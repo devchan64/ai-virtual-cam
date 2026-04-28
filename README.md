@@ -145,6 +145,61 @@ crop:
   smoothing: 0.85
 ```
 
+## Host Bootstrap
+
+Ubuntu/Debian 계열 호스트에서는 아래 스크립트로 기본 의존성을 설치할 수 있습니다.
+
+```bash
+sudo ./scripts/install-host-deps.sh
+```
+
+스크립트가 처리하는 범위:
+
+- Docker Engine 설치
+- NVIDIA Container Toolkit 설치 및 Docker runtime 연결
+- `v4l2loopback` 설치 및 `/dev/video10` 가상 카메라 구성
+- `/dev/video0`, `/dev/video10` 기준 런타임 계약 검증
+
+## Container Runtime
+
+초기 런타임 환경은 [Dockerfile](/Users/simchangbo/ws/ai-virtual-cam/Dockerfile)로 제공합니다. 이 이미지는 CUDA 런타임, Python 3, FFmpeg, GStreamer, V4L2 유틸리티를 포함하며 컨테이너 시작 시 GPU 및 장치 마운트 상태를 검증합니다.
+
+빌드:
+
+```bash
+docker build -t ai-virtual-cam:dev .
+```
+
+예시 실행:
+
+```bash
+docker run --rm -it \
+  --gpus all \
+  --device /dev/video0:/dev/video0 \
+  --device /dev/video10:/dev/video10 \
+  -e REQUIRE_INPUT_DEVICE=1 \
+  -e REQUIRE_OUTPUT_DEVICE=1 \
+  ai-virtual-cam:dev
+```
+
+기본 엔트리포인트는 [scripts/container-entrypoint.sh](/Users/simchangbo/ws/ai-virtual-cam/scripts/container-entrypoint.sh)이며, 현재는 런타임 계약 검증 후 전달된 명령을 실행합니다.
+
+## Config CLI
+
+사용자 설정 JSON은 [scripts/create-config.py](/Users/simchangbo/ws/ai-virtual-cam/scripts/create-config.py)로 생성할 수 있습니다. 이 도구는 카메라 인터페이스 선택, 입력/출력 해상도, 카메라 크롭, 배경 모드, 배경 이미지 크롭, segmentation 옵션을 대화형으로 수집합니다.
+
+카메라 목록 조회:
+
+```bash
+python3 scripts/create-config.py --list-cameras
+```
+
+설정 파일 생성:
+
+```bash
+python3 scripts/create-config.py --output config/settings.json
+```
+
 ## Repository Layout
 
 ```text
