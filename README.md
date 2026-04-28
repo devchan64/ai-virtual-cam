@@ -145,6 +145,8 @@ crop:
   smoothing: 0.85
 ```
 
+개발용 샘플 설정은 [config/settings.example.json](/Users/simchangbo/ws/ai-virtual-cam/config/settings.example.json)에 포함되어 있습니다.
+
 ## Host Bootstrap
 
 Ubuntu/Debian 계열 호스트에서는 아래 스크립트로 기본 의존성을 설치할 수 있습니다.
@@ -199,6 +201,33 @@ python3 scripts/create-config.py --list-cameras
 ```bash
 python3 scripts/create-config.py --output config/settings.json
 ```
+
+현재 구현된 backend:
+
+- `mock`: 개발용 파이프라인 smoke test
+- `tensorrt`: 인터페이스만 존재, 미구현
+- `onnxruntime`: 인터페이스만 존재, 미구현
+
+## Run
+
+로컬 실행:
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+python3 -m src.app.main --config config/settings.example.json --max-frames 30
+```
+
+현재 구현 범위:
+
+- JSON 설정 로드와 fail-fast 검증
+- OpenCV 기반 입력 캡처
+- 개발용 segmentation backend
+- 마스크 refine
+- chroma 또는 이미지 배경 합성
+- person-aware crop 후 출력 리사이즈
+- OpenCV `VideoWriter` 기반 출력
 
 ## Repository Layout
 

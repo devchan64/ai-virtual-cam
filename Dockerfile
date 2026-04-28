@@ -38,7 +38,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     v4l-utils \
     && rm -rf /var/lib/apt/lists/*
 
+COPY requirements.txt /tmp/requirements.txt
 RUN python3 -m pip install --upgrade pip setuptools wheel
+RUN python3 -m pip install -r /tmp/requirements.txt
+
+COPY src /workspace/src
+COPY config /workspace/config
+COPY docs /workspace/docs
 
 RUN mkdir -p /workspace/config /workspace/models /workspace/scripts /workspace/src
 
@@ -46,4 +52,4 @@ COPY scripts/container-entrypoint.sh /usr/local/bin/container-entrypoint.sh
 RUN chmod +x /usr/local/bin/container-entrypoint.sh
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/container-entrypoint.sh"]
-CMD ["bash"]
+CMD ["python3", "-m", "src.app.main", "--config", "config/settings.example.json", "--max-frames", "1"]

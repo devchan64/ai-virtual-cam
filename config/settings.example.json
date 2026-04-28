@@ -1,0 +1,36 @@
+{
+  "inputCamera": {
+    "devicePath": "/dev/video0",
+    "width": 1280,
+    "height": 720,
+    "fps": 30,
+    "crop": {
+      "x": 0,
+      "y": 0,
+      "width": 1280,
+      "height": 720
+    }
+  },
+  "outputCamera": {
+    "devicePath": "output/virtual-cam-preview.mp4",
+    "width": 1280,
+    "height": 720,
+    "fps": 30
+  },
+  "segmentation": {
+    "backend": "mock",
+    "threshold": 0.65
+  },
+  "background": {
+    "mode": "chroma",
+    "chromaColor": [
+      0,
+      255,
+      0
+    ]
+  },
+  "crop": {
+    "margin": 0.25,
+    "smoothing": 0.85
+  }
+}

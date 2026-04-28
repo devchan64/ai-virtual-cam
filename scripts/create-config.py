@@ -154,7 +154,7 @@ def build_config():
     camera_crop = prompt_crop("Camera", input_width, input_height)
 
     print("\nSegmentation settings")
-    segmentation_backend = prompt_choice("  backend", ["tensorrt", "onnxruntime"], default="tensorrt")
+    segmentation_backend = prompt_choice("  backend", ["mock", "tensorrt", "onnxruntime"], default="mock")
     segmentation_threshold = prompt_float("  threshold", default=0.65, minimum=0.0, maximum=1.0)
 
     print("\nBackground settings")
