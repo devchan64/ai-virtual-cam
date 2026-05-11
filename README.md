@@ -166,6 +166,7 @@ Ubuntu/Debian 계열 호스트에서는 아래 스크립트로 기본 의존성�
 
 ```bash
 ./bin/avc setup
+./bin/avc mac-camera-status
 ```
 
 스크립트가 처리하는 범위:
@@ -197,11 +198,11 @@ docker run --rm -it \
   ai-virtual-cam:dev
 ```
 
-기본 컨테이너 엔트리포인트 구현은 [scripts/runtime/container-entrypoint.sh](/Users/simchangbo/ws/ai-virtual-cam/scripts/runtime/container-entrypoint.sh)이며, 사용자 진입점은 `./bin/avc entrypoint`입니다.
+기본 컨테이너 엔트리포인트 구현은 [scripts/runtime/container-entrypoint.sh](/Users/simchangbo/ws/ai-virtual-cam/scripts/runtime/container-entrypoint.sh)이며, 공식 진입점은 `./bin/avc entrypoint`입니다.
 
 ## Config CLI
 
-사용자 설정 JSON은 [scripts/config/create-config.py](/Users/simchangbo/ws/ai-virtual-cam/scripts/config/create-config.py)로 생성할 수 있습니다. 권장 진입점은 `./bin/avc config`입니다. 이 도구는 카메라 인터페이스 선택, 입력/출력 해상도, 카메라 크롭, 배경 모드, 배경 이미지 크롭, segmentation 옵션을 대화형으로 수집합니다.
+사용자 설정 JSON 생성의 공식 진입점은 `./bin/avc config`입니다. 이 도구는 카메라 인터페이스 선택, 입력/출력 해상도, 카메라 크롭, 배경 모드, 배경 이미지 크롭, segmentation 옵션을 대화형으로 수집합니다.
 
 카메라 목록 조회:
 

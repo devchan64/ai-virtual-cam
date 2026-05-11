@@ -11,6 +11,7 @@ SKIP_NVIDIA_TOOLKIT=0
 SKIP_V4L2LOOPBACK=0
 OS_KIND=""
 LINUX_DISTRO_ID=""
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 log() {
   printf '[ai-virtual-cam] %s\n' "$*"
@@ -32,7 +33,7 @@ run() {
 
 usage() {
   cat <<'EOF'
-Usage: scripts/install-host-deps.sh [options]
+Usage: ./bin/avc setup [options]
 
 Install host dependencies for ai-virtual-cam on Linux (Debian/Ubuntu) or macOS.
 
@@ -299,6 +300,18 @@ install_macos_packages() {
   log "GUI runtime is unified to .venv."
 }
 
+install_macos_cmio_runtime() {
+  if [[ "$OS_KIND" != "macos" ]]; then
+    return 0
+  fi
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    log "Dry-run: would run ./bin/avc mac-camera-install"
+    return 0
+  fi
+  log "Running macOS CMIO virtual camera installer"
+  run bash "$SCRIPT_DIR/macos-cmio-install.sh"
+}
+
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -357,6 +370,7 @@ main() {
   install_docker
   install_nvidia_container_toolkit
   install_v4l2loopback
+  install_macos_cmio_runtime
   verify_host_contract
   log "Host dependency setup completed"
 }
