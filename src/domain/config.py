@@ -38,6 +38,7 @@ class InputCameraConfig:
     height: int
     fps: int
     crop: Rect
+    softwareZoom: float = 1.0
 
     @classmethod
     def from_dict(cls, raw: dict) -> "InputCameraConfig":
@@ -47,6 +48,7 @@ class InputCameraConfig:
             height=int(raw["height"]),
             fps=int(raw["fps"]),
             crop=Rect.from_dict(raw.get("crop") or _default_rect(raw)),
+            softwareZoom=float(raw.get("softwareZoom", 1.0)),
         )
         config.validate()
         return config
@@ -60,6 +62,8 @@ class InputCameraConfig:
             raise ValueError("inputCamera.crop exceeds input width")
         if self.crop.y + self.crop.height > self.height:
             raise ValueError("inputCamera.crop exceeds input height")
+        if self.softwareZoom < 1.0 or self.softwareZoom > 4.0:
+            raise ValueError("inputCamera.softwareZoom must be between 1.0 and 4.0")
 
 
 @dataclass(frozen=True)
@@ -73,12 +77,15 @@ class OutputCameraConfig:
     @classmethod
     def from_dict(cls, raw: dict) -> "OutputCameraConfig":
         default_backend = "pyvirtualcam" if platform.system() == "Darwin" else "opencv"
+        backend = str(raw.get("backend", default_backend))
+        if platform.system() == "Darwin" and backend == "cmio":
+            backend = "pyvirtualcam"
         config = cls(
             devicePath=str(raw["devicePath"]),
             width=int(raw["width"]),
             height=int(raw["height"]),
             fps=int(raw["fps"]),
-            backend=str(raw.get("backend", default_backend)),
+            backend=backend,
         )
         if not config.devicePath:
             raise ValueError("outputCamera.devicePath is required")
@@ -167,18 +174,39 @@ class BackgroundConfig:
 @dataclass(frozen=True)
 class PersonCropConfig:
     margin: float
-    smoothing: float
+    panSmoothing: float
+    upperBodyBias: float
+    upperBodyRatio: float
+    zoom: float
+    panPidKp: float
+    panPidKi: float
+    panPidKd: float
 
     @classmethod
     def from_dict(cls, raw: dict) -> "PersonCropConfig":
+        pan_smoothing = raw.get("panSmoothing", raw.get("smoothing", 0.85))
         config = cls(
             margin=float(raw["margin"]),
-            smoothing=float(raw["smoothing"]),
+            panSmoothing=float(pan_smoothing),
+            upperBodyBias=float(raw.get("upperBodyBias", 0.35)),
+            upperBodyRatio=float(raw.get("upperBodyRatio", 0.60)),
+            zoom=float(raw.get("zoom", 1.0)),
+            panPidKp=float(raw.get("panPidKp", 0.35)),
+            panPidKi=float(raw.get("panPidKi", 0.01)),
+            panPidKd=float(raw.get("panPidKd", 0.12)),
         )
         if config.margin < 0.0:
             raise ValueError("crop.margin must be >= 0.0")
-        if not 0.0 <= config.smoothing <= 1.0:
-            raise ValueError("crop.smoothing must be between 0.0 and 1.0")
+        if not 0.0 <= config.panSmoothing <= 1.0:
+            raise ValueError("crop.panSmoothing must be between 0.0 and 1.0")
+        if not 0.0 <= config.upperBodyBias <= 1.0:
+            raise ValueError("crop.upperBodyBias must be between 0.0 and 1.0")
+        if not 0.2 <= config.upperBodyRatio <= 1.0:
+            raise ValueError("crop.upperBodyRatio must be between 0.2 and 1.0")
+        if not 1.0 <= config.zoom <= 4.0:
+            raise ValueError("crop.zoom must be between 1.0 and 4.0")
+        if config.panPidKp < 0.0 or config.panPidKi < 0.0 or config.panPidKd < 0.0:
+            raise ValueError("crop.panPidKp/Ki/Kd must be >= 0.0")
         return config
 
 
@@ -196,12 +224,16 @@ class AppConfig:
             raise FileNotFoundError(f"Config file not found: {path}")
 
         raw = json.loads(path.read_text(encoding="utf-8"))
+        crop_cfg = PersonCropConfig.from_dict(raw["crop"])
+        input_raw = dict(raw["inputCamera"])
+        if "softwareZoom" not in input_raw:
+            input_raw["softwareZoom"] = crop_cfg.zoom
         return cls(
-            inputCamera=InputCameraConfig.from_dict(raw["inputCamera"]),
+            inputCamera=InputCameraConfig.from_dict(input_raw),
             outputCamera=OutputCameraConfig.from_dict(raw["outputCamera"]),
             segmentation=SegmentationConfig.from_dict(raw["segmentation"]),
             background=BackgroundConfig.from_dict(raw["background"]),
-            crop=PersonCropConfig.from_dict(raw["crop"]),
+            crop=crop_cfg,
         )
 
 

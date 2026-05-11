@@ -248,7 +248,8 @@ install_macos_packages() {
     run /opt/homebrew/bin/python3.12 -m venv "$venv_path"
   fi
   run "$venv_path/bin/python3" -m pip install --upgrade pip
-  run "$venv_path/bin/python3" -m pip install opencv-python numpy mediapipe==0.10.14 pyvirtualcam==0.12.1
+  run "$venv_path/bin/python3" -m pip install opencv-python numpy mediapipe==0.10.14 pyvirtualcam==0.14.0
+  log "macOS OBS 연동 확인: OBS Studio를 열어 'Start Virtual Camera'를 1회 실행 후 종료하세요."
 }
 
 parse_args() {

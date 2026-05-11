@@ -77,6 +77,8 @@ class ConfigGui:
         row += 1
         self._add_int(frame, row, "input_fps", "Input FPS", 30)
         row += 1
+        self._add_slider(frame, row, "input_software_zoom", "Input SW zoom", 1.0, 1.0, 4.0, resolution=0.01)
+        row += 1
 
         self._add_combo(frame, row, "output_backend", "Output backend", _output_backend_options(), _output_backend_options()[0])
         row += 1
@@ -118,7 +120,17 @@ class ConfigGui:
 
         self._add_slider(frame, row, "crop_margin", "Person crop margin", 0.25, 0.0, 2.0, resolution=0.01)
         row += 1
-        self._add_slider(frame, row, "crop_smoothing", "Person crop smoothing", 0.85, 0.0, 1.0, resolution=0.01)
+        self._add_slider(frame, row, "crop_pan_smoothing", "Pan smoothing", 0.85, 0.0, 1.0, resolution=0.01)
+        row += 1
+        self._add_slider(frame, row, "crop_upper_body_bias", "Upper body bias", 0.35, 0.0, 1.0, resolution=0.01)
+        row += 1
+        self._add_slider(frame, row, "crop_upper_body_ratio", "Upper body ratio", 0.60, 0.2, 1.0, resolution=0.01)
+        row += 1
+        self._add_slider(frame, row, "crop_pan_pid_kp", "Pan PID Kp", 0.35, 0.0, 2.0, resolution=0.01)
+        row += 1
+        self._add_slider(frame, row, "crop_pan_pid_ki", "Pan PID Ki", 0.01, 0.0, 0.5, resolution=0.001)
+        row += 1
+        self._add_slider(frame, row, "crop_pan_pid_kd", "Pan PID Kd", 0.12, 0.0, 2.0, resolution=0.01)
         row += 1
 
         ttk.Button(frame, text="Preview", command=self._preview).grid(row=row, column=0, columnspan=2, sticky="ew", pady=10, padx=4)
@@ -333,7 +345,13 @@ class ConfigGui:
             segmentation_selfie_temporal_smoothing=float(iv["seg_selfie_smoothing"].get()),
             background=background,
             crop_margin=float(iv["crop_margin"].get()),
-            crop_smoothing=float(iv["crop_smoothing"].get()),
+            crop_pan_smoothing=float(iv["crop_pan_smoothing"].get()),
+            crop_upper_body_bias=float(iv["crop_upper_body_bias"].get()),
+            crop_upper_body_ratio=float(iv["crop_upper_body_ratio"].get()),
+            input_software_zoom=float(iv["input_software_zoom"].get()),
+            crop_pan_pid_kp=float(iv["crop_pan_pid_kp"].get()),
+            crop_pan_pid_ki=float(iv["crop_pan_pid_ki"].get()),
+            crop_pan_pid_kd=float(iv["crop_pan_pid_kd"].get()),
         )
 
 

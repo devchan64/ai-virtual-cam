@@ -20,7 +20,13 @@ def build_config(
     segmentation_blend_feather: float = 0.35,
     background: dict,
     crop_margin: float,
-    crop_smoothing: float,
+    crop_pan_smoothing: float,
+    crop_upper_body_bias: float = 0.35,
+    crop_upper_body_ratio: float = 0.60,
+    input_software_zoom: float = 1.0,
+    crop_pan_pid_kp: float = 0.35,
+    crop_pan_pid_ki: float = 0.01,
+    crop_pan_pid_kd: float = 0.12,
 ) -> dict:
     return {
         "inputCamera": {
@@ -29,6 +35,7 @@ def build_config(
             "height": input_height,
             "fps": input_fps,
             "crop": {"x": 0, "y": 0, "width": input_width, "height": input_height},
+            "softwareZoom": float(input_software_zoom),
         },
         "outputCamera": {
             "devicePath": output_device,
@@ -50,6 +57,12 @@ def build_config(
         "background": background,
         "crop": {
             "margin": crop_margin,
-            "smoothing": crop_smoothing,
+            "panSmoothing": crop_pan_smoothing,
+            "upperBodyBias": float(crop_upper_body_bias),
+            "upperBodyRatio": float(crop_upper_body_ratio),
+            "zoom": float(input_software_zoom),
+            "panPidKp": float(crop_pan_pid_kp),
+            "panPidKi": float(crop_pan_pid_ki),
+            "panPidKd": float(crop_pan_pid_kd),
         },
     }

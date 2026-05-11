@@ -130,6 +130,7 @@ def build_config():
     input_width = prompt_int("  width", default=1280, minimum=1)
     input_height = prompt_int("  height", default=720, minimum=1)
     input_fps = prompt_int("  fps", default=30, minimum=1)
+    input_software_zoom = prompt_float("  software zoom (1.0..4.0)", default=1.0, minimum=1.0, maximum=4.0)
 
     print("\nOutput camera settings")
     output_backend = prompt_choice(
@@ -182,9 +183,14 @@ def build_config():
             maximum=1.0,
         )
 
-    print("\nPerson crop settings")
+    print("\nPerson crop / framing settings")
     crop_margin = prompt_float("  margin", default=0.25, minimum=0.0)
-    crop_smoothing = prompt_float("  smoothing", default=0.85, minimum=0.0, maximum=1.0)
+    crop_pan_smoothing = prompt_float("  pan smoothing", default=0.85, minimum=0.0, maximum=1.0)
+    crop_upper_body_bias = prompt_float("  upper body bias (0.0=top, 1.0=bottom)", default=0.35, minimum=0.0, maximum=1.0)
+    crop_upper_body_ratio = prompt_float("  upper body ratio (0.2..1.0)", default=0.60, minimum=0.2, maximum=1.0)
+    crop_pan_pid_kp = prompt_float("  pan PID Kp", default=0.35, minimum=0.0)
+    crop_pan_pid_ki = prompt_float("  pan PID Ki", default=0.01, minimum=0.0)
+    crop_pan_pid_kd = prompt_float("  pan PID Kd", default=0.12, minimum=0.0)
 
     config = build_config(
         input_device=input_camera_path,
@@ -204,7 +210,13 @@ def build_config():
         segmentation_selfie_temporal_smoothing=segmentation_selfie_temporal_smoothing,
         background=background,
         crop_margin=crop_margin,
-        crop_smoothing=crop_smoothing,
+        crop_pan_smoothing=crop_pan_smoothing,
+        crop_upper_body_bias=crop_upper_body_bias,
+        crop_upper_body_ratio=crop_upper_body_ratio,
+        input_software_zoom=input_software_zoom,
+        crop_pan_pid_kp=crop_pan_pid_kp,
+        crop_pan_pid_ki=crop_pan_pid_ki,
+        crop_pan_pid_kd=crop_pan_pid_kd,
     )
     config["inputCamera"]["crop"] = camera_crop
     return config
