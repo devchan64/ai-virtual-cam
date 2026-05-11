@@ -183,6 +183,8 @@ class PersonCropConfig:
     panPidKp: float
     panPidKi: float
     panPidKd: float
+    panTargetOffsetX: float
+    panTargetOffsetY: float
 
     @classmethod
     def from_dict(cls, raw: dict) -> "PersonCropConfig":
@@ -198,6 +200,8 @@ class PersonCropConfig:
             panPidKp=float(raw.get("panPidKp", 0.35)),
             panPidKi=float(raw.get("panPidKi", 0.01)),
             panPidKd=float(raw.get("panPidKd", 0.12)),
+            panTargetOffsetX=float(raw.get("panTargetOffsetX", 0.0)),
+            panTargetOffsetY=float(raw.get("panTargetOffsetY", 0.0)),
         )
         if config.margin < 0.0:
             raise ValueError("crop.margin must be >= 0.0")
@@ -215,6 +219,10 @@ class PersonCropConfig:
             raise ValueError("crop.zoomSmoothing must be between 0.0 and 1.0")
         if config.panPidKp < 0.0 or config.panPidKi < 0.0 or config.panPidKd < 0.0:
             raise ValueError("crop.panPidKp/Ki/Kd must be >= 0.0")
+        if not -1.0 <= config.panTargetOffsetX <= 1.0:
+            raise ValueError("crop.panTargetOffsetX must be between -1.0 and 1.0")
+        if not -1.0 <= config.panTargetOffsetY <= 1.0:
+            raise ValueError("crop.panTargetOffsetY must be between -1.0 and 1.0")
         return config
 
 

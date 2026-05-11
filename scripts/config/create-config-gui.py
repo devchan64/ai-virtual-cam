@@ -133,6 +133,10 @@ class ConfigGui:
         row += 1
         self._add_slider(frame, row, "crop_pan_pid_kd", "Pan PID Kd", 0.12, 0.0, 2.0, resolution=0.01)
         row += 1
+        self._add_slider(frame, row, "crop_pan_target_offset_x", "Pan target offset X", 0.00, -1.0, 1.0, resolution=0.01)
+        row += 1
+        self._add_slider(frame, row, "crop_pan_target_offset_y", "Pan target offset Y", 0.00, -1.0, 1.0, resolution=0.01)
+        row += 1
 
         ttk.Button(frame, text="Preview", command=self._preview).grid(row=row, column=0, columnspan=2, sticky="ew", pady=10, padx=4)
         ttk.Button(frame, text="Save JSON", command=self._save).grid(row=row, column=2, columnspan=2, sticky="ew", pady=10, padx=4)
@@ -164,7 +168,19 @@ class ConfigGui:
             value_var.set(format_value(float(raw)))
 
         value_var.set(format_value(float(default)))
-        ttk.Scale(parent, from_=min_value, to=max_value, variable=var, command=on_change).grid(
+        scale = ttk.Scale(parent, from_=min_value, to=max_value, variable=var, command=on_change)
+
+        def on_click(event):
+            widget = event.widget
+            width = max(1, widget.winfo_width())
+            ratio = max(0.0, min(1.0, float(event.x) / float(width)))
+            value = float(min_value) + ratio * (float(max_value) - float(min_value))
+            var.set(value)
+            value_var.set(format_value(value))
+            return "break"
+
+        scale.bind("<Button-1>", on_click)
+        scale.grid(
             row=row, column=1, columnspan=2, sticky="ew", padx=4
         )
         ttk.Label(parent, textvariable=value_var).grid(row=row, column=3, sticky="e")
@@ -302,6 +318,8 @@ class ConfigGui:
             crop.get("panPidKp"),
             crop.get("panPidKi"),
             crop.get("panPidKd"),
+            crop.get("panTargetOffsetX"),
+            crop.get("panTargetOffsetY"),
         )
 
     def _processing_signature(self, config: dict):
@@ -366,6 +384,8 @@ class ConfigGui:
             crop_pan_pid_kp=float(iv["crop_pan_pid_kp"].get()),
             crop_pan_pid_ki=float(iv["crop_pan_pid_ki"].get()),
             crop_pan_pid_kd=float(iv["crop_pan_pid_kd"].get()),
+            crop_pan_target_offset_x=float(iv["crop_pan_target_offset_x"].get()),
+            crop_pan_target_offset_y=float(iv["crop_pan_target_offset_y"].get()),
         )
 
 

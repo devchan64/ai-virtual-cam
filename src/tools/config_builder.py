@@ -29,6 +29,8 @@ def build_config(
     crop_pan_pid_kp: float = 0.35,
     crop_pan_pid_ki: float = 0.01,
     crop_pan_pid_kd: float = 0.12,
+    crop_pan_target_offset_x: float = 0.0,
+    crop_pan_target_offset_y: float = 0.0,
 ) -> dict:
     return {
         "inputCamera": {
@@ -68,5 +70,7 @@ def build_config(
             "panPidKp": float(crop_pan_pid_kp),
             "panPidKi": float(crop_pan_pid_ki),
             "panPidKd": float(crop_pan_pid_kd),
+            "panTargetOffsetX": float(crop_pan_target_offset_x),
+            "panTargetOffsetY": float(crop_pan_target_offset_y),
         },
     }

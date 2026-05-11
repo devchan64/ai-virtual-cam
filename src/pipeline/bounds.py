@@ -94,9 +94,13 @@ class BoundsTracker:
         target_h = min(height, max(1, bbox_height + margin_y * 2))
         target_w, target_h = self._fit_aspect(target_w, target_h, width, height)
         biased_center_y = int(round(center_y - bbox_height * self._config.upperBodyBias))
+        offset_x = int(round(self._config.panTargetOffsetX * (target_w * 0.5)))
+        offset_y = int(round(self._config.panTargetOffsetY * (target_h * 0.5)))
+        target_center_x = center_x + offset_x
+        target_center_y = biased_center_y + offset_y
 
-        x = clamp_int(center_x - target_w // 2, 0, max(0, width - target_w))
-        y = clamp_int(biased_center_y - target_h // 2, 0, max(0, height - target_h))
+        x = clamp_int(target_center_x - target_w // 2, 0, max(0, width - target_w))
+        y = clamp_int(target_center_y - target_h // 2, 0, max(0, height - target_h))
 
         return Bounds(
             x=x,

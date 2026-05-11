@@ -193,6 +193,8 @@ def build_config():
     crop_pan_pid_kp = prompt_float("  pan PID Kp", default=0.35, minimum=0.0)
     crop_pan_pid_ki = prompt_float("  pan PID Ki", default=0.01, minimum=0.0)
     crop_pan_pid_kd = prompt_float("  pan PID Kd", default=0.12, minimum=0.0)
+    crop_pan_target_offset_x = prompt_float("  pan target offset X (-1.0..1.0)", default=0.0, minimum=-1.0, maximum=1.0)
+    crop_pan_target_offset_y = prompt_float("  pan target offset Y (-1.0..1.0)", default=0.0, minimum=-1.0, maximum=1.0)
 
     config = build_config(
         input_device=input_camera_path,
@@ -221,6 +223,8 @@ def build_config():
         crop_pan_pid_kp=crop_pan_pid_kp,
         crop_pan_pid_ki=crop_pan_pid_ki,
         crop_pan_pid_kd=crop_pan_pid_kd,
+        crop_pan_target_offset_x=crop_pan_target_offset_x,
+        crop_pan_target_offset_y=crop_pan_target_offset_y,
     )
     config["inputCamera"]["crop"] = camera_crop
     return config
