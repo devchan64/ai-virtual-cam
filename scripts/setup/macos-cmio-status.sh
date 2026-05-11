@@ -39,8 +39,11 @@ check_cmd python3
 if xcodebuild -version >/dev/null 2>&1; then
   log "OK: full Xcode developer directory is active"
 else
-  log "WARN: full Xcode is not active (current xcodebuild is not usable for CMIO)"
-  log "      install Xcode.app and run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer"
+  log "WARN: 전체 Xcode가 활성화되어 있지 않아 CMIO 빌드를 진행할 수 없습니다."
+  log "      1) App Store에서 Xcode 설치"
+  log "      2) Xcode 1회 실행 후 초기 설정 완료"
+  log "      3) sudo xcode-select -s /Applications/Xcode.app/Contents/Developer"
+  log "      4) xcodebuild -version 으로 확인"
   ok=0
 fi
 

@@ -55,9 +55,13 @@ if ! command -v xcodegen >/dev/null 2>&1; then
 fi
 
 if ! xcodebuild -version >/dev/null 2>&1; then
-  fail "Full Xcode is required for CMIO build steps.
-Install Xcode.app, open it once, then select it:
-  sudo xcode-select -s /Applications/Xcode.app/Contents/Developer"
+  fail "CMIO 빌드 단계에는 전체 Xcode 앱이 필요합니다.
+1) App Store에서 Xcode를 설치하세요.
+2) Xcode를 1회 실행해 초기 설정/라이선스를 완료하세요.
+3) 개발자 경로를 Xcode로 전환하세요:
+   sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+4) 확인:
+   xcodebuild -version"
 fi
 
 if [[ ! -f "$XCODEGEN_SPEC_FILE" ]]; then
