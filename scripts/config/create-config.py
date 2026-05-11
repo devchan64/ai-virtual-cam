@@ -1,32 +1,15 @@
 #!/usr/bin/env python3
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
-def discover_cameras():
-    cameras = []
-    video_root = Path("/sys/class/video4linux")
-    if not video_root.exists():
-        return cameras
-
-    for entry in sorted(video_root.iterdir()):
-        device_path = Path("/dev") / entry.name
-        name_path = entry / "name"
-        label = entry.name
-        if name_path.exists():
-            label = name_path.read_text(encoding="utf-8").strip()
-        cameras.append(
-            {
-                "name": entry.name,
-                "devicePath": str(device_path),
-                "label": label,
-            }
-        )
-    return cameras
-
+from src.tools.config_builder import build_config
+from src.tools.config_io import discover_cameras, write_config
 
 def prompt_text(message, default=None, validator=None):
     while True:
@@ -183,30 +166,23 @@ def build_config():
     crop_margin = prompt_float("  margin", default=0.25, minimum=0.0)
     crop_smoothing = prompt_float("  smoothing", default=0.85, minimum=0.0, maximum=1.0)
 
-    return {
-        "inputCamera": {
-            "devicePath": input_camera_path,
-            "width": input_width,
-            "height": input_height,
-            "fps": input_fps,
-            "crop": camera_crop,
-        },
-        "outputCamera": {
-            "devicePath": output_camera_path,
-            "width": output_width,
-            "height": output_height,
-            "fps": output_fps,
-        },
-        "segmentation": {
-            "backend": segmentation_backend,
-            "threshold": segmentation_threshold,
-        },
-        "background": background,
-        "crop": {
-            "margin": crop_margin,
-            "smoothing": crop_smoothing,
-        },
-    }
+    config = build_config(
+        input_device=input_camera_path,
+        input_width=input_width,
+        input_height=input_height,
+        input_fps=input_fps,
+        output_device=output_camera_path,
+        output_width=output_width,
+        output_height=output_height,
+        output_fps=output_fps,
+        segmentation_backend=segmentation_backend,
+        segmentation_threshold=segmentation_threshold,
+        background=background,
+        crop_margin=crop_margin,
+        crop_smoothing=crop_smoothing,
+    )
+    config["inputCamera"]["crop"] = camera_crop
+    return config
 
 
 def list_cameras():
@@ -220,11 +196,9 @@ def list_cameras():
     return 0
 
 
-def write_config(output_path, config):
-    output_file = Path(output_path)
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-    output_file.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
-    print(f"Config written to {output_file}")
+def write_config_with_log(output_path, config):
+    write_config(output_path, config)
+    print(f"Config written to {output_path}")
 
 
 def parse_args():
@@ -250,7 +224,7 @@ def main():
         return list_cameras()
 
     config = build_config()
-    write_config(args.output, config)
+    write_config_with_log(args.output, config)
     return 0
 
 

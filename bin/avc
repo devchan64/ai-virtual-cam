@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  avc <command> [args...]
+
+Commands:
+  setup            Install host dependencies for current OS
+  config           Launch interactive config generator
+  config-gui       Launch GUI config generator
+  entrypoint       Run container entrypoint script
+  doctor           Basic runtime checks (python3, docker)
+USAGE
+}
+
+cmd="${1:-}"
+if [[ -z "$cmd" ]]; then
+  usage
+  exit 1
+fi
+shift || true
+
+case "$cmd" in
+  setup) exec "$ROOT_DIR/scripts/bin/avc-setup" "$@" ;;
+  config) exec "$ROOT_DIR/scripts/bin/avc-config" "$@" ;;
+  config-gui) exec "$ROOT_DIR/scripts/bin/avc-config-gui" "$@" ;;
+  entrypoint) exec "$ROOT_DIR/scripts/bin/avc-entrypoint" "$@" ;;
+  doctor) exec "$ROOT_DIR/scripts/bin/avc-doctor" "$@" ;;
+  -h|--help) usage ;;
+  *)
+    echo "Unknown command: $cmd" >&2
+    usage >&2
+    exit 1
+    ;;
+esac

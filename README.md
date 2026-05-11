@@ -16,6 +16,14 @@ USB Camera
  → Zoom / Meet / Teams
 ```
 
+## Onboarding Entry Point
+
+공식 실행 진입점은 하나만 사용합니다:
+
+```bash
+./bin/avc <command>
+```
+
 ## Goals
 
 - 실시간 인물 기반 가상 카메라 생성
@@ -145,7 +153,7 @@ crop:
 Ubuntu/Debian 계열 호스트에서는 아래 스크립트로 기본 의존성을 설치할 수 있습니다.
 
 ```bash
-sudo ./scripts/install-host-deps.sh
+./bin/avc setup
 ```
 
 스크립트가 처리하는 범위:
@@ -177,29 +185,29 @@ docker run --rm -it \
   ai-virtual-cam:dev
 ```
 
-기본 엔트리포인트는 [scripts/container-entrypoint.sh](/Users/simchangbo/ws/ai-virtual-cam/scripts/container-entrypoint.sh)이며, 현재는 런타임 계약 검증 후 전달된 명령을 실행합니다.
+기본 컨테이너 엔트리포인트 구현은 [scripts/runtime/container-entrypoint.sh](/Users/simchangbo/ws/ai-virtual-cam/scripts/runtime/container-entrypoint.sh)이며, 사용자 진입점은 `./bin/avc entrypoint`입니다.
 
 ## Config CLI
 
-사용자 설정 JSON은 [scripts/create-config.py](/Users/simchangbo/ws/ai-virtual-cam/scripts/create-config.py)로 생성할 수 있습니다. 이 도구는 카메라 인터페이스 선택, 입력/출력 해상도, 카메라 크롭, 배경 모드, 배경 이미지 크롭, segmentation 옵션을 대화형으로 수집합니다.
+사용자 설정 JSON은 [scripts/config/create-config.py](/Users/simchangbo/ws/ai-virtual-cam/scripts/config/create-config.py)로 생성할 수 있습니다. 권장 진입점은 `./bin/avc config`입니다. 이 도구는 카메라 인터페이스 선택, 입력/출력 해상도, 카메라 크롭, 배경 모드, 배경 이미지 크롭, segmentation 옵션을 대화형으로 수집합니다.
 
 카메라 목록 조회:
 
 ```bash
-python3 scripts/create-config.py --list-cameras
+./bin/avc config --list-cameras
 ```
 
 설정 파일 생성:
 
 ```bash
-python3 scripts/create-config.py --output config/settings.json
+./bin/avc config --output config/settings.json
 ```
 
 
 GUI 기반 설정 도구(기본 `tkinter`):
 
 ```bash
-python3 scripts/create-config-gui.py --output config/settings.json
+./bin/avc config-gui --output config/settings.json
 ```
 
 현재 구현된 backend:

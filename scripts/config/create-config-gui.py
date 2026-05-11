@@ -3,30 +3,17 @@
 from __future__ import annotations
 
 import argparse
-import json
+import sys
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-def discover_cameras():
-    cameras = []
-    video_root = Path("/sys/class/video4linux")
-    if not video_root.exists():
-        return cameras
-    for entry in sorted(video_root.iterdir()):
-        device_path = Path("/dev") / entry.name
-        name_path = entry / "name"
-        label = entry.name
-        if name_path.exists():
-            label = name_path.read_text(encoding="utf-8").strip()
-        cameras.append({"name": entry.name, "devicePath": str(device_path), "label": label})
-    return cameras
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
-
-def write_config(output_path: str, config: dict) -> None:
-    output_file = Path(output_path)
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-    output_file.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+from src.tools.config_builder import build_config
+from src.tools.config_io import discover_cameras, write_config
 
 
 class ConfigGui:
@@ -139,30 +126,21 @@ class ConfigGui:
         if background["mode"] == "image_chroma":
             background["colorBlendAlpha"] = float(iv["bg_blend_alpha"].get())
 
-        return {
-            "inputCamera": {
-                "devicePath": iv["input_device"].get(),
-                "width": input_w,
-                "height": input_h,
-                "fps": int(iv["input_fps"].get()),
-                "crop": {"x": 0, "y": 0, "width": input_w, "height": input_h},
-            },
-            "outputCamera": {
-                "devicePath": iv["output_device"].get(),
-                "width": output_w,
-                "height": output_h,
-                "fps": int(iv["output_fps"].get()),
-            },
-            "segmentation": {
-                "backend": iv["seg_backend"].get(),
-                "threshold": float(iv["seg_threshold"].get()),
-            },
-            "background": background,
-            "crop": {
-                "margin": float(iv["crop_margin"].get()),
-                "smoothing": float(iv["crop_smoothing"].get()),
-            },
-        }
+        return build_config(
+            input_device=iv["input_device"].get(),
+            input_width=input_w,
+            input_height=input_h,
+            input_fps=int(iv["input_fps"].get()),
+            output_device=iv["output_device"].get(),
+            output_width=output_w,
+            output_height=output_h,
+            output_fps=int(iv["output_fps"].get()),
+            segmentation_backend=iv["seg_backend"].get(),
+            segmentation_threshold=float(iv["seg_threshold"].get()),
+            background=background,
+            crop_margin=float(iv["crop_margin"].get()),
+            crop_smoothing=float(iv["crop_smoothing"].get()),
+        )
 
 
 def parse_args():
