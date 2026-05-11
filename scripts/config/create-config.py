@@ -186,8 +186,10 @@ def build_config():
     print("\nPerson crop / framing settings")
     crop_margin = prompt_float("  margin", default=0.25, minimum=0.0)
     crop_pan_smoothing = prompt_float("  pan smoothing", default=0.85, minimum=0.0, maximum=1.0)
-    crop_upper_body_bias = prompt_float("  upper body bias (0.0=top, 1.0=bottom)", default=0.35, minimum=0.0, maximum=1.0)
+    crop_zoom_smoothing = prompt_float("  zoom smoothing", default=0.80, minimum=0.0, maximum=1.0)
+    crop_upper_body_bias = prompt_float("  upper body bias (0.0=center, +up)", default=0.0, minimum=0.0, maximum=1.0)
     crop_upper_body_ratio = prompt_float("  upper body ratio (0.2..1.0)", default=0.60, minimum=0.2, maximum=1.0)
+    crop_upper_body_edge_smoothing = prompt_float("  upper body edge smoothing", default=0.35, minimum=0.0, maximum=1.0)
     crop_pan_pid_kp = prompt_float("  pan PID Kp", default=0.35, minimum=0.0)
     crop_pan_pid_ki = prompt_float("  pan PID Ki", default=0.01, minimum=0.0)
     crop_pan_pid_kd = prompt_float("  pan PID Kd", default=0.12, minimum=0.0)
@@ -211,8 +213,10 @@ def build_config():
         background=background,
         crop_margin=crop_margin,
         crop_pan_smoothing=crop_pan_smoothing,
+        crop_zoom_smoothing=crop_zoom_smoothing,
         crop_upper_body_bias=crop_upper_body_bias,
         crop_upper_body_ratio=crop_upper_body_ratio,
+        crop_upper_body_edge_smoothing=crop_upper_body_edge_smoothing,
         input_software_zoom=input_software_zoom,
         crop_pan_pid_kp=crop_pan_pid_kp,
         crop_pan_pid_ki=crop_pan_pid_ki,

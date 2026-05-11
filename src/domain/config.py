@@ -177,7 +177,9 @@ class PersonCropConfig:
     panSmoothing: float
     upperBodyBias: float
     upperBodyRatio: float
+    upperBodyEdgeSmoothing: float
     zoom: float
+    zoomSmoothing: float
     panPidKp: float
     panPidKi: float
     panPidKd: float
@@ -188,9 +190,11 @@ class PersonCropConfig:
         config = cls(
             margin=float(raw["margin"]),
             panSmoothing=float(pan_smoothing),
-            upperBodyBias=float(raw.get("upperBodyBias", 0.35)),
+            upperBodyBias=float(raw.get("upperBodyBias", 0.0)),
             upperBodyRatio=float(raw.get("upperBodyRatio", 0.60)),
+            upperBodyEdgeSmoothing=float(raw.get("upperBodyEdgeSmoothing", 0.35)),
             zoom=float(raw.get("zoom", 1.0)),
+            zoomSmoothing=float(raw.get("zoomSmoothing", 0.80)),
             panPidKp=float(raw.get("panPidKp", 0.35)),
             panPidKi=float(raw.get("panPidKi", 0.01)),
             panPidKd=float(raw.get("panPidKd", 0.12)),
@@ -203,8 +207,12 @@ class PersonCropConfig:
             raise ValueError("crop.upperBodyBias must be between 0.0 and 1.0")
         if not 0.2 <= config.upperBodyRatio <= 1.0:
             raise ValueError("crop.upperBodyRatio must be between 0.2 and 1.0")
+        if not 0.0 <= config.upperBodyEdgeSmoothing <= 1.0:
+            raise ValueError("crop.upperBodyEdgeSmoothing must be between 0.0 and 1.0")
         if not 1.0 <= config.zoom <= 4.0:
             raise ValueError("crop.zoom must be between 1.0 and 4.0")
+        if not 0.0 <= config.zoomSmoothing <= 1.0:
+            raise ValueError("crop.zoomSmoothing must be between 0.0 and 1.0")
         if config.panPidKp < 0.0 or config.panPidKi < 0.0 or config.panPidKd < 0.0:
             raise ValueError("crop.panPidKp/Ki/Kd must be >= 0.0")
         return config

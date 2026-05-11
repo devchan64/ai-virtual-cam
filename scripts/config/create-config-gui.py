@@ -48,11 +48,8 @@ class ConfigGui:
         self.vars: dict[str, tk.Variable] = {}
         self._preview_active = False
         self._preview_capture = None
-        self._preview_segmenter = None
-        self._preview_background = None
-        self._preview_composer = None
-        self._preview_seg_cfg = None
-        self._preview_bg_signature = None
+        self._preview_processor = None
+        self._preview_processing_signature = None
         self._preview_out_size = (0, 0)
         self._preview_window_name = "ai-virtual-cam preview (press q or esc to close)"
         self._build_form()
@@ -122,9 +119,13 @@ class ConfigGui:
         row += 1
         self._add_slider(frame, row, "crop_pan_smoothing", "Pan smoothing", 0.85, 0.0, 1.0, resolution=0.01)
         row += 1
-        self._add_slider(frame, row, "crop_upper_body_bias", "Upper body bias", 0.35, 0.0, 1.0, resolution=0.01)
+        self._add_slider(frame, row, "crop_zoom_smoothing", "Zoom smoothing", 0.80, 0.0, 1.0, resolution=0.01)
+        row += 1
+        self._add_slider(frame, row, "crop_upper_body_bias", "Upper body bias", 0.00, 0.0, 1.0, resolution=0.01)
         row += 1
         self._add_slider(frame, row, "crop_upper_body_ratio", "Upper body ratio", 0.60, 0.2, 1.0, resolution=0.01)
+        row += 1
+        self._add_slider(frame, row, "crop_upper_body_edge_smoothing", "Upper body edge smoothing", 0.35, 0.0, 1.0, resolution=0.01)
         row += 1
         self._add_slider(frame, row, "crop_pan_pid_kp", "Pan PID Kp", 0.35, 0.0, 2.0, resolution=0.01)
         row += 1
@@ -216,23 +217,20 @@ class ConfigGui:
 
     def _start_preview(self, config: dict) -> None:
         from src.adapter.capture.opencv_capture import OpenCVCapture
-        from src.domain.config import BackgroundConfig, InputCameraConfig, SegmentationConfig
-        from src.pipeline.background import BackgroundProvider
-        from src.pipeline.composer import Composer
-        from src.pipeline.segmentation import build_segmenter
+        from src.domain.config import BackgroundConfig, InputCameraConfig, PersonCropConfig, SegmentationConfig
+        from src.pipeline.frame_processor import FrameProcessor
 
         input_cfg = InputCameraConfig.from_dict(config["inputCamera"])
-        self._preview_seg_cfg = SegmentationConfig.from_dict(config["segmentation"])
+        seg_cfg = SegmentationConfig.from_dict(config["segmentation"])
         bg_cfg = BackgroundConfig.from_dict(config["background"])
+        crop_cfg = PersonCropConfig.from_dict(config["crop"])
         output_w = int(config["outputCamera"]["width"])
         output_h = int(config["outputCamera"]["height"])
 
         self._preview_capture = OpenCVCapture(input_cfg)
-        self._preview_segmenter = build_segmenter(self._preview_seg_cfg)
-        self._preview_background = BackgroundProvider(bg_cfg, output_w, output_h)
-        self._preview_composer = Composer()
+        self._preview_processor = FrameProcessor(seg_cfg, bg_cfg, crop_cfg, output_w, output_h)
         self._preview_out_size = (output_w, output_h)
-        self._preview_bg_signature = self._background_signature(config["background"])
+        self._preview_processing_signature = self._processing_signature(config)
         self._preview_active = True
         self.root.after(1, self._preview_tick)
 
@@ -241,10 +239,8 @@ class ConfigGui:
         if self._preview_capture is not None:
             self._preview_capture.release()
         self._preview_capture = None
-        self._preview_segmenter = None
-        self._preview_background = None
-        self._preview_composer = None
-        self._preview_seg_cfg = None
+        self._preview_processor = None
+        self._preview_processing_signature = None
         try:
             cv2.destroyWindow(self._preview_window_name)
         except cv2.error:
@@ -253,40 +249,26 @@ class ConfigGui:
     def _preview_tick(self) -> None:
         if not self._preview_active:
             return
-        from src.domain.config import BackgroundConfig, SegmentationConfig
-        from src.pipeline.background import BackgroundProvider
-        from src.pipeline.mask_processing import refine_mask
-        from src.pipeline.segmentation import build_segmenter
+        from src.domain.config import BackgroundConfig, PersonCropConfig, SegmentationConfig
+        from src.pipeline.frame_processor import FrameProcessor
 
         try:
             frame = self._preview_capture.read()
             config = self._build_config()
+            sig = self._processing_signature(config)
+            out_w = int(config["outputCamera"]["width"])
+            out_h = int(config["outputCamera"]["height"])
+            self._preview_out_size = (out_w, out_h)
 
-            seg_cfg = SegmentationConfig.from_dict(config["segmentation"])
-            if (
-                self._preview_seg_cfg is None
-                or seg_cfg.backend != self._preview_seg_cfg.backend
-                or seg_cfg.selfieModelSelection != self._preview_seg_cfg.selfieModelSelection
-                or abs(seg_cfg.selfieTemporalSmoothing - self._preview_seg_cfg.selfieTemporalSmoothing) > 1e-6
-            ):
-                self._preview_seg_cfg = seg_cfg
-                self._preview_segmenter = build_segmenter(self._preview_seg_cfg)
-
-            bg_sig = self._background_signature(config["background"])
-            if bg_sig != self._preview_bg_signature:
-                self._preview_bg_signature = bg_sig
+            if sig != self._preview_processing_signature or self._preview_processor is None:
                 bg_cfg = BackgroundConfig.from_dict(config["background"])
-                out_w, out_h = self._preview_out_size
-                self._preview_background = BackgroundProvider(bg_cfg, out_w, out_h)
+                seg_cfg = SegmentationConfig.from_dict(config["segmentation"])
+                crop_cfg = PersonCropConfig.from_dict(config["crop"])
+                self._preview_processor = FrameProcessor(seg_cfg, bg_cfg, crop_cfg, out_w, out_h)
+                self._preview_processing_signature = sig
 
-            raw_mask = self._preview_segmenter.segment(frame)
-            mask = refine_mask(raw_mask, self._preview_seg_cfg.threshold)
-            bg = self._preview_background.frame()
-            out_w, out_h = self._preview_out_size
-            composed = self._preview_composer.compose(frame, mask, bg)
-            if composed.shape[1] != out_w or composed.shape[0] != out_h:
-                composed = cv2.resize(composed, (out_w, out_h), interpolation=cv2.INTER_LINEAR)
-            preview = cv2.resize(composed, (max(1, out_w // 2), max(1, out_h // 2)), interpolation=cv2.INTER_AREA)
+            output_frame = self._preview_processor.process(frame)
+            preview = cv2.resize(output_frame, (max(1, out_w // 2), max(1, out_h // 2)), interpolation=cv2.INTER_AREA)
             cv2.imshow(self._preview_window_name, preview)
             key = cv2.waitKey(1) & 0xFF
             if key in (27, ord("q")):
@@ -306,6 +288,36 @@ class ConfigGui:
             background.get("imagePath"),
             tuple((background.get("crop") or {}).values()) if background.get("crop") else None,
             background.get("colorBlendAlpha"),
+        )
+
+    def _crop_signature(self, crop: dict):
+        return (
+            crop.get("margin"),
+            crop.get("panSmoothing", crop.get("smoothing")),
+            crop.get("zoomSmoothing"),
+            crop.get("upperBodyBias"),
+            crop.get("upperBodyRatio"),
+            crop.get("upperBodyEdgeSmoothing"),
+            crop.get("zoom"),
+            crop.get("panPidKp"),
+            crop.get("panPidKi"),
+            crop.get("panPidKd"),
+        )
+
+    def _processing_signature(self, config: dict):
+        seg = config["segmentation"]
+        selfie = seg.get("selfie") or {}
+        return (
+            seg.get("backend"),
+            seg.get("threshold"),
+            seg.get("edgeSmoothness"),
+            seg.get("blendFeather"),
+            selfie.get("modelSelection"),
+            selfie.get("temporalSmoothing"),
+            self._background_signature(config["background"]),
+            self._crop_signature(config["crop"]),
+            int(config["outputCamera"]["width"]),
+            int(config["outputCamera"]["height"]),
         )
 
     def _build_config(self):
@@ -346,8 +358,10 @@ class ConfigGui:
             background=background,
             crop_margin=float(iv["crop_margin"].get()),
             crop_pan_smoothing=float(iv["crop_pan_smoothing"].get()),
+            crop_zoom_smoothing=float(iv["crop_zoom_smoothing"].get()),
             crop_upper_body_bias=float(iv["crop_upper_body_bias"].get()),
             crop_upper_body_ratio=float(iv["crop_upper_body_ratio"].get()),
+            crop_upper_body_edge_smoothing=float(iv["crop_upper_body_edge_smoothing"].get()),
             input_software_zoom=float(iv["input_software_zoom"].get()),
             crop_pan_pid_kp=float(iv["crop_pan_pid_kp"].get()),
             crop_pan_pid_ki=float(iv["crop_pan_pid_ki"].get()),

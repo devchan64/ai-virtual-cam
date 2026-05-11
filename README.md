@@ -36,6 +36,6 @@
   "outputCamera": { "devicePath": "virtual-cam", "backend": "pyvirtualcam", "width": 1280, "height": 720, "fps": 30 },
   "segmentation": { "backend": "selfie", "threshold": 0.65, "edgeSmoothness": 0.5, "blendFeather": 0.35, "selfie": { "modelSelection": 1, "temporalSmoothing": 0.25 } },
   "background": { "mode": "chroma", "chromaColor": [0, 0, 0] },
-  "crop": { "margin": 0.25, "panSmoothing": 0.85, "upperBodyBias": 0.35, "upperBodyRatio": 0.60, "zoom": 1.2, "panPidKp": 0.35, "panPidKi": 0.01, "panPidKd": 0.12 }
+  "crop": { "margin": 0.25, "panSmoothing": 0.85, "upperBodyBias": 0.0, "upperBodyRatio": 0.60, "zoom": 1.2, "panPidKp": 0.35, "panPidKi": 0.01, "panPidKd": 0.12 }
 }
 ```
