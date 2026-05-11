@@ -62,7 +62,7 @@ class ConfigGui:
         self._add_int(frame, row, "output_fps", "Output FPS", 30)
         row += 1
 
-        self._add_combo(frame, row, "seg_backend", "Seg backend", ["mock", "tensorrt", "onnxruntime"], "mock")
+        self._add_combo(frame, row, "seg_backend", "Seg backend", ["face", "mock", "tensorrt", "onnxruntime"], "face")
         row += 1
         self._add_float(frame, row, "seg_threshold", "Seg threshold", 0.65)
         row += 1
@@ -173,7 +173,10 @@ class ConfigGui:
                 composed = composer.compose(frame, mask, bg)
                 if composed.shape[1] != output_w or composed.shape[0] != output_h:
                     composed = cv2.resize(composed, (output_w, output_h), interpolation=cv2.INTER_LINEAR)
-                cv2.imshow(window_name, composed)
+                preview_w = max(1, output_w // 2)
+                preview_h = max(1, output_h // 2)
+                preview = cv2.resize(composed, (preview_w, preview_h), interpolation=cv2.INTER_AREA)
+                cv2.imshow(window_name, preview)
                 key = cv2.waitKey(1) & 0xFF
                 if key in (27, ord("q")):
                     break

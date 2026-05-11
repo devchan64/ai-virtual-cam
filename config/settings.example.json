@@ -19,7 +19,7 @@
     "fps": 30
   },
   "segmentation": {
-    "backend": "mock",
+    "backend": "face",
     "threshold": 0.65
   },
   "background": {

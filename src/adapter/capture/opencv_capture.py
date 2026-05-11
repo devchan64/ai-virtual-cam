@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import platform
 import cv2
 import numpy as np
 
@@ -33,4 +34,8 @@ def _resolve_source(device_path: str):
     normalized = device_path.strip()
     if normalized.isdigit():
         return int(normalized)
+    if platform.system() == "Darwin" and normalized.startswith("/dev/video"):
+        suffix = normalized.removeprefix("/dev/video")
+        if suffix.isdigit():
+            return int(suffix)
     return normalized

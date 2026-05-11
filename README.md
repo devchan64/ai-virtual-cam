@@ -212,6 +212,7 @@ GUI 기반 설정 도구(기본 `tkinter`):
 
 현재 구현된 backend:
 
+- `face`: OpenCV 상반신 검출 우선 + 얼굴 fallback 기반 전경 마스크
 - `mock`: 개발용 파이프라인 smoke test
 - `tensorrt`: 인터페이스만 존재, 미구현
 - `onnxruntime`: 인터페이스만 존재, 미구현
@@ -244,7 +245,7 @@ macOS pyvirtualcam 예시 설정:
 {
   "inputCamera": { "devicePath": "0", "width": 1280, "height": 720, "fps": 30, "crop": { "x": 0, "y": 0, "width": 1280, "height": 720 } },
   "outputCamera": { "devicePath": "virtual-cam", "backend": "pyvirtualcam", "width": 1280, "height": 720, "fps": 30 },
-  "segmentation": { "backend": "mock", "threshold": 0.65 },
+  "segmentation": { "backend": "face", "threshold": 0.65 },
   "background": { "mode": "chroma", "chromaColor": [0, 255, 0] },
   "crop": { "margin": 0.25, "smoothing": 0.85 }
 }
