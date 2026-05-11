@@ -67,6 +67,7 @@ class OutputCameraConfig:
     width: int
     height: int
     fps: int
+    backend: str = "opencv"
 
     @classmethod
     def from_dict(cls, raw: dict) -> "OutputCameraConfig":
@@ -75,11 +76,14 @@ class OutputCameraConfig:
             width=int(raw["width"]),
             height=int(raw["height"]),
             fps=int(raw["fps"]),
+            backend=str(raw.get("backend", "opencv")),
         )
         if not config.devicePath:
             raise ValueError("outputCamera.devicePath is required")
         if config.width <= 0 or config.height <= 0 or config.fps <= 0:
             raise ValueError("outputCamera width/height/fps must be > 0")
+        if config.backend not in {"opencv", "pyvirtualcam"}:
+            raise ValueError("outputCamera.backend must be one of: opencv, pyvirtualcam")
         return config
 
 
@@ -105,6 +109,7 @@ class BackgroundConfig:
     chromaColor: tuple[int, int, int] | None
     imagePath: str | None
     crop: Rect | None
+    colorBlendAlpha: float
 
     @classmethod
     def from_dict(cls, raw: dict) -> "BackgroundConfig":
@@ -118,23 +123,26 @@ class BackgroundConfig:
             chromaColor=tuple(int(v) for v in chroma) if chroma else None,
             imagePath=str(image_path) if image_path else None,
             crop=crop,
+            colorBlendAlpha=float(raw.get("colorBlendAlpha", 0.35)),
         )
         config.validate()
         return config
 
     def validate(self) -> None:
-        if self.mode not in {"chroma", "image"}:
-            raise ValueError("background.mode must be one of: chroma, image")
-        if self.mode == "chroma":
+        if self.mode not in {"chroma", "image", "image_chroma"}:
+            raise ValueError("background.mode must be one of: chroma, image, image_chroma")
+        if self.mode in {"chroma", "image_chroma"}:
             if self.chromaColor is None or len(self.chromaColor) != 3:
                 raise ValueError("background.chromaColor must contain 3 values")
             if any(channel < 0 or channel > 255 for channel in self.chromaColor):
                 raise ValueError("background.chromaColor must be in 0..255")
-        if self.mode == "image":
+        if self.mode in {"image", "image_chroma"}:
             if not self.imagePath:
-                raise ValueError("background.imagePath is required in image mode")
+                raise ValueError("background.imagePath is required in image/image_chroma mode")
             if not Path(self.imagePath).exists():
                 raise ValueError(f"background.imagePath not found: {self.imagePath}")
+        if not 0.0 <= self.colorBlendAlpha <= 1.0:
+            raise ValueError("background.colorBlendAlpha must be between 0.0 and 1.0")
 
 
 @dataclass(frozen=True)

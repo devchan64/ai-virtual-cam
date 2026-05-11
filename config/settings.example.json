@@ -1,6 +1,6 @@
 {
   "inputCamera": {
-    "devicePath": "/dev/video0",
+    "devicePath": "0",
     "width": 1280,
     "height": 720,
     "fps": 30,
@@ -13,6 +13,7 @@
   },
   "outputCamera": {
     "devicePath": "output/virtual-cam-preview.mp4",
+    "backend": "opencv",
     "width": 1280,
     "height": 720,
     "fps": 30
@@ -27,7 +28,8 @@
       0,
       255,
       0
-    ]
+    ],
+    "colorBlendAlpha": 0.35
   },
   "crop": {
     "margin": 0.25,

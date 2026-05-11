@@ -2,7 +2,7 @@
 
 ## 1. 개요
 
-`ai-virtual-cam`은 Linux USB 카메라 영상을 입력받아 인물 영역을 실시간으로 분리하고, 배경을 크로마키 색상 또는 사용자 지정 배경으로 합성한 뒤, 최종 영상을 V4L2 가상 카메라로 출력하는 CUDA 가속 영상 파이프라인이다.
+`ai-virtual-cam`은 USB 카메라 영상을 입력받아 인물 영역을 실시간으로 분리하고, 배경을 크로마키 색상 또는 사용자 지정 배경으로 합성한 뒤, 최종 영상을 가상 카메라 또는 파일로 출력하는 영상 파이프라인이다.
 
 ```text
 USB Camera
@@ -17,16 +17,17 @@ USB Camera
 ## 2. 목표
 
 - 실시간 인물 기반 가상 카메라 생성
-- CUDA GPU 기반 추론 가속
-- Docker 기반 실행환경 격리
-- `v4l2loopback` 기반 화상회의 앱 연동
+- Linux CUDA GPU 기반 추론 가속
+- Linux Docker 기반 실행환경 격리
+- Linux `v4l2loopback` 기반 화상회의 앱 연동
+- macOS 로컬 실행 경로 지원
 - 사용자 배경 이미지/영상 합성 지원
 - 병합영역 crop 후 출력 재구성
 
 ## 3. 비목표
 
 - OBS 플러그인
-- Windows / macOS 지원
+- Windows 지원
 - 영상 편집 기능
 - 클라우드 기반 추론
 
@@ -40,17 +41,17 @@ USB Camera
  ├─ USB Camera (/dev/video0)
  └─ Docker Container
      └─ ai-virtual-cam
-         ├─ Capture
-         ├─ Segmentation
-         ├─ Mask Processing
-         ├─ Compose
-         ├─ Crop
-         └─ Virtual Cam Output
+
+[Host macOS]
+ ├─ USB Camera (index 0, 1, ...)
+ ├─ OBS Virtual Camera (or system virtual cam provider)
+ └─ Local Python Runtime
+     └─ ai-virtual-cam
 ```
 
 ## 5. 런타임 계약
 
-### Host
+### Host (Linux)
 
 필수:
 
@@ -65,10 +66,15 @@ Fail-Fast:
 - 카메라 없음 → 종료
 - 가상카메라 없음 → 종료
 
-### Device
+### Device (Linux)
 
 - Input: `/dev/video0`
 - Output: `/dev/video10`
+
+### Device (macOS)
+
+- Input: OpenCV camera index string (`"0"`, `"1"`, ...)
+- Output: pyvirtualcam backend virtual camera sink
 
 ## 6. 파이프라인
 
@@ -103,7 +109,7 @@ capture
 
 ### Background
 
-- `chroma`, `image`, `video`
+- `chroma`, `image`, `image_chroma`, `video`
 
 ### Compose
 
@@ -124,6 +130,7 @@ inputCamera:
 
 outputCamera:
   devicePath: /dev/video10
+  backend: opencv
   width: 1280
   height: 720
   fps: 30
@@ -133,8 +140,9 @@ segmentation:
   threshold: 0.65
 
 background:
-  mode: chroma
+  mode: chroma # chroma | image | image_chroma
   chromaColor: [0,255,0]
+  colorBlendAlpha: 0.35
 
 crop:
   margin: 0.25
@@ -174,6 +182,12 @@ ai-virtual-cam/
 
 - TensorRT
 - 영상 배경
+
+### Phase 4 (macOS)
+
+- 출력 어댑터 분리(`opencv`, `pyvirtualcam`)
+- 입력 카메라 인덱스 경로 지원
+- 백엔드 capability probe (`mps/cpu`, `cuda/cpu`) 설계
 
 ## 11. 핵심 원칙
 

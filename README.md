@@ -1,6 +1,6 @@
 # ai-virtual-cam
 
-`ai-virtual-cam`은 Linux USB 카메라 영상을 입력받아 인물 영역을 실시간으로 분리하고, 배경을 크로마키 색상 또는 사용자 지정 배경으로 합성한 뒤, 최종 영상을 V4L2 가상 카메라로 출력하는 CUDA 가속 영상 파이프라인입니다.
+`ai-virtual-cam`은 USB 카메라 영상을 입력받아 인물 영역을 실시간으로 분리하고, 배경을 크로마키 색상 또는 사용자 지정 배경으로 합성한 뒤, 최종 영상을 가상 카메라 또는 파일로 출력하는 영상 파이프라인입니다.
 
 상세 설계는 [docs/design.md](./docs/design.md)에서 확인할 수 있습니다.
 
@@ -19,40 +19,26 @@ USB Camera
 ## Goals
 
 - 실시간 인물 기반 가상 카메라 생성
-- CUDA GPU 기반 추론 가속
+- Linux CUDA 기반 추론 가속(목표)
 - Docker 기반 실행환경 격리
-- `v4l2loopback` 기반 화상회의 앱 연동
+- Linux `v4l2loopback` 기반 화상회의 앱 연동
 - 사용자 배경 이미지/영상 합성 지원
 - 병합 영역 crop 후 출력 재구성
 
 ## Non-Goals
 
 - OBS 플러그인 제공
-- Windows / macOS 지원
+- Windows 지원
 - 영상 편집 기능 제공
 - 클라우드 기반 추론 제공
 
 ## Architecture
 
-```text
-[Host Linux]
- ├─ NVIDIA Driver
- ├─ NVIDIA Container Toolkit
- ├─ v4l2loopback (/dev/video10)
- ├─ USB Camera (/dev/video0)
- └─ Docker Container
-     └─ ai-virtual-cam
-         ├─ Capture
-         ├─ Segmentation
-         ├─ Mask Processing
-         ├─ Compose
-         ├─ Crop
-         └─ Virtual Cam Output
-```
+Linux는 Docker + CUDA + V4L2 경로를, macOS는 로컬 Python + pyvirtualcam 경로를 사용합니다.
 
 ## Runtime Contract
 
-### Host Requirements
+### Host Requirements (Linux)
 
 필수 구성요소:
 
@@ -67,10 +53,15 @@ Fail-fast 원칙:
 - 카메라 없음 → 즉시 종료
 - 가상 카메라 없음 → 즉시 종료
 
-### Device Contract
+### Device Contract (Linux)
 
 - Input: `/dev/video0`
 - Output: `/dev/video10`
+
+### Device Contract (macOS)
+
+- Input: 카메라 인덱스(`"0"`, `"1"`) 또는 OpenCV가 여는 장치 문자열
+- Output: `outputCamera.backend=pyvirtualcam` 사용 시 시스템 가상 카메라(OBS Virtual Camera 등)로 송출
 
 ## Pipeline
 
@@ -128,6 +119,7 @@ inputCamera:
 
 outputCamera:
   devicePath: /dev/video10
+  backend: opencv
   width: 1280
   height: 720
   fps: 30
@@ -137,8 +129,9 @@ segmentation:
   threshold: 0.65
 
 background:
-  mode: chroma
+  mode: chroma # chroma | image | image_chroma
   chromaColor: [0,255,0]
+  colorBlendAlpha: 0.35 # image_chroma 모드에서 사용
 
 crop:
   margin: 0.25
@@ -215,6 +208,17 @@ python3 scripts/create-config-gui.py --output config/settings.json
 - `tensorrt`: 인터페이스만 존재, 미구현
 - `onnxruntime`: 인터페이스만 존재, 미구현
 
+배경 모드:
+
+- `chroma`: 단색 배경
+- `image`: 배경 이미지
+- `image_chroma`: 배경 이미지와 단색 배경을 비율로 혼합 (`colorBlendAlpha`)
+
+출력 backend:
+
+- `opencv`: 파일/디바이스 경로로 OpenCV `VideoWriter` 출력
+- `pyvirtualcam`: pyvirtualcam 기반 가상 카메라 출력(macOS 권장)
+
 ## Run
 
 로컬 실행:
@@ -224,6 +228,18 @@ python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
 python3 -m src.app.main --config config/settings.example.json --max-frames 30
+```
+
+macOS pyvirtualcam 예시 설정:
+
+```json
+{
+  "inputCamera": { "devicePath": "0", "width": 1280, "height": 720, "fps": 30, "crop": { "x": 0, "y": 0, "width": 1280, "height": 720 } },
+  "outputCamera": { "devicePath": "virtual-cam", "backend": "pyvirtualcam", "width": 1280, "height": 720, "fps": 30 },
+  "segmentation": { "backend": "mock", "threshold": 0.65 },
+  "background": { "mode": "chroma", "chromaColor": [0, 255, 0] },
+  "crop": { "margin": 0.25, "smoothing": 0.85 }
+}
 ```
 
 현재 구현 범위:

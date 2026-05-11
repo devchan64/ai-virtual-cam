@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from src.adapter.capture.opencv_capture import OpenCVCapture
-from src.adapter.output.opencv_output import OpenCVOutput
+from src.adapter.output.factory import build_output
 from src.domain.config import AppConfig
 from src.pipeline.runner import PipelineRunner
 
@@ -34,7 +34,7 @@ def main() -> int:
     config = AppConfig.load(config_path)
 
     capture = OpenCVCapture(config.inputCamera)
-    output = OpenCVOutput(config.outputCamera)
+    output = build_output(config.outputCamera)
 
     runner = PipelineRunner(
         config=config,

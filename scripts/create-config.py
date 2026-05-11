@@ -158,19 +158,26 @@ def build_config():
     segmentation_threshold = prompt_float("  threshold", default=0.65, minimum=0.0, maximum=1.0)
 
     print("\nBackground settings")
-    background_mode = prompt_choice("  mode", ["chroma", "image"], default="chroma")
+    background_mode = prompt_choice("  mode", ["chroma", "image", "image_chroma"], default="chroma")
     background = {"mode": background_mode}
 
-    if background_mode == "chroma":
+    if background_mode in {"chroma", "image_chroma"}:
         background["chromaColor"] = [
             prompt_int("  chroma R", default=0, minimum=0, maximum=255),
             prompt_int("  chroma G", default=255, minimum=0, maximum=255),
             prompt_int("  chroma B", default=0, minimum=0, maximum=255),
         ]
-    else:
+    if background_mode in {"image", "image_chroma"}:
         image_path = prompt_path("  image path", must_exist=True)
         background["imagePath"] = image_path
         background["crop"] = prompt_crop("Background image", output_width, output_height)
+    if background_mode == "image_chroma":
+        background["colorBlendAlpha"] = prompt_float(
+            "  color blend alpha (0.0=image only, 1.0=color only)",
+            default=0.35,
+            minimum=0.0,
+            maximum=1.0,
+        )
 
     print("\nPerson crop settings")
     crop_margin = prompt_float("  margin", default=0.25, minimum=0.0)

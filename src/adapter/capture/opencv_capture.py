@@ -9,7 +9,7 @@ from src.domain.config import InputCameraConfig
 class OpenCVCapture:
     def __init__(self, config: InputCameraConfig) -> None:
         self._config = config
-        self._capture = cv2.VideoCapture(config.devicePath)
+        self._capture = cv2.VideoCapture(_resolve_source(config.devicePath))
         self._capture.set(cv2.CAP_PROP_FRAME_WIDTH, config.width)
         self._capture.set(cv2.CAP_PROP_FRAME_HEIGHT, config.height)
         self._capture.set(cv2.CAP_PROP_FPS, config.fps)
@@ -27,3 +27,10 @@ class OpenCVCapture:
 
     def release(self) -> None:
         self._capture.release()
+
+
+def _resolve_source(device_path: str):
+    normalized = device_path.strip()
+    if normalized.isdigit():
+        return int(normalized)
+    return normalized

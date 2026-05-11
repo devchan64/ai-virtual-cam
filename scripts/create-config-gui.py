@@ -70,7 +70,7 @@ class ConfigGui:
         self._add_float(frame, row, "seg_threshold", "Seg threshold", 0.65)
         row += 1
 
-        self._add_combo(frame, row, "bg_mode", "Background mode", ["chroma", "image"], "chroma")
+        self._add_combo(frame, row, "bg_mode", "Background mode", ["chroma", "image", "image_chroma"], "chroma")
         row += 1
         self._add_text(frame, row, "bg_image", "Background image", "")
         ttk.Button(frame, text="Browse", command=self._pick_bg_image).grid(row=row, column=2, sticky="ew", padx=4)
@@ -79,6 +79,8 @@ class ConfigGui:
         self._add_int(frame, row, "bg_g", "Chroma G", 255, col_offset=2)
         row += 1
         self._add_int(frame, row, "bg_b", "Chroma B", 0)
+        row += 1
+        self._add_float(frame, row, "bg_blend_alpha", "Color blend alpha", 0.35)
         row += 1
 
         self._add_float(frame, row, "crop_margin", "Person crop margin", 0.25)
@@ -126,14 +128,16 @@ class ConfigGui:
         output_h = int(iv["output_height"].get())
 
         background = {"mode": iv["bg_mode"].get()}
-        if background["mode"] == "chroma":
+        if background["mode"] in {"chroma", "image_chroma"}:
             background["chromaColor"] = [int(iv["bg_r"].get()), int(iv["bg_g"].get()), int(iv["bg_b"].get())]
-        else:
+        if background["mode"] in {"image", "image_chroma"}:
             image_path = iv["bg_image"].get().strip()
             if not image_path:
-                raise ValueError("Background mode=image requires image path")
+                raise ValueError("Background mode=image/image_chroma requires image path")
             background["imagePath"] = image_path
             background["crop"] = {"x": 0, "y": 0, "width": output_w, "height": output_h}
+        if background["mode"] == "image_chroma":
+            background["colorBlendAlpha"] = float(iv["bg_blend_alpha"].get())
 
         return {
             "inputCamera": {

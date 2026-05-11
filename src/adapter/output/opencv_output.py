@@ -6,9 +6,10 @@ import cv2
 import numpy as np
 
 from src.domain.config import OutputCameraConfig
+from src.adapter.output.base import OutputSink
 
 
-class OpenCVOutput:
+class OpenCVOutput(OutputSink):
     def __init__(self, config: OutputCameraConfig) -> None:
         self._config = config
         self._writer = self._build_writer(config)
