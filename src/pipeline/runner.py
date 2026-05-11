@@ -31,7 +31,12 @@ class PipelineRunner:
             while True:
                 frame = self._capture.read()
                 raw_mask = self._segmenter.segment(frame)
-                mask = refine_mask(raw_mask, self._config.segmentation.threshold)
+                mask = refine_mask(
+                    raw_mask,
+                    self._config.segmentation.threshold,
+                    edge_smoothness=self._config.segmentation.edgeSmoothness,
+                    blend_feather=self._config.segmentation.blendFeather,
+                )
                 bounds = self._bounds.update(mask)
 
                 background = self._background.frame()

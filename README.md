@@ -24,6 +24,12 @@ USB Camera
 ./bin/avc <command>
 ```
 
+저장된 설정으로 가상카메라 스트림 실행:
+
+```bash
+./bin/avc serve --config config/settings.json
+```
+
 ## Goals
 
 - 실시간 인물 기반 가상 카메라 생성
@@ -135,6 +141,8 @@ outputCamera:
 segmentation:
   backend: selfie
   threshold: 0.65
+  edgeSmoothness: 0.50 # min=0.0, max=1.0
+  blendFeather: 0.35 # min=0.0, max=1.0
   selfie:
     modelSelection: 1 # min=0, max=1
     temporalSmoothing: 0.25 # min=0.0, max=0.95
@@ -248,7 +256,7 @@ macOS pyvirtualcam 예시 설정:
 {
   "inputCamera": { "devicePath": "0", "width": 1280, "height": 720, "fps": 30, "crop": { "x": 0, "y": 0, "width": 1280, "height": 720 } },
   "outputCamera": { "devicePath": "virtual-cam", "backend": "pyvirtualcam", "width": 1280, "height": 720, "fps": 30 },
-  "segmentation": { "backend": "selfie", "threshold": 0.65, "selfie": { "modelSelection": 1, "temporalSmoothing": 0.25 } },
+  "segmentation": { "backend": "selfie", "threshold": 0.65, "edgeSmoothness": 0.5, "blendFeather": 0.35, "selfie": { "modelSelection": 1, "temporalSmoothing": 0.25 } },
   "background": { "mode": "chroma", "chromaColor": [0, 0, 0] },
   "crop": { "margin": 0.25, "smoothing": 0.85 }
 }

@@ -83,6 +83,10 @@ class ConfigGui:
         row += 1
         self._add_slider(frame, row, "seg_threshold", "Seg threshold", 0.65, 0.0, 1.0, resolution=0.01)
         row += 1
+        self._add_slider(frame, row, "seg_edge_smoothness", "Edge smoothness", 0.50, 0.0, 1.0, resolution=0.01)
+        row += 1
+        self._add_slider(frame, row, "seg_blend_feather", "Blend feather", 0.35, 0.0, 1.0, resolution=0.01)
+        row += 1
         self._add_slider(frame, row, "seg_selfie_model", "Selfie model selection", 1, 0, 1, resolution=1)
         row += 1
         self._add_slider(frame, row, "seg_selfie_smoothing", "Selfie temporal smoothing", 0.25, 0.0, 0.95, resolution=0.01)
@@ -312,6 +316,8 @@ class ConfigGui:
             output_fps=int(iv["output_fps"].get()),
             segmentation_backend=iv["seg_backend"].get(),
             segmentation_threshold=float(iv["seg_threshold"].get()),
+            segmentation_edge_smoothness=float(iv["seg_edge_smoothness"].get()),
+            segmentation_blend_feather=float(iv["seg_blend_feather"].get()),
             segmentation_selfie_model_selection=int(round(float(iv["seg_selfie_model"].get()))),
             segmentation_selfie_temporal_smoothing=float(iv["seg_selfie_smoothing"].get()),
             background=background,

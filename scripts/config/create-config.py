@@ -140,6 +140,8 @@ def build_config():
     print("\nSegmentation settings")
     segmentation_backend = prompt_choice("  backend", _segmentation_backend_options(), default="selfie")
     segmentation_threshold = prompt_float("  threshold", default=0.65, minimum=0.0, maximum=1.0)
+    segmentation_edge_smoothness = prompt_float("  edge smoothness (0.0..1.0)", default=0.50, minimum=0.0, maximum=1.0)
+    segmentation_blend_feather = prompt_float("  blend feather (0.0..1.0)", default=0.35, minimum=0.0, maximum=1.0)
     segmentation_selfie_model_selection = prompt_int("  selfie model selection (0 or 1)", default=1, minimum=0, maximum=1)
     segmentation_selfie_temporal_smoothing = prompt_float(
         "  selfie temporal smoothing (0.0..0.95)",
@@ -185,6 +187,8 @@ def build_config():
         output_fps=output_fps,
         segmentation_backend=segmentation_backend,
         segmentation_threshold=segmentation_threshold,
+        segmentation_edge_smoothness=segmentation_edge_smoothness,
+        segmentation_blend_feather=segmentation_blend_feather,
         segmentation_selfie_model_selection=segmentation_selfie_model_selection,
         segmentation_selfie_temporal_smoothing=segmentation_selfie_temporal_smoothing,
         background=background,

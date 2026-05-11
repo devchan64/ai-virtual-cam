@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+VENV_PY="$ROOT_DIR/.venv/bin/python3"
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  cat <<'EOF'
+Usage:
+  ./bin/avc serve [--config PATH] [--max-frames N]
+
+Examples:
+  ./bin/avc serve --config config/settings.json
+  ./bin/avc serve --config config/settings.json --max-frames 300
+EOF
+  exit 0
+fi
+
+if [[ -x "$VENV_PY" ]]; then
+  exec "$VENV_PY" -m src.app.main "$@"
+fi
+
+exec python3 -m src.app.main "$@"

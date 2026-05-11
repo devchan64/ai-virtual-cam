@@ -15,6 +15,8 @@ def build_config(
     segmentation_threshold: float,
     segmentation_selfie_model_selection: int = 1,
     segmentation_selfie_temporal_smoothing: float = 0.25,
+    segmentation_edge_smoothness: float = 0.5,
+    segmentation_blend_feather: float = 0.35,
     background: dict,
     crop_margin: float,
     crop_smoothing: float,
@@ -36,6 +38,8 @@ def build_config(
         "segmentation": {
             "backend": segmentation_backend,
             "threshold": segmentation_threshold,
+            "edgeSmoothness": float(segmentation_edge_smoothness),
+            "blendFeather": float(segmentation_blend_feather),
             "selfie": {
                 "modelSelection": int(segmentation_selfie_model_selection),
                 "temporalSmoothing": float(segmentation_selfie_temporal_smoothing),

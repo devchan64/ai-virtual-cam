@@ -24,13 +24,15 @@
     "selfie": {
       "modelSelection": 1,
       "temporalSmoothing": 0.25
-    }
+    },
+    "edgeSmoothness": 0.5,
+    "blendFeather": 0.35
   },
   "background": {
     "mode": "chroma",
     "chromaColor": [
       0,
-      255,
+      0,
       0
     ],
     "colorBlendAlpha": 0.35
