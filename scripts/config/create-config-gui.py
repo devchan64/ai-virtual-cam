@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 import cv2
@@ -53,93 +54,121 @@ class ConfigGui:
         self._preview_out_size = (0, 0)
         self._preview_window_name = "ai-virtual-cam preview (press q or esc to close)"
         self._build_form()
+        self._load_existing_config()
 
     def _build_form(self) -> None:
         frame = ttk.Frame(self.root, padding=12)
         frame.grid(sticky="nsew")
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
-        for col in range(4):
-            frame.columnconfigure(col, weight=1 if col in (1, 3) else 0)
 
-        row = 0
+        notebook = ttk.Notebook(frame)
+        notebook.grid(row=0, column=0, sticky="nsew")
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(0, weight=1)
+
+        tab_io = ttk.Frame(notebook, padding=8)
+        tab_seg = ttk.Frame(notebook, padding=8)
+        tab_bg = ttk.Frame(notebook, padding=8)
+        tab_crop = ttk.Frame(notebook, padding=8)
+        notebook.add(tab_io, text="입출력")
+        notebook.add(tab_seg, text="세그멘테이션")
+        notebook.add(tab_bg, text="배경")
+        notebook.add(tab_crop, text="프레이밍")
+        for tab in (tab_io, tab_seg, tab_bg, tab_crop):
+            for col in range(4):
+                tab.columnconfigure(col, weight=1 if col in (1, 3) else 0)
+
         is_macos = platform.system() == "Darwin"
         cameras = discover_cameras()
         camera_values = [c["devicePath"] for c in cameras] or (["0"] if is_macos else ["/dev/video0"])
 
-        self._add_combo(frame, row, "input_device", "Input device", camera_values, camera_values[0])
+        row = 0
+        self._add_combo(tab_io, row, "input_device", "Input device", camera_values, camera_values[0])
         row += 1
-        self._add_int(frame, row, "input_width", "Input width", 1280)
-        self._add_int(frame, row, "input_height", "Input height", 720, col_offset=2)
+        self._add_int(tab_io, row, "input_width", "Input width", 1280)
+        self._add_int(tab_io, row, "input_height", "Input height", 720, col_offset=2)
         row += 1
-        self._add_int(frame, row, "input_fps", "Input FPS", 30)
+        self._add_int(tab_io, row, "input_fps", "Input FPS", 30)
         row += 1
-        self._add_slider(frame, row, "input_software_zoom", "Input SW zoom", 1.0, 1.0, 4.0, resolution=0.01)
+        self._add_slider(tab_io, row, "input_software_zoom", "Input SW zoom", 1.0, 1.0, 4.0, resolution=0.01)
         row += 1
 
-        self._add_combo(frame, row, "output_backend", "Output backend", _output_backend_options(), _output_backend_options()[0])
+        self._add_combo(tab_io, row, "output_backend", "Output backend", _output_backend_options(), _output_backend_options()[0])
         row += 1
         default_output_device = "virtual-cam" if is_macos else "/dev/video10"
-        self._add_text(frame, row, "output_device", "Output path", default_output_device)
+        self._add_text(tab_io, row, "output_device", "Output path", default_output_device)
         row += 1
-        self._add_int(frame, row, "output_width", "Output width", 1280)
-        self._add_int(frame, row, "output_height", "Output height", 720, col_offset=2)
+        self._add_int(tab_io, row, "output_width", "Output width", 1280)
+        self._add_int(tab_io, row, "output_height", "Output height", 720, col_offset=2)
         row += 1
-        self._add_int(frame, row, "output_fps", "Output FPS", 30)
-        row += 1
+        self._add_int(tab_io, row, "output_fps", "Output FPS", 30)
 
-        self._add_combo(frame, row, "seg_backend", "Seg backend", _segmentation_backend_options(), "selfie")
+        row = 0
+        self._add_combo(tab_seg, row, "seg_backend", "Seg backend", _segmentation_backend_options(), "selfie")
         row += 1
-        self._add_slider(frame, row, "seg_threshold", "Seg threshold", 0.65, 0.0, 1.0, resolution=0.01)
+        self._add_slider(tab_seg, row, "seg_threshold", "Seg threshold", 0.65, 0.0, 1.0, resolution=0.01)
         row += 1
-        self._add_slider(frame, row, "seg_edge_smoothness", "Edge smoothness", 0.50, 0.0, 1.0, resolution=0.01)
+        self._add_slider(tab_seg, row, "seg_edge_smoothness", "Edge smoothness", 0.50, 0.0, 1.0, resolution=0.01)
         row += 1
-        self._add_slider(frame, row, "seg_blend_feather", "Blend feather", 0.35, 0.0, 1.0, resolution=0.01)
+        self._add_slider(tab_seg, row, "seg_blend_feather", "Blend feather", 0.35, 0.0, 1.0, resolution=0.01)
         row += 1
-        self._add_slider(frame, row, "seg_selfie_model", "Selfie model selection", 1, 0, 1, resolution=1)
+        self._add_slider(tab_seg, row, "seg_selfie_model", "Selfie model selection", 1, 0, 1, resolution=1)
         row += 1
-        self._add_slider(frame, row, "seg_selfie_smoothing", "Selfie temporal smoothing", 0.25, 0.0, 0.95, resolution=0.01)
-        row += 1
+        self._add_slider(tab_seg, row, "seg_selfie_smoothing", "Selfie temporal smoothing", 0.25, 0.0, 0.95, resolution=0.01)
 
-        self._add_combo(frame, row, "bg_mode", "Background mode", ["chroma", "image", "image_chroma"], "chroma")
+        row = 0
+        self._add_combo(tab_bg, row, "bg_mode", "Background mode", ["chroma", "image", "image_chroma"], "chroma")
         row += 1
-        self._add_text(frame, row, "bg_image", "Background image", "")
-        ttk.Button(frame, text="Browse", command=self._pick_bg_image).grid(row=row, column=2, sticky="ew", padx=4)
+        self._add_text(tab_bg, row, "bg_image", "Background image", "")
+        ttk.Button(tab_bg, text="Browse", command=self._pick_bg_image).grid(row=row, column=2, sticky="ew", padx=4)
         row += 1
-        self._add_int(frame, row, "bg_r", "Chroma R", 0)
-        self._add_int(frame, row, "bg_g", "Chroma G", 0, col_offset=2)
+        self._add_int(tab_bg, row, "bg_r", "Chroma R", 0)
+        self._add_int(tab_bg, row, "bg_g", "Chroma G", 0, col_offset=2)
         row += 1
-        self._add_int(frame, row, "bg_b", "Chroma B", 0)
-        ttk.Button(frame, text="Pick Color", command=self._pick_chroma_color).grid(row=row, column=2, sticky="ew", padx=4)
+        self._add_int(tab_bg, row, "bg_b", "Chroma B", 0)
+        ttk.Button(tab_bg, text="Pick Color", command=self._pick_chroma_color).grid(row=row, column=2, sticky="ew", padx=4)
         row += 1
-        self._add_slider(frame, row, "bg_blend_alpha", "Color blend alpha", 0.35, 0.0, 1.0, resolution=0.01)
-        row += 1
+        self._add_slider(tab_bg, row, "bg_blend_alpha", "Color blend alpha", 0.35, 0.0, 1.0, resolution=0.01)
 
-        self._add_slider(frame, row, "crop_margin", "Person crop margin", 0.25, 0.0, 2.0, resolution=0.01)
+        row = 0
+        self._add_slider(tab_crop, row, "crop_margin", "Person crop margin", 0.25, 0.0, 2.0, resolution=0.01)
         row += 1
-        self._add_slider(frame, row, "crop_pan_smoothing", "Pan smoothing", 0.85, 0.0, 1.0, resolution=0.01)
+        self._add_slider(tab_crop, row, "crop_pan_smoothing", "Pan smoothing", 0.85, 0.0, 1.0, resolution=0.01)
         row += 1
-        self._add_slider(frame, row, "crop_zoom_smoothing", "Zoom smoothing", 0.80, 0.0, 1.0, resolution=0.01)
+        self._add_slider(tab_crop, row, "crop_tilt_smoothing", "Tilt smoothing", 0.85, 0.0, 1.0, resolution=0.01)
         row += 1
-        self._add_slider(frame, row, "crop_upper_body_bias", "Upper body bias", 0.00, 0.0, 1.0, resolution=0.01)
+        self._add_slider(tab_crop, row, "crop_zoom_smoothing", "Zoom smoothing", 0.80, 0.0, 1.0, resolution=0.01)
         row += 1
-        self._add_slider(frame, row, "crop_upper_body_ratio", "Upper body ratio", 0.60, 0.2, 1.0, resolution=0.01)
+        self._add_slider(tab_crop, row, "crop_upper_body_bias", "Upper body bias", 0.00, 0.0, 1.0, resolution=0.01)
         row += 1
-        self._add_slider(frame, row, "crop_upper_body_edge_smoothing", "Upper body edge smoothing", 0.35, 0.0, 1.0, resolution=0.01)
+        self._add_slider(tab_crop, row, "crop_upper_body_ratio", "Upper body ratio", 0.60, 0.2, 1.0, resolution=0.01)
         row += 1
-        self._add_slider(frame, row, "crop_pan_pid_kp", "Pan PID Kp", 0.35, 0.0, 2.0, resolution=0.01)
+        self._add_slider(tab_crop, row, "crop_upper_body_edge_smoothing", "Upper body edge smoothing", 0.35, 0.0, 1.0, resolution=0.01)
         row += 1
-        self._add_slider(frame, row, "crop_pan_pid_ki", "Pan PID Ki", 0.01, 0.0, 0.5, resolution=0.001)
+        self._add_slider(tab_crop, row, "crop_pan_pid_kp", "Pan PID Kp", 0.35, 0.0, 2.0, resolution=0.01)
         row += 1
-        self._add_slider(frame, row, "crop_pan_pid_kd", "Pan PID Kd", 0.12, 0.0, 2.0, resolution=0.01)
+        self._add_slider(tab_crop, row, "crop_pan_pid_ki", "Pan PID Ki", 0.01, 0.0, 0.5, resolution=0.001)
         row += 1
-        self._add_slider(frame, row, "crop_pan_target_offset_x", "Pan target offset X", 0.00, -1.0, 1.0, resolution=0.01)
+        self._add_slider(tab_crop, row, "crop_pan_pid_kd", "Pan PID Kd", 0.12, 0.0, 2.0, resolution=0.01)
         row += 1
-        self._add_slider(frame, row, "crop_pan_target_offset_y", "Pan target offset Y", 0.00, -1.0, 1.0, resolution=0.01)
+        self._add_slider(tab_crop, row, "crop_tilt_pid_kp", "Tilt PID Kp", 0.35, 0.0, 2.0, resolution=0.01)
         row += 1
+        self._add_slider(tab_crop, row, "crop_tilt_pid_ki", "Tilt PID Ki", 0.01, 0.0, 0.5, resolution=0.001)
+        row += 1
+        self._add_slider(tab_crop, row, "crop_tilt_pid_kd", "Tilt PID Kd", 0.12, 0.0, 2.0, resolution=0.01)
+        row += 1
+        self._add_slider(tab_crop, row, "crop_pan_target_offset_x", "Pan target offset X", 0.00, -1.0, 1.0, resolution=0.01)
+        row += 1
+        self._add_slider(tab_crop, row, "crop_pan_target_offset_y", "Pan target offset Y", 0.00, -1.0, 1.0, resolution=0.01)
 
-        ttk.Button(frame, text="Preview", command=self._preview).grid(row=row, column=0, columnspan=2, sticky="ew", pady=10, padx=4)
-        ttk.Button(frame, text="Save JSON", command=self._save).grid(row=row, column=2, columnspan=2, sticky="ew", pady=10, padx=4)
+        action_row = 1
+        action = ttk.Frame(frame)
+        action.grid(row=action_row, column=0, sticky="ew", pady=(10, 0))
+        action.columnconfigure(0, weight=1)
+        action.columnconfigure(1, weight=1)
+        ttk.Button(action, text="Preview", command=self._preview).grid(row=0, column=0, sticky="ew", padx=4)
+        ttk.Button(action, text="Save JSON", command=self._save).grid(row=0, column=1, sticky="ew", padx=4)
 
     def _add_text(self, parent, row, key, label, default, col_offset=0):
         ttk.Label(parent, text=label).grid(row=row, column=col_offset, sticky="w")
@@ -195,6 +224,75 @@ class ConfigGui:
         selected = filedialog.askopenfilename(title="Select background image")
         if selected:
             self.vars["bg_image"].set(selected)
+
+    def _load_existing_config(self):
+        config_path = Path(self.output_path).expanduser()
+        if not config_path.exists():
+            return
+        try:
+            raw = json.loads(config_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            messagebox.showwarning("Load warning", f"Failed to parse config file:\n{config_path}\n\n{exc}")
+            return
+
+        input_cfg = raw.get("inputCamera") or {}
+        output_cfg = raw.get("outputCamera") or {}
+        seg_cfg = raw.get("segmentation") or {}
+        selfie_cfg = seg_cfg.get("selfie") or {}
+        bg_cfg = raw.get("background") or {}
+        crop_cfg = raw.get("crop") or {}
+
+        self._set_var("input_device", input_cfg.get("devicePath"))
+        self._set_var("input_width", input_cfg.get("width"))
+        self._set_var("input_height", input_cfg.get("height"))
+        self._set_var("input_fps", input_cfg.get("fps"))
+        self._set_var("input_software_zoom", input_cfg.get("softwareZoom"))
+
+        self._set_var("output_backend", output_cfg.get("backend"))
+        self._set_var("output_device", output_cfg.get("devicePath"))
+        self._set_var("output_width", output_cfg.get("width"))
+        self._set_var("output_height", output_cfg.get("height"))
+        self._set_var("output_fps", output_cfg.get("fps"))
+
+        self._set_var("seg_backend", seg_cfg.get("backend"))
+        self._set_var("seg_threshold", seg_cfg.get("threshold"))
+        self._set_var("seg_edge_smoothness", seg_cfg.get("edgeSmoothness"))
+        self._set_var("seg_blend_feather", seg_cfg.get("blendFeather"))
+        self._set_var("seg_selfie_model", selfie_cfg.get("modelSelection"))
+        self._set_var("seg_selfie_smoothing", selfie_cfg.get("temporalSmoothing"))
+
+        self._set_var("bg_mode", bg_cfg.get("mode"))
+        chroma = bg_cfg.get("chromaColor") or []
+        if len(chroma) == 3:
+            self._set_var("bg_r", chroma[0])
+            self._set_var("bg_g", chroma[1])
+            self._set_var("bg_b", chroma[2])
+        self._set_var("bg_image", bg_cfg.get("imagePath"))
+        self._set_var("bg_blend_alpha", bg_cfg.get("colorBlendAlpha"))
+
+        self._set_var("crop_margin", crop_cfg.get("margin"))
+        self._set_var("crop_pan_smoothing", crop_cfg.get("panSmoothing", crop_cfg.get("smoothing")))
+        self._set_var("crop_tilt_smoothing", crop_cfg.get("tiltSmoothing", crop_cfg.get("panSmoothing", crop_cfg.get("smoothing"))))
+        self._set_var("crop_zoom_smoothing", crop_cfg.get("zoomSmoothing"))
+        self._set_var("crop_upper_body_bias", crop_cfg.get("upperBodyBias"))
+        self._set_var("crop_upper_body_ratio", crop_cfg.get("upperBodyRatio"))
+        self._set_var("crop_upper_body_edge_smoothing", crop_cfg.get("upperBodyEdgeSmoothing"))
+        self._set_var("crop_pan_pid_kp", crop_cfg.get("panPidKp"))
+        self._set_var("crop_pan_pid_ki", crop_cfg.get("panPidKi"))
+        self._set_var("crop_pan_pid_kd", crop_cfg.get("panPidKd"))
+        self._set_var("crop_tilt_pid_kp", crop_cfg.get("tiltPidKp", crop_cfg.get("panPidKp")))
+        self._set_var("crop_tilt_pid_ki", crop_cfg.get("tiltPidKi", crop_cfg.get("panPidKi")))
+        self._set_var("crop_tilt_pid_kd", crop_cfg.get("tiltPidKd", crop_cfg.get("panPidKd")))
+        self._set_var("crop_pan_target_offset_x", crop_cfg.get("panTargetOffsetX"))
+        self._set_var("crop_pan_target_offset_y", crop_cfg.get("panTargetOffsetY"))
+
+    def _set_var(self, key: str, value):
+        if value is None:
+            return
+        var = self.vars.get(key)
+        if var is None:
+            return
+        var.set(str(value))
 
     def _pick_chroma_color(self):
         rgb_default = (
@@ -310,6 +408,7 @@ class ConfigGui:
         return (
             crop.get("margin"),
             crop.get("panSmoothing", crop.get("smoothing")),
+            crop.get("tiltSmoothing"),
             crop.get("zoomSmoothing"),
             crop.get("upperBodyBias"),
             crop.get("upperBodyRatio"),
@@ -318,6 +417,9 @@ class ConfigGui:
             crop.get("panPidKp"),
             crop.get("panPidKi"),
             crop.get("panPidKd"),
+            crop.get("tiltPidKp"),
+            crop.get("tiltPidKi"),
+            crop.get("tiltPidKd"),
             crop.get("panTargetOffsetX"),
             crop.get("panTargetOffsetY"),
         )
@@ -376,6 +478,7 @@ class ConfigGui:
             background=background,
             crop_margin=float(iv["crop_margin"].get()),
             crop_pan_smoothing=float(iv["crop_pan_smoothing"].get()),
+            crop_tilt_smoothing=float(iv["crop_tilt_smoothing"].get()),
             crop_zoom_smoothing=float(iv["crop_zoom_smoothing"].get()),
             crop_upper_body_bias=float(iv["crop_upper_body_bias"].get()),
             crop_upper_body_ratio=float(iv["crop_upper_body_ratio"].get()),
@@ -384,6 +487,9 @@ class ConfigGui:
             crop_pan_pid_kp=float(iv["crop_pan_pid_kp"].get()),
             crop_pan_pid_ki=float(iv["crop_pan_pid_ki"].get()),
             crop_pan_pid_kd=float(iv["crop_pan_pid_kd"].get()),
+            crop_tilt_pid_kp=float(iv["crop_tilt_pid_kp"].get()),
+            crop_tilt_pid_ki=float(iv["crop_tilt_pid_ki"].get()),
+            crop_tilt_pid_kd=float(iv["crop_tilt_pid_kd"].get()),
             crop_pan_target_offset_x=float(iv["crop_pan_target_offset_x"].get()),
             crop_pan_target_offset_y=float(iv["crop_pan_target_offset_y"].get()),
         )

@@ -175,6 +175,7 @@ class BackgroundConfig:
 class PersonCropConfig:
     margin: float
     panSmoothing: float
+    tiltSmoothing: float
     upperBodyBias: float
     upperBodyRatio: float
     upperBodyEdgeSmoothing: float
@@ -183,6 +184,9 @@ class PersonCropConfig:
     panPidKp: float
     panPidKi: float
     panPidKd: float
+    tiltPidKp: float
+    tiltPidKi: float
+    tiltPidKd: float
     panTargetOffsetX: float
     panTargetOffsetY: float
 
@@ -192,6 +196,7 @@ class PersonCropConfig:
         config = cls(
             margin=float(raw["margin"]),
             panSmoothing=float(pan_smoothing),
+            tiltSmoothing=float(raw.get("tiltSmoothing", pan_smoothing)),
             upperBodyBias=float(raw.get("upperBodyBias", 0.0)),
             upperBodyRatio=float(raw.get("upperBodyRatio", 0.60)),
             upperBodyEdgeSmoothing=float(raw.get("upperBodyEdgeSmoothing", 0.35)),
@@ -200,6 +205,9 @@ class PersonCropConfig:
             panPidKp=float(raw.get("panPidKp", 0.35)),
             panPidKi=float(raw.get("panPidKi", 0.01)),
             panPidKd=float(raw.get("panPidKd", 0.12)),
+            tiltPidKp=float(raw.get("tiltPidKp", raw.get("panPidKp", 0.35))),
+            tiltPidKi=float(raw.get("tiltPidKi", raw.get("panPidKi", 0.01))),
+            tiltPidKd=float(raw.get("tiltPidKd", raw.get("panPidKd", 0.12))),
             panTargetOffsetX=float(raw.get("panTargetOffsetX", 0.0)),
             panTargetOffsetY=float(raw.get("panTargetOffsetY", 0.0)),
         )
@@ -207,6 +215,8 @@ class PersonCropConfig:
             raise ValueError("crop.margin must be >= 0.0")
         if not 0.0 <= config.panSmoothing <= 1.0:
             raise ValueError("crop.panSmoothing must be between 0.0 and 1.0")
+        if not 0.0 <= config.tiltSmoothing <= 1.0:
+            raise ValueError("crop.tiltSmoothing must be between 0.0 and 1.0")
         if not 0.0 <= config.upperBodyBias <= 1.0:
             raise ValueError("crop.upperBodyBias must be between 0.0 and 1.0")
         if not 0.2 <= config.upperBodyRatio <= 1.0:
@@ -219,6 +229,8 @@ class PersonCropConfig:
             raise ValueError("crop.zoomSmoothing must be between 0.0 and 1.0")
         if config.panPidKp < 0.0 or config.panPidKi < 0.0 or config.panPidKd < 0.0:
             raise ValueError("crop.panPidKp/Ki/Kd must be >= 0.0")
+        if config.tiltPidKp < 0.0 or config.tiltPidKi < 0.0 or config.tiltPidKd < 0.0:
+            raise ValueError("crop.tiltPidKp/Ki/Kd must be >= 0.0")
         if not -1.0 <= config.panTargetOffsetX <= 1.0:
             raise ValueError("crop.panTargetOffsetX must be between -1.0 and 1.0")
         if not -1.0 <= config.panTargetOffsetY <= 1.0:

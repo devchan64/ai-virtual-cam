@@ -21,6 +21,7 @@ def build_config(
     background: dict,
     crop_margin: float,
     crop_pan_smoothing: float,
+    crop_tilt_smoothing: float | None = None,
     crop_upper_body_bias: float = 0.0,
     crop_upper_body_ratio: float = 0.60,
     crop_upper_body_edge_smoothing: float = 0.35,
@@ -29,9 +30,16 @@ def build_config(
     crop_pan_pid_kp: float = 0.35,
     crop_pan_pid_ki: float = 0.01,
     crop_pan_pid_kd: float = 0.12,
+    crop_tilt_pid_kp: float | None = None,
+    crop_tilt_pid_ki: float | None = None,
+    crop_tilt_pid_kd: float | None = None,
     crop_pan_target_offset_x: float = 0.0,
     crop_pan_target_offset_y: float = 0.0,
 ) -> dict:
+    tilt_smoothing = float(crop_pan_smoothing if crop_tilt_smoothing is None else crop_tilt_smoothing)
+    tilt_kp = float(crop_pan_pid_kp if crop_tilt_pid_kp is None else crop_tilt_pid_kp)
+    tilt_ki = float(crop_pan_pid_ki if crop_tilt_pid_ki is None else crop_tilt_pid_ki)
+    tilt_kd = float(crop_pan_pid_kd if crop_tilt_pid_kd is None else crop_tilt_pid_kd)
     return {
         "inputCamera": {
             "devicePath": input_device,
@@ -62,6 +70,7 @@ def build_config(
         "crop": {
             "margin": crop_margin,
             "panSmoothing": crop_pan_smoothing,
+            "tiltSmoothing": tilt_smoothing,
             "upperBodyBias": float(crop_upper_body_bias),
             "upperBodyRatio": float(crop_upper_body_ratio),
             "upperBodyEdgeSmoothing": float(crop_upper_body_edge_smoothing),
@@ -70,6 +79,9 @@ def build_config(
             "panPidKp": float(crop_pan_pid_kp),
             "panPidKi": float(crop_pan_pid_ki),
             "panPidKd": float(crop_pan_pid_kd),
+            "tiltPidKp": tilt_kp,
+            "tiltPidKi": tilt_ki,
+            "tiltPidKd": tilt_kd,
             "panTargetOffsetX": float(crop_pan_target_offset_x),
             "panTargetOffsetY": float(crop_pan_target_offset_y),
         },

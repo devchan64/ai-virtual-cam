@@ -45,21 +45,25 @@ class BoundsTracker:
         self._prev_err_x = err_x
         self._prev_err_y = err_y
 
-        kp = self._config.panPidKp
-        ki = self._config.panPidKi
-        kd = self._config.panPidKd
-        pid_x = kp * err_x + ki * self._int_x + kd * d_x
-        pid_y = kp * err_y + ki * self._int_y + kd * d_y
+        pan_kp = self._config.panPidKp
+        pan_ki = self._config.panPidKi
+        pan_kd = self._config.panPidKd
+        tilt_kp = self._config.tiltPidKp
+        tilt_ki = self._config.tiltPidKi
+        tilt_kd = self._config.tiltPidKd
+        pid_x = pan_kp * err_x + pan_ki * self._int_x + pan_kd * d_x
+        pid_y = tilt_kp * err_y + tilt_ki * self._int_y + tilt_kd * d_y
 
         target_x = int(round(self._previous.x + pid_x))
         target_y = int(round(self._previous.y + pid_y))
 
         pan_alpha = self._config.panSmoothing
+        tilt_alpha = self._config.tiltSmoothing
         zoom_alpha = self._config.zoomSmoothing
         w = int(round(self._previous.width * zoom_alpha + current.width * (1.0 - zoom_alpha)))
         h = int(round(self._previous.height * zoom_alpha + current.height * (1.0 - zoom_alpha)))
         x = int(round(self._previous.x * pan_alpha + target_x * (1.0 - pan_alpha)))
-        y = int(round(self._previous.y * pan_alpha + target_y * (1.0 - pan_alpha)))
+        y = int(round(self._previous.y * tilt_alpha + target_y * (1.0 - tilt_alpha)))
         frame_h, frame_w = mask.shape[:2]
         w = max(1, min(w, frame_w))
         h = max(1, min(h, frame_h))
