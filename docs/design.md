@@ -1,40 +1,18 @@
 # ai-virtual-cam 설계문서
 
-## 개요
+## 플랫폼 정책
 
-`ai-virtual-cam`은 Linux 환경에서 USB 카메라 영상을 입력받아 인물 분리/배경 합성/크롭을 수행한 뒤 가상 카메라로 출력한다.
+- Linux: Docker + `v4l2loopback` 경로
+- macOS: OBS Virtual Camera 경로만 지원 (`pyvirtualcam`)
+- CMIO 관련 기능은 폐기
 
-## 지원 플랫폼
+## 실행 진입점
 
-- Linux (Debian/Ubuntu)
-
-## 런타임 계약
-
-- 입력 장치: `/dev/video0`
-- 출력 장치: `/dev/video10`
-- 출력 백엔드: `opencv`
-
-## 호스트 요구사항
-
-- Docker
-- NVIDIA GPU (TensorRT 경로 사용 시)
-- NVIDIA Container Toolkit
-- `v4l2loopback`
-
-## 파이프라인
-
-```text
-capture
- → segment
- → refine
- → bounds
- → compose
- → crop
- → resize
- → output
+```bash
+./bin/avc <command>
 ```
 
-## 설정 원칙
+## macOS 메모
 
-- 설정은 단일 JSON(SSOT)로 관리
-- 실패 조건은 즉시 종료(Fail-Fast)
+- `./bin/avc setup`에서 OBS 설치 수행
+- OBS에서 Virtual Camera를 1회 시작해야 카메라 목록 노출

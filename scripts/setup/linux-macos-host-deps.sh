@@ -34,7 +34,7 @@ usage() {
   cat <<'EOF'
 Usage: ./bin/avc setup [options]
 
-Install host dependencies for ai-virtual-cam on Linux (Debian/Ubuntu).
+Install host dependencies for ai-virtual-cam on Linux (Debian/Ubuntu) or macOS.
 
 Options:
   --output-device N        V4L2 loopback device number to create (default: 10)
@@ -52,12 +52,16 @@ require_privileges() {
   if [[ "$OS_KIND" == "linux" && "${EUID}" -ne 0 ]]; then
     fail "Run this script as root or via sudo on Linux."
   fi
+  if [[ "$OS_KIND" == "macos" && "${EUID}" -eq 0 ]]; then
+    fail "Do not run with sudo on macOS. Run as normal user."
+  fi
 }
 
 detect_os() {
   case "$(uname -s)" in
     Linux) OS_KIND="linux" ;;
-    *) fail "Unsupported OS: $(uname -s). Expected Linux." ;;
+    Darwin) OS_KIND="macos" ;;
+    *) fail "Unsupported OS: $(uname -s). Expected Linux or macOS." ;;
   esac
 }
 
@@ -119,10 +123,15 @@ install_docker() {
     return 0
   fi
 
-  setup_docker_repo
-  run apt-get update
-  apt_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-  run systemctl enable --now docker
+  if [[ "$OS_KIND" == "linux" ]]; then
+    setup_docker_repo
+    run apt-get update
+    apt_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    run systemctl enable --now docker
+    return 0
+  fi
+
+  run brew install --cask docker
 }
 
 setup_nvidia_container_toolkit_repo() {
@@ -143,6 +152,10 @@ setup_nvidia_container_toolkit_repo() {
 }
 
 install_nvidia_container_toolkit() {
+  if [[ "$OS_KIND" == "macos" ]]; then
+    log "Skipping NVIDIA Container Toolkit: not applicable on macOS."
+    return 0
+  fi
   if [[ "$SKIP_NVIDIA_TOOLKIT" -eq 1 ]]; then
     log "Skipping NVIDIA Container Toolkit installation"
     return 0
@@ -161,6 +174,10 @@ install_nvidia_container_toolkit() {
 }
 
 install_v4l2loopback() {
+  if [[ "$OS_KIND" == "macos" ]]; then
+    log "Skipping v4l2loopback: not available on macOS."
+    return 0
+  fi
   if [[ "$SKIP_V4L2LOOPBACK" -eq 1 ]]; then
     log "Skipping v4l2loopback installation"
     return 0
@@ -200,17 +217,38 @@ verify_host_contract() {
     fail "docker is not available after installation."
   fi
 
-  if [[ "$SKIP_NVIDIA_TOOLKIT" -eq 0 ]] && ! command -v nvidia-ctk >/dev/null 2>&1; then
-    fail "nvidia-ctk is not available after installation."
+  if [[ "$OS_KIND" == "linux" ]]; then
+    if [[ "$SKIP_NVIDIA_TOOLKIT" -eq 0 ]] && ! command -v nvidia-ctk >/dev/null 2>&1; then
+      fail "nvidia-ctk is not available after installation."
+    fi
+
+    if [[ ! -e "/dev/video${INPUT_DEVICE}" ]]; then
+      fail "Expected input camera /dev/video${INPUT_DEVICE} is missing."
+    fi
+
+    if [[ "$SKIP_V4L2LOOPBACK" -eq 0 ]] && [[ ! -e "/dev/video${OUTPUT_DEVICE}" ]]; then
+      fail "Expected output virtual camera /dev/video${OUTPUT_DEVICE} is missing."
+    fi
+    return 0
   fi
 
-  if [[ ! -e "/dev/video${INPUT_DEVICE}" ]]; then
-    fail "Expected input camera /dev/video${INPUT_DEVICE} is missing."
+  if ! brew list --cask obs >/dev/null 2>&1; then
+    fail "OBS Studio is not installed. macOS path requires OBS."
   fi
+}
 
-  if [[ "$SKIP_V4L2LOOPBACK" -eq 0 ]] && [[ ! -e "/dev/video${OUTPUT_DEVICE}" ]]; then
-    fail "Expected output virtual camera /dev/video${OUTPUT_DEVICE} is missing."
+install_macos_packages() {
+  log "Installing base packages with Homebrew (macOS)"
+  run brew install python@3.12 python-tk@3.12 ffmpeg opencv
+  run brew install --cask obs
+
+  local venv_path
+  venv_path="$(pwd)/.venv"
+  if [[ ! -x "$venv_path/bin/python3" ]]; then
+    run /opt/homebrew/bin/python3.12 -m venv "$venv_path"
   fi
+  run "$venv_path/bin/python3" -m pip install --upgrade pip
+  run "$venv_path/bin/python3" -m pip install opencv-python numpy mediapipe==0.10.14 pyvirtualcam==0.12.1
 }
 
 parse_args() {
@@ -259,11 +297,18 @@ main() {
   parse_args "$@"
   detect_os
   require_privileges
-  if ! command -v apt-get >/dev/null 2>&1; then
-    fail "Linux host requires apt-get (Debian/Ubuntu)."
+  if [[ "$OS_KIND" == "linux" ]]; then
+    if ! command -v apt-get >/dev/null 2>&1; then
+      fail "Linux host requires apt-get (Debian/Ubuntu)."
+    fi
+    load_os_release
+    install_base_packages
+  else
+    if ! command -v brew >/dev/null 2>&1; then
+      fail "Homebrew is required on macOS."
+    fi
+    install_macos_packages
   fi
-  load_os_release
-  install_base_packages
   install_docker
   install_nvidia_container_toolkit
   install_v4l2loopback

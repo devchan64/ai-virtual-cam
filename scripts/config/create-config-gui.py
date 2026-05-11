@@ -6,6 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 import cv2
+import platform
 
 try:
     import tkinter as tk
@@ -28,10 +29,14 @@ from src.tools.config_io import discover_cameras, write_config
 
 
 def _segmentation_backend_options():
+    if platform.system() == "Darwin":
+        return ["selfie", "mock", "onnxruntime"]
     return ["selfie", "mock", "onnxruntime", "tensorrt"]
 
 
 def _output_backend_options():
+    if platform.system() == "Darwin":
+        return ["pyvirtualcam", "opencv"]
     return ["opencv"]
 
 
@@ -61,8 +66,9 @@ class ConfigGui:
             frame.columnconfigure(col, weight=1 if col in (1, 3) else 0)
 
         row = 0
+        is_macos = platform.system() == "Darwin"
         cameras = discover_cameras()
-        camera_values = [c["devicePath"] for c in cameras] or ["/dev/video0"]
+        camera_values = [c["devicePath"] for c in cameras] or (["0"] if is_macos else ["/dev/video0"])
 
         self._add_combo(frame, row, "input_device", "Input device", camera_values, camera_values[0])
         row += 1
@@ -74,7 +80,7 @@ class ConfigGui:
 
         self._add_combo(frame, row, "output_backend", "Output backend", _output_backend_options(), _output_backend_options()[0])
         row += 1
-        default_output_device = "/dev/video10"
+        default_output_device = "virtual-cam" if is_macos else "/dev/video10"
         self._add_text(frame, row, "output_device", "Output path", default_output_device)
         row += 1
         self._add_int(frame, row, "output_width", "Output width", 1280)
@@ -341,7 +347,8 @@ def main() -> int:
     if TK_IMPORT_ERROR is not None:
         print(
             "Tkinter is not available in this Python runtime.\n"
-            "Use CLI config instead: ./bin/avc config",
+            "Use CLI config instead: ./bin/avc config\n"
+            "To use GUI on macOS, install a Python build with Tk support.",
             file=sys.stderr,
         )
         return 2
