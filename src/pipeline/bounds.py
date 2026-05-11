@@ -182,8 +182,8 @@ class BoundsTracker:
         frame_h, frame_w = shape
         free_x = max(0, frame_w - bounds.width)
         free_y = max(0, frame_h - bounds.height)
-        offset_x = int(round(self._config.panTargetOffsetX * (free_x * 0.5)))
-        offset_y = int(round(self._config.panTargetOffsetY * (free_y * 0.5)))
+        offset_x = int(round(self._config.panTargetOffsetX * free_x))
+        offset_y = int(round(self._config.panTargetOffsetY * free_y))
         x = clamp_int(bounds.x + offset_x, 0, free_x)
         y = clamp_int(bounds.y + offset_y, 0, free_y)
         return Bounds(x=x, y=y, width=bounds.width, height=bounds.height)
