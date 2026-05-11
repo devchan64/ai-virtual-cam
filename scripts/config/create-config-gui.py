@@ -6,6 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 import cv2
+import platform
 
 try:
     import tkinter as tk
@@ -25,6 +26,12 @@ if str(ROOT_DIR) not in sys.path:
 
 from src.tools.config_builder import build_config
 from src.tools.config_io import discover_cameras, write_config
+
+
+def _segmentation_backend_options():
+    if platform.system() == "Darwin":
+        return ["selfie", "mock", "onnxruntime"]
+    return ["selfie", "mock", "onnxruntime", "tensorrt"]
 
 
 class ConfigGui:
@@ -72,7 +79,7 @@ class ConfigGui:
         self._add_int(frame, row, "output_fps", "Output FPS", 30)
         row += 1
 
-        self._add_combo(frame, row, "seg_backend", "Seg backend", ["selfie", "mock", "tensorrt", "onnxruntime"], "selfie")
+        self._add_combo(frame, row, "seg_backend", "Seg backend", _segmentation_backend_options(), "selfie")
         row += 1
         self._add_slider(frame, row, "seg_threshold", "Seg threshold", 0.65, 0.0, 1.0, resolution=0.01)
         row += 1
@@ -87,7 +94,7 @@ class ConfigGui:
         ttk.Button(frame, text="Browse", command=self._pick_bg_image).grid(row=row, column=2, sticky="ew", padx=4)
         row += 1
         self._add_int(frame, row, "bg_r", "Chroma R", 0)
-        self._add_int(frame, row, "bg_g", "Chroma G", 255, col_offset=2)
+        self._add_int(frame, row, "bg_g", "Chroma G", 0, col_offset=2)
         row += 1
         self._add_int(frame, row, "bg_b", "Chroma B", 0)
         ttk.Button(frame, text="Pick Color", command=self._pick_chroma_color).grid(row=row, column=2, sticky="ew", padx=4)

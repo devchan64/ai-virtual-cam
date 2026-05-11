@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import platform
 
 import cv2
 import numpy as np
@@ -33,6 +34,11 @@ class UnsupportedSegmenter(Segmenter):
     backend: str
 
     def segment(self, frame: np.ndarray) -> np.ndarray:
+        if self.backend == "tensorrt" and platform.system() == "Darwin":
+            raise NotImplementedError(
+                "Segmentation backend 'tensorrt' is unavailable on macOS. "
+                "Use 'selfie', 'onnxruntime', or 'mock'."
+            )
         raise NotImplementedError(
             f"Segmentation backend '{self.backend}' is not implemented yet. "
             "Use 'mock' for pipeline smoke tests."

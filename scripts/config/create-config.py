@@ -2,6 +2,7 @@
 
 import argparse
 import sys
+import platform
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -137,7 +138,7 @@ def build_config():
     camera_crop = prompt_crop("Camera", input_width, input_height)
 
     print("\nSegmentation settings")
-    segmentation_backend = prompt_choice("  backend", ["selfie", "mock", "tensorrt", "onnxruntime"], default="selfie")
+    segmentation_backend = prompt_choice("  backend", _segmentation_backend_options(), default="selfie")
     segmentation_threshold = prompt_float("  threshold", default=0.65, minimum=0.0, maximum=1.0)
     segmentation_selfie_model_selection = prompt_int("  selfie model selection (0 or 1)", default=1, minimum=0, maximum=1)
     segmentation_selfie_temporal_smoothing = prompt_float(
@@ -154,7 +155,7 @@ def build_config():
     if background_mode in {"chroma", "image_chroma"}:
         background["chromaColor"] = [
             prompt_int("  chroma R", default=0, minimum=0, maximum=255),
-            prompt_int("  chroma G", default=255, minimum=0, maximum=255),
+            prompt_int("  chroma G", default=0, minimum=0, maximum=255),
             prompt_int("  chroma B", default=0, minimum=0, maximum=255),
         ]
     if background_mode in {"image", "image_chroma"}:
@@ -235,6 +236,12 @@ def main():
     config = build_config()
     write_config_with_log(args.output, config)
     return 0
+
+
+def _segmentation_backend_options():
+    if platform.system() == "Darwin":
+        return ["selfie", "mock", "onnxruntime"]
+    return ["selfie", "mock", "onnxruntime", "tensorrt"]
 
 
 if __name__ == "__main__":

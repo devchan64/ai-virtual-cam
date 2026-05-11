@@ -141,7 +141,7 @@ segmentation:
 
 background:
   mode: chroma # chroma | image | image_chroma
-  chromaColor: [0,255,0]
+  chromaColor: [0,0,0]
   colorBlendAlpha: 0.35 # image_chroma 모드에서 사용
 
 crop:
@@ -217,7 +217,7 @@ GUI 기반 설정 도구(기본 `tkinter`):
 
 - `selfie`: MediaPipe Selfie Segmentation 기반 전경 분리(권장)
 - `mock`: 개발용 파이프라인 smoke test
-- `tensorrt`: 인터페이스만 존재, 미구현
+- `tensorrt`: Linux + NVIDIA GPU 전용(현재 미구현)
 - `onnxruntime`: 현재는 `selfie` 경로로 호환 동작(추후 실제 ONNX 런타임 연결 예정)
 
 배경 모드:
@@ -249,7 +249,7 @@ macOS pyvirtualcam 예시 설정:
   "inputCamera": { "devicePath": "0", "width": 1280, "height": 720, "fps": 30, "crop": { "x": 0, "y": 0, "width": 1280, "height": 720 } },
   "outputCamera": { "devicePath": "virtual-cam", "backend": "pyvirtualcam", "width": 1280, "height": 720, "fps": 30 },
   "segmentation": { "backend": "selfie", "threshold": 0.65, "selfie": { "modelSelection": 1, "temporalSmoothing": 0.25 } },
-  "background": { "mode": "chroma", "chromaColor": [0, 255, 0] },
+  "background": { "mode": "chroma", "chromaColor": [0, 0, 0] },
   "crop": { "margin": 0.25, "smoothing": 0.85 }
 }
 ```
