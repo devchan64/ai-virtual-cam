@@ -36,7 +36,7 @@ def _segmentation_backend_options():
 
 def _output_backend_options():
     if platform.system() == "Darwin":
-        return ["pyvirtualcam", "opencv"]
+        return ["cmio", "opencv", "pyvirtualcam"]
     return ["opencv", "pyvirtualcam"]
 
 
@@ -80,7 +80,7 @@ class ConfigGui:
 
         self._add_combo(frame, row, "output_backend", "Output backend", _output_backend_options(), _output_backend_options()[0])
         row += 1
-        default_output_device = "virtual-cam" if is_macos else "/dev/video10"
+        default_output_device = "ai-virtual-cam" if is_macos else "/dev/video10"
         self._add_text(frame, row, "output_device", "Output path", default_output_device)
         row += 1
         self._add_int(frame, row, "output_width", "Output width", 1280)

@@ -9,13 +9,15 @@ fi
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VENV_PY="$ROOT_DIR/.venv/bin/python3"
 if [[ -x "$VENV_PY" ]]; then
-  if "$VENV_PY" -c "import tkinter, cv2, pyvirtualcam" >/dev/null 2>&1; then
+  if "$VENV_PY" -c "import tkinter, cv2" >/dev/null 2>&1; then
     :
   else
-    echo "[doctor] .venv exists but tkinter/cv2/pyvirtualcam missing; run ./bin/avc setup" >&2
+    echo "[doctor] .venv exists but tkinter/cv2 missing; run ./bin/avc setup" >&2
+    ok=0
   fi
 else
   echo "[doctor] .venv missing; run ./bin/avc setup" >&2
+  ok=0
 fi
 if ! command -v docker >/dev/null 2>&1; then
   echo "[doctor] missing: docker (optional for local run)" >&2

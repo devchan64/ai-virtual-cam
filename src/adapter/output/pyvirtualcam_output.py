@@ -16,14 +16,26 @@ class PyVirtualCamOutput(OutputSink):
     def __init__(self, config: OutputCameraConfig) -> None:
         if pyvirtualcam is None:
             raise RuntimeError(
-                "pyvirtualcam is not installed. Install requirements to use outputCamera.backend=pyvirtualcam."
+                "pyvirtualcam is not installed. This backend is legacy on macOS.\n"
+                "Use outputCamera.backend=cmio as the official OBS-free path, or install pyvirtualcam for temporary fallback."
             )
         self._config = config
-        self._cam = pyvirtualcam.Camera(
-            width=int(config.width),
-            height=int(config.height),
-            fps=int(config.fps),
-        )
+        try:
+            self._cam = pyvirtualcam.Camera(
+                width=int(config.width),
+                height=int(config.height),
+                fps=int(config.fps),
+            )
+        except RuntimeError as exc:
+            message = str(exc)
+            if "OBS Virtual Camera is not installed" in message:
+                raise RuntimeError(
+                    "pyvirtualcam legacy backend requires OBS Virtual Camera on macOS.\n"
+                    "Project direction is OBS-free via outputCamera.backend=cmio.\n"
+                    "Until CMIO runtime is implemented, use outputCamera.backend=opencv for local output,"
+                    " or keep pyvirtualcam+OBS as temporary fallback."
+                ) from exc
+            raise
 
     def write(self, frame: np.ndarray) -> None:
         if frame.shape[1] != self._config.width or frame.shape[0] != self._config.height:

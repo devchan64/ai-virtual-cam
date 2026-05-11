@@ -48,7 +48,7 @@ USB Camera
 
 ## Architecture
 
-Linux는 Docker + CUDA + V4L2 경로를, macOS는 로컬 Python + pyvirtualcam 경로를 사용합니다.
+Linux는 Docker + CUDA + V4L2 경로를, macOS는 로컬 Python + CMIO(계획/구현중) 경로를 사용합니다.
 
 ## Runtime Contract
 
@@ -75,7 +75,7 @@ Fail-fast 원칙:
 ### Device Contract (macOS)
 
 - Input: 카메라 인덱스(`"0"`, `"1"`) 또는 OpenCV가 여는 장치 문자열
-- Output: `outputCamera.backend=pyvirtualcam` 사용 시 시스템 가상 카메라(OBS Virtual Camera 등)로 송출
+- Output: `outputCamera.backend=cmio`를 공식 경로로 사용(OBS 비의존 방향)
 
 ## Pipeline
 
@@ -158,6 +158,7 @@ crop:
 ```
 
 개발용 샘플 설정은 [config/settings.example.json](/Users/simchangbo/ws/ai-virtual-cam/config/settings.example.json)에 포함되어 있습니다.
+macOS OBS 의존 제거 계획은 [docs/macos-camera-extension-roadmap.md](/Users/simchangbo/ws/ai-virtual-cam/docs/macos-camera-extension-roadmap.md)에 정리되어 있습니다.
 
 ## Host Bootstrap
 
@@ -237,7 +238,8 @@ GUI 기반 설정 도구(기본 `tkinter`):
 출력 backend:
 
 - `opencv`: 파일/디바이스 경로로 OpenCV `VideoWriter` 출력
-- `pyvirtualcam`: pyvirtualcam 기반 가상 카메라 출력(macOS 권장)
+- `cmio`: macOS CoreMediaIO Camera Extension 기반 가상 카메라(구현 진행중)
+- `pyvirtualcam`: 레거시 임시 fallback
 
 ## Run
 
@@ -250,12 +252,12 @@ pip install -r requirements.txt
 python3 -m src.app.main --config config/settings.example.json --max-frames 30
 ```
 
-macOS pyvirtualcam 예시 설정:
+macOS CMIO 목표 설정 예시:
 
 ```json
 {
   "inputCamera": { "devicePath": "0", "width": 1280, "height": 720, "fps": 30, "crop": { "x": 0, "y": 0, "width": 1280, "height": 720 } },
-  "outputCamera": { "devicePath": "virtual-cam", "backend": "pyvirtualcam", "width": 1280, "height": 720, "fps": 30 },
+  "outputCamera": { "devicePath": "ai-virtual-cam", "backend": "cmio", "width": 1280, "height": 720, "fps": 30 },
   "segmentation": { "backend": "selfie", "threshold": 0.65, "edgeSmoothness": 0.5, "blendFeather": 0.35, "selfie": { "modelSelection": 1, "temporalSmoothing": 0.25 } },
   "background": { "mode": "chroma", "chromaColor": [0, 0, 0] },
   "crop": { "margin": 0.25, "smoothing": 0.85 }

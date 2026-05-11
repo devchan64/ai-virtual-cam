@@ -192,7 +192,7 @@ install_nvidia_container_toolkit() {
 install_v4l2loopback() {
   if [[ "$OS_KIND" == "macos" ]]; then
     if [[ "$SKIP_V4L2LOOPBACK" -eq 0 ]]; then
-      log "Skipping v4l2loopback: not available on macOS. Use OBS Virtual Camera."
+      log "Skipping v4l2loopback: not available on macOS."
     fi
     return 0
   fi
@@ -292,9 +292,9 @@ install_macos_packages() {
       run "$venv_path/bin/python3" -m ensurepip --upgrade
     fi
     run "$venv_path/bin/python3" -m pip install --upgrade pip
-    run "$venv_path/bin/python3" -m pip install opencv-python numpy pyvirtualcam==0.12.1 mediapipe==0.10.14
+    run "$venv_path/bin/python3" -m pip install opencv-python numpy mediapipe==0.10.14
   elif [[ "$DRY_RUN" -eq 1 ]]; then
-    log "Dry-run: would normalize/create .venv with python3.12 and install opencv-python,numpy,pyvirtualcam==0.12.1,mediapipe==0.10.14"
+    log "Dry-run: would normalize/create .venv with python3.12 and install opencv-python,numpy,mediapipe==0.10.14"
   fi
   log "GUI runtime is unified to .venv."
 }

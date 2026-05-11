@@ -72,7 +72,7 @@ class OutputCameraConfig:
 
     @classmethod
     def from_dict(cls, raw: dict) -> "OutputCameraConfig":
-        default_backend = "pyvirtualcam" if platform.system() == "Darwin" else "opencv"
+        default_backend = "cmio" if platform.system() == "Darwin" else "opencv"
         config = cls(
             devicePath=str(raw["devicePath"]),
             width=int(raw["width"]),
@@ -84,8 +84,8 @@ class OutputCameraConfig:
             raise ValueError("outputCamera.devicePath is required")
         if config.width <= 0 or config.height <= 0 or config.fps <= 0:
             raise ValueError("outputCamera width/height/fps must be > 0")
-        if config.backend not in {"opencv", "pyvirtualcam"}:
-            raise ValueError("outputCamera.backend must be one of: opencv, pyvirtualcam")
+        if config.backend not in {"opencv", "pyvirtualcam", "cmio"}:
+            raise ValueError("outputCamera.backend must be one of: opencv, pyvirtualcam, cmio")
         return config
 
 

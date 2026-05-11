@@ -134,12 +134,12 @@ def build_config():
     print("\nOutput camera settings")
     output_backend = prompt_choice(
         "  backend",
-        ["pyvirtualcam", "opencv"] if is_macos else ["opencv", "pyvirtualcam"],
-        default="pyvirtualcam" if is_macos else "opencv",
+        ["cmio", "opencv", "pyvirtualcam"] if is_macos else ["opencv", "pyvirtualcam"],
+        default="cmio" if is_macos else "opencv",
     )
     output_camera_path = prompt_path(
         "  device path",
-        default="virtual-cam" if output_backend == "pyvirtualcam" else "/dev/video10",
+        default="ai-virtual-cam" if output_backend == "cmio" else ("virtual-cam" if output_backend == "pyvirtualcam" else "/dev/video10"),
     )
     output_width = prompt_int("  width", default=input_width, minimum=1)
     output_height = prompt_int("  height", default=input_height, minimum=1)
