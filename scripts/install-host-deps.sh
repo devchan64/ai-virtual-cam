@@ -9,6 +9,8 @@ DRY_RUN=0
 SKIP_DOCKER=0
 SKIP_NVIDIA_TOOLKIT=0
 SKIP_V4L2LOOPBACK=0
+OS_KIND=""
+LINUX_DISTRO_ID=""
 
 log() {
   printf '[ai-virtual-cam] %s\n' "$*"
@@ -32,7 +34,7 @@ usage() {
   cat <<'EOF'
 Usage: scripts/install-host-deps.sh [options]
 
-Install host dependencies for ai-virtual-cam on Debian/Ubuntu systems.
+Install host dependencies for ai-virtual-cam on Linux (Debian/Ubuntu) or macOS.
 
 Options:
   --output-device N        V4L2 loopback device number to create (default: 10)
@@ -46,16 +48,21 @@ Options:
 EOF
 }
 
-require_root() {
-  if [[ "${EUID}" -ne 0 ]]; then
-    fail "Run this script as root or via sudo."
+require_privileges() {
+  if [[ "$OS_KIND" == "linux" && "${EUID}" -ne 0 ]]; then
+    fail "Run this script as root or via sudo on Linux."
+  fi
+  if [[ "$OS_KIND" == "macos" && "${EUID}" -eq 0 ]]; then
+    fail "Do not run with sudo on macOS. Run as a normal user so Homebrew can work."
   fi
 }
 
-require_apt() {
-  if ! command -v apt-get >/dev/null 2>&1; then
-    fail "This script currently supports Debian/Ubuntu systems with apt-get only."
-  fi
+detect_os() {
+  case "$(uname -s)" in
+    Linux) OS_KIND="linux" ;;
+    Darwin) OS_KIND="macos" ;;
+    *) fail "Unsupported OS: $(uname -s). Expected Linux or macOS." ;;
+  esac
 }
 
 load_os_release() {
@@ -69,6 +76,7 @@ load_os_release() {
   if [[ "${ID:-}" != "ubuntu" && "${ID:-}" != "debian" ]]; then
     fail "Unsupported distribution: ${ID:-unknown}. Expected ubuntu or debian."
   fi
+  LINUX_DISTRO_ID="${ID}"
 }
 
 apt_install() {
@@ -84,7 +92,7 @@ install_base_packages() {
 setup_docker_repo() {
   log "Configuring Docker apt repository"
   run install -m 0755 -d /etc/apt/keyrings
-  run curl -fsSL "https://download.docker.com/linux/${ID}/gpg" -o /etc/apt/keyrings/docker.asc
+  run curl -fsSL "https://download.docker.com/linux/${LINUX_DISTRO_ID}/gpg" -o /etc/apt/keyrings/docker.asc
   run chmod a+r /etc/apt/keyrings/docker.asc
 
   local suite
@@ -93,7 +101,7 @@ setup_docker_repo() {
   if [[ "$DRY_RUN" -eq 0 ]]; then
     cat >/etc/apt/sources.list.d/docker.sources <<EOF
 Types: deb
-URIs: https://download.docker.com/linux/${ID}
+URIs: https://download.docker.com/linux/${LINUX_DISTRO_ID}
 Suites: ${suite}
 Components: stable
 Architectures: $(dpkg --print-architecture)
@@ -115,10 +123,28 @@ install_docker() {
     return 0
   fi
 
-  setup_docker_repo
-  run apt-get update
-  apt_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-  run systemctl enable --now docker
+  if [[ "$OS_KIND" == "linux" ]]; then
+    setup_docker_repo
+    run apt-get update
+    apt_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    run systemctl enable --now docker
+    return 0
+  fi
+
+  if [[ "$OS_KIND" == "macos" ]]; then
+    if ! command -v brew >/dev/null 2>&1; then
+      fail "Homebrew is required on macOS. Install it first: https://brew.sh"
+    fi
+    log "Installing Docker Desktop via Homebrew cask"
+    run brew install --cask docker
+  fi
+}
+
+brew_install() {
+  if ! command -v brew >/dev/null 2>&1; then
+    fail "Homebrew is required on macOS. Install it first: https://brew.sh"
+  fi
+  run brew install "$@"
 }
 
 setup_nvidia_container_toolkit_repo() {
@@ -139,6 +165,13 @@ setup_nvidia_container_toolkit_repo() {
 }
 
 install_nvidia_container_toolkit() {
+  if [[ "$OS_KIND" == "macos" ]]; then
+    if [[ "$SKIP_NVIDIA_TOOLKIT" -eq 0 ]]; then
+      log "Skipping NVIDIA Container Toolkit: not applicable on macOS."
+    fi
+    return 0
+  fi
+
   if [[ "$SKIP_NVIDIA_TOOLKIT" -eq 1 ]]; then
     log "Skipping NVIDIA Container Toolkit installation"
     return 0
@@ -157,6 +190,13 @@ install_nvidia_container_toolkit() {
 }
 
 install_v4l2loopback() {
+  if [[ "$OS_KIND" == "macos" ]]; then
+    if [[ "$SKIP_V4L2LOOPBACK" -eq 0 ]]; then
+      log "Skipping v4l2loopback: not available on macOS. Use OBS Virtual Camera."
+    fi
+    return 0
+  fi
+
   if [[ "$SKIP_V4L2LOOPBACK" -eq 1 ]]; then
     log "Skipping v4l2loopback installation"
     return 0
@@ -187,21 +227,46 @@ EOF
 verify_host_contract() {
   log "Verifying host contract"
 
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    log "Dry-run mode: skipping host contract checks"
+    return 0
+  fi
+
   if ! command -v docker >/dev/null 2>&1; then
     fail "docker is not available after installation."
   fi
 
-  if [[ "$SKIP_NVIDIA_TOOLKIT" -eq 0 ]] && ! command -v nvidia-ctk >/dev/null 2>&1; then
-    fail "nvidia-ctk is not available after installation."
+  if [[ "$OS_KIND" == "linux" ]]; then
+    if [[ "$SKIP_NVIDIA_TOOLKIT" -eq 0 ]] && ! command -v nvidia-ctk >/dev/null 2>&1; then
+      fail "nvidia-ctk is not available after installation."
+    fi
+
+    if [[ ! -e "/dev/video${INPUT_DEVICE}" ]]; then
+      fail "Expected input camera /dev/video${INPUT_DEVICE} is missing."
+    fi
+
+    if [[ "$SKIP_V4L2LOOPBACK" -eq 0 ]] && [[ ! -e "/dev/video${OUTPUT_DEVICE}" ]]; then
+      fail "Expected output virtual camera /dev/video${OUTPUT_DEVICE} is missing."
+    fi
+    return 0
   fi
 
-  if [[ ! -e "/dev/video${INPUT_DEVICE}" ]]; then
-    fail "Expected input camera /dev/video${INPUT_DEVICE} is missing."
+  if [[ "$OS_KIND" == "macos" ]]; then
+    if ! command -v python3 >/dev/null 2>&1; then
+      fail "python3 is not available after installation."
+    fi
+    if ! command -v ffmpeg >/dev/null 2>&1; then
+      fail "ffmpeg is not available after installation."
+    fi
+    if [[ "$SKIP_DOCKER" -eq 0 ]] && ! command -v docker >/dev/null 2>&1; then
+      log "docker CLI not found. Start Docker Desktop once to complete installation."
+    fi
   fi
+}
 
-  if [[ "$SKIP_V4L2LOOPBACK" -eq 0 ]] && [[ ! -e "/dev/video${OUTPUT_DEVICE}" ]]; then
-    fail "Expected output virtual camera /dev/video${OUTPUT_DEVICE} is missing."
-  fi
+install_macos_packages() {
+  log "Installing base packages with Homebrew (macOS)"
+  brew_install python ffmpeg opencv
 }
 
 parse_args() {
@@ -248,10 +313,17 @@ parse_args() {
 
 main() {
   parse_args "$@"
-  require_root
-  require_apt
-  load_os_release
-  install_base_packages
+  detect_os
+  require_privileges
+  if [[ "$OS_KIND" == "linux" ]]; then
+    if ! command -v apt-get >/dev/null 2>&1; then
+      fail "Linux host requires apt-get (Debian/Ubuntu)."
+    fi
+    load_os_release
+    install_base_packages
+  else
+    install_macos_packages
+  fi
   install_docker
   install_nvidia_container_toolkit
   install_v4l2loopback
