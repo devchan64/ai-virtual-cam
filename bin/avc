@@ -13,7 +13,7 @@ Single Entrypoint:
 
 Commands:
   setup            Install host dependencies for current OS
-  config           Launch interactive config generator
+  config           Alias to config-gui (legacy CLI config removed)
   config-gui       Launch GUI config generator
   serve            Start virtual camera stream service from saved config
   audio-mixer      Run virtual audio mixer (microphone gate scaffold)

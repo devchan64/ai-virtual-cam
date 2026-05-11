@@ -27,12 +27,6 @@ def parse_args() -> argparse.Namespace:
         default=0,
         help="Optional frame limit for smoke tests. 0 means unlimited.",
     )
-    parser.add_argument(
-        "--audio-mode",
-        choices=["auto", "on", "off"],
-        default="auto",
-        help="Audio mixer activation mode. auto=use config, on=force enable, off=disable.",
-    )
     return parser.parse_args()
 
 
@@ -67,18 +61,14 @@ def main() -> int:
     )
     audio_mixer: VirtualAudioMixer | None = None
     audio_thread: threading.Thread | None = None
-    want_audio = args.audio_mode == "on" or (
-        args.audio_mode == "auto" and config.audio is not None and config.audio.enabled
-    )
+    want_audio = config.audio is not None and config.audio.enabled
     if want_audio:
-        if config.audio is None:
-            raise RuntimeError("audio-mode is on but audio config is missing.")
         audio_mixer = VirtualAudioMixer(config.audio)
         audio_thread = threading.Thread(target=audio_mixer.run, kwargs={"max_steps": 0}, daemon=True)
         audio_thread.start()
-        print("[avc] audio mixer started (integrated with serve)", flush=True)
+        print("[avc] audio mixer enabled by config (audio.enabled=true)", flush=True)
     else:
-        print("[avc] audio mixer disabled", flush=True)
+        print("[avc] audio mixer disabled by config (audio.enabled=false)", flush=True)
 
     try:
         runner.run(max_frames=args.max_frames)

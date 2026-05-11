@@ -30,22 +30,22 @@
 ```bash
 ./bin/avc setup
 ./bin/avc config-gui
-./bin/avc serve --audio-mode auto
+./bin/avc serve
 ```
 
 오디오 활성화 선택:
 
 ```bash
-./bin/avc serve --config ~/.avc/setting.json --audio-mode auto  # config의 audio.enabled 사용
-./bin/avc serve --config ~/.avc/setting.json --audio-mode on    # 강제 활성화
-./bin/avc serve --config ~/.avc/setting.json --audio-mode off   # 비활성화
+./bin/avc config-gui   # 오디오 탭에서 Audio mixer true/false 설정
+./bin/avc serve        # audio.enabled 값을 그대로 사용
 ```
 
 오디오 게이트 정책(구조 기준):
 
 - 레벨(`thresholdDb`)만으로 열지 않고, 음성 대역 비율(`minVoiceBandRatio`) 조건을 함께 사용
 - 음악/주변소음처럼 음성 유사도가 낮은 입력은 게이트를 열지 않도록 설계
-- 사용자 음색에 맞게 `thresholdDb`, `hysteresisDb`, `minVoiceBandRatio`를 `config`/`config-gui`에서 조정 가능
+- 사용자 음색에 맞게 `thresholdDb`, `hysteresisDb`, `minVoiceBandRatio`를 `config-gui`에서 조정 가능
+- 오디오 탭의 `게이트 자동 튜닝`으로 무음/발화 측정 후 게이트 추천값 자동 적용
 
 기본 설정 파일 경로:
 

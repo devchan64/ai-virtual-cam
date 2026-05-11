@@ -16,6 +16,6 @@ if [[ -x "/opt/homebrew/bin/python3.12" ]] && /opt/homebrew/bin/python3.12 -c "i
 fi
 
 echo "No suitable Python found for GUI (needs tkinter and cv2)." >&2
-echo "Use CLI config instead: ./bin/avc config" >&2
 echo "Run './bin/avc setup' to normalize .venv runtime, then retry." >&2
+echo "If GUI is unavailable, edit ~/.avc/setting.json directly." >&2
 exit 2

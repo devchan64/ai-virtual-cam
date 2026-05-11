@@ -8,6 +8,14 @@ import sys
 from pathlib import Path
 import cv2
 import platform
+import numpy as np
+
+try:
+    import sounddevice as sd
+    SOUNDDEVICE_IMPORT_ERROR = None
+except ModuleNotFoundError as exc:
+    sd = None
+    SOUNDDEVICE_IMPORT_ERROR = exc
 
 try:
     import tkinter as tk
@@ -191,6 +199,20 @@ class ConfigGui:
         self._add_slider(tab_audio, row, "audio_gate_hysteresis_db", "Gate hysteresis dB", 3.0, 0.0, 20.0, resolution=0.5)
         row += 1
         self._add_slider(tab_audio, row, "audio_gate_min_voice_band_ratio", "Min voice band ratio", 0.55, 0.0, 1.0, resolution=0.01)
+        row += 1
+        self._add_slider(tab_audio, row, "audio_gate_attack_ms", "Gate attack ms", 20, 0, 500, resolution=1)
+        row += 1
+        self._add_slider(tab_audio, row, "audio_gate_hold_ms", "Gate hold ms", 140, 0, 2000, resolution=1)
+        row += 1
+        self._add_slider(tab_audio, row, "audio_gate_release_ms", "Gate release ms", 220, 0, 2000, resolution=1)
+        row += 1
+        self._add_slider(tab_audio, row, "audio_gate_open_gain", "Gate open gain", 1.0, 0.0, 2.0, resolution=0.01)
+        row += 1
+        self._add_slider(tab_audio, row, "audio_gate_closed_gain", "Gate closed gain", 0.0, 0.0, 1.0, resolution=0.01)
+        row += 1
+        ttk.Button(tab_audio, text="게이트 자동 튜닝", command=self._auto_tune_audio_gate).grid(
+            row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0)
+        )
 
         action_row = 1
         action = ttk.Frame(frame)
@@ -405,6 +427,11 @@ class ConfigGui:
         self._set_var("audio_gate_threshold_db", gate_cfg.get("thresholdDb"))
         self._set_var("audio_gate_hysteresis_db", gate_cfg.get("hysteresisDb"))
         self._set_var("audio_gate_min_voice_band_ratio", gate_cfg.get("minVoiceBandRatio"))
+        self._set_var("audio_gate_attack_ms", gate_cfg.get("attackMs"))
+        self._set_var("audio_gate_hold_ms", gate_cfg.get("holdMs"))
+        self._set_var("audio_gate_release_ms", gate_cfg.get("releaseMs"))
+        self._set_var("audio_gate_open_gain", gate_cfg.get("openGain"))
+        self._set_var("audio_gate_closed_gain", gate_cfg.get("closedGain"))
         self._on_input_device_changed()
         self._on_input_width_changed()
 
@@ -440,6 +467,98 @@ class ConfigGui:
             messagebox.showinfo("Saved", f"Config saved to {self.output_path}")
         except Exception as exc:
             messagebox.showerror("Validation error", str(exc))
+
+    def _auto_tune_audio_gate(self):
+        if sd is None:
+            messagebox.showerror(
+                "Audio tuning error",
+                "sounddevice 모듈이 없습니다. ./bin/avc setup 후 다시 시도하세요.",
+            )
+            return
+        try:
+            sample_rate = int(self.vars["audio_sample_rate"].get())
+            channels = int(self.vars["audio_channels"].get())
+        except Exception:
+            messagebox.showerror("Audio tuning error", "audio sample rate/channels 값이 올바르지 않습니다.")
+            return
+        if channels <= 0:
+            channels = 1
+
+        messagebox.showinfo(
+            "게이트 자동 튜닝 1/2",
+            "2초 동안 조용히 있어 주세요.\n(배경 소음 기준 측정)",
+        )
+        ambient = self._record_audio_block(seconds=2.0, sample_rate=sample_rate, channels=channels)
+        if ambient is None:
+            return
+
+        messagebox.showinfo(
+            "게이트 자동 튜닝 2/2",
+            "3초 동안 평소 회의 톤으로 말해 주세요.\n(음성 기준 측정)",
+        )
+        speech = self._record_audio_block(seconds=3.0, sample_rate=sample_rate, channels=channels)
+        if speech is None:
+            return
+
+        ambient_db = self._rms_dbfs(ambient)
+        speech_db = self._rms_dbfs(speech)
+        ambient_voice = self._voice_band_ratio(ambient, sample_rate)
+        speech_voice = self._voice_band_ratio(speech, sample_rate)
+
+        if speech_db <= ambient_db + 1.0:
+            threshold_db = ambient_db + 2.0
+            hysteresis_db = 6.0
+        else:
+            threshold_db = ambient_db + (speech_db - ambient_db) * 0.35
+            hysteresis_db = (speech_db - ambient_db) * 0.18
+        threshold_db = float(max(-80.0, min(0.0, threshold_db)))
+        hysteresis_db = float(max(1.5, min(12.0, hysteresis_db)))
+        min_voice_ratio = float(max(0.10, min(0.95, (ambient_voice + speech_voice) * 0.5 + 0.05)))
+
+        self.vars["audio_gate_threshold_db"].set(threshold_db)
+        self.vars["audio_gate_hysteresis_db"].set(hysteresis_db)
+        self.vars["audio_gate_min_voice_band_ratio"].set(min_voice_ratio)
+
+        messagebox.showinfo(
+            "게이트 자동 튜닝 완료",
+            "추천값을 반영했습니다.\n"
+            f"- thresholdDb: {threshold_db:.1f}\n"
+            f"- hysteresisDb: {hysteresis_db:.1f}\n"
+            f"- minVoiceBandRatio: {min_voice_ratio:.2f}",
+        )
+
+    def _record_audio_block(self, seconds: float, sample_rate: int, channels: int):
+        try:
+            frames = max(1, int(seconds * sample_rate))
+            data = sd.rec(frames, samplerate=sample_rate, channels=channels, dtype="float32")
+            sd.wait()
+        except Exception as exc:
+            messagebox.showerror("Audio tuning error", f"마이크 입력 측정 실패:\n{exc}")
+            return None
+        if data is None or len(data) == 0:
+            messagebox.showerror("Audio tuning error", "빈 오디오 데이터가 수집되었습니다.")
+            return None
+        mono = np.mean(np.asarray(data, dtype=np.float32), axis=1)
+        return mono
+
+    def _rms_dbfs(self, mono: np.ndarray) -> float:
+        rms = float(np.sqrt(np.mean(np.square(mono)) + 1e-12))
+        return float(20.0 * np.log10(max(rms, 1e-9)))
+
+    def _voice_band_ratio(self, mono: np.ndarray, sample_rate: int) -> float:
+        if mono.size < 32:
+            return 0.0
+        window = np.hanning(mono.size).astype(np.float32)
+        spec = np.fft.rfft((mono * window).astype(np.float32))
+        power = np.abs(spec) ** 2
+        freqs = np.fft.rfftfreq(mono.size, d=1.0 / float(sample_rate))
+        total_band = (freqs >= 80.0) & (freqs <= 8000.0)
+        voice_band = (freqs >= 300.0) & (freqs <= 3400.0)
+        total_power = float(np.sum(power[total_band]))
+        if total_power <= 1e-12:
+            return 0.0
+        voice_power = float(np.sum(power[voice_band]))
+        return float(max(0.0, min(1.0, voice_power / total_power)))
 
     def _preview(self):
         if self._preview_active:
@@ -623,6 +742,11 @@ class ConfigGui:
             audio_gate_threshold_db=float(iv["audio_gate_threshold_db"].get()),
             audio_gate_hysteresis_db=float(iv["audio_gate_hysteresis_db"].get()),
             audio_gate_min_voice_band_ratio=float(iv["audio_gate_min_voice_band_ratio"].get()),
+            audio_gate_attack_ms=int(round(float(iv["audio_gate_attack_ms"].get()))),
+            audio_gate_hold_ms=int(round(float(iv["audio_gate_hold_ms"].get()))),
+            audio_gate_release_ms=int(round(float(iv["audio_gate_release_ms"].get()))),
+            audio_gate_open_gain=float(iv["audio_gate_open_gain"].get()),
+            audio_gate_closed_gain=float(iv["audio_gate_closed_gain"].get()),
         )
 
 
@@ -636,8 +760,8 @@ def main() -> int:
     if TK_IMPORT_ERROR is not None:
         print(
             "Tkinter is not available in this Python runtime.\n"
-            "Use CLI config instead: ./bin/avc config\n"
-            "To use GUI on macOS, install a Python build with Tk support.",
+            "To use GUI on macOS, install a Python build with Tk support.\n"
+            "If GUI is unavailable, edit ~/.avc/setting.json directly.",
             file=sys.stderr,
         )
         return 2
