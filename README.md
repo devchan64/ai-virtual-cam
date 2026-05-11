@@ -212,7 +212,7 @@ GUI 기반 설정 도구(기본 `tkinter`):
 
 현재 구현된 backend:
 
-- `face`: OpenCV 상반신 검출 우선 + 얼굴 fallback 기반 전경 마스크
+- `face`: OpenCV 상반신 검출 + ROI 엣지 추적으로 전경 윤곽 생성, 실패 시 얼굴 fallback
 - `mock`: 개발용 파이프라인 smoke test
 - `tensorrt`: 인터페이스만 존재, 미구현
 - `onnxruntime`: 인터페이스만 존재, 미구현
@@ -311,3 +311,6 @@ ai-virtual-cam/
 ## Status
 
 현재 이 저장소는 초기 설계 단계이며, 본 README는 시스템 방향과 구현 범위를 정리한 문서입니다.
+
+Segmentation debug:
+- `SEGMENTATION_DEBUG=1 ./bin/avc config-gui` 로 실행하면 30프레임마다 edge/fallback 통계를 출력합니다.
