@@ -202,6 +202,13 @@ python3 scripts/create-config.py --list-cameras
 python3 scripts/create-config.py --output config/settings.json
 ```
 
+
+GUI 기반 설정 도구(기본 `tkinter`):
+
+```bash
+python3 scripts/create-config-gui.py --output config/settings.json
+```
+
 현재 구현된 backend:
 
 - `mock`: 개발용 파이프라인 smoke test
