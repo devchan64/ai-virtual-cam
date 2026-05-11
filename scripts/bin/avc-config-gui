@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+VENV_PY="$ROOT_DIR/.venv/bin/python3"
 
-if python3 -c "import tkinter" >/dev/null 2>&1; then
+if [[ -x "$VENV_PY" ]] && "$VENV_PY" -c "import tkinter, cv2" >/dev/null 2>&1; then
+  exec "$VENV_PY" "$ROOT_DIR/scripts/config/create-config-gui.py" "$@"
+fi
+
+if python3 -c "import tkinter, cv2" >/dev/null 2>&1; then
   exec python3 "$ROOT_DIR/scripts/config/create-config-gui.py" "$@"
 fi
 
-if [[ -x "/opt/homebrew/bin/python3.12" ]] && /opt/homebrew/bin/python3.12 -c "import tkinter" >/dev/null 2>&1; then
+if [[ -x "/opt/homebrew/bin/python3.12" ]] && /opt/homebrew/bin/python3.12 -c "import tkinter, cv2" >/dev/null 2>&1; then
   exec /opt/homebrew/bin/python3.12 "$ROOT_DIR/scripts/config/create-config-gui.py" "$@"
 fi
 
-echo "Tkinter is not available in current python3 and fallback python3.12." >&2
+echo "No suitable Python found for GUI (needs tkinter and cv2)." >&2
 echo "Use CLI config instead: ./bin/avc config" >&2
-echo "Or run directly with a Tk-enabled Python." >&2
+echo "Run './bin/avc setup' to normalize .venv runtime, then retry." >&2
 exit 2

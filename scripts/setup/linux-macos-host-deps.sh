@@ -267,13 +267,36 @@ verify_host_contract() {
 install_macos_packages() {
   log "Installing base packages with Homebrew (macOS)"
   brew_install python@3.12 python-tk@3.12 ffmpeg opencv
-  if [[ -x "/opt/homebrew/bin/python3.12" ]]; then
-    log "Installing Python packages for GUI preview support"
-    run /opt/homebrew/bin/python3.12 -m pip install --upgrade pip
-    run /opt/homebrew/bin/python3.12 -m pip install opencv-python numpy
+  if [[ -x "/opt/homebrew/bin/python3.12" && "$DRY_RUN" -eq 0 ]]; then
+    local venv_path
+    local recreate_venv
+    recreate_venv=0
+    if [[ -x "$(pwd)/.venv/bin/python3" ]]; then
+      venv_path="$(pwd)/.venv"
+      if ! "$venv_path/bin/python3" -c "import tkinter" >/dev/null 2>&1; then
+        recreate_venv=1
+        log "Existing .venv lacks tkinter; recreating .venv with python3.12"
+      else
+        log "Using existing venv for GUI preview support: $venv_path"
+      fi
+    else
+      venv_path="$(pwd)/.venv"
+      recreate_venv=1
+      log "Creating local venv for GUI preview support: $venv_path"
+    fi
+    if [[ "$recreate_venv" -eq 1 ]]; then
+      run /opt/homebrew/bin/python3.12 -m venv --clear "$venv_path"
+    fi
+    if ! "$venv_path/bin/python3" -m pip --version >/dev/null 2>&1; then
+      log "pip is missing in .venv; bootstrapping with ensurepip"
+      run "$venv_path/bin/python3" -m ensurepip --upgrade
+    fi
+    run "$venv_path/bin/python3" -m pip install --upgrade pip
+    run "$venv_path/bin/python3" -m pip install opencv-python numpy
+  elif [[ "$DRY_RUN" -eq 1 ]]; then
+    log "Dry-run: would normalize/create .venv with python3.12 and install opencv-python,numpy"
   fi
-  log "If tkinter is still unavailable, use Python 3.12 from Homebrew for GUI:"
-  log "  /opt/homebrew/opt/python@3.12/bin/python3 scripts/config/create-config-gui.py"
+  log "GUI runtime is unified to .venv."
 }
 
 parse_args() {

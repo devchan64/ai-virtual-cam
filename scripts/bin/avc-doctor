@@ -6,14 +6,16 @@ if ! command -v python3 >/dev/null 2>&1; then
   echo "[doctor] missing: python3" >&2
   ok=0
 fi
-if command -v python3 >/dev/null 2>&1; then
-  if python3 -c "import tkinter" >/dev/null 2>&1; then
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+VENV_PY="$ROOT_DIR/.venv/bin/python3"
+if [[ -x "$VENV_PY" ]]; then
+  if "$VENV_PY" -c "import tkinter, cv2" >/dev/null 2>&1; then
     :
-  elif [[ -x "/opt/homebrew/bin/python3.12" ]] && /opt/homebrew/bin/python3.12 -c "import tkinter" >/dev/null 2>&1; then
-    echo "[doctor] tkinter available via /opt/homebrew/bin/python3.12 (GUI will use fallback)" >&2
   else
-    echo "[doctor] missing: tkinter module (GUI config unavailable, CLI config still works)" >&2
+    echo "[doctor] .venv exists but tkinter/cv2 missing; run ./bin/avc setup" >&2
   fi
+else
+  echo "[doctor] .venv missing; run ./bin/avc setup" >&2
 fi
 if ! command -v docker >/dev/null 2>&1; then
   echo "[doctor] missing: docker (optional for local run)" >&2
