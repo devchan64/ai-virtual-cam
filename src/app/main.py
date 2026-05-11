@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import argparse
 import sys
+import threading
 from pathlib import Path
 
 from src.adapter.capture.opencv_capture import OpenCVCapture
 from src.adapter.output.factory import build_output
+from src.audio.mixer import VirtualAudioMixer
 from src.domain.config import AppConfig
 from src.pipeline.runner import PipelineRunner
 
@@ -24,6 +26,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=0,
         help="Optional frame limit for smoke tests. 0 means unlimited.",
+    )
+    parser.add_argument(
+        "--audio-mode",
+        choices=["auto", "on", "off"],
+        default="auto",
+        help="Audio mixer activation mode. auto=use config, on=force enable, off=disable.",
     )
     return parser.parse_args()
 
@@ -57,7 +65,28 @@ def main() -> int:
         capture=capture,
         output=output,
     )
-    runner.run(max_frames=args.max_frames)
+    audio_mixer: VirtualAudioMixer | None = None
+    audio_thread: threading.Thread | None = None
+    want_audio = args.audio_mode == "on" or (
+        args.audio_mode == "auto" and config.audio is not None and config.audio.enabled
+    )
+    if want_audio:
+        if config.audio is None:
+            raise RuntimeError("audio-mode is on but audio config is missing.")
+        audio_mixer = VirtualAudioMixer(config.audio)
+        audio_thread = threading.Thread(target=audio_mixer.run, kwargs={"max_steps": 0}, daemon=True)
+        audio_thread.start()
+        print("[avc] audio mixer started (integrated with serve)", flush=True)
+    else:
+        print("[avc] audio mixer disabled", flush=True)
+
+    try:
+        runner.run(max_frames=args.max_frames)
+    finally:
+        if audio_mixer is not None:
+            audio_mixer.stop()
+        if audio_thread is not None:
+            audio_thread.join(timeout=1.0)
     return 0
 
 

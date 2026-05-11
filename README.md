@@ -16,6 +16,7 @@
 - `config`: CLI 설정 생성기
 - `config-gui`: GUI 설정 생성기(프리뷰 포함)
 - `serve`: 저장된 설정으로 스트리밍 실행
+- `audio-mixer`: 마이크 게이트용 가상 오디오 믹서 스켈레톤 실행
 - `doctor`: 기본 런타임 점검
 
 ## 플랫폼 정책
@@ -29,8 +30,22 @@
 ```bash
 ./bin/avc setup
 ./bin/avc config-gui
-./bin/avc serve
+./bin/avc serve --audio-mode auto
 ```
+
+오디오 활성화 선택:
+
+```bash
+./bin/avc serve --config ~/.avc/setting.json --audio-mode auto  # config의 audio.enabled 사용
+./bin/avc serve --config ~/.avc/setting.json --audio-mode on    # 강제 활성화
+./bin/avc serve --config ~/.avc/setting.json --audio-mode off   # 비활성화
+```
+
+오디오 게이트 정책(구조 기준):
+
+- 레벨(`thresholdDb`)만으로 열지 않고, 음성 대역 비율(`minVoiceBandRatio`) 조건을 함께 사용
+- 음악/주변소음처럼 음성 유사도가 낮은 입력은 게이트를 열지 않도록 설계
+- 사용자 음색에 맞게 `thresholdDb`, `hysteresisDb`, `minVoiceBandRatio`를 `config`/`config-gui`에서 조정 가능
 
 기본 설정 파일 경로:
 

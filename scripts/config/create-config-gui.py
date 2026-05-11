@@ -73,11 +73,13 @@ class ConfigGui:
         tab_seg = ttk.Frame(notebook, padding=8)
         tab_bg = ttk.Frame(notebook, padding=8)
         tab_crop = ttk.Frame(notebook, padding=8)
+        tab_audio = ttk.Frame(notebook, padding=8)
         notebook.add(tab_io, text="입출력")
         notebook.add(tab_seg, text="세그멘테이션")
         notebook.add(tab_bg, text="배경")
         notebook.add(tab_crop, text="프레이밍")
-        for tab in (tab_io, tab_seg, tab_bg, tab_crop):
+        notebook.add(tab_audio, text="오디오")
+        for tab in (tab_io, tab_seg, tab_bg, tab_crop, tab_audio):
             for col in range(4):
                 tab.columnconfigure(col, weight=1 if col in (1, 3) else 0)
 
@@ -172,6 +174,23 @@ class ConfigGui:
         self._add_slider(tab_crop, row, "crop_pan_target_offset_x", "Pan target offset X", 0.00, -1.0, 1.0, resolution=0.01)
         row += 1
         self._add_slider(tab_crop, row, "crop_pan_target_offset_y", "Pan target offset Y", 0.00, -1.0, 1.0, resolution=0.01)
+
+        row = 0
+        self._add_combo(tab_audio, row, "audio_enabled", "Audio mixer", ["false", "true"], "false")
+        row += 1
+        self._add_text(tab_audio, row, "audio_input_device", "Input device", "default")
+        self._add_text(tab_audio, row, "audio_output_device", "Output device", "default", col_offset=2)
+        row += 1
+        self._add_int(tab_audio, row, "audio_sample_rate", "Sample rate", 48000)
+        self._add_int(tab_audio, row, "audio_channels", "Channels", 1, col_offset=2)
+        row += 1
+        self._add_int(tab_audio, row, "audio_frame_ms", "Frame ms", 20)
+        row += 1
+        self._add_slider(tab_audio, row, "audio_gate_threshold_db", "Gate threshold dB", -42.0, -80.0, 0.0, resolution=0.5)
+        row += 1
+        self._add_slider(tab_audio, row, "audio_gate_hysteresis_db", "Gate hysteresis dB", 3.0, 0.0, 20.0, resolution=0.5)
+        row += 1
+        self._add_slider(tab_audio, row, "audio_gate_min_voice_band_ratio", "Min voice band ratio", 0.55, 0.0, 1.0, resolution=0.01)
 
         action_row = 1
         action = ttk.Frame(frame)
@@ -331,6 +350,8 @@ class ConfigGui:
         selfie_cfg = seg_cfg.get("selfie") or {}
         bg_cfg = raw.get("background") or {}
         crop_cfg = raw.get("crop") or {}
+        audio_cfg = raw.get("audio") or {}
+        gate_cfg = audio_cfg.get("gate") or {}
 
         self._set_var("input_device", input_cfg.get("devicePath"))
         self._set_var("input_width", input_cfg.get("width"))
@@ -375,6 +396,15 @@ class ConfigGui:
         self._set_var("crop_tilt_pid_kd", crop_cfg.get("tiltPidKd", crop_cfg.get("panPidKd")))
         self._set_var("crop_pan_target_offset_x", crop_cfg.get("panTargetOffsetX"))
         self._set_var("crop_pan_target_offset_y", crop_cfg.get("panTargetOffsetY"))
+        self._set_var("audio_enabled", str(bool(audio_cfg.get("enabled", False))).lower())
+        self._set_var("audio_input_device", audio_cfg.get("inputDevice"))
+        self._set_var("audio_output_device", audio_cfg.get("outputDevice"))
+        self._set_var("audio_sample_rate", audio_cfg.get("sampleRate"))
+        self._set_var("audio_channels", audio_cfg.get("channels"))
+        self._set_var("audio_frame_ms", audio_cfg.get("frameMs"))
+        self._set_var("audio_gate_threshold_db", gate_cfg.get("thresholdDb"))
+        self._set_var("audio_gate_hysteresis_db", gate_cfg.get("hysteresisDb"))
+        self._set_var("audio_gate_min_voice_band_ratio", gate_cfg.get("minVoiceBandRatio"))
         self._on_input_device_changed()
         self._on_input_width_changed()
 
@@ -584,6 +614,15 @@ class ConfigGui:
             crop_tilt_pid_kd=float(iv["crop_tilt_pid_kd"].get()),
             crop_pan_target_offset_x=float(iv["crop_pan_target_offset_x"].get()),
             crop_pan_target_offset_y=float(iv["crop_pan_target_offset_y"].get()),
+            audio_enabled=iv["audio_enabled"].get().strip().lower() == "true",
+            audio_input_device=iv["audio_input_device"].get().strip(),
+            audio_output_device=iv["audio_output_device"].get().strip(),
+            audio_sample_rate=int(iv["audio_sample_rate"].get()),
+            audio_channels=int(iv["audio_channels"].get()),
+            audio_frame_ms=int(iv["audio_frame_ms"].get()),
+            audio_gate_threshold_db=float(iv["audio_gate_threshold_db"].get()),
+            audio_gate_hysteresis_db=float(iv["audio_gate_hysteresis_db"].get()),
+            audio_gate_min_voice_band_ratio=float(iv["audio_gate_min_voice_band_ratio"].get()),
         )
 
 

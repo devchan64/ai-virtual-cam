@@ -239,12 +239,78 @@ class PersonCropConfig:
 
 
 @dataclass(frozen=True)
+class AudioGateConfig:
+    enabled: bool
+    thresholdDb: float
+    hysteresisDb: float
+    attackMs: int
+    holdMs: int
+    releaseMs: int
+    openGain: float
+    closedGain: float
+    minVoiceBandRatio: float
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> "AudioGateConfig":
+        config = cls(
+            enabled=bool(raw.get("enabled", True)),
+            thresholdDb=float(raw.get("thresholdDb", -42.0)),
+            hysteresisDb=float(raw.get("hysteresisDb", 3.0)),
+            attackMs=int(raw.get("attackMs", 20)),
+            holdMs=int(raw.get("holdMs", 140)),
+            releaseMs=int(raw.get("releaseMs", 220)),
+            openGain=float(raw.get("openGain", 1.0)),
+            closedGain=float(raw.get("closedGain", 0.0)),
+            minVoiceBandRatio=float(raw.get("minVoiceBandRatio", 0.55)),
+        )
+        if config.attackMs < 0 or config.holdMs < 0 or config.releaseMs < 0:
+            raise ValueError("audio.gate attack/hold/release must be >= 0")
+        if config.openGain < 0.0 or config.closedGain < 0.0:
+            raise ValueError("audio.gate openGain/closedGain must be >= 0.0")
+        if config.minVoiceBandRatio < 0.0 or config.minVoiceBandRatio > 1.0:
+            raise ValueError("audio.gate minVoiceBandRatio must be between 0.0 and 1.0")
+        return config
+
+
+@dataclass(frozen=True)
+class AudioMixerConfig:
+    enabled: bool
+    inputDevice: str
+    outputDevice: str
+    sampleRate: int
+    channels: int
+    frameMs: int
+    gate: AudioGateConfig
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> "AudioMixerConfig":
+        gate_raw = raw.get("gate") or {}
+        config = cls(
+            enabled=bool(raw.get("enabled", False)),
+            inputDevice=str(raw.get("inputDevice", "default")),
+            outputDevice=str(raw.get("outputDevice", "default")),
+            sampleRate=int(raw.get("sampleRate", 48000)),
+            channels=int(raw.get("channels", 1)),
+            frameMs=int(raw.get("frameMs", 20)),
+            gate=AudioGateConfig.from_dict(gate_raw),
+        )
+        if config.sampleRate <= 0:
+            raise ValueError("audio.sampleRate must be > 0")
+        if config.channels <= 0:
+            raise ValueError("audio.channels must be > 0")
+        if config.frameMs <= 0:
+            raise ValueError("audio.frameMs must be > 0")
+        return config
+
+
+@dataclass(frozen=True)
 class AppConfig:
     inputCamera: InputCameraConfig
     outputCamera: OutputCameraConfig
     segmentation: SegmentationConfig
     background: BackgroundConfig
     crop: PersonCropConfig
+    audio: AudioMixerConfig | None = None
 
     @classmethod
     def load(cls, path: Path) -> "AppConfig":
@@ -262,6 +328,7 @@ class AppConfig:
             segmentation=SegmentationConfig.from_dict(raw["segmentation"]),
             background=BackgroundConfig.from_dict(raw["background"]),
             crop=crop_cfg,
+            audio=AudioMixerConfig.from_dict(raw["audio"]) if raw.get("audio") else None,
         )
 
 

@@ -200,6 +200,22 @@ def build_config():
     crop_pan_target_offset_x = prompt_float("  pan target offset X (-1.0..1.0)", default=0.0, minimum=-1.0, maximum=1.0)
     crop_pan_target_offset_y = prompt_float("  pan target offset Y (-1.0..1.0)", default=0.0, minimum=-1.0, maximum=1.0)
 
+    print("\nAudio mixer / voice gate settings")
+    audio_enabled = prompt_choice("  enable audio mixer", ["false", "true"], default="false") == "true"
+    audio_input_device = prompt_text("  input device", default="default")
+    audio_output_device = prompt_text("  output device", default="default")
+    audio_sample_rate = prompt_int("  sample rate", default=48000, minimum=8000)
+    audio_channels = prompt_int("  channels", default=1, minimum=1, maximum=2)
+    audio_frame_ms = prompt_int("  frame ms", default=20, minimum=5, maximum=200)
+    audio_gate_threshold_db = prompt_float("  gate threshold dB", default=-42.0, minimum=-80.0, maximum=0.0)
+    audio_gate_hysteresis_db = prompt_float("  gate hysteresis dB", default=3.0, minimum=0.0, maximum=20.0)
+    audio_gate_min_voice_band_ratio = prompt_float(
+        "  min voice band ratio (music/noise 차단)",
+        default=0.55,
+        minimum=0.0,
+        maximum=1.0,
+    )
+
     config = build_config(
         input_device=input_camera_path,
         input_width=input_width,
@@ -233,6 +249,15 @@ def build_config():
         crop_tilt_pid_kd=crop_tilt_pid_kd,
         crop_pan_target_offset_x=crop_pan_target_offset_x,
         crop_pan_target_offset_y=crop_pan_target_offset_y,
+        audio_enabled=audio_enabled,
+        audio_input_device=audio_input_device,
+        audio_output_device=audio_output_device,
+        audio_sample_rate=audio_sample_rate,
+        audio_channels=audio_channels,
+        audio_frame_ms=audio_frame_ms,
+        audio_gate_threshold_db=audio_gate_threshold_db,
+        audio_gate_hysteresis_db=audio_gate_hysteresis_db,
+        audio_gate_min_voice_band_ratio=audio_gate_min_voice_band_ratio,
     )
     config["inputCamera"]["crop"] = camera_crop
     return config

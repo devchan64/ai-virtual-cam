@@ -7,10 +7,12 @@ VENV_PY="$ROOT_DIR/.venv/bin/python3"
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   cat <<'EOF'
 Usage:
-  ./bin/avc serve [--config PATH] [--max-frames N]
+  ./bin/avc serve [--config PATH] [--max-frames N] [--audio-mode auto|on|off]
 
 Examples:
   ./bin/avc serve --config ~/.avc/setting.json
+  ./bin/avc serve --config ~/.avc/setting.json --audio-mode auto
+  ./bin/avc serve --config ~/.avc/setting.json --audio-mode on
   ./bin/avc serve --config ~/.avc/setting.json --max-frames 300
 EOF
   exit 0
