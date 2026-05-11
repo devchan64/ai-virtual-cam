@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import cv2
+import os
 from dataclasses import dataclass
 
 import numpy as np
@@ -22,19 +23,25 @@ class BoundsTracker:
         self._config = config
         self._target_aspect = float(target_width) / float(max(1, target_height))
         self._previous: Bounds | None = None
+        self._previous_base: Bounds | None = None
         self._int_x = 0.0
         self._int_y = 0.0
         self._prev_err_x = 0.0
         self._prev_err_y = 0.0
+        self._debug = os.getenv("FRAMING_DEBUG", "").strip() not in {"", "0", "false", "False"}
+        self._debug_frames = 0
 
     def update(self, mask: np.ndarray) -> Bounds:
         current = self._compute(mask)
-        if self._previous is None:
-            self._previous = current
-            return current
+        if self._previous_base is None:
+            self._previous_base = current
+            initial = self._apply_target_offset(current, mask.shape[:2])
+            self._previous = initial
+            self._debug_log(mask.shape[:2], current, initial)
+            return initial
 
-        err_x = float(current.x - self._previous.x)
-        err_y = float(current.y - self._previous.y)
+        err_x = float(current.x - self._previous_base.x)
+        err_y = float(current.y - self._previous_base.y)
         self._int_x += err_x
         self._int_y += err_y
         self._int_x = max(-2000.0, min(2000.0, self._int_x))
@@ -54,30 +61,27 @@ class BoundsTracker:
         pid_x = pan_kp * err_x + pan_ki * self._int_x + pan_kd * d_x
         pid_y = tilt_kp * err_y + tilt_ki * self._int_y + tilt_kd * d_y
 
-        target_x = int(round(self._previous.x + pid_x))
-        target_y = int(round(self._previous.y + pid_y))
+        target_x = int(round(self._previous_base.x + pid_x))
+        target_y = int(round(self._previous_base.y + pid_y))
 
         pan_alpha = self._config.panSmoothing
         tilt_alpha = self._config.tiltSmoothing
         zoom_alpha = self._config.zoomSmoothing
-        w = int(round(self._previous.width * zoom_alpha + current.width * (1.0 - zoom_alpha)))
-        h = int(round(self._previous.height * zoom_alpha + current.height * (1.0 - zoom_alpha)))
-        x = int(round(self._previous.x * pan_alpha + target_x * (1.0 - pan_alpha)))
-        y = int(round(self._previous.y * tilt_alpha + target_y * (1.0 - tilt_alpha)))
+        w = int(round(self._previous_base.width * zoom_alpha + current.width * (1.0 - zoom_alpha)))
+        h = int(round(self._previous_base.height * zoom_alpha + current.height * (1.0 - zoom_alpha)))
+        x = int(round(self._previous_base.x * pan_alpha + target_x * (1.0 - pan_alpha)))
+        y = int(round(self._previous_base.y * tilt_alpha + target_y * (1.0 - tilt_alpha)))
         frame_h, frame_w = mask.shape[:2]
         w = max(1, min(w, frame_w))
         h = max(1, min(h, frame_h))
         x = clamp_int(x, 0, max(0, frame_w - w))
         y = clamp_int(y, 0, max(0, frame_h - h))
-        free_x = max(0, frame_w - w)
-        free_y = max(0, frame_h - h)
-        offset_x = int(round(self._config.panTargetOffsetX * (free_x * 0.5)))
-        offset_y = int(round(self._config.panTargetOffsetY * (free_y * 0.5)))
-        x = clamp_int(x + offset_x, 0, free_x)
-        y = clamp_int(y + offset_y, 0, free_y)
-        smoothed = Bounds(x=x, y=y, width=w, height=h)
-        self._previous = smoothed
-        return smoothed
+        base = Bounds(x=x, y=y, width=w, height=h)
+        self._previous_base = base
+        output = self._apply_target_offset(base, mask.shape[:2])
+        self._previous = output
+        self._debug_log(mask.shape[:2], base, output)
+        return output
 
     def _compute(self, mask: np.ndarray) -> Bounds:
         height, width = mask.shape[:2]
@@ -107,6 +111,7 @@ class BoundsTracker:
         target_w = min(width, max(1, bbox_width + margin_x * 2))
         target_h = min(height, max(1, bbox_height + margin_y * 2))
         target_w, target_h = self._fit_aspect(target_w, target_h, width, height)
+        target_w, target_h = self._ensure_vertical_headroom(target_w, target_h, width, height)
         biased_center_y = int(round(center_y - bbox_height * self._config.upperBodyBias))
         base_x = center_x - target_w // 2
         base_y = biased_center_y - target_h // 2
@@ -156,3 +161,53 @@ class BoundsTracker:
 
     def as_rect(self, bounds: Bounds) -> Rect:
         return Rect(x=bounds.x, y=bounds.y, width=bounds.width, height=bounds.height)
+
+    def _ensure_vertical_headroom(self, w: int, h: int, max_w: int, max_h: int) -> tuple[int, int]:
+        # If Y offset is requested but crop consumes full frame height, keep a small headroom
+        # so vertical framing can move.
+        wants_y_offset = abs(self._config.panTargetOffsetY) > 1e-6
+        if not wants_y_offset:
+            return w, h
+        if h < max_h:
+            return w, h
+        reserve = max(8, int(round(max_h * 0.10)))
+        new_h = max(1, max_h - reserve)
+        new_w = int(round(new_h * self._target_aspect))
+        if new_w > max_w:
+            new_w = max_w
+            new_h = int(round(new_w / self._target_aspect))
+        return max(1, new_w), max(1, new_h)
+
+    def _apply_target_offset(self, bounds: Bounds, shape: tuple[int, int]) -> Bounds:
+        frame_h, frame_w = shape
+        free_x = max(0, frame_w - bounds.width)
+        free_y = max(0, frame_h - bounds.height)
+        offset_x = int(round(self._config.panTargetOffsetX * (free_x * 0.5)))
+        offset_y = int(round(self._config.panTargetOffsetY * (free_y * 0.5)))
+        x = clamp_int(bounds.x + offset_x, 0, free_x)
+        y = clamp_int(bounds.y + offset_y, 0, free_y)
+        return Bounds(x=x, y=y, width=bounds.width, height=bounds.height)
+
+    def _debug_log(self, shape: tuple[int, int], base: Bounds, output: Bounds) -> None:
+        if not self._debug:
+            return
+        self._debug_frames += 1
+        if self._debug_frames % 30 != 0:
+            return
+        frame_h, frame_w = shape
+        free_x = max(0, frame_w - base.width)
+        free_y = max(0, frame_h - base.height)
+        offset_x = output.x - base.x
+        offset_y = output.y - base.y
+        print(
+            "[frame-debug] "
+            f"frame={self._debug_frames} "
+            f"frame={frame_w}x{frame_h} "
+            f"crop={base.width}x{base.height} "
+            f"base=({base.x},{base.y}) "
+            f"out=({output.x},{output.y}) "
+            f"free=({free_x},{free_y}) "
+            f"offset=({offset_x},{offset_y}) "
+            f"targetOffset=({self._config.panTargetOffsetX:.2f},{self._config.panTargetOffsetY:.2f})",
+            flush=True,
+        )
