@@ -266,7 +266,9 @@ verify_host_contract() {
 
 install_macos_packages() {
   log "Installing base packages with Homebrew (macOS)"
-  brew_install python ffmpeg opencv
+  brew_install python@3.12 python-tk@3.12 ffmpeg opencv
+  log "If tkinter is still unavailable, use Python 3.12 from Homebrew for GUI:"
+  log "  /opt/homebrew/opt/python@3.12/bin/python3 scripts/config/create-config-gui.py"
 }
 
 parse_args() {

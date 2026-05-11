@@ -6,6 +6,11 @@ if ! command -v python3 >/dev/null 2>&1; then
   echo "[doctor] missing: python3" >&2
   ok=0
 fi
+if command -v python3 >/dev/null 2>&1; then
+  if ! python3 -c "import tkinter" >/dev/null 2>&1; then
+    echo "[doctor] missing: tkinter module (GUI config unavailable, CLI config still works)" >&2
+  fi
+fi
 if ! command -v docker >/dev/null 2>&1; then
   echo "[doctor] missing: docker (optional for local run)" >&2
 fi

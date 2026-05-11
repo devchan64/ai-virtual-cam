@@ -4,9 +4,18 @@ from __future__ import annotations
 
 import argparse
 import sys
-import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+
+try:
+    import tkinter as tk
+    from tkinter import filedialog, messagebox, ttk
+    TK_IMPORT_ERROR = None
+except ModuleNotFoundError as exc:
+    tk = None
+    filedialog = None
+    messagebox = None
+    ttk = None
+    TK_IMPORT_ERROR = exc
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
@@ -150,6 +159,15 @@ def parse_args():
 
 
 def main() -> int:
+    if TK_IMPORT_ERROR is not None:
+        print(
+            "Tkinter is not available in this Python runtime.\n"
+            "Use CLI config instead: ./bin/avc config\n"
+            "To use GUI, install a Python build with Tk support (for macOS, python.org installer is recommended).",
+            file=sys.stderr,
+        )
+        return 2
+
     args = parse_args()
     root = tk.Tk()
     ConfigGui(root, args.output)
