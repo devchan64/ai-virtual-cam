@@ -103,6 +103,35 @@ if [[ "$OS_NAME" == "Darwin" ]]; then
   fi
 fi
 
+if [[ "$OS_NAME" == "Linux" ]]; then
+  log "Linux v4l2loopback 경로 진단 시작"
+  if command -v ffmpeg >/dev/null 2>&1; then
+    log "ok: ffmpeg available"
+  else
+    fail "ffmpeg not found; run ./bin/avc setup"
+  fi
+
+  if lsmod 2>/dev/null | grep -q '^v4l2loopback'; then
+    log "ok: v4l2loopback module loaded"
+  else
+    warn "v4l2loopback module is not loaded (run: sudo modprobe v4l2loopback)"
+  fi
+
+  if [[ -e "/dev/video10" ]]; then
+    log "ok: virtual camera device exists (/dev/video10)"
+  else
+    warn "virtual camera device not found: /dev/video10"
+  fi
+
+  if command -v v4l2-ctl >/dev/null 2>&1 && [[ -e "/dev/video10" ]]; then
+    if v4l2-ctl --device=/dev/video10 --all >/dev/null 2>&1; then
+      log "ok: v4l2 device responds (/dev/video10)"
+    else
+      warn "v4l2 device exists but does not respond: /dev/video10"
+    fi
+  fi
+fi
+
 if [[ "$ok" -eq 1 ]]; then
   log "checks passed"
   exit 0

@@ -116,3 +116,17 @@ pluginkit -m -A -D | grep -Ei "obs|virtual.?camera|cameraextension|coremedia"
   }
 }
 ```
+
+Linux 예시 출력 설정:
+
+```json
+{
+  "outputCamera": {
+    "devicePath": "/dev/video10",
+    "backend": "v4l2loopback",
+    "width": 1280,
+    "height": 720,
+    "fps": 30
+  }
+}
+```

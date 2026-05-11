@@ -135,8 +135,8 @@ def build_config():
     print("\nOutput camera settings")
     output_backend = prompt_choice(
         "  backend",
-        ["pyvirtualcam", "opencv"] if is_macos else ["opencv"],
-        default="pyvirtualcam" if is_macos else "opencv",
+        ["pyvirtualcam", "opencv"] if is_macos else ["v4l2loopback", "opencv"],
+        default="pyvirtualcam" if is_macos else "v4l2loopback",
     )
     output_camera_path = prompt_path(
         "  device path",

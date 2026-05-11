@@ -2,7 +2,7 @@
 
 ## 플랫폼 정책
 
-- Linux: Docker + `v4l2loopback` 경로
+- Linux: Docker + `v4l2loopback` 경로 (`outputCamera.backend=v4l2loopback`)
 - macOS: OBS Virtual Camera 경로만 지원 (`pyvirtualcam`)
 - CMIO 관련 기능은 폐기
 
