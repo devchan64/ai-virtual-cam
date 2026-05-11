@@ -2,7 +2,6 @@
 
 import argparse
 import sys
-import platform
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -102,8 +101,7 @@ def prompt_crop(prefix, default_width, default_height):
 
 def choose_camera(cameras):
     if not cameras:
-        default_input = "0" if platform.system() == "Darwin" else "/dev/video0"
-        return prompt_path("Input camera device path", default=default_input)
+        return prompt_path("Input camera device path", default="/dev/video0")
 
     print("Detected camera interfaces:")
     for index, camera in enumerate(cameras, start=1):
@@ -122,7 +120,6 @@ def choose_camera(cameras):
 
 
 def build_config():
-    is_macos = platform.system() == "Darwin"
     cameras = discover_cameras()
     input_camera_path = choose_camera(cameras)
 
@@ -132,14 +129,10 @@ def build_config():
     input_fps = prompt_int("  fps", default=30, minimum=1)
 
     print("\nOutput camera settings")
-    output_backend = prompt_choice(
-        "  backend",
-        ["cmio", "opencv"] if is_macos else ["opencv"],
-        default="cmio" if is_macos else "opencv",
-    )
+    output_backend = "opencv"
     output_camera_path = prompt_path(
         "  device path",
-        default="ai-virtual-cam" if output_backend == "cmio" else "/dev/video10",
+        default="/dev/video10",
     )
     output_width = prompt_int("  width", default=input_width, minimum=1)
     output_height = prompt_int("  height", default=input_height, minimum=1)
@@ -254,8 +247,6 @@ def main():
 
 
 def _segmentation_backend_options():
-    if platform.system() == "Darwin":
-        return ["selfie", "mock", "onnxruntime"]
     return ["selfie", "mock", "onnxruntime", "tensorrt"]
 
 

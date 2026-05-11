@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import platform
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -72,20 +71,19 @@ class OutputCameraConfig:
 
     @classmethod
     def from_dict(cls, raw: dict) -> "OutputCameraConfig":
-        default_backend = "cmio" if platform.system() == "Darwin" else "opencv"
         config = cls(
             devicePath=str(raw["devicePath"]),
             width=int(raw["width"]),
             height=int(raw["height"]),
             fps=int(raw["fps"]),
-            backend=str(raw.get("backend", default_backend)),
+            backend=str(raw.get("backend", "opencv")),
         )
         if not config.devicePath:
             raise ValueError("outputCamera.devicePath is required")
         if config.width <= 0 or config.height <= 0 or config.fps <= 0:
             raise ValueError("outputCamera width/height/fps must be > 0")
-        if config.backend not in {"opencv", "cmio"}:
-            raise ValueError("outputCamera.backend must be one of: opencv, cmio")
+        if config.backend != "opencv":
+            raise ValueError("outputCamera.backend must be: opencv")
         return config
 
 

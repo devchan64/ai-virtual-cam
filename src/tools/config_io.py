@@ -1,17 +1,10 @@
 from __future__ import annotations
 
 import json
-import platform
 from pathlib import Path
 
 
 def discover_cameras() -> list[dict[str, str]]:
-    if platform.system() == "Darwin":
-        return [
-            {"name": f"cam{idx}", "devicePath": str(idx), "label": f"Camera Index {idx}"}
-            for idx in range(4)
-        ]
-
     cameras: list[dict[str, str]] = []
     video_root = Path("/sys/class/video4linux")
     if not video_root.exists():

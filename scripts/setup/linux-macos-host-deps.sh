@@ -11,7 +11,6 @@ SKIP_NVIDIA_TOOLKIT=0
 SKIP_V4L2LOOPBACK=0
 OS_KIND=""
 LINUX_DISTRO_ID=""
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 log() {
   printf '[ai-virtual-cam] %s\n' "$*"
@@ -35,7 +34,7 @@ usage() {
   cat <<'EOF'
 Usage: ./bin/avc setup [options]
 
-Install host dependencies for ai-virtual-cam on Linux (Debian/Ubuntu) or macOS.
+Install host dependencies for ai-virtual-cam on Linux (Debian/Ubuntu).
 
 Options:
   --output-device N        V4L2 loopback device number to create (default: 10)
@@ -53,16 +52,12 @@ require_privileges() {
   if [[ "$OS_KIND" == "linux" && "${EUID}" -ne 0 ]]; then
     fail "Run this script as root or via sudo on Linux."
   fi
-  if [[ "$OS_KIND" == "macos" && "${EUID}" -eq 0 ]]; then
-    fail "Do not run with sudo on macOS. Run as a normal user so Homebrew can work."
-  fi
 }
 
 detect_os() {
   case "$(uname -s)" in
     Linux) OS_KIND="linux" ;;
-    Darwin) OS_KIND="macos" ;;
-    *) fail "Unsupported OS: $(uname -s). Expected Linux or macOS." ;;
+    *) fail "Unsupported OS: $(uname -s). Expected Linux." ;;
   esac
 }
 
@@ -124,28 +119,10 @@ install_docker() {
     return 0
   fi
 
-  if [[ "$OS_KIND" == "linux" ]]; then
-    setup_docker_repo
-    run apt-get update
-    apt_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-    run systemctl enable --now docker
-    return 0
-  fi
-
-  if [[ "$OS_KIND" == "macos" ]]; then
-    if ! command -v brew >/dev/null 2>&1; then
-      fail "Homebrew is required on macOS. Install it first: https://brew.sh"
-    fi
-    log "Installing Docker Desktop via Homebrew cask"
-    run brew install --cask docker
-  fi
-}
-
-brew_install() {
-  if ! command -v brew >/dev/null 2>&1; then
-    fail "Homebrew is required on macOS. Install it first: https://brew.sh"
-  fi
-  run brew install "$@"
+  setup_docker_repo
+  run apt-get update
+  apt_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  run systemctl enable --now docker
 }
 
 setup_nvidia_container_toolkit_repo() {
@@ -166,13 +143,6 @@ setup_nvidia_container_toolkit_repo() {
 }
 
 install_nvidia_container_toolkit() {
-  if [[ "$OS_KIND" == "macos" ]]; then
-    if [[ "$SKIP_NVIDIA_TOOLKIT" -eq 0 ]]; then
-      log "Skipping NVIDIA Container Toolkit: not applicable on macOS."
-    fi
-    return 0
-  fi
-
   if [[ "$SKIP_NVIDIA_TOOLKIT" -eq 1 ]]; then
     log "Skipping NVIDIA Container Toolkit installation"
     return 0
@@ -191,13 +161,6 @@ install_nvidia_container_toolkit() {
 }
 
 install_v4l2loopback() {
-  if [[ "$OS_KIND" == "macos" ]]; then
-    if [[ "$SKIP_V4L2LOOPBACK" -eq 0 ]]; then
-      log "Skipping v4l2loopback: not available on macOS."
-    fi
-    return 0
-  fi
-
   if [[ "$SKIP_V4L2LOOPBACK" -eq 1 ]]; then
     log "Skipping v4l2loopback installation"
     return 0
@@ -237,91 +200,17 @@ verify_host_contract() {
     fail "docker is not available after installation."
   fi
 
-  if [[ "$OS_KIND" == "linux" ]]; then
-    if [[ "$SKIP_NVIDIA_TOOLKIT" -eq 0 ]] && ! command -v nvidia-ctk >/dev/null 2>&1; then
-      fail "nvidia-ctk is not available after installation."
-    fi
-
-    if [[ ! -e "/dev/video${INPUT_DEVICE}" ]]; then
-      fail "Expected input camera /dev/video${INPUT_DEVICE} is missing."
-    fi
-
-    if [[ "$SKIP_V4L2LOOPBACK" -eq 0 ]] && [[ ! -e "/dev/video${OUTPUT_DEVICE}" ]]; then
-      fail "Expected output virtual camera /dev/video${OUTPUT_DEVICE} is missing."
-    fi
-    return 0
+  if [[ "$SKIP_NVIDIA_TOOLKIT" -eq 0 ]] && ! command -v nvidia-ctk >/dev/null 2>&1; then
+    fail "nvidia-ctk is not available after installation."
   fi
 
-  if [[ "$OS_KIND" == "macos" ]]; then
-    if ! command -v python3 >/dev/null 2>&1; then
-      fail "python3 is not available after installation."
-    fi
-    if ! command -v ffmpeg >/dev/null 2>&1; then
-      fail "ffmpeg is not available after installation."
-    fi
-    if [[ "$SKIP_DOCKER" -eq 0 ]] && ! command -v docker >/dev/null 2>&1; then
-      log "docker CLI not found. Start Docker Desktop once to complete installation."
-    fi
+  if [[ ! -e "/dev/video${INPUT_DEVICE}" ]]; then
+    fail "Expected input camera /dev/video${INPUT_DEVICE} is missing."
   fi
-}
 
-install_macos_packages() {
-  log "Installing base packages with Homebrew (macOS)"
-  brew_install python@3.12 python-tk@3.12 ffmpeg opencv xcodegen
-  if [[ -x "/opt/homebrew/bin/python3.12" && "$DRY_RUN" -eq 0 ]]; then
-    local venv_path
-    local recreate_venv
-    recreate_venv=0
-    if [[ -x "$(pwd)/.venv/bin/python3" ]]; then
-      venv_path="$(pwd)/.venv"
-      if ! "$venv_path/bin/python3" -c "import tkinter" >/dev/null 2>&1; then
-        recreate_venv=1
-        log "Existing .venv lacks tkinter; recreating .venv with python3.12"
-      else
-        log "Using existing venv for GUI preview support: $venv_path"
-      fi
-    else
-      venv_path="$(pwd)/.venv"
-      recreate_venv=1
-      log "Creating local venv for GUI preview support: $venv_path"
-    fi
-    if [[ "$recreate_venv" -eq 1 ]]; then
-      run /opt/homebrew/bin/python3.12 -m venv --clear "$venv_path"
-    fi
-    if ! "$venv_path/bin/python3" -m pip --version >/dev/null 2>&1; then
-      log "pip is missing in .venv; bootstrapping with ensurepip"
-      run "$venv_path/bin/python3" -m ensurepip --upgrade
-    fi
-    run "$venv_path/bin/python3" -m pip install --upgrade pip
-    run "$venv_path/bin/python3" -m pip install opencv-python numpy mediapipe==0.10.14
-  elif [[ "$DRY_RUN" -eq 1 ]]; then
-    log "Dry-run: would normalize/create .venv with python3.12 and install opencv-python,numpy,mediapipe==0.10.14"
+  if [[ "$SKIP_V4L2LOOPBACK" -eq 0 ]] && [[ ! -e "/dev/video${OUTPUT_DEVICE}" ]]; then
+    fail "Expected output virtual camera /dev/video${OUTPUT_DEVICE} is missing."
   fi
-  log "GUI runtime is unified to .venv."
-}
-
-install_macos_cmio_runtime() {
-  if [[ "$OS_KIND" != "macos" ]]; then
-    return 0
-  fi
-  if [[ "$DRY_RUN" -eq 1 ]]; then
-    log "Dry-run: would run internal CMIO install step"
-    return 0
-  fi
-  log "Running macOS CMIO virtual camera installer"
-  run bash "$SCRIPT_DIR/macos-cmio-install.sh"
-}
-
-verify_macos_cmio_runtime() {
-  if [[ "$OS_KIND" != "macos" ]]; then
-    return 0
-  fi
-  if [[ "$DRY_RUN" -eq 1 ]]; then
-    log "Dry-run: would run internal CMIO status step"
-    return 0
-  fi
-  log "Verifying macOS CMIO runtime readiness"
-  run bash "$SCRIPT_DIR/macos-cmio-status.sh"
 }
 
 parse_args() {
@@ -370,20 +259,14 @@ main() {
   parse_args "$@"
   detect_os
   require_privileges
-  if [[ "$OS_KIND" == "linux" ]]; then
-    if ! command -v apt-get >/dev/null 2>&1; then
-      fail "Linux host requires apt-get (Debian/Ubuntu)."
-    fi
-    load_os_release
-    install_base_packages
-  else
-    install_macos_packages
+  if ! command -v apt-get >/dev/null 2>&1; then
+    fail "Linux host requires apt-get (Debian/Ubuntu)."
   fi
+  load_os_release
+  install_base_packages
   install_docker
   install_nvidia_container_toolkit
   install_v4l2loopback
-  install_macos_cmio_runtime
-  verify_macos_cmio_runtime
   verify_host_contract
   log "Host dependency setup completed"
 }
