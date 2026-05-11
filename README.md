@@ -218,7 +218,7 @@ GUI 기반 설정 도구(기본 `tkinter`):
 - `selfie`: MediaPipe Selfie Segmentation 기반 전경 분리(권장)
 - `mock`: 개발용 파이프라인 smoke test
 - `tensorrt`: 인터페이스만 존재, 미구현
-- `onnxruntime`: 인터페이스만 존재, 미구현
+- `onnxruntime`: 현재는 `selfie` 경로로 호환 동작(추후 실제 ONNX 런타임 연결 예정)
 
 배경 모드:
 
@@ -314,4 +314,3 @@ ai-virtual-cam/
 ## Status
 
 현재 이 저장소는 초기 설계 단계이며, 본 README는 시스템 방향과 구현 범위를 정리한 문서입니다.
-

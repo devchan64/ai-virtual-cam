@@ -74,7 +74,7 @@ class ConfigGui:
 
         self._add_combo(frame, row, "seg_backend", "Seg backend", ["selfie", "mock", "tensorrt", "onnxruntime"], "selfie")
         row += 1
-        self._add_float(frame, row, "seg_threshold", "Seg threshold", 0.65)
+        self._add_slider(frame, row, "seg_threshold", "Seg threshold", 0.65, 0.0, 1.0, resolution=0.01)
         row += 1
         self._add_slider(frame, row, "seg_selfie_model", "Selfie model selection", 1, 0, 1, resolution=1)
         row += 1
@@ -92,11 +92,12 @@ class ConfigGui:
         self._add_int(frame, row, "bg_b", "Chroma B", 0)
         ttk.Button(frame, text="Pick Color", command=self._pick_chroma_color).grid(row=row, column=2, sticky="ew", padx=4)
         row += 1
-        self._add_float(frame, row, "bg_blend_alpha", "Color blend alpha", 0.35)
+        self._add_slider(frame, row, "bg_blend_alpha", "Color blend alpha", 0.35, 0.0, 1.0, resolution=0.01)
         row += 1
 
-        self._add_float(frame, row, "crop_margin", "Person crop margin", 0.25)
-        self._add_float(frame, row, "crop_smoothing", "Person crop smoothing", 0.85, col_offset=2)
+        self._add_slider(frame, row, "crop_margin", "Person crop margin", 0.25, 0.0, 2.0, resolution=0.01)
+        row += 1
+        self._add_slider(frame, row, "crop_smoothing", "Person crop smoothing", 0.85, 0.0, 1.0, resolution=0.01)
         row += 1
 
         ttk.Button(frame, text="Preview", command=self._preview).grid(row=row, column=0, columnspan=2, sticky="ew", pady=10, padx=4)

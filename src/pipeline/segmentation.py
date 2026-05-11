@@ -79,11 +79,25 @@ class MediaPipeSelfieSegmenter(Segmenter):
         return mask
 
 
+class OnnxRuntimeCompatSegmenter(Segmenter):
+    def __init__(self, config: SegmentationConfig) -> None:
+        print(
+            "[seg] onnxruntime backend: ONNX model runtime is not wired yet. "
+            "Using selfie-compatible segmentation path as fallback."
+        )
+        self._delegate = MediaPipeSelfieSegmenter(config)
+
+    def segment(self, frame: np.ndarray) -> np.ndarray:
+        return self._delegate.segment(frame)
+
+
 def build_segmenter(config: SegmentationConfig) -> Segmenter:
     if config.backend == "selfie":
         return MediaPipeSelfieSegmenter(config)
+    if config.backend == "onnxruntime":
+        return OnnxRuntimeCompatSegmenter(config)
     if config.backend == "mock":
         return MockSegmenter()
-    if config.backend in {"tensorrt", "onnxruntime"}:
+    if config.backend in {"tensorrt"}:
         return UnsupportedSegmenter(config.backend)
     raise ValueError(f"Unsupported segmentation backend: {config.backend}")
