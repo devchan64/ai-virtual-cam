@@ -7,6 +7,10 @@ CMIO_DIR="$ROOT_DIR/macos/cmio"
 STATUS_FILE="$CMIO_DIR/.phase0_bootstrapped"
 RUNTIME_READY_FILE="$CMIO_DIR/.runtime_ready"
 XCODE_PROJECT_FILE="$CMIO_DIR/AVCVirtualCam.xcodeproj/project.pbxproj"
+HOST_APP_SWIFT="$CMIO_DIR/host/App.swift"
+HOST_INFO_PLIST="$CMIO_DIR/host/Info.plist"
+EXT_PROVIDER_SWIFT="$CMIO_DIR/extension/CameraExtensionProvider.swift"
+EXT_INFO_PLIST="$CMIO_DIR/extension/Info.plist"
 ok=1
 
 log() {
@@ -63,6 +67,15 @@ else
   log "WARN: runtime ready marker missing (install not complete)"
   ok=0
 fi
+
+for f in "$HOST_APP_SWIFT" "$HOST_INFO_PLIST" "$EXT_PROVIDER_SWIFT" "$EXT_INFO_PLIST"; do
+  if [[ -f "$f" ]]; then
+    log "OK: scaffold file exists -> $f"
+  else
+    log "WARN: scaffold file missing -> $f"
+    ok=0
+  fi
+done
 
 if [[ -f "$CONFIG_PATH" ]]; then
   backend="$(python3 - <<PY

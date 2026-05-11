@@ -9,6 +9,12 @@ STATUS_FILE="$CMIO_DIR/.phase0_bootstrapped"
 RUNTIME_READY_FILE="$CMIO_DIR/.runtime_ready"
 XCODE_PROJECT_FILE="$CMIO_DIR/AVCVirtualCam.xcodeproj/project.pbxproj"
 XCODE_PROJECT_DIR="$(dirname "$XCODE_PROJECT_FILE")"
+HOST_APP_SWIFT="$HOST_DIR/App.swift"
+HOST_INFO_PLIST="$HOST_DIR/Info.plist"
+HOST_ENTITLEMENTS="$HOST_DIR/AVCVirtualCamHost.entitlements"
+EXT_PROVIDER_SWIFT="$EXT_DIR/CameraExtensionProvider.swift"
+EXT_INFO_PLIST="$EXT_DIR/Info.plist"
+EXT_ENTITLEMENTS="$EXT_DIR/AVCVirtualCamExtension.entitlements"
 
 log() {
   printf '[ai-virtual-cam] %s\n' "$*"
@@ -59,7 +65,84 @@ EOF
   log "  - $XCODE_PROJECT_FILE"
 fi
 
+if [[ ! -f "$HOST_APP_SWIFT" ]]; then
+  cat >"$HOST_APP_SWIFT" <<'EOF'
+import Foundation
+
+@main
+struct AVCVirtualCamHost {
+    static func main() {
+        print("[cmio-host] placeholder host started")
+        RunLoop.main.run()
+    }
+}
+EOF
+fi
+
+if [[ ! -f "$HOST_INFO_PLIST" ]]; then
+  cat >"$HOST_INFO_PLIST" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>com.aivirtualcam.host</string>
+  <key>CFBundleName</key>
+  <string>AVCVirtualCamHost</string>
+</dict>
+</plist>
+EOF
+fi
+
+if [[ ! -f "$HOST_ENTITLEMENTS" ]]; then
+  cat >"$HOST_ENTITLEMENTS" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+</dict>
+</plist>
+EOF
+fi
+
+if [[ ! -f "$EXT_PROVIDER_SWIFT" ]]; then
+  cat >"$EXT_PROVIDER_SWIFT" <<'EOF'
+import Foundation
+
+public final class CameraExtensionProvider {
+    public init() {}
+}
+EOF
+fi
+
+if [[ ! -f "$EXT_INFO_PLIST" ]]; then
+  cat >"$EXT_INFO_PLIST" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>com.aivirtualcam.extension</string>
+  <key>CFBundleName</key>
+  <string>AVCVirtualCamExtension</string>
+</dict>
+</plist>
+EOF
+fi
+
+if [[ ! -f "$EXT_ENTITLEMENTS" ]]; then
+  cat >"$EXT_ENTITLEMENTS" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+</dict>
+</plist>
+EOF
+fi
+
 date -u +"%Y-%m-%dT%H:%M:%SZ" >"$RUNTIME_READY_FILE"
 log "CMIO project detected: $XCODE_PROJECT_FILE"
 log "Marked runtime as ready: $RUNTIME_READY_FILE"
-log "NOTE: this is Phase 0 scaffold only; streaming runtime is still pending implementation."
+log "Generated Host/Extension scaffold sources under: $CMIO_DIR"
+log "NOTE: streaming runtime is still pending implementation."
