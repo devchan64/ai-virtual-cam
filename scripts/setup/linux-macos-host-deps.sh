@@ -267,7 +267,7 @@ verify_host_contract() {
 
 install_macos_packages() {
   log "Installing base packages with Homebrew (macOS)"
-  brew_install python@3.12 python-tk@3.12 ffmpeg opencv
+  brew_install python@3.12 python-tk@3.12 ffmpeg opencv xcodegen
   if [[ -x "/opt/homebrew/bin/python3.12" && "$DRY_RUN" -eq 0 ]]; then
     local venv_path
     local recreate_venv

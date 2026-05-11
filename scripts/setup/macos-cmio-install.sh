@@ -9,6 +9,7 @@ STATUS_FILE="$CMIO_DIR/.phase0_bootstrapped"
 RUNTIME_READY_FILE="$CMIO_DIR/.runtime_ready"
 XCODE_PROJECT_FILE="$CMIO_DIR/AVCVirtualCam.xcodeproj/project.pbxproj"
 XCODE_PROJECT_DIR="$(dirname "$XCODE_PROJECT_FILE")"
+XCODEGEN_SPEC_FILE="$CMIO_DIR/project.yml"
 HOST_APP_SWIFT="$HOST_DIR/App.swift"
 HOST_INFO_PLIST="$HOST_DIR/Info.plist"
 HOST_ENTITLEMENTS="$HOST_DIR/AVCVirtualCamHost.entitlements"
@@ -31,7 +32,6 @@ fi
 
 log "Preparing CMIO Phase 0 workspace"
 mkdir -p "$HOST_DIR" "$EXT_DIR"
-mkdir -p "$XCODE_PROJECT_DIR"
 
 if [[ ! -f "$CMIO_DIR/README.md" ]]; then
   cat >"$CMIO_DIR/README.md" <<'EOF'
@@ -50,20 +50,27 @@ fi
 
 date -u +"%Y-%m-%dT%H:%M:%SZ" >"$STATUS_FILE"
 
-if [[ ! -f "$XCODE_PROJECT_FILE" ]]; then
-  cat >"$XCODE_PROJECT_FILE" <<'EOF'
-// !$*UTF8*$!
-{
-  archiveVersion = 1;
-  classes = {};
-  objectVersion = 56;
-  objects = {};
-  rootObject = 000000000000000000000000;
-}
-EOF
-  log "Created CMIO Phase 0 placeholder project file:"
-  log "  - $XCODE_PROJECT_FILE"
+if ! command -v xcodegen >/dev/null 2>&1; then
+  fail "xcodegen is required to generate CMIO Xcode project. Re-run ./bin/avc setup after installing xcodegen."
 fi
+
+if ! xcodebuild -version >/dev/null 2>&1; then
+  fail "Full Xcode is required for CMIO build steps.
+Install Xcode.app, open it once, then select it:
+  sudo xcode-select -s /Applications/Xcode.app/Contents/Developer"
+fi
+
+if [[ ! -f "$XCODEGEN_SPEC_FILE" ]]; then
+  fail "CMIO XcodeGen spec missing: $XCODEGEN_SPEC_FILE"
+fi
+
+log "Generating Xcode project from spec"
+# Clean broken/nested project artifacts from older setup runs.
+if [[ -d "$XCODE_PROJECT_DIR" ]]; then
+  rm -rf "$XCODE_PROJECT_DIR"
+fi
+
+xcodegen --spec "$XCODEGEN_SPEC_FILE" --project "$CMIO_DIR"
 
 if [[ ! -f "$HOST_APP_SWIFT" ]]; then
   cat >"$HOST_APP_SWIFT" <<'EOF'
@@ -145,4 +152,4 @@ date -u +"%Y-%m-%dT%H:%M:%SZ" >"$RUNTIME_READY_FILE"
 log "CMIO project detected: $XCODE_PROJECT_FILE"
 log "Marked runtime as ready: $RUNTIME_READY_FILE"
 log "Generated Host/Extension scaffold sources under: $CMIO_DIR"
-log "NOTE: streaming runtime is still pending implementation."
+log "NOTE: streaming runtime bridge is still pending implementation."

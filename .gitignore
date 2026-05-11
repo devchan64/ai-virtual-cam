@@ -2,3 +2,7 @@ __pycache__/
 *.pyc
 .venv/
 /output/
+
+# CMIO setup runtime markers
+macos/cmio/.phase0_bootstrapped
+macos/cmio/.runtime_ready

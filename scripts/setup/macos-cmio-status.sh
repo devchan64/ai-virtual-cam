@@ -36,6 +36,14 @@ check_cmd xcodebuild
 check_cmd xcrun
 check_cmd python3
 
+if xcodebuild -version >/dev/null 2>&1; then
+  log "OK: full Xcode developer directory is active"
+else
+  log "WARN: full Xcode is not active (current xcodebuild is not usable for CMIO)"
+  log "      install Xcode.app and run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer"
+  ok=0
+fi
+
 if [[ -d "$CMIO_DIR" ]]; then
   log "OK: CMIO workspace exists -> $CMIO_DIR"
 else
@@ -54,7 +62,18 @@ fi
 if [[ -f "$XCODE_PROJECT_FILE" ]]; then
   log "OK: CMIO Xcode project exists"
   if grep -q "000000000000000000000000" "$XCODE_PROJECT_FILE"; then
-    log "INFO: placeholder Xcode project detected (Phase 0 scaffold)."
+    log "WARN: placeholder pbxproj detected (invalid project)"
+    ok=0
+  fi
+  if [[ -d "$CMIO_DIR/AVCVirtualCam.xcodeproj/AVCVirtualCam.xcodeproj" ]]; then
+    log "WARN: nested .xcodeproj detected from old generation"
+    ok=0
+  fi
+  if xcodebuild -list -project "$CMIO_DIR/AVCVirtualCam.xcodeproj" >/dev/null 2>&1; then
+    log "OK: xcodebuild can read CMIO project"
+  else
+    log "WARN: xcodebuild cannot read CMIO project"
+    ok=0
   fi
 else
   log "WARN: CMIO Xcode project missing -> $XCODE_PROJECT_FILE"

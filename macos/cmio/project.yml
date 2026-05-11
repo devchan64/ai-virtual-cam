@@ -1,0 +1,32 @@
+name: AVCVirtualCam
+options:
+  bundleIdPrefix: com.aivirtualcam
+targets:
+  AVCVirtualCamHost:
+    type: application
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources:
+      - host
+    info:
+      path: host/Info.plist
+    entitlements:
+      path: host/AVCVirtualCamHost.entitlements
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.aivirtualcam.host
+      PRODUCT_NAME: AVCVirtualCamHost
+      SWIFT_VERSION: 5.0
+  AVCVirtualCamExtension:
+    type: app-extension
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources:
+      - extension
+    info:
+      path: extension/Info.plist
+    entitlements:
+      path: extension/AVCVirtualCamExtension.entitlements
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.aivirtualcam.extension
+      PRODUCT_NAME: AVCVirtualCamExtension
+      SWIFT_VERSION: 5.0
