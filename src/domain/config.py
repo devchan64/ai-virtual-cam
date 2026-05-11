@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import platform
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -71,12 +72,13 @@ class OutputCameraConfig:
 
     @classmethod
     def from_dict(cls, raw: dict) -> "OutputCameraConfig":
+        default_backend = "pyvirtualcam" if platform.system() == "Darwin" else "opencv"
         config = cls(
             devicePath=str(raw["devicePath"]),
             width=int(raw["width"]),
             height=int(raw["height"]),
             fps=int(raw["fps"]),
-            backend=str(raw.get("backend", "opencv")),
+            backend=str(raw.get("backend", default_backend)),
         )
         if not config.devicePath:
             raise ValueError("outputCamera.devicePath is required")

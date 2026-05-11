@@ -34,6 +34,12 @@ def _segmentation_backend_options():
     return ["selfie", "mock", "onnxruntime", "tensorrt"]
 
 
+def _output_backend_options():
+    if platform.system() == "Darwin":
+        return ["pyvirtualcam", "opencv"]
+    return ["opencv", "pyvirtualcam"]
+
+
 class ConfigGui:
     def __init__(self, root: tk.Tk, output_path: str) -> None:
         self.root = root
@@ -60,8 +66,9 @@ class ConfigGui:
             frame.columnconfigure(col, weight=1 if col in (1, 3) else 0)
 
         row = 0
+        is_macos = platform.system() == "Darwin"
         cameras = discover_cameras()
-        camera_values = [c["devicePath"] for c in cameras] or ["/dev/video0"]
+        camera_values = [c["devicePath"] for c in cameras] or (["0"] if is_macos else ["/dev/video0"])
 
         self._add_combo(frame, row, "input_device", "Input device", camera_values, camera_values[0])
         row += 1
@@ -71,7 +78,10 @@ class ConfigGui:
         self._add_int(frame, row, "input_fps", "Input FPS", 30)
         row += 1
 
-        self._add_text(frame, row, "output_device", "Output path", "output/virtual-cam-preview.mp4")
+        self._add_combo(frame, row, "output_backend", "Output backend", _output_backend_options(), _output_backend_options()[0])
+        row += 1
+        default_output_device = "virtual-cam" if is_macos else "/dev/video10"
+        self._add_text(frame, row, "output_device", "Output path", default_output_device)
         row += 1
         self._add_int(frame, row, "output_width", "Output width", 1280)
         self._add_int(frame, row, "output_height", "Output height", 720, col_offset=2)
@@ -314,6 +324,7 @@ class ConfigGui:
             output_width=output_w,
             output_height=output_h,
             output_fps=int(iv["output_fps"].get()),
+            output_backend=iv["output_backend"].get(),
             segmentation_backend=iv["seg_backend"].get(),
             segmentation_threshold=float(iv["seg_threshold"].get()),
             segmentation_edge_smoothness=float(iv["seg_edge_smoothness"].get()),

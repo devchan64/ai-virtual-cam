@@ -11,6 +11,7 @@ def build_config(
     output_width: int,
     output_height: int,
     output_fps: int,
+    output_backend: str = "opencv",
     segmentation_backend: str,
     segmentation_threshold: float,
     segmentation_selfie_model_selection: int = 1,
@@ -34,6 +35,7 @@ def build_config(
             "width": output_width,
             "height": output_height,
             "fps": output_fps,
+            "backend": output_backend,
         },
         "segmentation": {
             "backend": segmentation_backend,

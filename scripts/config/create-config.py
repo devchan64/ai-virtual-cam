@@ -102,7 +102,8 @@ def prompt_crop(prefix, default_width, default_height):
 
 def choose_camera(cameras):
     if not cameras:
-        return prompt_path("Input camera device path", default="/dev/video0")
+        default_input = "0" if platform.system() == "Darwin" else "/dev/video0"
+        return prompt_path("Input camera device path", default=default_input)
 
     print("Detected camera interfaces:")
     for index, camera in enumerate(cameras, start=1):
@@ -121,6 +122,7 @@ def choose_camera(cameras):
 
 
 def build_config():
+    is_macos = platform.system() == "Darwin"
     cameras = discover_cameras()
     input_camera_path = choose_camera(cameras)
 
@@ -130,7 +132,15 @@ def build_config():
     input_fps = prompt_int("  fps", default=30, minimum=1)
 
     print("\nOutput camera settings")
-    output_camera_path = prompt_path("  device path", default="/dev/video10")
+    output_backend = prompt_choice(
+        "  backend",
+        ["pyvirtualcam", "opencv"] if is_macos else ["opencv", "pyvirtualcam"],
+        default="pyvirtualcam" if is_macos else "opencv",
+    )
+    output_camera_path = prompt_path(
+        "  device path",
+        default="virtual-cam" if output_backend == "pyvirtualcam" else "/dev/video10",
+    )
     output_width = prompt_int("  width", default=input_width, minimum=1)
     output_height = prompt_int("  height", default=input_height, minimum=1)
     output_fps = prompt_int("  fps", default=input_fps, minimum=1)
@@ -185,6 +195,7 @@ def build_config():
         output_width=output_width,
         output_height=output_height,
         output_fps=output_fps,
+        output_backend=output_backend,
         segmentation_backend=segmentation_backend,
         segmentation_threshold=segmentation_threshold,
         segmentation_edge_smoothness=segmentation_edge_smoothness,
