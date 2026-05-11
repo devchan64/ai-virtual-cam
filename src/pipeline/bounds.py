@@ -69,6 +69,12 @@ class BoundsTracker:
         h = max(1, min(h, frame_h))
         x = clamp_int(x, 0, max(0, frame_w - w))
         y = clamp_int(y, 0, max(0, frame_h - h))
+        free_x = max(0, frame_w - w)
+        free_y = max(0, frame_h - h)
+        offset_x = int(round(self._config.panTargetOffsetX * (free_x * 0.5)))
+        offset_y = int(round(self._config.panTargetOffsetY * (free_y * 0.5)))
+        x = clamp_int(x + offset_x, 0, free_x)
+        y = clamp_int(y + offset_y, 0, free_y)
         smoothed = Bounds(x=x, y=y, width=w, height=h)
         self._previous = smoothed
         return smoothed
@@ -80,9 +86,13 @@ class BoundsTracker:
         if points.size == 0:
             return Bounds(0, 0, width, height)
 
-        y_min, x_min = points.min(axis=0)
-        y_max, x_max = points.max(axis=0)
-
+        # Robust bbox: trim tail noise so tilt can react even when mask leaks downward.
+        ys = points[:, 0].astype(np.float32)
+        xs = points[:, 1].astype(np.float32)
+        y_min = int(np.percentile(ys, 2.0))
+        y_max = int(np.percentile(ys, 92.0))
+        x_min = int(np.percentile(xs, 2.0))
+        x_max = int(np.percentile(xs, 98.0))
         bbox_width = max(1, int(x_max - x_min + 1))
         bbox_height = max(1, int(y_max - y_min + 1))
 
@@ -98,13 +108,12 @@ class BoundsTracker:
         target_h = min(height, max(1, bbox_height + margin_y * 2))
         target_w, target_h = self._fit_aspect(target_w, target_h, width, height)
         biased_center_y = int(round(center_y - bbox_height * self._config.upperBodyBias))
-        offset_x = int(round(self._config.panTargetOffsetX * (target_w * 0.5)))
-        offset_y = int(round(self._config.panTargetOffsetY * (target_h * 0.5)))
-        target_center_x = center_x + offset_x
-        target_center_y = biased_center_y + offset_y
-
-        x = clamp_int(target_center_x - target_w // 2, 0, max(0, width - target_w))
-        y = clamp_int(target_center_y - target_h // 2, 0, max(0, height - target_h))
+        base_x = center_x - target_w // 2
+        base_y = biased_center_y - target_h // 2
+        free_x = max(0, width - target_w)
+        free_y = max(0, height - target_h)
+        x = clamp_int(base_x, 0, free_x)
+        y = clamp_int(base_y, 0, free_y)
 
         return Bounds(
             x=x,

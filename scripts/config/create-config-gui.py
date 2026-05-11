@@ -26,7 +26,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from src.tools.config_builder import build_config
-from src.tools.config_io import discover_cameras, write_config
+from src.tools.config_io import discover_camera_mode_options, discover_cameras, write_config
 
 
 def _segmentation_backend_options():
@@ -53,6 +53,8 @@ class ConfigGui:
         self._preview_processing_signature = None
         self._preview_out_size = (0, 0)
         self._preview_window_name = "ai-virtual-cam preview (press q or esc to close)"
+        self._widgets: dict[str, object] = {}
+        self._input_modes: list[tuple[int, int, str]] = []
         self._build_form()
         self._load_existing_config()
 
@@ -84,12 +86,21 @@ class ConfigGui:
         camera_values = [c["devicePath"] for c in cameras] or (["0"] if is_macos else ["/dev/video0"])
 
         row = 0
-        self._add_combo(tab_io, row, "input_device", "Input device", camera_values, camera_values[0])
+        self._add_combo(tab_io, row, "input_device", "Input device", camera_values, camera_values[0], readonly=True)
         row += 1
-        self._add_int(tab_io, row, "input_width", "Input width", 1280)
-        self._add_int(tab_io, row, "input_height", "Input height", 720, col_offset=2)
+        initial_modes = discover_camera_mode_options(camera_values[0]) if camera_values else [(1280, 720, "30")]
+        width_values = sorted({str(w) for w, _h, _fps in initial_modes}, key=lambda v: int(v))
+        default_w = width_values[0] if width_values else "1280"
+        height_values = sorted({str(h) for w, h, _fps in initial_modes if str(w) == default_w}, key=lambda v: int(v))
+        default_h = height_values[0] if height_values else "720"
+        self._add_combo(tab_io, row, "input_width", "Input width", width_values, default_w)
+        self._add_combo(tab_io, row, "input_height", "Input height", height_values, default_h, col_offset=2)
         row += 1
-        self._add_int(tab_io, row, "input_fps", "Input FPS", 30)
+        fps_values = sorted(
+            {fps for w, h, fps in initial_modes if str(w) == default_w and str(h) == default_h},
+            key=lambda v: float(v),
+        ) or ["30"]
+        self._add_combo(tab_io, row, "input_fps", "Input FPS", fps_values, "30")
         row += 1
         self._add_slider(tab_io, row, "input_software_zoom", "Input SW zoom", 1.0, 1.0, 4.0, resolution=0.01)
         row += 1
@@ -169,15 +180,27 @@ class ConfigGui:
         action.columnconfigure(1, weight=1)
         ttk.Button(action, text="Preview", command=self._preview).grid(row=0, column=0, sticky="ew", padx=4)
         ttk.Button(action, text="Save JSON", command=self._save).grid(row=0, column=1, sticky="ew", padx=4)
+        input_device_widget = self._widgets.get("input_device")
+        if input_device_widget is not None:
+            input_device_widget.bind("<<ComboboxSelected>>", self._on_input_device_changed)
+        input_width_widget = self._widgets.get("input_width")
+        if input_width_widget is not None:
+            input_width_widget.bind("<<ComboboxSelected>>", self._on_input_width_changed)
+        input_height_widget = self._widgets.get("input_height")
+        if input_height_widget is not None:
+            input_height_widget.bind("<<ComboboxSelected>>", self._on_input_height_changed)
 
-    def _add_text(self, parent, row, key, label, default, col_offset=0):
+    def _add_text(self, parent, row, key, label, default, col_offset=0, readonly=False):
         ttk.Label(parent, text=label).grid(row=row, column=col_offset, sticky="w")
         var = tk.StringVar(value=default)
         self.vars[key] = var
-        ttk.Entry(parent, textvariable=var).grid(row=row, column=col_offset + 1, sticky="ew", padx=4)
+        entry = ttk.Entry(parent, textvariable=var)
+        if readonly:
+            entry.state(["disabled"])
+        entry.grid(row=row, column=col_offset + 1, sticky="ew", padx=4)
 
-    def _add_int(self, parent, row, key, label, default, col_offset=0):
-        self._add_text(parent, row, key, label, str(default), col_offset)
+    def _add_int(self, parent, row, key, label, default, col_offset=0, readonly=False):
+        self._add_text(parent, row, key, label, str(default), col_offset, readonly=readonly)
 
     def _add_float(self, parent, row, key, label, default, col_offset=0):
         self._add_text(parent, row, key, label, str(default), col_offset)
@@ -214,11 +237,78 @@ class ConfigGui:
         )
         ttk.Label(parent, textvariable=value_var).grid(row=row, column=3, sticky="e")
 
-    def _add_combo(self, parent, row, key, label, values, default):
-        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w")
+    def _add_combo(self, parent, row, key, label, values, default, readonly=False, col_offset=0):
+        ttk.Label(parent, text=label).grid(row=row, column=col_offset, sticky="w")
         var = tk.StringVar(value=default)
         self.vars[key] = var
-        ttk.Combobox(parent, textvariable=var, values=values, state="readonly").grid(row=row, column=1, columnspan=3, sticky="ew", padx=4)
+        state = "disabled" if readonly else "readonly"
+        combo = ttk.Combobox(parent, textvariable=var, values=values, state=state)
+        span = 3 if col_offset == 0 else 1
+        combo.grid(row=row, column=col_offset + 1, columnspan=span, sticky="ew", padx=4)
+        self._widgets[key] = combo
+
+    def _on_input_device_changed(self, _event=None):
+        device = self.vars["input_device"].get().strip()
+        self._input_modes = discover_camera_mode_options(device)
+        width_values = sorted({str(w) for w, _h, _fps in self._input_modes}, key=lambda v: int(v))
+        width_combo = self._widgets.get("input_width")
+        if width_combo is not None:
+            width_combo["values"] = width_values
+        if self.vars["input_width"].get().strip() not in width_values:
+            self.vars["input_width"].set(width_values[0] if width_values else "1280")
+        self._refresh_input_height_values()
+        self._refresh_input_fps_values()
+
+    def _on_input_width_changed(self, _event=None):
+        self._refresh_input_height_values()
+        self._refresh_input_fps_values()
+
+    def _on_input_height_changed(self, _event=None):
+        # If current pair is unsupported, snap to the first valid pair.
+        try:
+            w = int(self.vars["input_width"].get().strip())
+            h = int(self.vars["input_height"].get().strip())
+        except ValueError:
+            return
+        valid_pairs = {(ww, hh) for ww, hh, _fps in self._input_modes}
+        if self._input_modes and (w, h) not in valid_pairs:
+            w0, h0, _fps0 = self._input_modes[0]
+            self.vars["input_width"].set(str(w0))
+            self.vars["input_height"].set(str(h0))
+            self._refresh_input_height_values()
+        self._refresh_input_fps_values()
+
+    def _refresh_input_height_values(self):
+        width_raw = self.vars["input_width"].get().strip()
+        try:
+            w = int(width_raw)
+        except ValueError:
+            return
+        heights = sorted({str(h) for ww, h, _fps in self._input_modes if ww == w}, key=lambda v: int(v))
+        if not heights:
+            heights = ["720"]
+        height_combo = self._widgets.get("input_height")
+        if height_combo is not None:
+            height_combo["values"] = heights
+        current_h = self.vars["input_height"].get().strip()
+        if current_h not in heights:
+            self.vars["input_height"].set(heights[0])
+
+    def _refresh_input_fps_values(self):
+        try:
+            w = int(self.vars["input_width"].get().strip())
+            h = int(self.vars["input_height"].get().strip())
+        except ValueError:
+            return
+        fps_values = sorted({fps for ww, hh, fps in self._input_modes if ww == w and hh == h}, key=lambda v: float(v))
+        if not fps_values:
+            fps_values = ["30"]
+        fps_combo = self._widgets.get("input_fps")
+        if fps_combo is not None:
+            fps_combo["values"] = fps_values
+        current = self.vars["input_fps"].get().strip()
+        if current not in fps_values:
+            self.vars["input_fps"].set(fps_values[0])
 
     def _pick_bg_image(self):
         selected = filedialog.askopenfilename(title="Select background image")
@@ -285,6 +375,8 @@ class ConfigGui:
         self._set_var("crop_tilt_pid_kd", crop_cfg.get("tiltPidKd", crop_cfg.get("panPidKd")))
         self._set_var("crop_pan_target_offset_x", crop_cfg.get("panTargetOffsetX"))
         self._set_var("crop_pan_target_offset_y", crop_cfg.get("panTargetOffsetY"))
+        self._on_input_device_changed()
+        self._on_input_width_changed()
 
     def _set_var(self, key: str, value):
         if value is None:
