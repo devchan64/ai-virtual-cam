@@ -221,8 +221,8 @@ def parse_args():
     )
     parser.add_argument(
         "--output",
-        default="config/settings.json",
-        help="Output JSON file path (default: config/settings.json)",
+        default="~/.avc/setting.json",
+        help="Output JSON file path (default: ~/.avc/setting.json)",
     )
     parser.add_argument(
         "--list-cameras",

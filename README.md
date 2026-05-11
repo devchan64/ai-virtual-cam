@@ -27,7 +27,7 @@ USB Camera
 저장된 설정으로 가상카메라 스트림 실행:
 
 ```bash
-./bin/avc serve --config config/settings.json
+./bin/avc serve --config ~/.avc/setting.json
 ```
 
 ## Goals
@@ -211,14 +211,14 @@ docker run --rm -it \
 설정 파일 생성:
 
 ```bash
-./bin/avc config --output config/settings.json
+./bin/avc config --output ~/.avc/setting.json
 ```
 
 
 GUI 기반 설정 도구(기본 `tkinter`):
 
 ```bash
-./bin/avc config-gui --output config/settings.json
+./bin/avc config-gui --output ~/.avc/setting.json
 ```
 
 현재 구현된 backend:

@@ -16,7 +16,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the ai-virtual-cam pipeline.")
     parser.add_argument(
         "--config",
-        default="config/settings.json",
+        default="~/.avc/setting.json",
         help="Path to the JSON config file.",
     )
     parser.add_argument(
@@ -30,7 +30,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    config_path = Path(args.config)
+    config_path = Path(args.config).expanduser()
     config = AppConfig.load(config_path)
 
     capture = OpenCVCapture(config.inputCamera)

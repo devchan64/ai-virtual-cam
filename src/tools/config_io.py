@@ -34,6 +34,6 @@ def discover_cameras() -> list[dict[str, str]]:
 
 
 def write_config(output_path: str, config: dict) -> None:
-    output_file = Path(output_path)
+    output_file = Path(output_path).expanduser()
     output_file.parent.mkdir(parents=True, exist_ok=True)
     output_file.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")

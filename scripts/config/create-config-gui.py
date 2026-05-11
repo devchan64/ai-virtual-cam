@@ -328,7 +328,7 @@ class ConfigGui:
 
 def parse_args():
     parser = argparse.ArgumentParser(description="GUI config generator for ai-virtual-cam")
-    parser.add_argument("--output", default="config/settings.json")
+    parser.add_argument("--output", default="~/.avc/setting.json")
     return parser.parse_args()
 
 

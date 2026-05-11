@@ -10,8 +10,8 @@ Usage:
   ./bin/avc serve [--config PATH] [--max-frames N]
 
 Examples:
-  ./bin/avc serve --config config/settings.json
-  ./bin/avc serve --config config/settings.json --max-frames 300
+  ./bin/avc serve --config ~/.avc/setting.json
+  ./bin/avc serve --config ~/.avc/setting.json --max-frames 300
 EOF
   exit 0
 fi
