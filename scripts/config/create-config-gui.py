@@ -8,10 +8,11 @@ from pathlib import Path
 
 try:
     import tkinter as tk
-    from tkinter import filedialog, messagebox, ttk
+    from tkinter import colorchooser, filedialog, messagebox, ttk
     TK_IMPORT_ERROR = None
 except ModuleNotFoundError as exc:
     tk = None
+    colorchooser = None
     filedialog = None
     messagebox = None
     ttk = None
@@ -75,6 +76,7 @@ class ConfigGui:
         self._add_int(frame, row, "bg_g", "Chroma G", 255, col_offset=2)
         row += 1
         self._add_int(frame, row, "bg_b", "Chroma B", 0)
+        ttk.Button(frame, text="Pick Color", command=self._pick_chroma_color).grid(row=row, column=2, sticky="ew", padx=4)
         row += 1
         self._add_float(frame, row, "bg_blend_alpha", "Color blend alpha", 0.35)
         row += 1
@@ -83,7 +85,8 @@ class ConfigGui:
         self._add_float(frame, row, "crop_smoothing", "Person crop smoothing", 0.85, col_offset=2)
         row += 1
 
-        ttk.Button(frame, text="Save JSON", command=self._save).grid(row=row, column=0, columnspan=4, sticky="ew", pady=10)
+        ttk.Button(frame, text="Preview", command=self._preview).grid(row=row, column=0, columnspan=2, sticky="ew", pady=10, padx=4)
+        ttk.Button(frame, text="Save JSON", command=self._save).grid(row=row, column=2, columnspan=2, sticky="ew", pady=10, padx=4)
 
     def _add_text(self, parent, row, key, label, default, col_offset=0):
         ttk.Label(parent, text=label).grid(row=row, column=col_offset, sticky="w")
@@ -108,6 +111,23 @@ class ConfigGui:
         if selected:
             self.vars["bg_image"].set(selected)
 
+    def _pick_chroma_color(self):
+        rgb_default = (
+            int(self.vars["bg_r"].get()),
+            int(self.vars["bg_g"].get()),
+            int(self.vars["bg_b"].get()),
+        )
+        picked_rgb, _ = colorchooser.askcolor(
+            color="#%02x%02x%02x" % rgb_default,
+            title="Select chroma color",
+        )
+        if picked_rgb is None:
+            return
+        r, g, b = (int(picked_rgb[0]), int(picked_rgb[1]), int(picked_rgb[2]))
+        self.vars["bg_r"].set(str(r))
+        self.vars["bg_g"].set(str(g))
+        self.vars["bg_b"].set(str(b))
+
     def _save(self):
         try:
             config = self._build_config()
@@ -115,6 +135,51 @@ class ConfigGui:
             messagebox.showinfo("Saved", f"Config saved to {self.output_path}")
         except Exception as exc:
             messagebox.showerror("Validation error", str(exc))
+
+    def _preview(self):
+        try:
+            config = self._build_config()
+            self._run_preview(config)
+        except Exception as exc:
+            messagebox.showerror("Preview error", str(exc))
+
+    def _run_preview(self, config: dict) -> None:
+        import cv2
+        from src.adapter.capture.opencv_capture import OpenCVCapture
+        from src.domain.config import BackgroundConfig, InputCameraConfig, SegmentationConfig
+        from src.pipeline.background import BackgroundProvider
+        from src.pipeline.composer import Composer
+        from src.pipeline.mask_processing import refine_mask
+        from src.pipeline.segmentation import build_segmenter
+
+        input_cfg = InputCameraConfig.from_dict(config["inputCamera"])
+        seg_cfg = SegmentationConfig.from_dict(config["segmentation"])
+        bg_cfg = BackgroundConfig.from_dict(config["background"])
+        output_w = int(config["outputCamera"]["width"])
+        output_h = int(config["outputCamera"]["height"])
+
+        capture = OpenCVCapture(input_cfg)
+        segmenter = build_segmenter(seg_cfg)
+        background = BackgroundProvider(bg_cfg, output_w, output_h)
+        composer = Composer()
+
+        window_name = "ai-virtual-cam preview (press q or esc to close)"
+        try:
+            while True:
+                frame = capture.read()
+                raw_mask = segmenter.segment(frame)
+                mask = refine_mask(raw_mask, seg_cfg.threshold)
+                bg = background.frame()
+                composed = composer.compose(frame, mask, bg)
+                if composed.shape[1] != output_w or composed.shape[0] != output_h:
+                    composed = cv2.resize(composed, (output_w, output_h), interpolation=cv2.INTER_LINEAR)
+                cv2.imshow(window_name, composed)
+                key = cv2.waitKey(1) & 0xFF
+                if key in (27, ord("q")):
+                    break
+        finally:
+            capture.release()
+            cv2.destroyWindow(window_name)
 
     def _build_config(self):
         iv = self.vars

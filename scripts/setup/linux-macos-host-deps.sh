@@ -267,6 +267,11 @@ verify_host_contract() {
 install_macos_packages() {
   log "Installing base packages with Homebrew (macOS)"
   brew_install python@3.12 python-tk@3.12 ffmpeg opencv
+  if [[ -x "/opt/homebrew/bin/python3.12" ]]; then
+    log "Installing Python packages for GUI preview support"
+    run /opt/homebrew/bin/python3.12 -m pip install --upgrade pip
+    run /opt/homebrew/bin/python3.12 -m pip install opencv-python numpy
+  fi
   log "If tkinter is still unavailable, use Python 3.12 from Homebrew for GUI:"
   log "  /opt/homebrew/opt/python@3.12/bin/python3 scripts/config/create-config-gui.py"
 }

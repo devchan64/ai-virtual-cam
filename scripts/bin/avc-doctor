@@ -7,7 +7,11 @@ if ! command -v python3 >/dev/null 2>&1; then
   ok=0
 fi
 if command -v python3 >/dev/null 2>&1; then
-  if ! python3 -c "import tkinter" >/dev/null 2>&1; then
+  if python3 -c "import tkinter" >/dev/null 2>&1; then
+    :
+  elif [[ -x "/opt/homebrew/bin/python3.12" ]] && /opt/homebrew/bin/python3.12 -c "import tkinter" >/dev/null 2>&1; then
+    echo "[doctor] tkinter available via /opt/homebrew/bin/python3.12 (GUI will use fallback)" >&2
+  else
     echo "[doctor] missing: tkinter module (GUI config unavailable, CLI config still works)" >&2
   fi
 fi
