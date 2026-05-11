@@ -91,15 +91,24 @@ class OutputCameraConfig:
 class SegmentationConfig:
     backend: str
     threshold: float
+    selfieModelSelection: int = 1
+    selfieTemporalSmoothing: float = 0.25
 
     @classmethod
     def from_dict(cls, raw: dict) -> "SegmentationConfig":
+        selfie = raw.get("selfie") or {}
         config = cls(
             backend=str(raw["backend"]),
             threshold=float(raw["threshold"]),
+            selfieModelSelection=int(selfie.get("modelSelection", 1)),
+            selfieTemporalSmoothing=float(selfie.get("temporalSmoothing", 0.25)),
         )
         if not 0.0 <= config.threshold <= 1.0:
             raise ValueError("segmentation.threshold must be between 0.0 and 1.0")
+        if config.selfieModelSelection not in {0, 1}:
+            raise ValueError("segmentation.selfie.modelSelection must be 0 or 1")
+        if not 0.0 <= config.selfieTemporalSmoothing <= 0.95:
+            raise ValueError("segmentation.selfie.temporalSmoothing must be between 0.0 and 0.95")
         return config
 
 

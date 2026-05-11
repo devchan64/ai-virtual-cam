@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+import cv2
 
 try:
     import tkinter as tk
@@ -32,6 +33,15 @@ class ConfigGui:
         self.output_path = output_path
         self.root.title("ai-virtual-cam config GUI")
         self.vars: dict[str, tk.Variable] = {}
+        self._preview_active = False
+        self._preview_capture = None
+        self._preview_segmenter = None
+        self._preview_background = None
+        self._preview_composer = None
+        self._preview_seg_cfg = None
+        self._preview_bg_signature = None
+        self._preview_out_size = (0, 0)
+        self._preview_window_name = "ai-virtual-cam preview (press q or esc to close)"
         self._build_form()
 
     def _build_form(self) -> None:
@@ -62,9 +72,13 @@ class ConfigGui:
         self._add_int(frame, row, "output_fps", "Output FPS", 30)
         row += 1
 
-        self._add_combo(frame, row, "seg_backend", "Seg backend", ["face", "mock", "tensorrt", "onnxruntime"], "face")
+        self._add_combo(frame, row, "seg_backend", "Seg backend", ["selfie", "mock", "tensorrt", "onnxruntime"], "selfie")
         row += 1
         self._add_float(frame, row, "seg_threshold", "Seg threshold", 0.65)
+        row += 1
+        self._add_slider(frame, row, "seg_selfie_model", "Selfie model selection", 1, 0, 1, resolution=1)
+        row += 1
+        self._add_slider(frame, row, "seg_selfie_smoothing", "Selfie temporal smoothing", 0.25, 0.0, 0.95, resolution=0.01)
         row += 1
 
         self._add_combo(frame, row, "bg_mode", "Background mode", ["chroma", "image", "image_chroma"], "chroma")
@@ -99,6 +113,26 @@ class ConfigGui:
 
     def _add_float(self, parent, row, key, label, default, col_offset=0):
         self._add_text(parent, row, key, label, str(default), col_offset)
+
+    def _add_slider(self, parent, row, key, label, default, min_value, max_value, resolution=0.01):
+        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w")
+        var = tk.DoubleVar(value=float(default))
+        self.vars[key] = var
+        value_var = tk.StringVar()
+
+        def format_value(value: float) -> str:
+            if resolution >= 1:
+                return str(int(round(value)))
+            return f"{value:.2f}"
+
+        def on_change(raw):
+            value_var.set(format_value(float(raw)))
+
+        value_var.set(format_value(float(default)))
+        ttk.Scale(parent, from_=min_value, to=max_value, variable=var, command=on_change).grid(
+            row=row, column=1, columnspan=2, sticky="ew", padx=4
+        )
+        ttk.Label(parent, textvariable=value_var).grid(row=row, column=3, sticky="e")
 
     def _add_combo(self, parent, row, key, label, values, default):
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w")
@@ -137,52 +171,108 @@ class ConfigGui:
             messagebox.showerror("Validation error", str(exc))
 
     def _preview(self):
+        if self._preview_active:
+            self._stop_preview()
+            return
         try:
             config = self._build_config()
-            self._run_preview(config)
+            self._start_preview(config)
         except Exception as exc:
             messagebox.showerror("Preview error", str(exc))
 
-    def _run_preview(self, config: dict) -> None:
-        import cv2
+    def _start_preview(self, config: dict) -> None:
         from src.adapter.capture.opencv_capture import OpenCVCapture
         from src.domain.config import BackgroundConfig, InputCameraConfig, SegmentationConfig
         from src.pipeline.background import BackgroundProvider
         from src.pipeline.composer import Composer
-        from src.pipeline.mask_processing import refine_mask
         from src.pipeline.segmentation import build_segmenter
 
         input_cfg = InputCameraConfig.from_dict(config["inputCamera"])
-        seg_cfg = SegmentationConfig.from_dict(config["segmentation"])
+        self._preview_seg_cfg = SegmentationConfig.from_dict(config["segmentation"])
         bg_cfg = BackgroundConfig.from_dict(config["background"])
         output_w = int(config["outputCamera"]["width"])
         output_h = int(config["outputCamera"]["height"])
 
-        capture = OpenCVCapture(input_cfg)
-        segmenter = build_segmenter(seg_cfg)
-        background = BackgroundProvider(bg_cfg, output_w, output_h)
-        composer = Composer()
+        self._preview_capture = OpenCVCapture(input_cfg)
+        self._preview_segmenter = build_segmenter(self._preview_seg_cfg)
+        self._preview_background = BackgroundProvider(bg_cfg, output_w, output_h)
+        self._preview_composer = Composer()
+        self._preview_out_size = (output_w, output_h)
+        self._preview_bg_signature = self._background_signature(config["background"])
+        self._preview_active = True
+        self.root.after(1, self._preview_tick)
 
-        window_name = "ai-virtual-cam preview (press q or esc to close)"
+    def _stop_preview(self) -> None:
+        self._preview_active = False
+        if self._preview_capture is not None:
+            self._preview_capture.release()
+        self._preview_capture = None
+        self._preview_segmenter = None
+        self._preview_background = None
+        self._preview_composer = None
+        self._preview_seg_cfg = None
         try:
-            while True:
-                frame = capture.read()
-                raw_mask = segmenter.segment(frame)
-                mask = refine_mask(raw_mask, seg_cfg.threshold)
-                bg = background.frame()
-                composed = composer.compose(frame, mask, bg)
-                if composed.shape[1] != output_w or composed.shape[0] != output_h:
-                    composed = cv2.resize(composed, (output_w, output_h), interpolation=cv2.INTER_LINEAR)
-                preview_w = max(1, output_w // 2)
-                preview_h = max(1, output_h // 2)
-                preview = cv2.resize(composed, (preview_w, preview_h), interpolation=cv2.INTER_AREA)
-                cv2.imshow(window_name, preview)
-                key = cv2.waitKey(1) & 0xFF
-                if key in (27, ord("q")):
-                    break
-        finally:
-            capture.release()
-            cv2.destroyWindow(window_name)
+            cv2.destroyWindow(self._preview_window_name)
+        except cv2.error:
+            pass
+
+    def _preview_tick(self) -> None:
+        if not self._preview_active:
+            return
+        from src.domain.config import BackgroundConfig, SegmentationConfig
+        from src.pipeline.background import BackgroundProvider
+        from src.pipeline.mask_processing import refine_mask
+        from src.pipeline.segmentation import build_segmenter
+
+        try:
+            frame = self._preview_capture.read()
+            config = self._build_config()
+
+            seg_cfg = SegmentationConfig.from_dict(config["segmentation"])
+            if (
+                self._preview_seg_cfg is None
+                or seg_cfg.backend != self._preview_seg_cfg.backend
+                or seg_cfg.selfieModelSelection != self._preview_seg_cfg.selfieModelSelection
+                or abs(seg_cfg.selfieTemporalSmoothing - self._preview_seg_cfg.selfieTemporalSmoothing) > 1e-6
+            ):
+                self._preview_seg_cfg = seg_cfg
+                self._preview_segmenter = build_segmenter(self._preview_seg_cfg)
+
+            bg_sig = self._background_signature(config["background"])
+            if bg_sig != self._preview_bg_signature:
+                self._preview_bg_signature = bg_sig
+                bg_cfg = BackgroundConfig.from_dict(config["background"])
+                out_w, out_h = self._preview_out_size
+                self._preview_background = BackgroundProvider(bg_cfg, out_w, out_h)
+
+            raw_mask = self._preview_segmenter.segment(frame)
+            mask = refine_mask(raw_mask, self._preview_seg_cfg.threshold)
+            bg = self._preview_background.frame()
+            out_w, out_h = self._preview_out_size
+            composed = self._preview_composer.compose(frame, mask, bg)
+            if composed.shape[1] != out_w or composed.shape[0] != out_h:
+                composed = cv2.resize(composed, (out_w, out_h), interpolation=cv2.INTER_LINEAR)
+            preview = cv2.resize(composed, (max(1, out_w // 2), max(1, out_h // 2)), interpolation=cv2.INTER_AREA)
+            cv2.imshow(self._preview_window_name, preview)
+            key = cv2.waitKey(1) & 0xFF
+            if key in (27, ord("q")):
+                self._stop_preview()
+                return
+        except Exception as exc:
+            self._stop_preview()
+            messagebox.showerror("Preview error", str(exc))
+            return
+
+        self.root.after(1, self._preview_tick)
+
+    def _background_signature(self, background: dict):
+        return (
+            background.get("mode"),
+            tuple(background.get("chromaColor") or []),
+            background.get("imagePath"),
+            tuple((background.get("crop") or {}).values()) if background.get("crop") else None,
+            background.get("colorBlendAlpha"),
+        )
 
     def _build_config(self):
         iv = self.vars
@@ -214,6 +304,8 @@ class ConfigGui:
             output_fps=int(iv["output_fps"].get()),
             segmentation_backend=iv["seg_backend"].get(),
             segmentation_threshold=float(iv["seg_threshold"].get()),
+            segmentation_selfie_model_selection=int(round(float(iv["seg_selfie_model"].get()))),
+            segmentation_selfie_temporal_smoothing=float(iv["seg_selfie_smoothing"].get()),
             background=background,
             crop_margin=float(iv["crop_margin"].get()),
             crop_smoothing=float(iv["crop_smoothing"].get()),

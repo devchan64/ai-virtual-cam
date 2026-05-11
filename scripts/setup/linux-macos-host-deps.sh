@@ -292,9 +292,9 @@ install_macos_packages() {
       run "$venv_path/bin/python3" -m ensurepip --upgrade
     fi
     run "$venv_path/bin/python3" -m pip install --upgrade pip
-    run "$venv_path/bin/python3" -m pip install opencv-python numpy
+    run "$venv_path/bin/python3" -m pip install opencv-python numpy mediapipe==0.10.14
   elif [[ "$DRY_RUN" -eq 1 ]]; then
-    log "Dry-run: would normalize/create .venv with python3.12 and install opencv-python,numpy"
+    log "Dry-run: would normalize/create .venv with python3.12 and install opencv-python,numpy,mediapipe==0.10.14"
   fi
   log "GUI runtime is unified to .venv."
 }

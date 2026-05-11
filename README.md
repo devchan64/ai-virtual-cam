@@ -133,8 +133,11 @@ outputCamera:
   fps: 30
 
 segmentation:
-  backend: tensorrt
+  backend: selfie
   threshold: 0.65
+  selfie:
+    modelSelection: 1 # min=0, max=1
+    temporalSmoothing: 0.25 # min=0.0, max=0.95
 
 background:
   mode: chroma # chroma | image | image_chroma
@@ -212,7 +215,7 @@ GUI 기반 설정 도구(기본 `tkinter`):
 
 현재 구현된 backend:
 
-- `face`: OpenCV 상반신 검출 + ROI 엣지 추적으로 전경 윤곽 생성, 실패 시 얼굴 fallback
+- `selfie`: MediaPipe Selfie Segmentation 기반 전경 분리(권장)
 - `mock`: 개발용 파이프라인 smoke test
 - `tensorrt`: 인터페이스만 존재, 미구현
 - `onnxruntime`: 인터페이스만 존재, 미구현
@@ -245,7 +248,7 @@ macOS pyvirtualcam 예시 설정:
 {
   "inputCamera": { "devicePath": "0", "width": 1280, "height": 720, "fps": 30, "crop": { "x": 0, "y": 0, "width": 1280, "height": 720 } },
   "outputCamera": { "devicePath": "virtual-cam", "backend": "pyvirtualcam", "width": 1280, "height": 720, "fps": 30 },
-  "segmentation": { "backend": "face", "threshold": 0.65 },
+  "segmentation": { "backend": "selfie", "threshold": 0.65, "selfie": { "modelSelection": 1, "temporalSmoothing": 0.25 } },
   "background": { "mode": "chroma", "chromaColor": [0, 255, 0] },
   "crop": { "margin": 0.25, "smoothing": 0.85 }
 }
@@ -312,5 +315,3 @@ ai-virtual-cam/
 
 현재 이 저장소는 초기 설계 단계이며, 본 README는 시스템 방향과 구현 범위를 정리한 문서입니다.
 
-Segmentation debug:
-- `SEGMENTATION_DEBUG=1 ./bin/avc config-gui` 로 실행하면 30프레임마다 edge/fallback 통계를 출력합니다.

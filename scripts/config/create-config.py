@@ -137,8 +137,15 @@ def build_config():
     camera_crop = prompt_crop("Camera", input_width, input_height)
 
     print("\nSegmentation settings")
-    segmentation_backend = prompt_choice("  backend", ["face", "mock", "tensorrt", "onnxruntime"], default="face")
+    segmentation_backend = prompt_choice("  backend", ["selfie", "mock", "tensorrt", "onnxruntime"], default="selfie")
     segmentation_threshold = prompt_float("  threshold", default=0.65, minimum=0.0, maximum=1.0)
+    segmentation_selfie_model_selection = prompt_int("  selfie model selection (0 or 1)", default=1, minimum=0, maximum=1)
+    segmentation_selfie_temporal_smoothing = prompt_float(
+        "  selfie temporal smoothing (0.0..0.95)",
+        default=0.25,
+        minimum=0.0,
+        maximum=0.95,
+    )
 
     print("\nBackground settings")
     background_mode = prompt_choice("  mode", ["chroma", "image", "image_chroma"], default="chroma")
@@ -177,6 +184,8 @@ def build_config():
         output_fps=output_fps,
         segmentation_backend=segmentation_backend,
         segmentation_threshold=segmentation_threshold,
+        segmentation_selfie_model_selection=segmentation_selfie_model_selection,
+        segmentation_selfie_temporal_smoothing=segmentation_selfie_temporal_smoothing,
         background=background,
         crop_margin=crop_margin,
         crop_smoothing=crop_smoothing,

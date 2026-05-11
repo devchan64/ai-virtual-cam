@@ -19,8 +19,12 @@
     "fps": 30
   },
   "segmentation": {
-    "backend": "face",
-    "threshold": 0.65
+    "backend": "selfie",
+    "threshold": 0.65,
+    "selfie": {
+      "modelSelection": 1,
+      "temporalSmoothing": 0.25
+    }
   },
   "background": {
     "mode": "chroma",
