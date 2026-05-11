@@ -86,7 +86,7 @@ apt_install() {
 install_base_packages() {
   log "Installing base packages"
   run apt-get update
-  apt_install ca-certificates curl gnupg gnupg2 lsb-release software-properties-common
+  apt_install ca-certificates curl gnupg gnupg2 lsb-release software-properties-common python3 python3-venv python3-pip
 }
 
 setup_docker_repo() {
@@ -241,15 +241,43 @@ install_macos_packages() {
   log "Installing base packages with Homebrew (macOS)"
   run brew install python@3.12 python-tk@3.12 ffmpeg opencv
   run brew install --cask obs
-
-  local venv_path
-  venv_path="$(pwd)/.venv"
-  if [[ ! -x "$venv_path/bin/python3" ]]; then
-    run /opt/homebrew/bin/python3.12 -m venv "$venv_path"
-  fi
-  run "$venv_path/bin/python3" -m pip install --upgrade pip
-  run "$venv_path/bin/python3" -m pip install opencv-python numpy mediapipe==0.10.14 pyvirtualcam==0.14.0
   log "macOS OBS 연동 확인: OBS Studio를 열어 'Start Virtual Camera'를 1회 실행 후 종료하세요."
+}
+
+install_python_runtime_packages() {
+  local venv_path
+  local py_bootstrap
+  venv_path="$(pwd)/.venv"
+
+  if [[ "$OS_KIND" == "macos" ]]; then
+    py_bootstrap="/opt/homebrew/bin/python3.12"
+  else
+    py_bootstrap="python3"
+  fi
+
+  if [[ ! -x "$venv_path/bin/python3" ]]; then
+    log "Creating shared venv: $venv_path"
+    run "$py_bootstrap" -m venv "$venv_path"
+  else
+    log "Using existing venv: $venv_path"
+  fi
+
+  run "$venv_path/bin/python3" -m pip install --upgrade pip
+
+  log "Installing Python runtime dependencies (video/audio base)"
+  run "$venv_path/bin/python3" -m pip install opencv-python numpy mediapipe==0.10.14 pyvirtualcam==0.14.0 sounddevice
+
+  log "Installing noise-cancel dependencies"
+  # rnnoise Python wrapper (best-effort)
+  if ! run "$venv_path/bin/python3" -m pip install rnnoise; then
+    log "WARN: rnnoise Python package install failed. denoise.backend=rnnoise runtime may be unavailable."
+  fi
+  # deepfilternet is Linux-only in our current policy.
+  if [[ "$OS_KIND" == "linux" ]]; then
+    if ! run "$venv_path/bin/python3" -m pip install deepfilternet; then
+      log "WARN: deepfilternet install failed. denoise.backend=deepfilternet runtime may be unavailable."
+    fi
+  fi
 }
 
 parse_args() {
@@ -313,6 +341,7 @@ main() {
   install_docker
   install_nvidia_container_toolkit
   install_v4l2loopback
+  install_python_runtime_packages
   verify_host_contract
   log "Host dependency setup completed"
 }

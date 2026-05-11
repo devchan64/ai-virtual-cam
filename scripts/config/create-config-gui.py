@@ -49,6 +49,12 @@ def _output_backend_options():
     return ["v4l2loopback", "opencv"]
 
 
+def _audio_denoise_backend_options():
+    if platform.system() == "Darwin":
+        return ["none", "rnnoise"]
+    return ["none", "rnnoise", "deepfilternet"]
+
+
 class ConfigGui:
     def __init__(self, root: tk.Tk, output_path: str) -> None:
         self.root = root
@@ -193,6 +199,13 @@ class ConfigGui:
         self._add_int(tab_audio, row, "audio_channels", "Channels", 1, col_offset=2)
         row += 1
         self._add_int(tab_audio, row, "audio_frame_ms", "Frame ms", 20)
+        row += 1
+        self._add_combo(tab_audio, row, "audio_denoise_enabled", "Noise cancel", ["false", "true"], "false")
+        row += 1
+        denoise_backends = _audio_denoise_backend_options()
+        self._add_combo(tab_audio, row, "audio_denoise_backend", "NC backend", denoise_backends, denoise_backends[0])
+        row += 1
+        self._add_slider(tab_audio, row, "audio_denoise_strength", "NC strength", 0.50, 0.0, 1.0, resolution=0.01)
         row += 1
         self._add_slider(tab_audio, row, "audio_gate_threshold_db", "Gate threshold dB", -42.0, -80.0, 0.0, resolution=0.5)
         row += 1
@@ -373,6 +386,7 @@ class ConfigGui:
         bg_cfg = raw.get("background") or {}
         crop_cfg = raw.get("crop") or {}
         audio_cfg = raw.get("audio") or {}
+        denoise_cfg = audio_cfg.get("denoise") or {}
         gate_cfg = audio_cfg.get("gate") or {}
 
         self._set_var("input_device", input_cfg.get("devicePath"))
@@ -424,6 +438,16 @@ class ConfigGui:
         self._set_var("audio_sample_rate", audio_cfg.get("sampleRate"))
         self._set_var("audio_channels", audio_cfg.get("channels"))
         self._set_var("audio_frame_ms", audio_cfg.get("frameMs"))
+        self._set_var("audio_denoise_enabled", str(bool(denoise_cfg.get("enabled", False))).lower())
+        self._set_var("audio_denoise_backend", denoise_cfg.get("backend"))
+        self._set_var("audio_denoise_strength", denoise_cfg.get("strength"))
+        denoise_backend_widget = self._widgets.get("audio_denoise_backend")
+        if denoise_backend_widget is not None:
+            allowed = _audio_denoise_backend_options()
+            denoise_backend_widget["values"] = allowed
+            current_backend = self.vars["audio_denoise_backend"].get().strip()
+            if current_backend not in allowed:
+                self.vars["audio_denoise_backend"].set(allowed[0])
         self._set_var("audio_gate_threshold_db", gate_cfg.get("thresholdDb"))
         self._set_var("audio_gate_hysteresis_db", gate_cfg.get("hysteresisDb"))
         self._set_var("audio_gate_min_voice_band_ratio", gate_cfg.get("minVoiceBandRatio"))
@@ -739,6 +763,9 @@ class ConfigGui:
             audio_sample_rate=int(iv["audio_sample_rate"].get()),
             audio_channels=int(iv["audio_channels"].get()),
             audio_frame_ms=int(iv["audio_frame_ms"].get()),
+            audio_denoise_enabled=iv["audio_denoise_enabled"].get().strip().lower() == "true",
+            audio_denoise_backend=iv["audio_denoise_backend"].get().strip(),
+            audio_denoise_strength=float(iv["audio_denoise_strength"].get()),
             audio_gate_threshold_db=float(iv["audio_gate_threshold_db"].get()),
             audio_gate_hysteresis_db=float(iv["audio_gate_hysteresis_db"].get()),
             audio_gate_min_voice_band_ratio=float(iv["audio_gate_min_voice_band_ratio"].get()),

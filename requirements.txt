@@ -2,3 +2,5 @@ numpy==2.1.3
 opencv-python-headless==4.10.0.84
 mediapipe==0.10.14
 pyvirtualcam==0.14.0
+sounddevice==0.5.1
+rnnoise==0.4.0

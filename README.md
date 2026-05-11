@@ -46,6 +46,10 @@
 - 음악/주변소음처럼 음성 유사도가 낮은 입력은 게이트를 열지 않도록 설계
 - 사용자 음색에 맞게 `thresholdDb`, `hysteresisDb`, `minVoiceBandRatio`를 `config-gui`에서 조정 가능
 - 오디오 탭의 `게이트 자동 튜닝`으로 무음/발화 측정 후 게이트 추천값 자동 적용
+- 오디오 탭에서 노이즈캔슬 속성(`denoise.enabled/backend/strength`) 저장 지원
+- 노이즈캔슬 backend는 OS별로 분리 선택:
+  - macOS: `none`, `rnnoise`
+  - Linux: `none`, `rnnoise`, `deepfilternet`
 
 기본 설정 파일 경로:
 

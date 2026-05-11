@@ -41,6 +41,9 @@ def build_config(
     audio_sample_rate: int = 48000,
     audio_channels: int = 1,
     audio_frame_ms: int = 20,
+    audio_denoise_enabled: bool = False,
+    audio_denoise_backend: str = "none",
+    audio_denoise_strength: float = 0.5,
     audio_gate_enabled: bool = True,
     audio_gate_threshold_db: float = -42.0,
     audio_gate_hysteresis_db: float = 3.0,
@@ -107,6 +110,11 @@ def build_config(
             "sampleRate": int(audio_sample_rate),
             "channels": int(audio_channels),
             "frameMs": int(audio_frame_ms),
+            "denoise": {
+                "enabled": bool(audio_denoise_enabled),
+                "backend": str(audio_denoise_backend),
+                "strength": float(audio_denoise_strength),
+            },
             "gate": {
                 "enabled": bool(audio_gate_enabled),
                 "thresholdDb": float(audio_gate_threshold_db),

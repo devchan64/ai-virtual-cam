@@ -27,6 +27,11 @@ class VirtualAudioMixer:
             flush=True,
         )
         print(
+            "[audio] denoise config: "
+            f"enabled={self._cfg.denoiseEnabled} backend={self._cfg.denoiseBackend} strength={self._cfg.denoiseStrength:.2f}",
+            flush=True,
+        )
+        print(
             "[audio] gate config: "
             f"enabled={self._cfg.gate.enabled} thresholdDb={self._cfg.gate.thresholdDb} "
             f"hysteresisDb={self._cfg.gate.hysteresisDb} attack={self._cfg.gate.attackMs}ms "

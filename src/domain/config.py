@@ -280,6 +280,9 @@ class AudioMixerConfig:
     sampleRate: int
     channels: int
     frameMs: int
+    denoiseEnabled: bool
+    denoiseBackend: str
+    denoiseStrength: float
     gate: AudioGateConfig
 
     @classmethod
@@ -292,6 +295,9 @@ class AudioMixerConfig:
             sampleRate=int(raw.get("sampleRate", 48000)),
             channels=int(raw.get("channels", 1)),
             frameMs=int(raw.get("frameMs", 20)),
+            denoiseEnabled=bool((raw.get("denoise") or {}).get("enabled", False)),
+            denoiseBackend=str((raw.get("denoise") or {}).get("backend", "none")),
+            denoiseStrength=float((raw.get("denoise") or {}).get("strength", 0.5)),
             gate=AudioGateConfig.from_dict(gate_raw),
         )
         if config.sampleRate <= 0:
@@ -300,6 +306,16 @@ class AudioMixerConfig:
             raise ValueError("audio.channels must be > 0")
         if config.frameMs <= 0:
             raise ValueError("audio.frameMs must be > 0")
+        if platform.system() == "Darwin":
+            allowed_denoise_backends = {"none", "rnnoise"}
+            if config.denoiseBackend not in allowed_denoise_backends:
+                raise ValueError("audio.denoise.backend must be one of: none, rnnoise (macOS)")
+        else:
+            allowed_denoise_backends = {"none", "rnnoise", "deepfilternet"}
+            if config.denoiseBackend not in allowed_denoise_backends:
+                raise ValueError("audio.denoise.backend must be one of: none, rnnoise, deepfilternet")
+        if config.denoiseStrength < 0.0 or config.denoiseStrength > 1.0:
+            raise ValueError("audio.denoise.strength must be between 0.0 and 1.0")
         return config
 
 
