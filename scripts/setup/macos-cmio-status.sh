@@ -3,6 +3,10 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CONFIG_PATH="${1:-$HOME/.avc/setting.json}"
+CMIO_DIR="$ROOT_DIR/macos/cmio"
+STATUS_FILE="$CMIO_DIR/.phase0_bootstrapped"
+RUNTIME_READY_FILE="$CMIO_DIR/.runtime_ready"
+XCODE_PROJECT_FILE="$CMIO_DIR/AVCVirtualCam.xcodeproj/project.pbxproj"
 ok=1
 
 log() {
@@ -19,7 +23,7 @@ check_cmd() {
 }
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
-  log "ERROR: mac-camera-status is only supported on macOS."
+  log "ERROR: CMIO status check is only supported on macOS."
   exit 1
 fi
 
@@ -27,6 +31,38 @@ log "CMIO runtime status (WIP)"
 check_cmd xcodebuild
 check_cmd xcrun
 check_cmd python3
+
+if [[ -d "$CMIO_DIR" ]]; then
+  log "OK: CMIO workspace exists -> $CMIO_DIR"
+else
+  log "WARN: CMIO workspace missing -> $CMIO_DIR"
+  log "      run ./bin/avc setup"
+  ok=0
+fi
+
+if [[ -f "$STATUS_FILE" ]]; then
+  log "OK: Phase 0 bootstrap marker exists"
+else
+  log "WARN: Phase 0 bootstrap marker missing"
+  ok=0
+fi
+
+if [[ -f "$XCODE_PROJECT_FILE" ]]; then
+  log "OK: CMIO Xcode project exists"
+  if grep -q "000000000000000000000000" "$XCODE_PROJECT_FILE"; then
+    log "INFO: placeholder Xcode project detected (Phase 0 scaffold)."
+  fi
+else
+  log "WARN: CMIO Xcode project missing -> $XCODE_PROJECT_FILE"
+  ok=0
+fi
+
+if [[ -f "$RUNTIME_READY_FILE" ]]; then
+  log "OK: runtime ready marker exists"
+else
+  log "WARN: runtime ready marker missing (install not complete)"
+  ok=0
+fi
 
 if [[ -f "$CONFIG_PATH" ]]; then
   backend="$(python3 - <<PY
@@ -51,11 +87,10 @@ else
   ok=0
 fi
 
-log "INFO: installer/runtime are pending implementation."
+log "INFO: CMIO runtime must be fully ready for ./bin/avc setup success."
 log "INFO: see roadmap -> $ROOT_DIR/docs/macos-camera-extension-roadmap.md"
 
 if [[ "$ok" -eq 1 ]]; then
   exit 0
 fi
 exit 1
-

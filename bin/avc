@@ -16,10 +16,6 @@ Commands:
   config           Launch interactive config generator
   config-gui       Launch GUI config generator
   serve            Start virtual camera stream service from saved config
-  mac-camera-install
-                   Install/prepare macOS CMIO virtual camera runtime (WIP)
-  mac-camera-status
-                   Check macOS CMIO virtual camera runtime status (WIP)
   entrypoint       Run container entrypoint script
   doctor           Basic runtime checks (python3, docker)
 USAGE
@@ -37,8 +33,6 @@ case "$cmd" in
   config) exec "$ROOT_DIR/scripts/bin/avc-config" "$@" ;;
   config-gui) exec "$ROOT_DIR/scripts/bin/avc-config-gui" "$@" ;;
   serve) exec "$ROOT_DIR/scripts/bin/avc-serve" "$@" ;;
-  mac-camera-install) exec "$ROOT_DIR/scripts/bin/avc-mac-camera-install" "$@" ;;
-  mac-camera-status) exec "$ROOT_DIR/scripts/bin/avc-mac-camera-status" "$@" ;;
   entrypoint) exec "$ROOT_DIR/scripts/bin/avc-entrypoint" "$@" ;;
   doctor) exec "$ROOT_DIR/scripts/bin/avc-doctor" "$@" ;;
   -h|--help) usage ;;

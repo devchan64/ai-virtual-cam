@@ -166,8 +166,9 @@ Ubuntu/Debian 계열 호스트에서는 아래 스크립트로 기본 의존성�
 
 ```bash
 ./bin/avc setup
-./bin/avc mac-camera-status
 ```
+
+macOS에서는 `setup` 실행 시 CMIO Phase 0 작업공간(`macos/cmio`) 부트스트랩이 함께 수행됩니다.
 
 스크립트가 처리하는 범위:
 
@@ -240,7 +241,6 @@ GUI 기반 설정 도구(기본 `tkinter`):
 
 - `opencv`: 파일/디바이스 경로로 OpenCV `VideoWriter` 출력
 - `cmio`: macOS CoreMediaIO Camera Extension 기반 가상 카메라(구현 진행중)
-- `pyvirtualcam`: 레거시 임시 fallback
 
 ## Run
 

@@ -74,7 +74,7 @@ Fail-Fast:
 ### Device (macOS)
 
 - Input: OpenCV camera index string (`"0"`, `"1"`, ...)
-- Output: pyvirtualcam backend virtual camera sink
+- Output: CMIO backend virtual camera sink (planned)
 
 ## 6. 파이프라인
 
@@ -185,7 +185,7 @@ ai-virtual-cam/
 
 ### Phase 4 (macOS)
 
-- 출력 어댑터 분리(`opencv`, `pyvirtualcam`)
+- 출력 어댑터 분리(`opencv`, `cmio`)
 - 입력 카메라 인덱스 경로 지원
 - 백엔드 capability probe (`mps/cpu`, `cuda/cpu`) 설계
 

@@ -36,8 +36,8 @@ def _segmentation_backend_options():
 
 def _output_backend_options():
     if platform.system() == "Darwin":
-        return ["cmio", "opencv", "pyvirtualcam"]
-    return ["opencv", "pyvirtualcam"]
+        return ["cmio", "opencv"]
+    return ["opencv"]
 
 
 class ConfigGui:

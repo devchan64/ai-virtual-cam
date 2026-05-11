@@ -13,8 +13,7 @@ class CmioOutput(OutputSink):
             "outputCamera.backend=cmio is selected, but CMIO camera extension runtime is not implemented yet.\n"
             "This project is moving to OBS-free macOS virtual camera via CoreMediaIO.\n"
             "Current options:\n"
-            "1) Use outputCamera.backend=opencv for local file sink.\n"
-            "2) Use outputCamera.backend=pyvirtualcam only as temporary legacy fallback."
+            "1) Use outputCamera.backend=opencv for local file sink."
         )
 
     def write(self, frame: np.ndarray) -> None:

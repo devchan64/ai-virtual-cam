@@ -38,7 +38,7 @@
 
 ### Phase 1: 런타임 골격 (1주)
 - Host/Extension 프로젝트 생성 및 서명/권한 플로우 정리.
-- `bin/avc`에 `mac-camera-install`, `mac-camera-status` 서브커맨드 추가.
+- `./bin/avc setup` 내부 단계로 CMIO 설치/상태 검증 통합.
 - 성공 기준:
   - 개발자 맥에서 1회 설치 후 재부팅 없이 디바이스 사용 가능.
 
@@ -88,9 +88,8 @@
 
 ## 운영 정책
 - macOS 기본 backend:
-  - 단기: `pyvirtualcam` 유지(호환성)
-  - 중기: `cmio` 기본 전환
-- `pyvirtualcam`은 레거시 옵션으로 유지 후 추후 제거 여부 결정.
+  - `cmio` 단일 경로 유지
+  - `opencv`는 로컬 파일 출력 테스트 용도로만 유지
 
 ## 완료 정의 (DoD)
 - OBS 미설치 환경에서 `./bin/avc serve`만으로 가상 카메라가 Meet에 노출.

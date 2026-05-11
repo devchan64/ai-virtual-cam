@@ -305,11 +305,23 @@ install_macos_cmio_runtime() {
     return 0
   fi
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    log "Dry-run: would run ./bin/avc mac-camera-install"
+    log "Dry-run: would run internal CMIO install step"
     return 0
   fi
   log "Running macOS CMIO virtual camera installer"
   run bash "$SCRIPT_DIR/macos-cmio-install.sh"
+}
+
+verify_macos_cmio_runtime() {
+  if [[ "$OS_KIND" != "macos" ]]; then
+    return 0
+  fi
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    log "Dry-run: would run internal CMIO status step"
+    return 0
+  fi
+  log "Verifying macOS CMIO runtime readiness"
+  run bash "$SCRIPT_DIR/macos-cmio-status.sh"
 }
 
 parse_args() {
@@ -371,6 +383,7 @@ main() {
   install_nvidia_container_toolkit
   install_v4l2loopback
   install_macos_cmio_runtime
+  verify_macos_cmio_runtime
   verify_host_contract
   log "Host dependency setup completed"
 }

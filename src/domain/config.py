@@ -84,8 +84,8 @@ class OutputCameraConfig:
             raise ValueError("outputCamera.devicePath is required")
         if config.width <= 0 or config.height <= 0 or config.fps <= 0:
             raise ValueError("outputCamera width/height/fps must be > 0")
-        if config.backend not in {"opencv", "pyvirtualcam", "cmio"}:
-            raise ValueError("outputCamera.backend must be one of: opencv, pyvirtualcam, cmio")
+        if config.backend not in {"opencv", "cmio"}:
+            raise ValueError("outputCamera.backend must be one of: opencv, cmio")
         return config
 
 
