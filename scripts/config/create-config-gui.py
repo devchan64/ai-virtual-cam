@@ -64,6 +64,9 @@ class ConfigGui:
         self.root = root
         self.output_path = output_path
         self.root.title("ai-virtual-cam config GUI")
+        self.root.geometry("640x480")
+        self.root.minsize(640, 480)
+        self.root.resizable(True, True)
         self.vars: dict[str, tk.Variable] = {}
         self._preview_active = False
         self._preview_capture = None
