@@ -203,13 +203,19 @@ verify_host_contract() {
   if ! brew list --cask obs >/dev/null 2>&1; then
     fail "OBS Studio is not installed. macOS path requires OBS."
   fi
+
+  if ! brew list --cask blackhole-2ch >/dev/null 2>&1; then
+    fail "BlackHole 2ch is not installed. macOS path requires virtual audio device."
+  fi
 }
 
 install_macos_packages() {
   log "Installing base packages with Homebrew (macOS)"
   run brew install python@3.12 python-tk@3.12 ffmpeg opencv gstreamer
   run brew install --cask obs
+  run brew install --cask blackhole-2ch
   log "macOS OBS 연동 확인: OBS Studio를 열어 'Start Virtual Camera'를 1회 실행 후 종료하세요."
+  log "macOS 오디오 루프백 설치: BlackHole 2ch"
 }
 
 install_python_runtime_packages() {
