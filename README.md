@@ -98,6 +98,13 @@ sudo -v
   - Linux: `none`, `rnnoise`, `deepfilternet`
 - `config-gui`의 오디오 탭에서 `오디오 게이트 테스트`를 실행하면 현재 설정값으로 게이트 상태 전환을 시뮬레이션해 확인할 수 있습니다.
 
+macOS 오디오 장치 설정 가이드:
+
+- `config-gui` 오디오 탭에서 `inputDevice`는 실제 마이크 장치명, `outputDevice`는 `BlackHole 2ch`를 선택합니다.
+- `default`는 환경에 따라 장치 해석이 실패할 수 있으므로, 가능하면 실제 장치명을 명시 저장하세요.
+- 회의 앱(Zoom/Meet 등)의 마이크 입력 장치는 `BlackHole 2ch`로 선택합니다.
+- 내장 스피커로 모니터링이 필요하면 macOS `Audio MIDI 설정`에서 `다중 출력 기기`를 생성해 `BlackHole`과 스피커를 함께 구성하세요.
+
 Linux 오디오 장치 ID 정책:
 
 - `config-gui`는 오디오 장치 값을 `setting.json`에 원본 ID 그대로 저장합니다.
@@ -154,6 +161,10 @@ pluginkit -m -A -D | grep -Ei "obs|virtual.?camera|cameraextension|coremedia"
   `./bin/avc setup`로 `.venv` 및 Tk 의존성을 설치한 뒤 다시 실행하세요.
 - `No module named cv2`:
   `./bin/avc setup`로 공통 `.venv` 의존성을 다시 맞추세요.
+- `audio output device open failed: ... No output device matching 'BlackHole 2ch'`:
+  - `config-gui`를 재실행해 오디오 장치 목록을 다시 불러오고 저장하세요.
+  - 에러 메시지의 `available=[...]`에 표시된 실제 출력 장치명을 `audio.outputDevice`에 그대로 설정하세요.
+  - macOS 사운드 장치 반영이 지연된 경우 재부팅 후 다시 시도하세요.
 
 ## 설정 예시
 

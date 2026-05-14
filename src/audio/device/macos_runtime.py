@@ -36,6 +36,33 @@ class MacOSAudioRuntime:
         except Exception:
             return name
 
+    def _resolve_named_sounddevice(self, configured: str, *, kind: str) -> str:
+        name = str(configured).strip()
+        if not name or sd is None:
+            return name
+        try:
+            sd.query_devices(name, kind=kind)
+            return name
+        except Exception:
+            pass
+        try:
+            channel_key = "max_input_channels" if kind == "input" else "max_output_channels"
+            candidates = [
+                str(device.get("name", "")).strip()
+                for device in sd.query_devices()
+                if str(device.get("name", "")).strip() and int(device.get(channel_key, 0)) > 0
+            ]
+        except Exception:
+            return name
+        lowered = name.lower()
+        for candidate in candidates:
+            if lowered == candidate.lower():
+                return candidate
+        for candidate in candidates:
+            if lowered in candidate.lower():
+                return candidate
+        return name
+
     def run(self, max_steps: int = 0) -> None:
         if sd is None:
             raise RuntimeError("sounddevice 모듈이 필요합니다. ./bin/avc setup 후 다시 시도하세요.")
@@ -45,6 +72,8 @@ class MacOSAudioRuntime:
         configured_output = str(self._cfg.outputDevice).strip() or "default"
         input_device = self._resolve_default_sounddevice(configured_input, kind="input")
         output_device = self._resolve_default_sounddevice(configured_output, kind="output")
+        input_device = self._resolve_named_sounddevice(input_device, kind="input")
+        output_device = self._resolve_named_sounddevice(output_device, kind="output")
         in_channels = int(self._cfg.channels)
         out_channels = int(self._cfg.channels)
 
@@ -55,7 +84,20 @@ class MacOSAudioRuntime:
         try:
             output_info = sd.query_devices(output_device, kind="output")
         except Exception as exc:
-            raise RuntimeError(f"audio output device open failed: configured output '{output_device}': {exc}") from exc
+            output_names: list[str] = []
+            try:
+                output_names = [
+                    str(device.get("name", "")).strip()
+                    for device in sd.query_devices()
+                    if str(device.get("name", "")).strip() and int(device.get("max_output_channels", 0)) > 0
+                ]
+            except Exception:
+                output_names = []
+            raise RuntimeError(
+                "audio output device open failed: "
+                f"configured output '{output_device}': {exc}. "
+                f"available={output_names or ['<none>']}"
+            ) from exc
 
         if in_channels > int(input_info.get("max_input_channels", in_channels)):
             in_channels = int(input_info.get("max_input_channels", in_channels))
