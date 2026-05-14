@@ -261,12 +261,46 @@ def _coerce_audio_input_device(device_name: str) -> str:
 
 
 def _coerce_audio_output_device(device_name: str) -> str:
+    def _pick_virtual_output(names: list[str]) -> str | None:
+        for candidate in names:
+            lowered_candidate = candidate.lower()
+            if "virtual" in lowered_candidate and "default" not in lowered_candidate:
+                return candidate
+        return None
+
+    def _monitor_to_sink(name: str) -> str:
+        lowered = name.lower()
+        if ".monitor" not in lowered:
+            return name
+        candidate = name[:-len(".monitor")] if lowered.endswith(".monitor") else name.split(".monitor", 1)[0]
+        if not candidate:
+            return name
+        try:
+            proc = subprocess.run(
+                ["pactl", "list", "short", "sinks"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=1.5,
+            )
+            if proc.returncode == 0:
+                sink_names = {
+                    line.split()[1].strip()
+                    for line in proc.stdout.splitlines()
+                    if len(line.split()) >= 2
+                }
+                if candidate in sink_names:
+                    return candidate
+        except Exception:
+            return candidate
+        return name
+
     try:
         import sounddevice as sd
     except Exception:
         if str(device_name).strip() == "default":
             return "pulse"
-        return device_name
+        return _monitor_to_sink(device_name)
 
     if not isinstance(device_name, str):
         return device_name
@@ -275,6 +309,8 @@ def _coerce_audio_output_device(device_name: str) -> str:
         return device_name
 
     lowered = name.lower()
+    name = _monitor_to_sink(name)
+    is_monitor = ".monitor" in lowered
     try:
         names = [
             str(device.get("name", "")).strip()
@@ -287,26 +323,22 @@ def _coerce_audio_output_device(device_name: str) -> str:
 
         if name in names:
             return name
-
+        if is_monitor:
+            return name
         if name == "default":
+            virtual = _pick_virtual_output(names)
+            if virtual is not None:
+                return virtual
             if "pulse" in names:
                 return "pulse"
             return names[0]
-
-        for candidate in names:
-            lowered_candidate = candidate.lower()
-            if "virtual" in lowered_candidate and "default" not in lowered_candidate:
-                return candidate
 
         if "ai-virtual-cam" in lowered or "virtual-cam" in lowered or "virtual" in lowered:
-            if "pulse" in names:
-                return "pulse"
             return names[0]
 
-        if "pulse" in names:
-            return "pulse"
-
         if name == "pulse":
+            return names[0]
+        if "pulse" in names:
             return names[0]
     except Exception:
         pass
@@ -373,7 +405,6 @@ def build_config(
     if not audio_input_device or str(audio_input_device).strip().lower() == "default":
         audio_input_device = _default_audio_input_device()
     audio_input_device = _coerce_audio_input_device(audio_input_device)
-    audio_output_device = _coerce_audio_output_device(audio_output_device)
 
     tilt_smoothing = float(crop_pan_smoothing if crop_tilt_smoothing is None else crop_tilt_smoothing)
     tilt_kp = float(crop_pan_pid_kp if crop_tilt_pid_kp is None else crop_tilt_pid_kp)

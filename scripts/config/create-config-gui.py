@@ -78,6 +78,37 @@ def _run_cmd(cmd: list[str], *, check: bool = False, timeout: float | None = 1.5
         raise RuntimeError(f"command not found: {cmd[0]}") from exc
 
 
+def _is_v4l2_capture_capable(device_path: str) -> tuple[bool, str]:
+    """Return whether a v4l2 node exposes Video Capture capability."""
+    try:
+        proc = _run_cmd(["v4l2-ctl", "--all", "-d", device_path], check=False, timeout=2.0)
+    except Exception as exc:
+        return False, f"v4l2-ctl 실행 실패: {exc}"
+    if proc.returncode != 0:
+        err = (proc.stderr or "").strip()
+        return False, f"v4l2-ctl 실패(code={proc.returncode}): {err}" if err else f"v4l2-ctl 실패(code={proc.returncode})"
+
+    stdout = (proc.stdout or "").lower()
+    for line in stdout.splitlines():
+        lowered = line.lower()
+        if "video capture" in lowered and "video output" in lowered:
+            return True, "video capture/output 동시 지원"
+        if "video capture" in lowered and "video output" not in lowered:
+            return True, "video capture 전용 지원"
+    return False, "v4l2-ctl 결과에서 video capture capability를 확인하지 못함"
+
+
+def _probe_v4l2_capture(device_path: str, retries: int = 5, delay_sec: float = 0.2) -> tuple[bool, str]:
+    if not Path(device_path).exists():
+        return False, f"{device_path} not found"
+    for _ in range(max(1, retries)):
+        capable, detail = _is_v4l2_capture_capable(device_path)
+        if capable:
+            return True, detail
+        time.sleep(delay_sec)
+    return False, detail
+
+
 def _audio_default_output_device() -> str:
     if platform.system() != "Linux":
         return "default"
@@ -159,14 +190,46 @@ def _audio_default_output_device() -> str:
 
 
 def _coerce_audio_output_device_for_sounddevice(device_name: str) -> str:
+    def _pick_virtual_output(names: list[str]) -> str | None:
+        for candidate in names:
+            lowered_candidate = candidate.lower()
+            if "virtual" in lowered_candidate and "default" not in lowered_candidate:
+                return candidate
+        return None
+
     if sd is None:
         return device_name
     name = str(device_name).strip()
     if not name:
         return name
     if name == "default":
-        return "pulse"
+        if sd is None:
+            return "pulse"
+        try:
+            names = [
+                str(d.get("name", "")).strip()
+                for d in sd.query_devices()
+                if int(d.get("max_output_channels", 0)) > 0
+            ]
+            names = [n for n in names if n]
+            if not names:
+                return "pulse"
+            virtual = _pick_virtual_output(names)
+            if virtual is not None:
+                return virtual
+            if "pulse" in names:
+                return "pulse"
+            return names[0]
+        except Exception:
+            return "pulse"
     lowered = name.lower()
+    if ".monitor" in lowered:
+        candidate = name[:-len(".monitor")] if lowered.endswith(".monitor") else name.split(".monitor", 1)[0]
+        if candidate:
+            name = candidate
+        is_monitor = True
+    else:
+        is_monitor = False
     try:
         names = [
             str(d.get("name", "")).strip()
@@ -178,16 +241,14 @@ def _coerce_audio_output_device_for_sounddevice(device_name: str) -> str:
             return name
         if name in names:
             return name
-        for candidate in names:
-            lower_candidate = candidate.lower()
-            if "virtual" in lower_candidate and "default" not in lower_candidate:
-                return candidate
+        if is_monitor:
+            return name
         if "ai-virtual-cam" in lowered or "virtual-cam" in lowered or "virtual" in lowered or "monitor" in lowered:
-            if "pulse" in names:
-                return "pulse"
+            return names[0]
+        if name == "pulse" and names:
             return names[0]
         if "pulse" in names:
-            return "pulse"
+            return names[0]
     except Exception:
         return name
     return name
@@ -975,29 +1036,53 @@ class ConfigGui:
             return
 
         _log(f"Create virtual camera: video_no={video_no} label={VIRTUAL_CAMERA_LABEL}")
-        try:
-            proc = _run_cmd(
-                ["sudo", "modprobe", "v4l2loopback", f"video_nr={video_no}", f"card_label={VIRTUAL_CAMERA_LABEL}", "exclusive_caps=1"],
-                check=False,
-                timeout=4.0,
-            )
-        except Exception as exc:
-            messagebox.showerror("가상 카메라 생성", f"modprobe 실행에 실패했습니다: {exc}")
-            return
+        camera_args = [
+            [f"video_nr={video_no}", f"card_label={VIRTUAL_CAMERA_LABEL}", "exclusive_caps=1"],
+            [f"video_nr={video_no}", f"card_label={VIRTUAL_CAMERA_LABEL}"],
+            [f"video_nr={video_no}", f"card_label={VIRTUAL_CAMERA_LABEL}", "exclusive_caps=0"],
+        ]
 
-        if proc.returncode != 0:
-            messagebox.showerror(
-                "가상 카메라 생성",
-                f"모듈 로드 실패 (code={proc.returncode})\n{proc.stdout or ''}{proc.stderr or ''}".strip(),
-            )
-            return
+        last_error = ""
+        for idx, args in enumerate(camera_args):
+            if idx > 0:
+                _log("Reconfigure virtual camera with fallback args (capture compatibility attempt)")
+                try:
+                    reload_proc = _run_cmd(
+                        ["sudo", "modprobe", "-r", "v4l2loopback"],
+                        check=False,
+                        timeout=4.0,
+                    )
+                    if reload_proc.returncode != 0:
+                        _log(f"modprobe -r skipped/failed: {reload_proc.stderr.strip()}")
+                except Exception as exc:
+                    _log(f"modprobe -r 실패(무시): {exc}")
 
-        if (Path(device)).exists():
-            _log(f"Virtual camera created and available: {device}")
-            messagebox.showinfo("가상 카메라 생성", f"가상 카메라를 생성했습니다: {device}")
-        else:
-            _log(f"Virtual camera command succeeded but {device} not found yet. check module availability")
-            messagebox.showwarning("가상 카메라 생성", "모듈은 로드되었지만 디바이스가 즉시 보이지 않을 수 있습니다.")
+            cmd = ["sudo", "modprobe", "v4l2loopback", *args]
+            try:
+                proc = _run_cmd(cmd, check=False, timeout=4.0)
+            except Exception as exc:
+                last_error = f"modprobe 실행 예외: {exc}"
+                _log(last_error)
+                continue
+            if proc.returncode != 0:
+                err = (proc.stderr or proc.stdout or "").strip()
+                last_error = f"modprobe 로드 실패(code={proc.returncode}): {err}"
+                _log(last_error)
+                continue
+
+            ready, detail = _probe_v4l2_capture(device, retries=10, delay_sec=0.2)
+            if ready:
+                _log(f"Virtual camera capture-capable confirmed on {device}: {detail} (args={args})")
+                messagebox.showinfo("가상 카메라 생성", f"가상 카메라를 생성했습니다: {device}")
+                return
+
+            last_error = f"{device} created but not capture-capable: {detail} (args={args})"
+            _log(last_error)
+
+        messagebox.showerror(
+            "가상 카메라 생성",
+            f"사용 가능한 가상 카메라 장치 생성 실패: {last_error}",
+        )
 
     def _remove_virtual_camera(self) -> None:
         if platform.system() != "Linux":
@@ -1109,6 +1194,12 @@ class ConfigGui:
             _log(f"set-default-source failed: code={default_source.returncode} err={default_source.stderr.strip()}")
 
         _log(f"Virtual microphone sink created: {AUDIO_VIRTUAL_SINK_NAME} module_id={proc.stdout.strip()}")
+        output_widget = self._widgets.get("audio_output_device")
+        if isinstance(output_widget, ttk.Combobox):
+            output_values = list(output_widget["values"])
+            if AUDIO_VIRTUAL_SINK_NAME not in output_values:
+                output_widget["values"] = tuple(output_values + [AUDIO_VIRTUAL_SINK_NAME])
+            self._set_var("audio_output_device", AUDIO_VIRTUAL_SINK_NAME)
         messagebox.showinfo(
             "가상 마이크 생성",
             f"가상 마이크를 생성했습니다: {AUDIO_VIRTUAL_SOURCE_NAME} (source)\n"
@@ -1241,7 +1332,7 @@ class ConfigGui:
         resolved_output_device = (
             defaults["audio_output_device"]
             if raw_output_device.lower() == "default" or not raw_output_device
-            else _coerce_audio_output_device_for_sounddevice(raw_output_device)
+            else raw_output_device
         )
         self._set_var("audio_input_device", resolved_input_device)
         input_widget = self._widgets.get("audio_input_device")
@@ -2134,7 +2225,7 @@ class ConfigGui:
             crop_pan_target_offset_y=float(iv["crop_pan_target_offset_y"].get()),
             audio_enabled=self._parse_bool(iv["audio_enabled"].get()),
             audio_input_device=iv["audio_input_device"].get().strip(),
-            audio_output_device=_coerce_audio_output_device_for_sounddevice(iv["audio_output_device"].get().strip()),
+            audio_output_device=iv["audio_output_device"].get().strip(),
             audio_sample_rate=int(iv["audio_sample_rate"].get()),
             audio_channels=int(iv["audio_channels"].get()),
             audio_frame_ms=int(iv["audio_frame_ms"].get()),

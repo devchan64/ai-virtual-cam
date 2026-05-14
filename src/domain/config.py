@@ -118,12 +118,46 @@ def _default_audio_output_device() -> str:
 
 
 def _coerce_audio_output_device(device_name: str) -> str:
+    def _monitor_to_sink(name: str) -> str:
+        lowered = name.lower()
+        if ".monitor" not in lowered:
+            return name
+        candidate = name[:-len(".monitor")] if lowered.endswith(".monitor") else name.split(".monitor", 1)[0]
+        if not candidate:
+            return name
+        try:
+            proc = subprocess.run(
+                ["pactl", "list", "short", "sinks"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=1.5,
+            )
+            if proc.returncode == 0:
+                sink_names = {
+                    line.split()[1].strip()
+                    for line in proc.stdout.splitlines()
+                    if len(line.split()) >= 2
+                }
+                if candidate in sink_names:
+                    return candidate
+        except Exception:
+            return candidate
+        return name
+
+    def _pick_virtual_output(names: list[str]) -> str | None:
+        for candidate in names:
+            lowered_candidate = candidate.lower()
+            if "virtual" in lowered_candidate and "default" not in lowered_candidate:
+                return candidate
+        return None
+
     try:
         import sounddevice as sd
     except Exception:
         if str(device_name).strip() == "default":
             return "pulse"
-        return device_name
+        return _monitor_to_sink(device_name)
 
     if not isinstance(device_name, str):
         return device_name
@@ -132,35 +166,34 @@ def _coerce_audio_output_device(device_name: str) -> str:
         return device_name
 
     lowered = name.lower()
+    name = _monitor_to_sink(name)
+    is_monitor = ".monitor" in lowered
     try:
         devices = sd.query_devices()
         names = [str(d.get("name", "")).strip() for d in devices if int(d.get("max_output_channels", 0)) > 0]
         if name in names:
             return name
-
+        if is_monitor:
+            return name
         if name == "default":
+            virtual = _pick_virtual_output(names)
+            if virtual is not None:
+                return virtual
             if "pulse" in names:
                 return "pulse"
             if names:
                 return names[0]
 
-        # Prefer actual SoundDevice virtual output endpoint if any.
-        for candidate in names:
-            if "virtual" in candidate.lower() and "default" not in candidate.lower():
-                return candidate
-
         # If config uses PulseAudio short-name (e.g., ai-virtual-cam), force a safe default.
-        if "ai-virtual-cam" in lowered or "virtual" in lowered or "monitor" in lowered:
-            if "pulse" in names:
-                return "pulse"
+        if "ai-virtual-cam" in lowered or "virtual" in lowered:
             if names:
                 return names[0]
 
         # Fallback to explicit PulseAudio/PipeWire aggregate.
+        if "pulse" in names and name == "pulse":
+            return names[0]
         if "pulse" in names:
             return "pulse"
-        if name == "pulse" and names:
-            return names[0]
     except Exception:
         pass
     return device_name
@@ -586,7 +619,6 @@ class AudioMixerConfig:
         output_device = str(raw.get("outputDevice", _default_audio_output_device())).strip()
         if not output_device or output_device.lower() == "default":
             output_device = _default_audio_output_device()
-        output_device = _coerce_audio_output_device(output_device)
         config = cls(
             enabled=bool(raw.get("enabled", True)),
             inputDevice=input_device,
