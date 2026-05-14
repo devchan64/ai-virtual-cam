@@ -83,6 +83,19 @@ apt_install() {
   run apt-get install -y "$@"
 }
 
+cleanup_v4l2loopback_dkms_state() {
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    printf '[dry-run] rm -rf /var/crash/v4l2loopback*.crash\n'
+    printf '[dry-run] dkms remove v4l2loopback/0.12.7 --all\n'
+    return 0
+  fi
+
+  rm -f /var/crash/v4l2loopback*.crash || true
+  if command -v dkms >/dev/null 2>&1; then
+    dkms remove v4l2loopback/0.12.7 --all || true
+  fi
+}
+
 install_base_packages() {
   log "Installing base packages"
   run apt-get update
@@ -173,6 +186,52 @@ install_nvidia_container_toolkit() {
   run systemctl restart docker
 }
 
+log_v4l2loopback_dkms_log() {
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    return 0
+  fi
+
+  local latest_log
+  latest_log="$(ls -1t /var/lib/dkms/v4l2loopback/*/build/make.log 2>/dev/null | head -n 1 || true)"
+  if [[ -z "$latest_log" ]]; then
+    log "No v4l2loopback DKMS build log found."
+    return 0
+  fi
+
+  log "Latest v4l2loopback DKMS log: $latest_log"
+  sed -n '1,60p' "$latest_log"
+}
+
+install_v4l2loopback_from_source() {
+  log "Falling back to v4l2loopback source build"
+  cleanup_v4l2loopback_dkms_state
+  apt_install build-essential dkms linux-headers-"$(uname -r)" git make
+
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    log "[dry-run] clone/build/install v4l2loopback from GitHub"
+    return 0
+  fi
+
+  local src_dir="/tmp/v4l2loopback-avc"
+  run rm -rf "$src_dir"
+  run git clone --depth 1 https://github.com/umlaeute/v4l2loopback.git "$src_dir"
+  run bash -c "cd '$src_dir' && make"
+  run bash -c "cd '$src_dir' && make install DKMS=1"
+}
+
+load_v4l2loopback_module() {
+  if [[ "$DRY_RUN" -eq 0 ]] && lsmod | grep -q '^v4l2loopback'; then
+    run modprobe -r v4l2loopback
+  fi
+
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    printf '[dry-run] modprobe v4l2loopback video_nr=%s card_label=%s exclusive_caps=1\n' "$OUTPUT_DEVICE" "$CARD_LABEL"
+    return 0
+  fi
+
+  run modprobe v4l2loopback "video_nr=${OUTPUT_DEVICE}" "card_label=${CARD_LABEL}" exclusive_caps=1
+}
+
 install_v4l2loopback() {
   if [[ "$OS_KIND" == "macos" ]]; then
     log "Skipping v4l2loopback: not available on macOS."
@@ -184,7 +243,15 @@ install_v4l2loopback() {
   fi
 
   log "Installing and configuring v4l2loopback"
-  apt_install v4l2loopback-dkms v4l2loopback-utils v4l-utils
+  cleanup_v4l2loopback_dkms_state
+  if ! apt_install v4l2loopback-dkms v4l2loopback-utils v4l-utils; then
+    cleanup_v4l2loopback_dkms_state
+    log "DKMS package install failed. Trying source fallback."
+    log_v4l2loopback_dkms_log
+    if ! install_v4l2loopback_from_source; then
+      fail "v4l2loopback installation failed (package and source fallback)."
+    fi
+  fi
 
   if [[ "$DRY_RUN" -eq 0 ]]; then
     cat >/etc/modules-load.d/ai-virtual-cam.conf <<EOF
@@ -198,11 +265,17 @@ EOF
     printf '[dry-run] write /etc/modprobe.d/ai-virtual-cam-v4l2loopback.conf\n'
   fi
 
-  if lsmod | grep -q '^v4l2loopback'; then
-    run modprobe -r v4l2loopback
+  if ! load_v4l2loopback_module; then
+    cleanup_v4l2loopback_dkms_state
+    log "Failed to load v4l2loopback module after install. Trying source rebuild."
+    log_v4l2loopback_dkms_log
+    if ! install_v4l2loopback_from_source; then
+      fail "v4l2loopback module rebuild failed."
+    fi
+    if ! load_v4l2loopback_module; then
+      fail "v4l2loopback module load failed after fallback build."
+    fi
   fi
-
-  run modprobe v4l2loopback "video_nr=${OUTPUT_DEVICE}" "card_label=${CARD_LABEL}" exclusive_caps=1
 }
 
 verify_host_contract() {
