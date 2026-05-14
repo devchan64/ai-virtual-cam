@@ -62,9 +62,17 @@ def main() -> int:
     )
     audio_mixer: VirtualAudioMixer | None = None
     audio_thread: threading.Thread | None = None
+
+    def _audio_stream_state(opened: bool, gate_state: str, step: int) -> None:
+        action = "열림" if opened else "닫힘"
+        print(
+            f"[avc] 오디오 게이트 스트림 {action}: step={step} gate_state={gate_state}",
+            flush=True,
+        )
+
     want_audio = config.audio is not None and config.audio.enabled
     if want_audio:
-        audio_mixer = VirtualAudioMixer(config.audio)
+        audio_mixer = VirtualAudioMixer(config.audio, on_stream_state=_audio_stream_state)
         audio_thread = threading.Thread(target=audio_mixer.run, kwargs={"max_steps": 0}, daemon=True)
         audio_thread.start()
         print("[avc] audio mixer enabled by config (audio.enabled=true)", flush=True)

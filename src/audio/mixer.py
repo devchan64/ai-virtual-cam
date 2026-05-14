@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 from src.audio.gate import NoiseGate
@@ -25,13 +25,19 @@ class VirtualAudioMixer:
     - log output for troubleshooting
     """
 
-    def __init__(self, config: AudioMixerConfig) -> None:
+    def __init__(
+        self,
+        config: AudioMixerConfig,
+        on_stream_state: Callable[[bool, str, int], None] | None = None,
+    ) -> None:
         self._cfg = config
         self._gate = NoiseGate(config.gate, frame_ms=config.frameMs)
         self._running = False
         self._steps = 0
         self._stream = None
         self._denoise_warned = False
+        self._on_stream_state = on_stream_state
+        self._stream_open = False
 
     def run(self, max_steps: int = 0) -> None:
         if sd is None:
@@ -100,6 +106,14 @@ class VirtualAudioMixer:
 
         self._running = True
         self._steps = 0
+        self._stream_open = False
+
+        def _report_stream_state(opened: bool, state: str) -> None:
+            if not self._running:
+                return
+            self._stream_open = opened
+            if self._on_stream_state is not None:
+                self._on_stream_state(opened, state, self._steps)
 
         def callback(
             indata: np.ndarray,
@@ -129,6 +143,9 @@ class VirtualAudioMixer:
             voice_band_ratio = self._voice_band_ratio(mono, self._cfg.sampleRate)
             gate = self._gate.step(level_db, voice_band_ratio=voice_band_ratio)
             gain = float(gate.gain)
+            stream_open = gate.state.value in {"open", "hold"} if self._cfg.gate.enabled else True
+            if stream_open != self._stream_open:
+                _report_stream_state(stream_open, gate.state.value)
 
             processed = self._apply_denoise(data, sample_rate=self._cfg.sampleRate)
             if processed.shape[1] != outdata.shape[1]:
@@ -137,7 +154,10 @@ class VirtualAudioMixer:
                     processed = base
                 else:
                     processed = np.repeat(base, outdata.shape[1], axis=1)
-            outdata[:] = processed * gain
+            if stream_open:
+                outdata[:] = processed * gain
+            else:
+                outdata.fill(0.0)
             np.clip(outdata, -1.0, 1.0, out=outdata)
 
             self._steps += 1
@@ -145,6 +165,10 @@ class VirtualAudioMixer:
                 print(
                     f"[audio] gate heartbeat: step={self._steps} levelDb={gate.inputLevelDb:.1f} "
                     f"voiceRatio={gate.voiceBandRatio:.2f} state={gate.state.value} gain={gate.gain:.2f}",
+                    flush=True,
+                )
+                print(
+                    f"[audio] stream state: {'open' if self._stream_open else 'closed'}",
                     flush=True,
                 )
 
@@ -168,6 +192,8 @@ class VirtualAudioMixer:
         finally:
             # Explicitly clear mixer state on stream termination.
             self._running = False
+            if self._stream_open:
+                _report_stream_state(False, "stop")
         print("[audio] mixer stopped", flush=True)
 
     def stop(self) -> None:

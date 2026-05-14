@@ -45,14 +45,14 @@ def build_config(
     audio_denoise_backend: str = "none",
     audio_denoise_strength: float = 0.5,
     audio_gate_enabled: bool = True,
-    audio_gate_threshold_db: float = -42.0,
-    audio_gate_hysteresis_db: float = 3.0,
-    audio_gate_attack_ms: int = 20,
-    audio_gate_hold_ms: int = 140,
-    audio_gate_release_ms: int = 220,
+    audio_gate_threshold_db: float = -40.0,
+    audio_gate_hysteresis_db: float = 4.0,
+    audio_gate_attack_ms: int = 30,
+    audio_gate_hold_ms: int = 160,
+    audio_gate_release_ms: int = 500,
     audio_gate_open_gain: float = 1.0,
     audio_gate_closed_gain: float = 0.0,
-    audio_gate_min_voice_band_ratio: float = 0.55,
+    audio_gate_min_voice_band_ratio: float = 0.50,
 ) -> dict:
     tilt_smoothing = float(crop_pan_smoothing if crop_tilt_smoothing is None else crop_tilt_smoothing)
     tilt_kp = float(crop_pan_pid_kp if crop_tilt_pid_kp is None else crop_tilt_pid_kp)

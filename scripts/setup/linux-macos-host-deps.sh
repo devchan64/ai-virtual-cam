@@ -105,7 +105,7 @@ cleanup_v4l2loopback_dkms_state() {
 install_base_packages() {
   log "Installing base packages"
   run apt-get update
-  apt_install ca-certificates curl gnupg gnupg2 lsb-release software-properties-common python3 python3-venv python3-pip libportaudio2 portaudio19-dev
+  apt_install ca-certificates curl gnupg gnupg2 lsb-release software-properties-common python3 python3-venv python3-pip libportaudio2 portaudio19-dev ffmpeg
 }
 
 setup_docker_repo() {
@@ -278,13 +278,17 @@ verify_host_contract() {
   fi
 
   if [[ "$OS_KIND" == "linux" ]]; then
-    if [[ "$SKIP_NVIDIA_TOOLKIT" -eq 0 ]] && ! command -v nvidia-ctk >/dev/null 2>&1; then
+  if [[ "$SKIP_NVIDIA_TOOLKIT" -eq 0 ]] && ! command -v nvidia-ctk >/dev/null 2>&1; then
       fail "nvidia-ctk is not available after installation."
-    fi
+  fi
 
-    if [[ ! -e "/dev/video${INPUT_DEVICE}" ]]; then
-      fail "Expected input camera /dev/video${INPUT_DEVICE} is missing."
-    fi
+  if ! command -v ffmpeg >/dev/null 2>&1; then
+    fail "ffmpeg is not available after installation."
+  fi
+
+  if [[ ! -e "/dev/video${INPUT_DEVICE}" ]]; then
+    fail "Expected input camera /dev/video${INPUT_DEVICE} is missing."
+  fi
 
     if [[ "$SKIP_V4L2LOOPBACK" -eq 0 ]] && [[ ! -e "/dev/video${OUTPUT_DEVICE}" ]]; then
       fail "Expected output virtual camera /dev/video${OUTPUT_DEVICE} is missing."
