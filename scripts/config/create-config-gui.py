@@ -572,8 +572,6 @@ class ConfigGui:
         bg_cfg = raw.get("background") or {}
         crop_cfg = raw.get("crop") or {}
         audio_cfg = raw.get("audio") or {}
-        denoise_cfg = audio_cfg.get("denoise") or {}
-        gate_cfg = audio_cfg.get("gate") or {}
 
         self._set_var("input_device", input_cfg.get("devicePath"))
         self._set_var("input_width", input_cfg.get("width"))
@@ -618,32 +616,43 @@ class ConfigGui:
         self._set_var("crop_tilt_pid_kd", crop_cfg.get("tiltPidKd", crop_cfg.get("panPidKd")))
         self._set_var("crop_pan_target_offset_x", crop_cfg.get("panTargetOffsetX"))
         self._set_var("crop_pan_target_offset_y", crop_cfg.get("panTargetOffsetY"))
-        self._set_var("audio_enabled", audio_cfg.get("enabled", False))
-        self._set_var("audio_input_device", audio_cfg.get("inputDevice"))
-        self._set_var("audio_output_device", audio_cfg.get("outputDevice"))
-        self._set_var("audio_sample_rate", audio_cfg.get("sampleRate"))
-        self._set_var("audio_channels", audio_cfg.get("channels"))
-        self._set_var("audio_frame_ms", audio_cfg.get("frameMs"))
-        self._set_var("audio_denoise_enabled", denoise_cfg.get("enabled", False))
-        self._set_var("audio_denoise_backend", denoise_cfg.get("backend"))
-        self._set_var("audio_denoise_strength", denoise_cfg.get("strength"))
+        self._load_audio_settings_from_config(audio_cfg)
+        self._on_input_device_changed()
+        self._on_input_width_changed()
+
+    def _load_audio_settings_from_config(self, audio_cfg: dict) -> None:
+        defaults = self._build_audio_defaults()
+        denoise_cfg = audio_cfg.get("denoise") or {}
+        gate_cfg = audio_cfg.get("gate") or {}
+
+        self._set_var("audio_enabled", audio_cfg.get("enabled", defaults["audio_enabled"]))
+        self._set_var("audio_input_device", audio_cfg.get("inputDevice", defaults["audio_input_device"]))
+        self._set_var("audio_output_device", audio_cfg.get("outputDevice", defaults["audio_output_device"]))
+        self._set_var("audio_sample_rate", audio_cfg.get("sampleRate", defaults["audio_sample_rate"]))
+        self._set_var("audio_channels", audio_cfg.get("channels", defaults["audio_channels"]))
+        self._set_var("audio_frame_ms", audio_cfg.get("frameMs", defaults["audio_frame_ms"]))
+        self._set_var("audio_denoise_enabled", denoise_cfg.get("enabled", defaults["audio_denoise_enabled"]))
+        self._set_var("audio_denoise_backend", denoise_cfg.get("backend", defaults["audio_denoise_backend"]))
+        self._set_var("audio_denoise_strength", denoise_cfg.get("strength", defaults["audio_denoise_strength"]))
         denoise_backend_widget = self._widgets.get("audio_denoise_backend")
         if denoise_backend_widget is not None:
             allowed = _audio_denoise_backend_options()
             denoise_backend_widget["values"] = allowed
             current_backend = self.vars["audio_denoise_backend"].get().strip()
             if current_backend not in allowed:
-                self.vars["audio_denoise_backend"].set(allowed[0])
-        self._set_var("audio_gate_threshold_db", gate_cfg.get("thresholdDb"))
-        self._set_var("audio_gate_hysteresis_db", gate_cfg.get("hysteresisDb"))
-        self._set_var("audio_gate_min_voice_band_ratio", gate_cfg.get("minVoiceBandRatio"))
-        self._set_var("audio_gate_attack_ms", gate_cfg.get("attackMs"))
-        self._set_var("audio_gate_hold_ms", gate_cfg.get("holdMs"))
-        self._set_var("audio_gate_release_ms", gate_cfg.get("releaseMs"))
-        self._set_var("audio_gate_open_gain", gate_cfg.get("openGain"))
-        self._set_var("audio_gate_closed_gain", gate_cfg.get("closedGain"))
-        self._on_input_device_changed()
-        self._on_input_width_changed()
+                self._set_var("audio_denoise_backend", allowed[0])
+
+        self._set_var("audio_gate_threshold_db", gate_cfg.get("thresholdDb", defaults["audio_gate_threshold_db"]))
+        self._set_var("audio_gate_hysteresis_db", gate_cfg.get("hysteresisDb", defaults["audio_gate_hysteresis_db"]))
+        self._set_var(
+            "audio_gate_min_voice_band_ratio",
+            gate_cfg.get("minVoiceBandRatio", defaults["audio_gate_min_voice_band_ratio"]),
+        )
+        self._set_var("audio_gate_attack_ms", gate_cfg.get("attackMs", defaults["audio_gate_attack_ms"]))
+        self._set_var("audio_gate_hold_ms", gate_cfg.get("holdMs", defaults["audio_gate_hold_ms"]))
+        self._set_var("audio_gate_release_ms", gate_cfg.get("releaseMs", defaults["audio_gate_release_ms"]))
+        self._set_var("audio_gate_open_gain", gate_cfg.get("openGain", defaults["audio_gate_open_gain"]))
+        self._set_var("audio_gate_closed_gain", gate_cfg.get("closedGain", defaults["audio_gate_closed_gain"]))
 
     def _set_var(self, key: str, value):
         if value is None:
