@@ -44,6 +44,8 @@ class VirtualAudioMixer:
         self._stream_open = False
         self._last_gate_state = "closed"
         self._gst_proc: subprocess.Popen | None = None
+        self._forward_proc: subprocess.Popen | None = None
+        self._forward_mode: str | None = None
 
     def run(self, max_steps: int = 0) -> None:
         if platform.system() != "Linux":
@@ -293,11 +295,10 @@ class VirtualAudioMixer:
         self._steps = 0
         self._last_gate_state = "closed"
 
-        cmd = ["gst-launch-1.0", "-m", "-e"]
-        cmd.append("pulsesrc")
-        if input_device.lower() not in {"default"}:
-            cmd.append(f"device={input_device}")
-        cmd.extend(
+        monitor_cmd = ["gst-launch-1.0", "-m", "-e"]
+        monitor_src = self._build_gst_input_src_tokens(input_device)
+        monitor_cmd.extend(monitor_src)
+        monitor_cmd.extend(
             [
                 "!",
                 "audioconvert",
@@ -310,13 +311,9 @@ class VirtualAudioMixer:
                 "message=true",
                 f"interval={int(self._cfg.frameMs) * 1000000}",
                 "!",
-                "queue",
-                "!",
-                "pulsesink",
+                "fakesink",
             ]
         )
-        if output_device.lower() not in {"default"}:
-            cmd.append(f"device={output_device}")
 
         print(
             "[audio] mixer starting (gstreamer): "
@@ -324,7 +321,7 @@ class VirtualAudioMixer:
             f"{self._cfg.sampleRate}Hz/{self._cfg.channels}ch frame={self._cfg.frameMs}ms",
             flush=True,
         )
-        print(f"[audio] gst cmd: {' '.join(cmd)}", flush=True)
+        print(f"[audio] gst monitor cmd: {' '.join(monitor_cmd)}", flush=True)
         print(
             "[audio] gstreamer input validation: "
             f"configured_input='{input_device}' configured_output='{output_device}'",
@@ -337,11 +334,12 @@ class VirtualAudioMixer:
 
         self._running = True
         self._stream_open = False
+        self._start_forward_pipeline(input_device, output_device, mode="silence")
         if self._on_stream_state is not None:
             self._on_stream_state(False, "closed", 0)
         try:
             self._gst_proc = subprocess.Popen(
-                cmd,
+                monitor_cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -381,6 +379,11 @@ class VirtualAudioMixer:
                     stream_open = state in {"attack", "open", "hold", "release"}
                     if stream_open != self._stream_open:
                         self._stream_open = stream_open
+                        self._switch_forward_mode(
+                            input_device,
+                            output_device,
+                            "mic" if stream_open else "silence",
+                        )
                         if self._on_stream_state is not None:
                             self._on_stream_state(stream_open, state, self._steps)
 
@@ -416,6 +419,7 @@ class VirtualAudioMixer:
                         proc.kill()
                     except Exception:
                         pass
+            self._stop_forward_pipeline()
             if self._on_stream_state is not None:
                 self._on_stream_state(False, "stop", 0)
             print("[audio] mixer stopped (gstreamer)", flush=True)
@@ -489,6 +493,87 @@ class VirtualAudioMixer:
                 proc.terminate()
             except Exception:
                 pass
+        self._stop_forward_pipeline()
+
+    def _build_forward_cmd(self, input_device: str, output_device: str, mode: str) -> list[str]:
+        cmd = ["gst-launch-1.0", "-q", "-e"]
+        if mode == "mic":
+            cmd.extend(self._build_gst_input_src_tokens(input_device))
+        else:
+            cmd.extend(["audiotestsrc", "is-live=true", "wave=silence"])
+        cmd.extend(
+            [
+                "!",
+                "audioconvert",
+                "!",
+                "audioresample",
+                "!",
+                f"audio/x-raw,rate={int(self._cfg.sampleRate)},channels={int(self._cfg.channels)}",
+                "!",
+                "queue",
+                "!",
+                "pulsesink",
+            ]
+        )
+        if output_device.lower() not in {"default"}:
+            cmd.append(f"device={output_device}")
+        return cmd
+
+    def _build_gst_input_src_tokens(self, input_device: str) -> list[str]:
+        raw = str(input_device).strip()
+        lowered = raw.lower()
+        if not raw or lowered in {"default", "pulse"}:
+            return ["pulsesrc"]
+
+        hw = self._extract_alsa_hw_device(raw)
+        if hw is not None:
+            return ["alsasrc", f"device={hw}"]
+
+        # Pulse source name (e.g. alsa_input....__source)
+        return ["pulsesrc", f"device={raw}"]
+
+    def _extract_alsa_hw_device(self, value: str) -> str | None:
+        text = str(value)
+        m = re.search(r"\((hw:[0-9]+,[0-9]+)\)", text)
+        if m is not None:
+            return m.group(1)
+        m2 = re.search(r"\b(hw:[0-9]+,[0-9]+)\b", text)
+        if m2 is not None:
+            return m2.group(1)
+        return None
+
+    def _start_forward_pipeline(self, input_device: str, output_device: str, mode: str) -> None:
+        cmd = self._build_forward_cmd(input_device, output_device, mode)
+        self._forward_proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        self._forward_mode = mode
+        print(f"[audio] forward stream mode={mode}", flush=True)
+
+    def _stop_forward_pipeline(self) -> None:
+        proc = self._forward_proc
+        self._forward_proc = None
+        self._forward_mode = None
+        if proc is None:
+            return
+        if proc.poll() is None:
+            try:
+                proc.terminate()
+                proc.wait(timeout=1.0)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+
+    def _switch_forward_mode(self, input_device: str, output_device: str, mode: str) -> None:
+        if self._forward_mode == mode and self._forward_proc is not None and self._forward_proc.poll() is None:
+            return
+        self._stop_forward_pipeline()
+        self._start_forward_pipeline(input_device, output_device, mode)
 
     def _resolve_sounddevice_input_device(self, configured: str) -> str:
         name = str(configured).strip()
