@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+IMAGE_NAME="${AVC_DOCKER_IMAGE:-ai-virtual-cam:local}"
+
+log() {
+  printf '[avc-docker] %s\n' "$*"
+}
+
+ensure_docker() {
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "docker is required. run ./bin/avc setup first." >&2
+    exit 2
+  fi
+}
+
+ensure_image() {
+  if docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
+    return 0
+  fi
+  log "docker image not found. building: $IMAGE_NAME"
+  docker build -t "$IMAGE_NAME" "$ROOT_DIR"
+}
+
+run_serve() {
+  local config_path="${1:-$HOME/.avc/setting.json}"
+  shift || true
+
+  local config_dir
+  config_dir="$(cd "$(dirname "$config_path")" && pwd)"
+  local config_file
+  config_file="$(basename "$config_path")"
+
+  if [[ ! -f "$config_path" ]]; then
+    echo "config not found: $config_path" >&2
+    exit 2
+  fi
+
+  local extra_args=()
+  if [[ "$(uname -s)" == "Linux" ]]; then
+    extra_args+=(--gpus all)
+  fi
+
+  docker run --rm -it \
+    "${extra_args[@]}" \
+    --network host \
+    -v "$ROOT_DIR:/workspace" \
+    -v "$config_dir:/host-config" \
+    -v /tmp/.X11-unix:/tmp/.X11-unix \
+    -e DISPLAY="${DISPLAY:-}" \
+    "$IMAGE_NAME" \
+    python3 -m src.app.main --config "/host-config/$config_file" "$@"
+}
+
+run_config() {
+  local output_path="${1:-$HOME/.avc/setting.json}"
+
+  if [[ -z "${DISPLAY:-}" ]]; then
+    echo "DISPLAY is not set. docker config(gui) requires X11 forwarding." >&2
+    exit 2
+  fi
+
+  local output_dir
+  output_dir="$(cd "$(dirname "$output_path")" && pwd)"
+  local output_file
+  output_file="$(basename "$output_path")"
+
+  docker run --rm -it \
+    --network host \
+    -v "$ROOT_DIR:/workspace" \
+    -v "$output_dir:/host-config" \
+    -v /tmp/.X11-unix:/tmp/.X11-unix \
+    -e DISPLAY="$DISPLAY" \
+    "$IMAGE_NAME" \
+    python3 /workspace/scripts/config/create-config-gui.py --output "/host-config/$output_file"
+}
+
+main() {
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    echo "[avc-docker] macOS에서는 docker 기반 serve/config 실행을 지원하지 않습니다." >&2
+    echo "[avc-docker] macOS는 호스트 런타임으로 실행하세요: ./bin/avc setup && ./bin/avc config && ./bin/avc serve" >&2
+    exit 2
+  fi
+
+  ensure_docker
+  ensure_image
+
+  local mode="${1:-}"
+  shift || true
+  case "$mode" in
+    serve)
+      run_serve "$@"
+      ;;
+    config)
+      run_config "$@"
+      ;;
+    *)
+      echo "usage: $0 <serve|config> [args...]" >&2
+      exit 2
+      ;;
+  esac
+}
+
+main "$@"

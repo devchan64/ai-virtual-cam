@@ -32,6 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pciutils \
     python3 \
     python3-pip \
+    python3-tk \
     python3-venv \
     tini \
     usbutils \
@@ -45,10 +46,11 @@ RUN python3 -m pip install -r /tmp/requirements.txt
 COPY src /workspace/src
 COPY config /workspace/config
 COPY docs /workspace/docs
+COPY scripts /workspace/scripts
 
 RUN mkdir -p /workspace/config /workspace/models /workspace/scripts /workspace/src
 
-COPY scripts/container-entrypoint.sh /usr/local/bin/container-entrypoint.sh
+COPY scripts/runtime/container-entrypoint.sh /usr/local/bin/container-entrypoint.sh
 RUN chmod +x /usr/local/bin/container-entrypoint.sh
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/container-entrypoint.sh"]

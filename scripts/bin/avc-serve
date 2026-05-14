@@ -8,12 +8,32 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   cat <<'EOF'
 Usage:
   ./bin/avc serve [--config PATH] [--max-frames N]
+  ./bin/avc serve --docker [--config PATH] [--max-frames N]
 
 Examples:
   ./bin/avc serve --config ~/.avc/setting.json
   ./bin/avc serve --config ~/.avc/setting.json --max-frames 300
 EOF
   exit 0
+fi
+
+if [[ "${1:-}" == "--docker" ]]; then
+  shift
+  config_path="${HOME}/.avc/setting.json"
+  passthrough=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --config)
+        config_path="$2"
+        shift 2
+        ;;
+      *)
+        passthrough+=("$1")
+        shift
+        ;;
+    esac
+  done
+  exec "$ROOT_DIR/scripts/bin/avc-docker-run" serve "$config_path" "${passthrough[@]}"
 fi
 
 if [[ -x "$VENV_PY" ]]; then

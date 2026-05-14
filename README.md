@@ -35,6 +35,15 @@ macOS 오디오 권장:
 ./bin/avc serve
 ```
 
+Docker 실행(선택):
+
+```bash
+./bin/avc serve --docker --config ~/.avc/setting.json
+```
+
+- 로컬 Python 대신 Docker 컨테이너에서 `serve`를 실행합니다.
+- Linux에서는 `--gpus all`로 실행됩니다.
+
 ### 4) 회의 앱 연결
 
 - 카메라: `OBS Virtual Camera`(macOS) 또는 Linux 가상 카메라(`/dev/videoN`)
@@ -46,6 +55,15 @@ macOS 오디오 권장:
 ```bash
 ./bin/avc doctor
 ```
+
+Docker에서 설정 GUI 실행(선택):
+
+```bash
+./bin/avc config --docker --output ~/.avc/setting.json
+```
+
+- X11 `DISPLAY`가 설정된 환경에서만 동작합니다.
+- Docker 이미지가 없으면 자동 빌드합니다.
 
 ## 명령어
 
@@ -83,6 +101,49 @@ macOS 오디오 권장:
 - macOS: OBS Virtual Camera(`pyvirtualcam`) 경로
 - macOS 오디오 루프백: BlackHole 장치 사용 권장
 - CMIO 관련 기능은 폐기
+
+### Docker 배포 정책
+
+- Docker Hub 이미지는 Linux 런타임 기준으로 배포합니다.
+- macOS 경로(OBS Virtual Camera/BlackHole/CoreAudio)는 호스트 통합 의존성이 커서 Docker 배포 대상으로 보지 않습니다.
+- 따라서 Docker 태그는 Linux 용도임을 명시해 운영하는 것을 권장합니다.
+  - 예: `linux-latest`, `linux-vX.Y.Z`
+
+### Docker 태그 규칙
+
+권장 저장소:
+
+- `<dockerhub-id>/ai-virtual-cam`
+
+권장 태그:
+
+1. `linux-latest`
+- 최신 안정 Linux 이미지
+
+2. `linux-vX.Y.Z`
+- 릴리즈 버전 고정 태그
+- 예: `linux-v0.3.0`
+
+3. `linux-<git-sha>`
+- 빌드 추적용 태그
+- 예: `linux-a1b2c3d`
+
+운영 권장:
+
+- 배포 시 `linux-latest` + `linux-vX.Y.Z`를 함께 푸시
+- 장애 대응/롤백 대비를 위해 `linux-<git-sha>`도 병행
+
+수동 배포 예시:
+
+```bash
+docker build -t <dockerhub-id>/ai-virtual-cam:linux-latest .
+docker tag <dockerhub-id>/ai-virtual-cam:linux-latest <dockerhub-id>/ai-virtual-cam:linux-v0.1.0
+docker tag <dockerhub-id>/ai-virtual-cam:linux-latest <dockerhub-id>/ai-virtual-cam:linux-$(git rev-parse --short HEAD)
+
+docker push <dockerhub-id>/ai-virtual-cam:linux-latest
+docker push <dockerhub-id>/ai-virtual-cam:linux-v0.1.0
+docker push <dockerhub-id>/ai-virtual-cam:linux-$(git rev-parse --short HEAD)
+```
 
 ### macOS 필수 체크
 
