@@ -16,10 +16,8 @@ Commands:
   env              Manage Python environment (.venv)
   config           Launch GUI config generator
   serve            Start virtual camera stream service from saved config
-  docker-macos     Run docker serve/config with macOS image defaults
   audio-mixer      Run virtual audio mixer (microphone gate scaffold)
-  entrypoint       Run container entrypoint script
-  doctor           Basic runtime checks (python3, docker)
+  doctor           Basic runtime checks (python3)
 USAGE
 }
 
@@ -35,9 +33,7 @@ case "$cmd" in
   env) exec "$ROOT_DIR/scripts/bin/avc-env" "$@" ;;
   config) exec "$ROOT_DIR/scripts/bin/avc-config" "$@" ;;
   serve) exec "$ROOT_DIR/scripts/bin/avc-serve" "$@" ;;
-  docker-macos) exec "$ROOT_DIR/scripts/bin/avc-docker-macos" "$@" ;;
   audio-mixer) exec "$ROOT_DIR/scripts/bin/avc-audio-mixer" "$@" ;;
-  entrypoint) exec "$ROOT_DIR/scripts/bin/avc-entrypoint" "$@" ;;
   doctor) exec "$ROOT_DIR/scripts/bin/avc-doctor" "$@" ;;
   -h|--help) usage ;;
   *)

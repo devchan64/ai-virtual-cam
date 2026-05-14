@@ -36,12 +36,6 @@ else
   fail ".venv missing; run ./bin/avc setup"
 fi
 
-if ! command -v docker >/dev/null 2>&1; then
-  warn "missing: docker (optional for local run)"
-else
-  log "ok: docker available"
-fi
-
 if [[ -f "$CONFIG_PATH" ]]; then
   backend="$(python3 - <<PY
 import json

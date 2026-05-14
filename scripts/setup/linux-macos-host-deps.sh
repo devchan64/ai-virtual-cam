@@ -4,8 +4,6 @@ set -euo pipefail
 
 INPUT_DEVICE=0
 DRY_RUN=0
-SKIP_DOCKER=0
-SKIP_NVIDIA_TOOLKIT=0
 OS_KIND=""
 LINUX_DISTRO_ID=""
 
@@ -40,8 +38,6 @@ This command no longer creates virtual devices; it only prepares runtime depende
 
 Options:
   --input-device N         Expected USB camera device number (default: 0)
-  --skip-docker            Do not install Docker Engine
-  --skip-nvidia-toolkit    Do not install NVIDIA Container Toolkit
   --dry-run                Print commands without executing them
   -h, --help               Show this help
 EOF
@@ -89,90 +85,6 @@ install_base_packages() {
     gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly
 }
 
-setup_docker_repo() {
-  log "Configuring Docker apt repository"
-  run install -m 0755 -d /etc/apt/keyrings
-  run curl -fsSL "https://download.docker.com/linux/${LINUX_DISTRO_ID}/gpg" -o /etc/apt/keyrings/docker.asc
-  run chmod a+r /etc/apt/keyrings/docker.asc
-
-  local suite
-  suite="${UBUNTU_CODENAME:-${VERSION_CODENAME}}"
-
-  if [[ "$DRY_RUN" -eq 0 ]]; then
-    cat >/etc/apt/sources.list.d/docker.sources <<EOF
-Types: deb
-URIs: https://download.docker.com/linux/${LINUX_DISTRO_ID}
-Suites: ${suite}
-Components: stable
-Architectures: $(dpkg --print-architecture)
-Signed-By: /etc/apt/keyrings/docker.asc
-EOF
-  else
-    printf '[dry-run] write /etc/apt/sources.list.d/docker.sources\n'
-  fi
-}
-
-install_docker() {
-  if [[ "$SKIP_DOCKER" -eq 1 ]]; then
-    log "Skipping Docker installation"
-    return 0
-  fi
-
-  if command -v docker >/dev/null 2>&1; then
-    log "Docker already installed"
-    return 0
-  fi
-
-  if [[ "$OS_KIND" == "linux" ]]; then
-    setup_docker_repo
-    run apt-get update
-    apt_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-    run systemctl enable --now docker
-    return 0
-  fi
-
-  run brew install --cask docker
-}
-
-setup_nvidia_container_toolkit_repo() {
-  log "Configuring NVIDIA Container Toolkit repository"
-  run install -m 0755 -d /usr/share/keyrings
-  run curl -fsSL "https://nvidia.github.io/libnvidia-container/gpgkey" \
-    -o /tmp/nvidia-container-toolkit.gpg
-  run gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg /tmp/nvidia-container-toolkit.gpg
-  run chmod a+r /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
-
-  if [[ "$DRY_RUN" -eq 0 ]]; then
-    curl -s -L "https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list" \
-      | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
-      | tee /etc/apt/sources.list.d/nvidia-container-toolkit.list >/dev/null
-  else
-    printf '[dry-run] write /etc/apt/sources.list.d/nvidia-container-toolkit.list from stable/deb\n'
-  fi
-}
-
-install_nvidia_container_toolkit() {
-  if [[ "$OS_KIND" == "macos" ]]; then
-    log "Skipping NVIDIA Container Toolkit: not applicable on macOS."
-    return 0
-  fi
-  if [[ "$SKIP_NVIDIA_TOOLKIT" -eq 1 ]]; then
-    log "Skipping NVIDIA Container Toolkit installation"
-    return 0
-  fi
-
-  if command -v nvidia-ctk >/dev/null 2>&1; then
-    log "NVIDIA Container Toolkit already installed"
-  else
-    setup_nvidia_container_toolkit_repo
-    run apt-get update
-    apt_install nvidia-container-toolkit
-  fi
-
-  run nvidia-ctk runtime configure --runtime=docker
-  run systemctl restart docker
-}
-
 verify_host_contract() {
   log "Verifying host contract"
 
@@ -181,15 +93,7 @@ verify_host_contract() {
     return 0
   fi
 
-  if ! command -v docker >/dev/null 2>&1; then
-    fail "docker is not available after installation."
-  fi
-
   if [[ "$OS_KIND" == "linux" ]]; then
-    if [[ "$SKIP_NVIDIA_TOOLKIT" -eq 0 ]] && ! command -v nvidia-ctk >/dev/null 2>&1; then
-      fail "nvidia-ctk is not available after installation."
-    fi
-
     if ! command -v ffmpeg >/dev/null 2>&1; then
       fail "ffmpeg is not available after installation."
     fi
@@ -207,6 +111,7 @@ verify_host_contract() {
   if ! brew list --cask blackhole-2ch >/dev/null 2>&1; then
     fail "BlackHole 2ch is not installed. macOS path requires virtual audio device."
   fi
+
 }
 
 install_macos_packages() {
@@ -229,14 +134,6 @@ parse_args() {
       --input-device)
         INPUT_DEVICE="$2"
         shift 2
-        ;;
-      --skip-docker)
-        SKIP_DOCKER=1
-        shift
-        ;;
-      --skip-nvidia-toolkit)
-        SKIP_NVIDIA_TOOLKIT=1
-        shift
         ;;
       --dry-run)
         DRY_RUN=1
@@ -269,8 +166,6 @@ main() {
     fi
     install_macos_packages
   fi
-  install_docker
-  install_nvidia_container_toolkit
   log "Setup now installs dependencies only; create virtual devices in config."
   install_python_runtime_packages
   verify_host_contract

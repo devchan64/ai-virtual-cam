@@ -10,7 +10,7 @@
 ./bin/avc setup
 ```
 
-- Linux: 런타임 의존성 + Docker/NVIDIA Toolkit(옵션) 설치
+- Linux: 런타임 의존성 설치
 - macOS: OBS Studio + BlackHole 2ch + Python 런타임 의존성 설치
 
 Python 의존성만 재동기화:
@@ -43,25 +43,6 @@ macOS 오디오 권장:
 ./bin/avc serve
 ```
 
-Docker 실행(선택):
-
-```bash
-./bin/avc serve --docker --config ~/.avc/setting.json
-```
-
-- 로컬 Python 대신 Docker 컨테이너에서 `serve`를 실행합니다.
-- Linux 호스트는 `Dockerfile.linux`, macOS 호스트는 `Dockerfile.darwin-host`를 사용합니다.
-- Linux에서는 `--gpus all`로 실행됩니다.
-
-macOS 전용 Docker 실행 명령:
-
-```bash
-./bin/avc docker-macos serve --config ~/.avc/setting.json
-```
-
-- 기본 이미지: `devchan64/ai-virtual-cam:macos-latest`
-- 기본 Dockerfile: `Dockerfile.darwin-host`
-
 ### 4) 회의 앱 연결
 
 - 카메라: `OBS Virtual Camera`(macOS) 또는 Linux 가상 카메라(`/dev/videoN`)
@@ -74,22 +55,6 @@ macOS 전용 Docker 실행 명령:
 ./bin/avc doctor
 ```
 
-Docker에서 설정 GUI 실행(선택):
-
-```bash
-./bin/avc config --docker --output ~/.avc/setting.json
-```
-
-- X11 `DISPLAY`가 설정된 환경에서만 동작합니다.
-- Docker 이미지가 없으면 호스트 OS에 맞는 Dockerfile로 자동 빌드합니다.
-
-macOS 전용 설정 GUI 실행 명령:
-
-```bash
-./bin/avc docker-macos config --output ~/.avc/setting.json
-```
-
-- macOS에서는 카메라/오디오 장치 탐색 정확성을 위해 `config`를 호스트 런타임으로 실행합니다.
 
 ## 명령어
 
@@ -103,7 +68,6 @@ macOS 전용 설정 GUI 실행 명령:
 - `env`: Python 환경 동기화 (`env sync`)
 - `config`: GUI 설정 생성기(프리뷰 포함)
 - `serve`: 저장된 설정으로 스트리밍 실행
-- `docker-macos`: macOS 전용 Docker 실행(serve/config)
 - `audio-mixer`: 마이크 게이트 기반 가상 오디오 믹서 실행 (Linux: 실시간 입력/출력 스트림)
 - `doctor`: 기본 런타임 점검
 
@@ -129,63 +93,6 @@ macOS 전용 설정 GUI 실행 명령:
 - macOS: OBS Virtual Camera(`pyvirtualcam`) 경로
 - macOS 오디오 루프백: BlackHole 장치 사용 권장
 - CMIO 관련 기능은 폐기
-
-### Docker 배포 정책
-
-- Dockerfile을 플랫폼별로 분리해 운영합니다.
-  - Linux: `Dockerfile.linux`
-  - macOS: `Dockerfile.darwin-host`
-- Docker 이미지는 운영 목적에 맞게 플랫폼 태그를 분리해 배포합니다.
-
-### Docker 태그 규칙
-
-권장 저장소:
-
-- `devchan64/ai-virtual-cam`
-
-권장 태그:
-
-1. `linux-latest`
-- 최신 안정 Linux 이미지
-
-2. `linux-vX.Y.Z`
-- 릴리즈 버전 고정 태그
-- 예: `linux-v0.3.0`
-
-3. `linux-<git-sha>`
-- 빌드 추적용 태그
-- 예: `linux-a1b2c3d`
-
-4. `macos-latest`
-- 최신 안정 macOS용 Docker 빌드 이미지
-
-5. `macos-vX.Y.Z`
-- macOS 릴리즈 버전 고정 태그
-- 예: `macos-v0.3.0`
-
-운영 권장:
-
-- Linux 배포 시 `linux-latest` + `linux-vX.Y.Z`를 함께 푸시
-- macOS 배포 시 `macos-latest` + `macos-vX.Y.Z`를 함께 푸시
-- 장애 대응/롤백 대비를 위해 `linux-<git-sha>` 태그도 병행
-
-수동 배포 예시:
-
-```bash
-docker build -f Dockerfile.linux -t devchan64/ai-virtual-cam:linux-latest .
-docker tag devchan64/ai-virtual-cam:linux-latest devchan64/ai-virtual-cam:linux-v0.1.0
-docker tag devchan64/ai-virtual-cam:linux-latest devchan64/ai-virtual-cam:linux-$(git rev-parse --short HEAD)
-
-docker push devchan64/ai-virtual-cam:linux-latest
-docker push devchan64/ai-virtual-cam:linux-v0.1.0
-docker push devchan64/ai-virtual-cam:linux-$(git rev-parse --short HEAD)
-
-docker build -f Dockerfile.darwin-host -t devchan64/ai-virtual-cam:macos-latest .
-docker tag devchan64/ai-virtual-cam:macos-latest devchan64/ai-virtual-cam:macos-v0.1.0
-
-docker push devchan64/ai-virtual-cam:macos-latest
-docker push devchan64/ai-virtual-cam:macos-v0.1.0
-```
 
 ### macOS 필수 체크
 
