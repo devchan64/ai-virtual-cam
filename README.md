@@ -98,6 +98,16 @@ sudo -v
   - Linux: `none`, `rnnoise`, `deepfilternet`
 - `config-gui`의 오디오 탭에서 `오디오 게이트 테스트`를 실행하면 현재 설정값으로 게이트 상태 전환을 시뮬레이션해 확인할 수 있습니다.
 
+Linux 오디오 장치 ID 정책:
+
+- `config-gui`는 오디오 장치 값을 `setting.json`에 원본 ID 그대로 저장합니다.
+  - 예: `alsa_input...__source`, `ai-virtual-cam`
+- `serve`는 시스템 기본 source/sink를 변경하지 않습니다.
+- 설정값이 `sounddevice`에서 직접 열 수 없는 ID이면 자동 변환/폴백 없이 에러로 종료합니다.
+- 권장: `serve`에 사용할 오디오 장치는 `sounddevice`에서 조회 가능한 값으로 저장하세요.
+  - 예: `default`, `pulse`, `sof-hda-dsp: - (hw:0,0)` 등
+  - `pactl` 전용 ID(예: `alsa_input...`, `ai-virtual-cam`)는 환경에 따라 `sounddevice` 직접 오픈이 실패할 수 있습니다.
+
 기본 설정 파일 경로:
 
 - `~/.avc/setting.json`

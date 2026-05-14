@@ -85,7 +85,8 @@ apt_install() {
 install_base_packages() {
   log "Installing base packages"
   run apt-get update
-  apt_install ca-certificates curl gnupg gnupg2 lsb-release software-properties-common python3 python3-venv python3-pip libportaudio2 portaudio19-dev ffmpeg pulseaudio-utils
+  apt_install ca-certificates curl gnupg gnupg2 lsb-release software-properties-common python3 python3-venv python3-pip libportaudio2 portaudio19-dev ffmpeg pulseaudio-utils \
+    gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly
 }
 
 setup_docker_repo() {
@@ -206,7 +207,7 @@ verify_host_contract() {
 
 install_macos_packages() {
   log "Installing base packages with Homebrew (macOS)"
-  run brew install python@3.12 python-tk@3.12 ffmpeg opencv
+  run brew install python@3.12 python-tk@3.12 ffmpeg opencv gstreamer
   run brew install --cask obs
   log "macOS OBS 연동 확인: OBS Studio를 열어 'Start Virtual Camera'를 1회 실행 후 종료하세요."
 }

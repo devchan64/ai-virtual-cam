@@ -2773,7 +2773,6 @@ class ConfigGui:
             iv["audio_output_device"].get().strip(),
             getattr(self, "_audio_output_display_to_raw", {}),
         )
-        audio_input_for_runtime = _coerce_audio_input_device_for_sounddevice(raw_audio_input)
 
         return build_config(
             input_device=iv["input_device"].get(),
@@ -2809,7 +2808,7 @@ class ConfigGui:
             crop_pan_target_offset_x=float(iv["crop_pan_target_offset_x"].get()),
             crop_pan_target_offset_y=float(iv["crop_pan_target_offset_y"].get()),
             audio_enabled=self._parse_bool(iv["audio_enabled"].get()),
-            audio_input_device=audio_input_for_runtime,
+            audio_input_device=raw_audio_input,
             audio_output_device=raw_audio_output,
             audio_sample_rate=int(iv["audio_sample_rate"].get()),
             audio_channels=int(iv["audio_channels"].get()),
