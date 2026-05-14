@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-echo "[avc] NOTICE: CLI config(create-config.py)는 폐기되었습니다. config-gui로 전환합니다." >&2
+echo "[avc] NOTICE: CLI config(create-config.py)는 폐기되었습니다. GUI 설정기(config)로 전환합니다." >&2
 exec "$ROOT_DIR/scripts/bin/avc-config-gui" "$@"

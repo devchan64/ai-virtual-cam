@@ -56,7 +56,7 @@ PY
 )"
   log "config: $CONFIG_PATH backend=$backend"
 else
-  warn "config not found: $CONFIG_PATH (run ./bin/avc config-gui)"
+  warn "config not found: $CONFIG_PATH (run ./bin/avc config)"
 fi
 
 if [[ "$OS_NAME" == "Darwin" ]]; then

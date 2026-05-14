@@ -13,8 +13,7 @@ Single Entrypoint:
 
 Commands:
   setup            Install host dependencies for current OS
-  config           Alias to config-gui (legacy CLI config removed)
-  config-gui       Launch GUI config generator
+  config           Launch GUI config generator
   serve            Start virtual camera stream service from saved config
   audio-mixer      Run virtual audio mixer (microphone gate scaffold)
   entrypoint       Run container entrypoint script
@@ -32,7 +31,6 @@ shift || true
 case "$cmd" in
   setup) exec "$ROOT_DIR/scripts/bin/avc-setup" "$@" ;;
   config) exec "$ROOT_DIR/scripts/bin/avc-config" "$@" ;;
-  config-gui) exec "$ROOT_DIR/scripts/bin/avc-config-gui" "$@" ;;
   serve) exec "$ROOT_DIR/scripts/bin/avc-serve" "$@" ;;
   audio-mixer) exec "$ROOT_DIR/scripts/bin/avc-audio-mixer" "$@" ;;
   entrypoint) exec "$ROOT_DIR/scripts/bin/avc-entrypoint" "$@" ;;
