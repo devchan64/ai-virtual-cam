@@ -48,13 +48,19 @@ class VirtualAudioMixer:
         self._forward_mode: str | None = None
 
     def run(self, max_steps: int = 0) -> None:
-        if platform.system() != "Linux":
-            raise RuntimeError("audio mixer runtime is Linux GStreamer-only now.")
-        if not self._can_use_gstreamer():
+        os_name = platform.system()
+        if os_name == "Linux":
+            if not self._can_use_gstreamer():
+                raise RuntimeError(
+                    "gst-launch-1.0 is required for audio mixer runtime. Run ./bin/avc setup."
+                )
+            self._run_with_gstreamer(max_steps=max_steps)
+            return
+        if sd is None:
             raise RuntimeError(
-                "gst-launch-1.0 is required for audio mixer runtime. Run ./bin/avc setup."
+                "sounddevice 모듈이 필요합니다. ./bin/avc setup 후 다시 시도하세요."
             )
-        self._run_with_gstreamer(max_steps=max_steps)
+        self._run_with_sounddevice(max_steps=max_steps)
         return
 
         frame_samples = max(1, int(self._cfg.sampleRate * self._cfg.frameMs / 1000.0))
@@ -282,6 +288,116 @@ class VirtualAudioMixer:
 
     def _can_use_gstreamer(self) -> bool:
         return shutil.which("gst-launch-1.0") is not None
+
+    def _run_with_sounddevice(self, max_steps: int = 0) -> None:
+        frame_samples = max(1, int(self._cfg.sampleRate * self._cfg.frameMs / 1000.0))
+        input_device = str(self._cfg.inputDevice).strip() or "default"
+        output_device = str(self._cfg.outputDevice).strip() or "default"
+        in_channels = int(self._cfg.channels)
+        out_channels = int(self._cfg.channels)
+
+        try:
+            input_info = sd.query_devices(input_device, kind="input")
+        except Exception as exc:
+            raise RuntimeError(f"audio input device open failed: configured input '{input_device}': {exc}") from exc
+        try:
+            output_info = sd.query_devices(output_device, kind="output")
+        except Exception as exc:
+            raise RuntimeError(f"audio output device open failed: configured output '{output_device}': {exc}") from exc
+
+        if in_channels > int(input_info.get("max_input_channels", in_channels)):
+            in_channels = int(input_info.get("max_input_channels", in_channels))
+        if out_channels > int(output_info.get("max_output_channels", out_channels)):
+            out_channels = int(output_info.get("max_output_channels", out_channels))
+        if in_channels <= 0 or out_channels <= 0:
+            raise RuntimeError("selected input/output device has no usable channels")
+
+        gate = NoiseGate(self._cfg.gate, frame_ms=self._cfg.frameMs)
+        self._running = True
+        self._steps = 0
+        self._stream_open = False
+        self._last_gate_state = "closed"
+
+        print(
+            "[audio] mixer starting (sounddevice): "
+            f"in={input_device} out={output_device} "
+            f"{self._cfg.sampleRate}Hz/{in_channels}->{out_channels}ch frame={self._cfg.frameMs}ms",
+            flush=True,
+        )
+        print(
+            "[audio] policy: system default sink/source is not modified by this process",
+            flush=True,
+        )
+
+        def callback(
+            indata: np.ndarray,
+            outdata: np.ndarray,
+            frames: int,
+            _time: dict[str, Any],
+            status: sd.CallbackFlags,
+        ) -> None:
+            if status.input_overflow:
+                print("[audio] input overflow", flush=True)
+            if status.output_underflow:
+                print("[audio] output underflow", flush=True)
+            if frames <= 0 or not self._running:
+                outdata.fill(0.0)
+                return
+
+            data = indata.astype(np.float32, copy=True)
+            mono = data.mean(axis=1) if data.shape[1] > 1 else data[:, 0]
+            mono = np.clip(mono, -1.0, 1.0)
+            level_db = self._rms_dbfs(mono)
+            voice_ratio = self._voice_band_ratio(mono, self._cfg.sampleRate)
+            gate_state = gate.step(level_db, voice_band_ratio=voice_ratio)
+            state = gate_state.state.value
+            self._steps += 1
+
+            if state != self._last_gate_state:
+                prev = self._last_gate_state
+                self._last_gate_state = state
+                print(
+                    f"[audio] gate transition: step={self._steps} "
+                    f"{prev} -> {state} levelDb={level_db:.1f} voiceRatio={voice_ratio:.2f}",
+                    flush=True,
+                )
+
+            stream_open = state in {"attack", "open", "hold", "release"}
+            if stream_open != self._stream_open:
+                self._stream_open = stream_open
+                if self._on_stream_state is not None:
+                    self._on_stream_state(stream_open, state, self._steps)
+
+            if stream_open:
+                out = data
+                if out.shape[1] != outdata.shape[1]:
+                    base = out.mean(axis=1, keepdims=True)
+                    out = base if outdata.shape[1] == 1 else np.repeat(base, outdata.shape[1], axis=1)
+                outdata[:] = out * float(gate_state.gain)
+            else:
+                outdata.fill(0.0)
+            np.clip(outdata, -1.0, 1.0, out=outdata)
+
+            if max_steps > 0 and self._steps >= max_steps:
+                self._running = False
+                raise sd.CallbackStop
+
+        try:
+            with sd.Stream(
+                samplerate=self._cfg.sampleRate,
+                blocksize=frame_samples,
+                dtype="float32",
+                channels=(in_channels, out_channels),
+                device=(input_device, output_device),
+                callback=callback,
+            ):
+                while self._running:
+                    time.sleep(max(0.001, self._cfg.frameMs / 1000.0))
+        finally:
+            self._running = False
+            if self._on_stream_state is not None:
+                self._on_stream_state(False, "stop", self._steps)
+            print("[audio] mixer stopped (sounddevice)", flush=True)
 
     def _run_with_gstreamer(self, max_steps: int = 0) -> None:
         input_device = str(self._cfg.inputDevice).strip()
