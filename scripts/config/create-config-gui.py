@@ -357,24 +357,6 @@ def _coerce_audio_input_device_for_sounddevice(device_name: str) -> str:
     if not name:
         return name
     lowered = name.lower()
-    # Bridge PulseAudio source IDs (e.g. alsa_input..., *.monitor) to sounddevice's pulse endpoint.
-    if (
-        ".monitor" in lowered
-        or lowered.startswith("alsa_input.")
-        or lowered.startswith("alsa_output.")
-    ):
-        try:
-            proc = subprocess.run(
-                ["pactl", "set-default-source", name],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=1.5,
-            )
-            if proc.returncode == 0:
-                return "pulse"
-        except Exception:
-            pass
     try:
         names = [
             str(d.get("name", "")).strip()
@@ -389,6 +371,14 @@ def _coerce_audio_input_device_for_sounddevice(device_name: str) -> str:
         if name == "default":
             if "default" in names:
                 return "default"
+            return names[0]
+        if (
+            ".monitor" in lowered
+            or lowered.startswith("alsa_input.")
+            or lowered.startswith("alsa_output.")
+        ):
+            if "pulse" in names:
+                return "pulse"
             return names[0]
         if "monitor" in lowered:
             for candidate in names:
@@ -2775,6 +2765,16 @@ class ConfigGui:
         if background["mode"] == "image_chroma":
             background["colorBlendAlpha"] = float(iv["bg_blend_alpha"].get())
 
+        raw_audio_input = _audio_device_raw_from_display(
+            iv["audio_input_device"].get().strip(),
+            getattr(self, "_audio_input_display_to_raw", {}),
+        )
+        raw_audio_output = _audio_device_raw_from_display(
+            iv["audio_output_device"].get().strip(),
+            getattr(self, "_audio_output_display_to_raw", {}),
+        )
+        audio_input_for_runtime = _coerce_audio_input_device_for_sounddevice(raw_audio_input)
+
         return build_config(
             input_device=iv["input_device"].get(),
             input_width=input_w,
@@ -2809,14 +2809,8 @@ class ConfigGui:
             crop_pan_target_offset_x=float(iv["crop_pan_target_offset_x"].get()),
             crop_pan_target_offset_y=float(iv["crop_pan_target_offset_y"].get()),
             audio_enabled=self._parse_bool(iv["audio_enabled"].get()),
-            audio_input_device=_audio_device_raw_from_display(
-                iv["audio_input_device"].get().strip(),
-                getattr(self, "_audio_input_display_to_raw", {}),
-            ),
-            audio_output_device=_audio_device_raw_from_display(
-                iv["audio_output_device"].get().strip(),
-                getattr(self, "_audio_output_display_to_raw", {}),
-            ),
+            audio_input_device=audio_input_for_runtime,
+            audio_output_device=raw_audio_output,
             audio_sample_rate=int(iv["audio_sample_rate"].get()),
             audio_channels=int(iv["audio_channels"].get()),
             audio_frame_ms=int(iv["audio_frame_ms"].get()),

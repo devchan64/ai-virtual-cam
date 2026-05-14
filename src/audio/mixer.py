@@ -316,21 +316,6 @@ class VirtualAudioMixer:
             return name
         except Exception:
             pass
-        # Bridge pactl source names (e.g. ai-virtual-cam.monitor) to sounddevice "pulse".
-        if ".monitor" in name.lower() or "alsa_input." in name.lower() or "alsa_output." in name.lower():
-            try:
-                proc = subprocess.run(
-                    ["pactl", "set-default-source", name],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    timeout=1.5,
-                )
-                if proc.returncode == 0:
-                    print(f"[audio] input source mapped via pactl default-source: {name} -> pulse", flush=True)
-                    return "pulse"
-            except Exception:
-                pass
         return name
 
     def _pick_preferred_monitor_source(self) -> str | None:
@@ -371,20 +356,6 @@ class VirtualAudioMixer:
             return name
         except Exception:
             pass
-        if "alsa_output." in name.lower() or "ai-virtual-cam" in name.lower():
-            try:
-                proc = subprocess.run(
-                    ["pactl", "set-default-sink", name],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    timeout=1.5,
-                )
-                if proc.returncode == 0:
-                    print(f"[audio] output sink mapped via pactl default-sink: {name} -> pulse", flush=True)
-                    return "pulse"
-            except Exception:
-                pass
         return name
 
     def _apply_denoise(self, data: np.ndarray, sample_rate: int) -> np.ndarray:
