@@ -256,7 +256,7 @@ class ConfigGui:
         self._add_slider(tab_crop, row, "crop_pan_target_offset_y", "Pan target offset Y", 0.00, -1.0, 1.0, resolution=0.01)
 
         row = 0
-        self._add_combo(tab_audio, row, "audio_enabled", "Audio mixer", ["false", "true"], "false")
+        self._add_bool_switch(tab_audio, row, "audio_enabled", "Audio mixer", True)
         row += 1
         self._add_text(tab_audio, row, "audio_input_device", "Input device", "default")
         self._add_text(tab_audio, row, "audio_output_device", "Output device", "default", col_offset=2)
@@ -391,6 +391,18 @@ class ConfigGui:
         combo.grid(row=row, column=col_offset + 1, columnspan=span, sticky="ew", padx=4)
         self._widgets[key] = combo
 
+    def _add_bool_switch(self, parent, row, key, label, default=False):
+        var = tk.BooleanVar(value=bool(default))
+        self.vars[key] = var
+        check_btn = ttk.Checkbutton(parent, text=label, variable=var)
+        check_btn.grid(row=row, column=0, columnspan=4, sticky="w", padx=4, pady=(2, 2))
+        self._widgets[key] = check_btn
+
+    def _parse_bool(self, value) -> bool:
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"1", "true", "on", "yes", "y"}
+
     def _on_input_device_changed(self, _event=None):
         device = self.vars["input_device"].get().strip()
         self._input_modes = discover_camera_mode_options(device)
@@ -512,7 +524,7 @@ class ConfigGui:
     def _build_audio_defaults(self) -> dict[str, float | int | str]:
         denoise_backends = _audio_denoise_backend_options()
         return {
-            "audio_enabled": "false",
+            "audio_enabled": True,
             "audio_input_device": "default",
             "audio_output_device": "default",
             "audio_sample_rate": 48000,
@@ -606,7 +618,7 @@ class ConfigGui:
         self._set_var("crop_tilt_pid_kd", crop_cfg.get("tiltPidKd", crop_cfg.get("panPidKd")))
         self._set_var("crop_pan_target_offset_x", crop_cfg.get("panTargetOffsetX"))
         self._set_var("crop_pan_target_offset_y", crop_cfg.get("panTargetOffsetY"))
-        self._set_var("audio_enabled", str(bool(audio_cfg.get("enabled", False))).lower())
+        self._set_var("audio_enabled", audio_cfg.get("enabled", False))
         self._set_var("audio_input_device", audio_cfg.get("inputDevice"))
         self._set_var("audio_output_device", audio_cfg.get("outputDevice"))
         self._set_var("audio_sample_rate", audio_cfg.get("sampleRate"))
@@ -638,6 +650,9 @@ class ConfigGui:
             return
         var = self.vars.get(key)
         if var is None:
+            return
+        if isinstance(var, tk.BooleanVar):
+            var.set(self._parse_bool(value))
             return
         var.set(str(value))
 
@@ -1453,7 +1468,7 @@ class ConfigGui:
             crop_tilt_pid_kd=float(iv["crop_tilt_pid_kd"].get()),
             crop_pan_target_offset_x=float(iv["crop_pan_target_offset_x"].get()),
             crop_pan_target_offset_y=float(iv["crop_pan_target_offset_y"].get()),
-            audio_enabled=iv["audio_enabled"].get().strip().lower() == "true",
+            audio_enabled=self._parse_bool(iv["audio_enabled"].get()),
             audio_input_device=iv["audio_input_device"].get().strip(),
             audio_output_device=iv["audio_output_device"].get().strip(),
             audio_sample_rate=int(iv["audio_sample_rate"].get()),

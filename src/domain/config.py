@@ -289,7 +289,7 @@ class AudioMixerConfig:
     def from_dict(cls, raw: dict) -> "AudioMixerConfig":
         gate_raw = raw.get("gate") or {}
         config = cls(
-            enabled=bool(raw.get("enabled", False)),
+            enabled=bool(raw.get("enabled", True)),
             inputDevice=str(raw.get("inputDevice", "default")),
             outputDevice=str(raw.get("outputDevice", "default")),
             sampleRate=int(raw.get("sampleRate", 48000)),

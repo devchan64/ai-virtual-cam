@@ -35,7 +35,7 @@ def build_config(
     crop_tilt_pid_kd: float | None = None,
     crop_pan_target_offset_x: float = 0.0,
     crop_pan_target_offset_y: float = 0.0,
-    audio_enabled: bool = False,
+    audio_enabled: bool = True,
     audio_input_device: str = "default",
     audio_output_device: str = "default",
     audio_sample_rate: int = 48000,
