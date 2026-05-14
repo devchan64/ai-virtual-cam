@@ -42,6 +42,7 @@ Docker 실행(선택):
 ```
 
 - 로컬 Python 대신 Docker 컨테이너에서 `serve`를 실행합니다.
+- Linux 호스트는 `Dockerfile.linux`, macOS 호스트는 `Dockerfile.macos`를 사용합니다.
 - Linux에서는 `--gpus all`로 실행됩니다.
 
 ### 4) 회의 앱 연결
@@ -63,7 +64,7 @@ Docker에서 설정 GUI 실행(선택):
 ```
 
 - X11 `DISPLAY`가 설정된 환경에서만 동작합니다.
-- Docker 이미지가 없으면 자동 빌드합니다.
+- Docker 이미지가 없으면 호스트 OS에 맞는 Dockerfile로 자동 빌드합니다.
 
 ## 명령어
 
@@ -104,10 +105,10 @@ Docker에서 설정 GUI 실행(선택):
 
 ### Docker 배포 정책
 
-- Docker Hub 이미지는 Linux 런타임 기준으로 배포합니다.
-- macOS 경로(OBS Virtual Camera/BlackHole/CoreAudio)는 호스트 통합 의존성이 커서 Docker 배포 대상으로 보지 않습니다.
-- 따라서 Docker 태그는 Linux 용도임을 명시해 운영하는 것을 권장합니다.
-  - 예: `linux-latest`, `linux-vX.Y.Z`
+- Dockerfile을 플랫폼별로 분리해 운영합니다.
+  - Linux: `Dockerfile.linux`
+  - macOS: `Dockerfile.macos`
+- Docker 이미지는 운영 목적에 맞게 플랫폼 태그를 분리해 배포합니다.
 
 ### Docker 태그 규칙
 
@@ -128,21 +129,35 @@ Docker에서 설정 GUI 실행(선택):
 - 빌드 추적용 태그
 - 예: `linux-a1b2c3d`
 
+4. `macos-latest`
+- 최신 안정 macOS용 Docker 빌드 이미지
+
+5. `macos-vX.Y.Z`
+- macOS 릴리즈 버전 고정 태그
+- 예: `macos-v0.3.0`
+
 운영 권장:
 
-- 배포 시 `linux-latest` + `linux-vX.Y.Z`를 함께 푸시
-- 장애 대응/롤백 대비를 위해 `linux-<git-sha>`도 병행
+- Linux 배포 시 `linux-latest` + `linux-vX.Y.Z`를 함께 푸시
+- macOS 배포 시 `macos-latest` + `macos-vX.Y.Z`를 함께 푸시
+- 장애 대응/롤백 대비를 위해 `linux-<git-sha>` 태그도 병행
 
 수동 배포 예시:
 
 ```bash
-docker build -t <dockerhub-id>/ai-virtual-cam:linux-latest .
+docker build -f Dockerfile.linux -t <dockerhub-id>/ai-virtual-cam:linux-latest .
 docker tag <dockerhub-id>/ai-virtual-cam:linux-latest <dockerhub-id>/ai-virtual-cam:linux-v0.1.0
 docker tag <dockerhub-id>/ai-virtual-cam:linux-latest <dockerhub-id>/ai-virtual-cam:linux-$(git rev-parse --short HEAD)
 
 docker push <dockerhub-id>/ai-virtual-cam:linux-latest
 docker push <dockerhub-id>/ai-virtual-cam:linux-v0.1.0
 docker push <dockerhub-id>/ai-virtual-cam:linux-$(git rev-parse --short HEAD)
+
+docker build -f Dockerfile.macos -t <dockerhub-id>/ai-virtual-cam:macos-latest .
+docker tag <dockerhub-id>/ai-virtual-cam:macos-latest <dockerhub-id>/ai-virtual-cam:macos-v0.1.0
+
+docker push <dockerhub-id>/ai-virtual-cam:macos-latest
+docker push <dockerhub-id>/ai-virtual-cam:macos-v0.1.0
 ```
 
 ### macOS 필수 체크

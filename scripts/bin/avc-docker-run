@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 IMAGE_NAME="${AVC_DOCKER_IMAGE:-ai-virtual-cam:local}"
+DOCKERFILE_PATH="${AVC_DOCKERFILE:-}"
 
 log() {
   printf '[avc-docker] %s\n' "$*"
@@ -16,11 +17,32 @@ ensure_docker() {
 }
 
 ensure_image() {
+  local dockerfile_path="$DOCKERFILE_PATH"
+  if [[ -z "$dockerfile_path" ]]; then
+    case "$(uname -s)" in
+      Darwin)
+        dockerfile_path="$ROOT_DIR/Dockerfile.macos"
+        ;;
+      Linux)
+        dockerfile_path="$ROOT_DIR/Dockerfile.linux"
+        ;;
+      *)
+        echo "unsupported host os: $(uname -s)" >&2
+        exit 2
+        ;;
+    esac
+  fi
+
+  if [[ ! -f "$dockerfile_path" ]]; then
+    echo "dockerfile not found: $dockerfile_path" >&2
+    exit 2
+  fi
+
   if docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
     return 0
   fi
-  log "docker image not found. building: $IMAGE_NAME"
-  docker build -t "$IMAGE_NAME" "$ROOT_DIR"
+  log "docker image not found. building: $IMAGE_NAME (dockerfile=$(basename "$dockerfile_path"))"
+  docker build -f "$dockerfile_path" -t "$IMAGE_NAME" "$ROOT_DIR"
 }
 
 run_serve() {
@@ -38,13 +60,15 @@ run_serve() {
   fi
 
   local extra_args=()
+  local network_args=()
   if [[ "$(uname -s)" == "Linux" ]]; then
     extra_args+=(--gpus all)
+    network_args+=(--network host)
   fi
 
   docker run --rm -it \
     "${extra_args[@]}" \
-    --network host \
+    "${network_args[@]}" \
     -v "$ROOT_DIR:/workspace" \
     -v "$config_dir:/host-config" \
     -v /tmp/.X11-unix:/tmp/.X11-unix \
@@ -66,8 +90,13 @@ run_config() {
   local output_file
   output_file="$(basename "$output_path")"
 
+  local network_args=()
+  if [[ "$(uname -s)" == "Linux" ]]; then
+    network_args+=(--network host)
+  fi
+
   docker run --rm -it \
-    --network host \
+    "${network_args[@]}" \
     -v "$ROOT_DIR:/workspace" \
     -v "$output_dir:/host-config" \
     -v /tmp/.X11-unix:/tmp/.X11-unix \
@@ -77,12 +106,6 @@ run_config() {
 }
 
 main() {
-  if [[ "$(uname -s)" == "Darwin" ]]; then
-    echo "[avc-docker] macOS에서는 docker 기반 serve/config 실행을 지원하지 않습니다." >&2
-    echo "[avc-docker] macOS는 호스트 런타임으로 실행하세요: ./bin/avc setup && ./bin/avc config && ./bin/avc serve" >&2
-    exit 2
-  fi
-
   ensure_docker
   ensure_image
 
