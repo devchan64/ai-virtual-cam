@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import platform
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,19 +13,240 @@ def _default_audio_output_device() -> str:
     try:
         import sounddevice as sd
     except Exception:
-        return "default"
+        pactl_default = _pactl_default_audio_device("sink")
+        return pactl_default if pactl_default != "default" else "pulse"
+
+    # Prefer a PulseAudio sink name that is actually accepted by sounddevice.
+    # In many environments, the virtual sink itself only appears as pactl short name,
+    # while sounddevice sees `pulse` as the runtime endpoint.
+    try:
+        sound_devices = sd.query_devices()
+        pulse_fallback: str | None = None
+        first_non_default: str | None = None
+        for d in sound_devices:
+            dname = str(d.get("name", "")).strip()
+            if not dname:
+                continue
+            if int(d.get("max_output_channels", 0)) <= 0:
+                continue
+            lowered = dname.lower()
+            if "virtual" in lowered:
+                return dname
+            if lowered == "pulse":
+                pulse_fallback = dname
+            if first_non_default is None and "default" not in lowered:
+                first_non_default = dname
+            if pulse_fallback is None:
+                pulse_fallback = first_non_default
+        if pulse_fallback is not None:
+            return pulse_fallback
+    except Exception:
+        pass
 
     try:
+        proc = subprocess.run(
+            ["pactl", "get-default-sink"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=1.5,
+        )
+        if proc.returncode == 0:
+            default_name = proc.stdout.strip()
+            if default_name and default_name.lower() != "default":
+                return default_name
+    except Exception:
+        pass
+
+    try:
+        virtual_candidates: list[str] = []
+        default_output_name: str | None = None
+        index_output = sd.default.device[1] if sd.default.device is not None else None
         for device in sd.query_devices():
             name = str(device.get("name", ""))
             if int(device.get("max_output_channels", 0)) <= 0:
                 continue
             lowered = name.lower()
             if "ai-virtual-cam" in lowered or "virtual-cam" in lowered or "virtual" in lowered:
-                return name
+                virtual_candidates.append(name)
+            if (
+                default_output_name is None
+                and index_output is not None
+                and isinstance(index_output, int)
+                and sd.query_devices(index_output).get("name") == name
+            ):
+                default_output_name = name
+        if virtual_candidates:
+            return virtual_candidates[0]
+        if (
+            default_output_name is not None
+            and "(hw:" not in default_output_name.lower()
+            and "sof-hda" not in default_output_name.lower()
+        ):
+            return default_output_name
+    except Exception:
+        pactl_default = _pactl_default_audio_device("sink")
+        return pactl_default if pactl_default != "default" else "pulse"
+    pactl_default = _pactl_default_audio_device("sink")
+    if (
+        pactl_default != "default"
+        and "(hw:" not in pactl_default.lower()
+        and "sof-hda" not in pactl_default.lower()
+    ):
+        try:
+            proc = subprocess.run(
+                ["pactl", "list", "short", "sinks"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=1.5,
+            )
+            if proc.returncode == 0:
+                for line in proc.stdout.splitlines():
+                    parts = line.split()
+                    if len(parts) < 2:
+                        continue
+                    name = parts[1].strip()
+                    lowered = name.lower()
+                    if "virtual" in lowered or "ai-virtual-cam" in lowered:
+                        if "(hw:" not in lowered and "sof-hda" not in lowered:
+                            return name
+        except Exception:
+            pass
+        return pactl_default
+    return "pulse"
+
+
+def _coerce_audio_output_device(device_name: str) -> str:
+    try:
+        import sounddevice as sd
+    except Exception:
+        if str(device_name).strip() == "default":
+            return "pulse"
+        return device_name
+
+    if not isinstance(device_name, str):
+        return device_name
+    name = device_name.strip()
+    if not name:
+        return device_name
+
+    lowered = name.lower()
+    try:
+        devices = sd.query_devices()
+        names = [str(d.get("name", "")).strip() for d in devices if int(d.get("max_output_channels", 0)) > 0]
+        if name in names:
+            return name
+
+        if name == "default":
+            if "pulse" in names:
+                return "pulse"
+            if names:
+                return names[0]
+
+        # Prefer actual SoundDevice virtual output endpoint if any.
+        for candidate in names:
+            if "virtual" in candidate.lower() and "default" not in candidate.lower():
+                return candidate
+
+        # If config uses PulseAudio short-name (e.g., ai-virtual-cam), force a safe default.
+        if "ai-virtual-cam" in lowered or "virtual" in lowered or "monitor" in lowered:
+            if "pulse" in names:
+                return "pulse"
+            if names:
+                return names[0]
+
+        # Fallback to explicit PulseAudio/PipeWire aggregate.
+        if "pulse" in names:
+            return "pulse"
+        if name == "pulse" and names:
+            return names[0]
+    except Exception:
+        pass
+    return device_name
+
+
+def _pactl_default_audio_device(kind: str) -> str:
+    if platform.system() != "Linux" or kind not in {"source", "sink"}:
+        return "default"
+    try:
+        proc = subprocess.run(
+            ["pactl", f"get-default-{'source' if kind == 'source' else 'sink'}"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=1.5,
+        )
+    except Exception:
+        proc = None
+    if proc is not None and proc.returncode == 0:
+        default_name = proc.stdout.strip()
+        if default_name:
+            return default_name
+    try:
+        proc = subprocess.run(
+            ["pactl", "list", "short", f"{kind}s"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=1.5,
+        )
+        if proc.returncode == 0:
+            for line in proc.stdout.splitlines():
+                parts = line.split("\t")
+                if len(parts) < 2:
+                    continue
+                name = parts[1].strip()
+                if not name:
+                    continue
+                lowered = name.lower()
+                if "virtual" in lowered:
+                    return name
+                if "default" not in lowered:
+                    return name
     except Exception:
         return "default"
     return "default"
+
+
+def _default_audio_input_device() -> str:
+    if platform.system() != "Linux":
+        return "default"
+    try:
+        import sounddevice as sd
+    except Exception:
+        pactl_default = _pactl_default_audio_device("source")
+        return pactl_default if pactl_default != "default" else "default"
+
+    try:
+        default_input = sd.default.device[0] if sd.default.device is not None else None
+        if isinstance(default_input, int):
+            device = sd.query_devices(default_input)
+            if device and int(device.get("max_input_channels", 0)) > 0:
+                name = str(device.get("name", "")).strip()
+                if name:
+                    return name
+    except Exception:
+        pactl_default = _pactl_default_audio_device("source")
+        return pactl_default if pactl_default != "default" else "default"
+
+    try:
+        for device in sd.query_devices():
+            if int(device.get("max_input_channels", 0)) <= 0:
+                continue
+            name = str(device.get("name", "")).strip()
+            if not name:
+                continue
+            lowered = name.lower()
+            if "ai-virtual-cam" in lowered or "virtual-cam" in lowered or "virtual" in lowered:
+                return name
+            if lowered not in {"default"}:
+                return name
+    except Exception:
+        pactl_default = _pactl_default_audio_device("source")
+        return pactl_default if pactl_default != "default" else "default"
+    pactl_default = _pactl_default_audio_device("source")
+    return pactl_default if pactl_default != "default" else "default"
 
 
 @dataclass(frozen=True)
@@ -309,10 +531,17 @@ class AudioMixerConfig:
     @classmethod
     def from_dict(cls, raw: dict) -> "AudioMixerConfig":
         gate_raw = raw.get("gate") or {}
+        input_device = str(raw.get("inputDevice", "default")).strip()
+        if not input_device or input_device.lower() == "default":
+            input_device = _default_audio_input_device()
+        output_device = str(raw.get("outputDevice", _default_audio_output_device())).strip()
+        if not output_device or output_device.lower() == "default":
+            output_device = _default_audio_output_device()
+        output_device = _coerce_audio_output_device(output_device)
         config = cls(
             enabled=bool(raw.get("enabled", True)),
-            inputDevice=str(raw.get("inputDevice", "default")),
-            outputDevice=str(raw.get("outputDevice", _default_audio_output_device())),
+            inputDevice=input_device,
+            outputDevice=output_device,
             sampleRate=int(raw.get("sampleRate", 48000)),
             channels=int(raw.get("channels", 1)),
             frameMs=int(raw.get("frameMs", 20)),

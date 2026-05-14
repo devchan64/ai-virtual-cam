@@ -8,6 +8,7 @@ from collections import deque
 import sys
 import time
 import threading
+import subprocess
 from pathlib import Path
 from typing import Callable
 import cv2
@@ -62,19 +63,280 @@ def _audio_denoise_backend_options():
 
 
 def _audio_default_output_device() -> str:
-    if platform.system() != "Linux" or sd is None:
+    if platform.system() != "Linux":
         return "default"
+    if sd is None:
+        pactl_default = _pactl_default_audio_device("sink")
+        return pactl_default if pactl_default != "default" else "pulse"
     try:
+        sound_names: list[str] = []
         for device in sd.query_devices():
             name = str(device.get("name", ""))
             if int(device.get("max_output_channels", 0)) <= 0:
                 continue
+            if not name.strip():
+                continue
+            sound_names.append(name)
+        if sound_names:
+            if "pulse" in sound_names:
+                return "pulse"
+            for name in sound_names:
+                lowered = name.lower()
+                if "virtual" in lowered and "default" not in lowered:
+                    return name
+            for name in sound_names:
+                lowered = name.lower()
+                if "default" not in lowered:
+                    return name
+            return sound_names[0]
+    except Exception:
+        pactl_default = _pactl_default_audio_device("sink")
+        return pactl_default if pactl_default != "default" else "pulse"
+
+    def _first_pulse_sink() -> str | None:
+        try:
+            proc = subprocess.run(
+                ["pactl", "list", "short", "sinks"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=1.5,
+            )
+        except Exception:
+            return None
+        if proc.returncode != 0:
+            return None
+        for line in proc.stdout.splitlines():
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            name = parts[1].strip()
+            if not name:
+                continue
             lowered = name.lower()
-            if "ai-virtual-cam" in lowered or "virtual-cam" in lowered or "virtual" in lowered:
+            if "(hw:" in lowered or "sof-hda" in lowered:
+                continue
+            if "ai-virtual-cam" in lowered or "virtual" in lowered:
                 return name
+        for line in proc.stdout.splitlines():
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            name = parts[1].strip()
+            if not name:
+                continue
+            lowered = name.lower()
+            if "(hw:" in lowered or "sof-hda" in lowered:
+                continue
+            if "default" not in lowered:
+                return name
+        return None
+
+    # Prefer explicitly virtual/ai-virtual-cam sink to avoid picking physical default sink.
+    prefer_sink = _first_pulse_sink()
+    if prefer_sink is not None:
+        return prefer_sink
+    pactl_default = _pactl_default_audio_device("sink")
+    if pactl_default != "default" and "(hw:" not in pactl_default.lower() and "sof-hda" not in pactl_default.lower():
+        return pactl_default
+    return "pulse"
+
+
+def _coerce_audio_output_device_for_sounddevice(device_name: str) -> str:
+    if sd is None:
+        return device_name
+    name = str(device_name).strip()
+    if not name:
+        return name
+    if name == "default":
+        return "pulse"
+    lowered = name.lower()
+    try:
+        names = [
+            str(d.get("name", "")).strip()
+            for d in sd.query_devices()
+            if int(d.get("max_output_channels", 0)) > 0
+        ]
+        names = [n for n in names if n]
+        if not names:
+            return name
+        if name in names:
+            return name
+        if "ai-virtual-cam" in lowered or "virtual" in lowered or "monitor" in lowered:
+            if "pulse" in names:
+                return "pulse"
+            return names[0]
+        if "pulse" in names:
+            return "pulse"
+        if name == "pulse":
+            return names[0]
+    except Exception:
+        return name
+    return name
+
+
+def _pactl_default_audio_device(kind: str) -> str:
+    if platform.system() != "Linux":
+        return "default"
+    if kind not in {"source", "sink"}:
+        return "default"
+    try:
+        proc = subprocess.run(
+            ["pactl", f"get-default-{'source' if kind == 'source' else 'sink'}"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=1.5,
+        )
+    except Exception:
+        proc = None
+    if proc is not None and proc.returncode == 0:
+        default_name = proc.stdout.strip()
+        if default_name:
+            return default_name
+
+    try:
+        proc_list = subprocess.run(
+            ["pactl", "list", "short", f"{kind}s"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=1.5,
+        )
+        if proc_list.returncode == 0:
+            for line in proc_list.stdout.splitlines():
+                parts = line.split("\t")
+                if len(parts) < 2:
+                    continue
+                name = parts[1].strip()
+                if not name:
+                    continue
+                lowered = name.lower()
+                if "virtual" in lowered:
+                    return name
+                if "default" not in lowered:
+                    return name
     except Exception:
         return "default"
     return "default"
+
+
+def _audio_default_input_device() -> str:
+    if platform.system() != "Linux":
+        return "default"
+    if sd is None:
+        pactl_default = _pactl_default_audio_device("source")
+        return pactl_default if pactl_default != "default" else "default"
+    try:
+        default_input = sd.default.device[0] if sd.default.device is not None else None
+        if isinstance(default_input, int):
+            device = sd.query_devices(default_input)
+            if device and int(device.get("max_input_channels", 0)) > 0:
+                name = str(device.get("name", "")).strip()
+                if name:
+                    return name
+    except Exception:
+        pactl_default = _pactl_default_audio_device("source")
+        return pactl_default if pactl_default != "default" else "default"
+    try:
+        for device in sd.query_devices():
+            name = str(device.get("name", ""))
+            if not name:
+                continue
+            if int(device.get("max_input_channels", 0)) <= 0:
+                continue
+            lowered = name.lower()
+            if "ai-virtual-cam" in lowered or "virtual-cam" in lowered or "virtual" in lowered:
+                return name
+            if lowered not in {"default"}:
+                return name
+    except Exception:
+        pactl_default = _pactl_default_audio_device("source")
+        return pactl_default if pactl_default != "default" else "default"
+    pactl_default = _pactl_default_audio_device("source")
+    return pactl_default if pactl_default != "default" else "default"
+
+
+def _audio_device_candidates(kind: str) -> list[str]:
+    print(f"[avc] 오디오 {kind} 디바이스 후보 수집 시작 (sd_imported={sd is not None})", flush=True)
+    if platform.system() != "Linux":
+        print("[avc] 오디오 디바이스 후보: 플랫폼 비 Linux, 기본값 ['default'] 사용", flush=True)
+        return ["default"]
+    values: list[str] = ["default"]
+    seen = {"default"}
+
+    channel_key = "max_input_channels" if kind == "input" else "max_output_channels"
+    pactl_kind = "source" if kind == "input" else "sink"
+    print(
+        f"[avc] 오디오 {kind} 디바이스 채널키={channel_key}, pactl_kind={pactl_kind}",
+        flush=True,
+    )
+    if sd is not None:
+        try:
+            for device in sd.query_devices():
+                name = str(device.get("name", "")).strip()
+                if not name:
+                    continue
+                if int(device.get(channel_key, 0)) <= 0:
+                    continue
+                if name not in seen:
+                    seen.add(name)
+                    values.append(name)
+                    print(f"[avc] 오디오 {kind} 후보(sounddevice): {name}", flush=True)
+        except Exception:
+            print(f"[avc] 오디오 {kind} sounddevice 조회 실패: 예외 발생", flush=True)
+            pass
+
+    # Add PulseAudio/pipewire short device names to avoid missing monitor/source entries
+    try:
+        proc_list = subprocess.run(
+            ["pactl", "list", "short", f"{pactl_kind}s"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=1.5,
+        )
+        print(
+            f"[avc] 오디오 {kind} pactl list short {pactl_kind}s rc={proc_list.returncode}",
+            flush=True,
+        )
+        if proc_list.returncode == 0:
+            for line in proc_list.stdout.splitlines():
+                parts = line.split()
+                if len(parts) < 2:
+                    continue
+                name = parts[1].strip()
+                if not name:
+                    continue
+                if name not in seen:
+                    seen.add(name)
+                    values.append(name)
+                    print(f"[avc] 오디오 {kind} 후보(pactl): {name}", flush=True)
+    except Exception:
+        print(f"[avc] 오디오 {kind} pactl 조회 실패: 예외 발생", flush=True)
+        pass
+
+    if kind in {"input", "output"}:
+        pactl_default = _pactl_default_audio_device(pactl_kind)
+        print(f"[avc] 오디오 {kind} 기본값 후보: {pactl_default}", flush=True)
+        if pactl_default != "default" and pactl_default not in seen:
+            seen.add(pactl_default)
+            values.append(pactl_default)
+            print(f"[avc] 오디오 {kind} 기본값 후보 강제 추가: {pactl_default}", flush=True)
+
+    if not values:
+        values.append("default")
+        print(f"[avc] 오디오 {kind} 후보가 비어 fallback 'default' 추가", flush=True)
+    print(f"[avc] 오디오 {kind} 총 후보 수: {len(values)}", flush=True)
+    return values
+
+
+def _audio_input_device_candidates() -> list[str]:
+    return _audio_device_candidates("input")
+
+
+def _audio_output_device_candidates() -> list[str]:
+    return _audio_device_candidates("output")
 
 
 class ConfigGui:
@@ -192,7 +454,8 @@ class ConfigGui:
         height_values = sorted({str(h) for w, h, _fps in initial_modes if str(w) == default_w}, key=lambda v: int(v))
         default_h = height_values[0] if height_values else "720"
         self._add_combo(tab_io, row, "input_width", "Input width", width_values, default_w)
-        self._add_combo(tab_io, row, "input_height", "Input height", height_values, default_h, col_offset=2)
+        row += 1
+        self._add_combo(tab_io, row, "input_height", "Input height", height_values, default_h)
         row += 1
         fps_values = sorted(
             {fps for w, h, fps in initial_modes if str(w) == default_w and str(h) == default_h},
@@ -278,14 +541,30 @@ class ConfigGui:
         row = 0
         self._add_bool_switch(tab_audio, row, "audio_enabled", "Audio mixer", True)
         row += 1
-        self._add_text(tab_audio, row, "audio_input_device", "Input device", "default")
-        self._add_text(
+        audio_input_candidates = _audio_input_device_candidates()
+        audio_input_default = _audio_default_input_device()
+        if audio_input_default not in audio_input_candidates:
+            audio_input_candidates.append(audio_input_default)
+        self._add_combo(
+            tab_audio,
+            row,
+            "audio_input_device",
+            "Input device",
+            audio_input_candidates,
+            audio_input_default,
+        )
+        row += 1
+        audio_output_candidates = _audio_output_device_candidates()
+        audio_output_default = _audio_default_output_device()
+        if audio_output_default not in audio_output_candidates:
+            audio_output_candidates.append(audio_output_default)
+        self._add_combo(
             tab_audio,
             row,
             "audio_output_device",
             "Output device",
-            _audio_default_output_device(),
-            col_offset=2,
+            audio_output_candidates,
+            audio_output_default,
         )
         row += 1
         self._add_int(tab_audio, row, "audio_sample_rate", "Sample rate", 48000)
@@ -554,7 +833,7 @@ class ConfigGui:
         denoise_backends = _audio_denoise_backend_options()
         return {
             "audio_enabled": True,
-            "audio_input_device": "default",
+            "audio_input_device": _audio_default_input_device(),
             "audio_output_device": _audio_default_output_device(),
             "audio_sample_rate": 48000,
             "audio_channels": 1,
@@ -655,8 +934,34 @@ class ConfigGui:
         gate_cfg = audio_cfg.get("gate") or {}
 
         self._set_var("audio_enabled", audio_cfg.get("enabled", defaults["audio_enabled"]))
-        self._set_var("audio_input_device", audio_cfg.get("inputDevice", defaults["audio_input_device"]))
-        self._set_var("audio_output_device", audio_cfg.get("outputDevice", defaults["audio_output_device"]))
+        raw_input_device = str(audio_cfg.get("inputDevice", "")).strip() if isinstance(audio_cfg.get("inputDevice"), str) else ""
+        raw_output_device = (
+            str(audio_cfg.get("outputDevice", "")).strip() if isinstance(audio_cfg.get("outputDevice"), str) else ""
+        )
+        resolved_input_device = (
+            defaults["audio_input_device"]
+            if raw_input_device.lower() == "default" or not raw_input_device
+            else raw_input_device
+        )
+        resolved_output_device = (
+            defaults["audio_output_device"]
+            if raw_output_device.lower() == "default" or not raw_output_device
+            else _coerce_audio_output_device_for_sounddevice(raw_output_device)
+        )
+        self._set_var("audio_input_device", resolved_input_device)
+        input_widget = self._widgets.get("audio_input_device")
+        if isinstance(input_widget, ttk.Combobox):
+            input_values = list(input_widget["values"])
+            if resolved_input_device not in input_values:
+                input_widget["values"] = tuple(input_values + [resolved_input_device])
+            self.vars["audio_input_device"].set(resolved_input_device)
+        self._set_var("audio_output_device", resolved_output_device)
+        output_widget = self._widgets.get("audio_output_device")
+        if isinstance(output_widget, ttk.Combobox):
+            output_values = list(output_widget["values"])
+            if resolved_output_device not in output_values:
+                output_widget["values"] = tuple(output_values + [resolved_output_device])
+            self.vars["audio_output_device"].set(resolved_output_device)
         self._set_var("audio_sample_rate", audio_cfg.get("sampleRate", defaults["audio_sample_rate"]))
         self._set_var("audio_channels", audio_cfg.get("channels", defaults["audio_channels"]))
         self._set_var("audio_frame_ms", audio_cfg.get("frameMs", defaults["audio_frame_ms"]))
@@ -1080,7 +1385,9 @@ class ConfigGui:
         frame_ms = int(audio_cfg.get("frameMs", 20))
         frame_samples = max(1, int(sample_rate * frame_ms / 1000))
         channels = max(1, int(audio_cfg.get("channels", 1)))
-        input_device = audio_cfg.get("inputDevice") or "default"
+        input_device = audio_cfg.get("inputDevice")
+        if not isinstance(input_device, str) or not input_device.strip() or input_device.strip().lower() == "default":
+            input_device = _audio_default_input_device()
         gate = NoiseGate(gate_config, frame_ms=frame_ms)
 
         if sd is None:
@@ -1092,8 +1399,8 @@ class ConfigGui:
 
         window = tk.Toplevel(self.root)
         window.title("오디오 게이트 실시간 테스트")
-        window.geometry("1280x720")
-        window.minsize(420, 240)
+        window.geometry("640x480")
+        window.minsize(640, 480)
         window.resizable(True, True)
         window.grab_set()
 
@@ -1532,7 +1839,7 @@ class ConfigGui:
             crop_pan_target_offset_y=float(iv["crop_pan_target_offset_y"].get()),
             audio_enabled=self._parse_bool(iv["audio_enabled"].get()),
             audio_input_device=iv["audio_input_device"].get().strip(),
-            audio_output_device=iv["audio_output_device"].get().strip(),
+            audio_output_device=_coerce_audio_output_device_for_sounddevice(iv["audio_output_device"].get().strip()),
             audio_sample_rate=int(iv["audio_sample_rate"].get()),
             audio_channels=int(iv["audio_channels"].get()),
             audio_frame_ms=int(iv["audio_frame_ms"].get()),
