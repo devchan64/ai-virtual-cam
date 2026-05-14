@@ -266,7 +266,7 @@ class ConfigGui:
         row += 1
         self._add_int(tab_audio, row, "audio_frame_ms", "Frame ms", 20)
         row += 1
-        self._add_combo(tab_audio, row, "audio_denoise_enabled", "Noise cancel", ["false", "true"], "false")
+        self._add_bool_switch(tab_audio, row, "audio_denoise_enabled", "Noise cancel", True)
         row += 1
         denoise_backends = _audio_denoise_backend_options()
         self._add_combo(tab_audio, row, "audio_denoise_backend", "NC backend", denoise_backends, denoise_backends[0])
@@ -530,7 +530,7 @@ class ConfigGui:
             "audio_sample_rate": 48000,
             "audio_channels": 1,
             "audio_frame_ms": 20,
-            "audio_denoise_enabled": "false",
+            "audio_denoise_enabled": True,
             "audio_denoise_backend": denoise_backends[0],
             "audio_denoise_strength": 0.5,
             "audio_gate_threshold_db": -40.0,
@@ -624,7 +624,7 @@ class ConfigGui:
         self._set_var("audio_sample_rate", audio_cfg.get("sampleRate"))
         self._set_var("audio_channels", audio_cfg.get("channels"))
         self._set_var("audio_frame_ms", audio_cfg.get("frameMs"))
-        self._set_var("audio_denoise_enabled", str(bool(denoise_cfg.get("enabled", False))).lower())
+        self._set_var("audio_denoise_enabled", denoise_cfg.get("enabled", False))
         self._set_var("audio_denoise_backend", denoise_cfg.get("backend"))
         self._set_var("audio_denoise_strength", denoise_cfg.get("strength"))
         denoise_backend_widget = self._widgets.get("audio_denoise_backend")
@@ -1474,7 +1474,7 @@ class ConfigGui:
             audio_sample_rate=int(iv["audio_sample_rate"].get()),
             audio_channels=int(iv["audio_channels"].get()),
             audio_frame_ms=int(iv["audio_frame_ms"].get()),
-            audio_denoise_enabled=iv["audio_denoise_enabled"].get().strip().lower() == "true",
+            audio_denoise_enabled=self._parse_bool(iv["audio_denoise_enabled"].get()),
             audio_denoise_backend=iv["audio_denoise_backend"].get().strip(),
             audio_denoise_strength=float(iv["audio_denoise_strength"].get()),
             audio_gate_threshold_db=float(iv["audio_gate_threshold_db"].get()),

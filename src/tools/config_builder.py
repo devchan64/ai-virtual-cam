@@ -41,7 +41,7 @@ def build_config(
     audio_sample_rate: int = 48000,
     audio_channels: int = 1,
     audio_frame_ms: int = 20,
-    audio_denoise_enabled: bool = False,
+    audio_denoise_enabled: bool = True,
     audio_denoise_backend: str = "none",
     audio_denoise_strength: float = 0.5,
     audio_gate_enabled: bool = True,

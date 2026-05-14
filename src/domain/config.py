@@ -295,7 +295,7 @@ class AudioMixerConfig:
             sampleRate=int(raw.get("sampleRate", 48000)),
             channels=int(raw.get("channels", 1)),
             frameMs=int(raw.get("frameMs", 20)),
-            denoiseEnabled=bool((raw.get("denoise") or {}).get("enabled", False)),
+            denoiseEnabled=bool((raw.get("denoise") or {}).get("enabled", True)),
             denoiseBackend=str((raw.get("denoise") or {}).get("backend", "none")),
             denoiseStrength=float((raw.get("denoise") or {}).get("strength", 0.5)),
             gate=AudioGateConfig.from_dict(gate_raw),
