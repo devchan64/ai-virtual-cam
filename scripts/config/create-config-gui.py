@@ -358,6 +358,16 @@ def _coerce_audio_input_device_for_sounddevice(device_name: str) -> str:
         return name
     lowered = name.lower()
     if name.lower() == "default":
+        try:
+            default_pair = sd.default.device
+            default_input_index = int(default_pair[0]) if default_pair and default_pair[0] is not None else -1
+            if default_input_index >= 0:
+                info = sd.query_devices(default_input_index, kind="input")
+                resolved = str(info.get("name", "")).strip()
+                if resolved:
+                    return resolved
+        except Exception:
+            pass
         return "default"
     try:
         # 1) exact name first
@@ -929,13 +939,14 @@ class ConfigGui:
             output_fps_values[0] if output_fps_values else "30",
         )
         row += 1
-        ttk.Button(tab_io, text="가상 카메라 생성", command=self._create_virtual_camera).grid(
-            row=row, column=0, columnspan=2, sticky="ew", padx=4, pady=(6, 0)
-        )
-        ttk.Button(tab_io, text="가상 카메라 제거", command=self._remove_virtual_camera).grid(
-            row=row, column=2, columnspan=2, sticky="ew", padx=4, pady=(6, 0)
-        )
-        row += 1
+        if platform.system() == "Linux":
+            ttk.Button(tab_io, text="가상 카메라 생성", command=self._create_virtual_camera).grid(
+                row=row, column=0, columnspan=2, sticky="ew", padx=4, pady=(6, 0)
+            )
+            ttk.Button(tab_io, text="가상 카메라 제거", command=self._remove_virtual_camera).grid(
+                row=row, column=2, columnspan=2, sticky="ew", padx=4, pady=(6, 0)
+            )
+            row += 1
         ttk.Button(tab_io, text="비디오 기본값 복원", command=self._reset_video_settings).grid(
             row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0)
         )
@@ -1045,13 +1056,14 @@ class ConfigGui:
             audio_output_default_display,
         )
         row += 1
-        ttk.Button(tab_audio, text="가상 마이크 생성", command=self._create_virtual_speaker).grid(
-            row=row, column=0, columnspan=2, sticky="ew", padx=4, pady=(6, 0)
-        )
-        ttk.Button(tab_audio, text="가상 마이크 제거", command=self._remove_virtual_speaker).grid(
-            row=row, column=2, columnspan=2, sticky="ew", padx=4, pady=(6, 0)
-        )
-        row += 1
+        if platform.system() == "Linux":
+            ttk.Button(tab_audio, text="가상 마이크 생성", command=self._create_virtual_speaker).grid(
+                row=row, column=0, columnspan=2, sticky="ew", padx=4, pady=(6, 0)
+            )
+            ttk.Button(tab_audio, text="가상 마이크 제거", command=self._remove_virtual_speaker).grid(
+                row=row, column=2, columnspan=2, sticky="ew", padx=4, pady=(6, 0)
+            )
+            row += 1
         self._add_int(tab_audio, row, "audio_sample_rate", "Sample rate", 48000)
         self._add_int(tab_audio, row, "audio_channels", "Channels", 1, col_offset=2)
         row += 1
