@@ -5,9 +5,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 import cv2
 import platform
+from collections import deque
+from threading import Lock
 import numpy as np
 
 try:
@@ -35,6 +38,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from src.tools.config_builder import build_config
 from src.tools.config_io import discover_camera_mode_options, discover_cameras, write_config
+from src.audio.gate import AudioGateConfig, NoiseGate
 
 
 def _segmentation_backend_options():
@@ -69,6 +73,20 @@ class ConfigGui:
         self._preview_window_name = "ai-virtual-cam preview (press q or esc to close)"
         self._widgets: dict[str, object] = {}
         self._input_modes: list[tuple[int, int, str]] = []
+        self._audio_gate_test_running = False
+        self._audio_gate_test_lock: Lock = Lock()
+        self._audio_gate_test_window: tk.Toplevel | None = None
+        self._audio_gate_test_after_id: str | None = None
+        self._audio_gate_test_stream = None
+        self._audio_gate_test_gate: NoiseGate | None = None
+        self._audio_gate_test_queue: deque[tuple[float, float, str, float]] = deque(maxlen=120)
+        self._audio_gate_test_error: str | None = None
+        self._audio_gate_test_sample_count = 0
+        self._audio_gate_test_pass_count = 0
+        self._audio_gate_test_match_count = 0
+        self._audio_gate_test_started_at = 0.0
+        self._audio_gate_test_threshold_db = -42.0
+        self._audio_gate_test_min_ratio = 0.55
         self._build_form()
         self._load_existing_config()
 
@@ -77,11 +95,29 @@ class ConfigGui:
         frame.grid(sticky="nsew")
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
-
-        notebook = ttk.Notebook(frame)
-        notebook.grid(row=0, column=0, sticky="nsew")
         frame.columnconfigure(0, weight=1)
         frame.rowconfigure(0, weight=1)
+
+        self._scroll_canvas = tk.Canvas(frame, highlightthickness=0)
+        v_scroll = ttk.Scrollbar(frame, orient="vertical", command=self._scroll_canvas.yview)
+        self._scroll_canvas.configure(yscrollcommand=v_scroll.set)
+        self._scroll_canvas.grid(row=0, column=0, sticky="nsew")
+        v_scroll.grid(row=0, column=1, sticky="ns")
+        frame.rowconfigure(0, weight=1)
+        frame.columnconfigure(0, weight=1)
+
+        scroll_inner = ttk.Frame(self._scroll_canvas, padding=0)
+        self._scroll_window = self._scroll_canvas.create_window((0, 0), window=scroll_inner, anchor="nw")
+        scroll_inner.bind("<Configure>", lambda event: self._scroll_canvas.configure(scrollregion=self._scroll_canvas.bbox("all")))
+        self._scroll_canvas.bind("<Configure>", self._on_scroll_canvas_configure)
+        self._scroll_canvas.bind_all("<MouseWheel>", self._on_mouse_wheel)
+        self._scroll_canvas.bind_all("<Button-4>", self._on_mouse_wheel_linux)
+        self._scroll_canvas.bind_all("<Button-5>", self._on_mouse_wheel_linux)
+
+        notebook = ttk.Notebook(scroll_inner)
+        notebook.grid(row=0, column=0, sticky="nsew")
+        scroll_inner.columnconfigure(0, weight=1)
+        scroll_inner.rowconfigure(0, weight=1)
 
         tab_io = ttk.Frame(notebook, padding=8)
         tab_seg = ttk.Frame(notebook, padding=8)
@@ -130,6 +166,10 @@ class ConfigGui:
         self._add_int(tab_io, row, "output_height", "Output height", 720, col_offset=2)
         row += 1
         self._add_int(tab_io, row, "output_fps", "Output FPS", 30)
+        row += 1
+        ttk.Button(tab_io, text="비디오 기본값 복원", command=self._reset_video_settings).grid(
+            row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0)
+        )
 
         row = 0
         self._add_combo(tab_seg, row, "seg_backend", "Seg backend", _segmentation_backend_options(), "selfie")
@@ -224,16 +264,23 @@ class ConfigGui:
         self._add_slider(tab_audio, row, "audio_gate_closed_gain", "Gate closed gain", 0.0, 0.0, 1.0, resolution=0.01)
         row += 1
         ttk.Button(tab_audio, text="게이트 자동 튜닝", command=self._auto_tune_audio_gate).grid(
+            row=row, column=0, columnspan=2, sticky="ew", padx=4, pady=(6, 0)
+        )
+        ttk.Button(tab_audio, text="오디오 게이트 테스트", command=self._run_audio_gate_test).grid(
+            row=row, column=2, columnspan=2, sticky="ew", padx=4, pady=(6, 0)
+        )
+        row += 1
+        ttk.Button(tab_audio, text="오디오 기본값 복원", command=self._reset_audio_settings).grid(
             row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0)
         )
 
         action_row = 1
-        action = ttk.Frame(frame)
-        action.grid(row=action_row, column=0, sticky="ew", pady=(10, 0))
-        action.columnconfigure(0, weight=1)
-        action.columnconfigure(1, weight=1)
-        ttk.Button(action, text="Preview", command=self._preview).grid(row=0, column=0, sticky="ew", padx=4)
-        ttk.Button(action, text="Save JSON", command=self._save).grid(row=0, column=1, sticky="ew", padx=4)
+        action_frame = ttk.Frame(scroll_inner)
+        action_frame.grid(row=action_row, column=0, sticky="ew", pady=(10, 0))
+        action_frame.columnconfigure(0, weight=1)
+        action_frame.columnconfigure(1, weight=1)
+        ttk.Button(action_frame, text="Preview", command=self._preview).grid(row=0, column=0, sticky="ew", padx=4)
+        ttk.Button(action_frame, text="Save JSON", command=self._save).grid(row=0, column=1, sticky="ew", padx=4)
         input_device_widget = self._widgets.get("input_device")
         if input_device_widget is not None:
             input_device_widget.bind("<<ComboboxSelected>>", self._on_input_device_changed)
@@ -243,6 +290,23 @@ class ConfigGui:
         input_height_widget = self._widgets.get("input_height")
         if input_height_widget is not None:
             input_height_widget.bind("<<ComboboxSelected>>", self._on_input_height_changed)
+
+    def _on_scroll_canvas_configure(self, event) -> None:
+        self._scroll_canvas.itemconfigure(self._scroll_window, width=event.width)
+
+    def _on_mouse_wheel(self, event) -> None:
+        if not getattr(self, "_scroll_canvas", None):
+            return
+        delta = -1 * int(event.delta / 120)
+        self._scroll_canvas.yview_scroll(delta, "units")
+
+    def _on_mouse_wheel_linux(self, event) -> None:
+        if not getattr(self, "_scroll_canvas", None):
+            return
+        if event.num == 4:
+            self._scroll_canvas.yview_scroll(-1, "units")
+        elif event.num == 5:
+            self._scroll_canvas.yview_scroll(1, "units")
 
     def _add_text(self, parent, row, key, label, default, col_offset=0, readonly=False):
         ttk.Label(parent, text=label).grid(row=row, column=col_offset, sticky="w")
@@ -368,6 +432,90 @@ class ConfigGui:
         selected = filedialog.askopenfilename(title="Select background image")
         if selected:
             self.vars["bg_image"].set(selected)
+
+    def _build_video_defaults(self) -> dict[str, float | int | str]:
+        is_macos = platform.system() == "Darwin"
+        cameras = discover_cameras()
+        camera_values = [c["devicePath"] for c in cameras] or (["0"] if is_macos else ["/dev/video0"])
+        input_device = camera_values[0]
+        input_modes = discover_camera_mode_options(input_device) or [(1280, 720, "30")]
+        input_width = int(input_modes[0][0])
+        input_height = int(input_modes[0][1])
+        input_fps = int(float(input_modes[0][2]))
+
+        return {
+            "input_device": input_device,
+            "input_width": input_width,
+            "input_height": input_height,
+            "input_fps": input_fps,
+            "input_software_zoom": 1.0,
+            "output_backend": _output_backend_options()[0],
+            "output_device": "virtual-cam" if is_macos else "/dev/video10",
+            "output_width": 1280,
+            "output_height": 720,
+            "output_fps": 30,
+            "seg_backend": "selfie",
+            "seg_threshold": 0.65,
+            "seg_edge_smoothness": 0.50,
+            "seg_blend_feather": 0.35,
+            "seg_selfie_model": 1,
+            "seg_selfie_smoothing": 0.25,
+            "bg_mode": "chroma",
+            "bg_image": "",
+            "bg_r": 0,
+            "bg_g": 0,
+            "bg_b": 0,
+            "bg_blend_alpha": 0.35,
+            "crop_margin": 0.25,
+            "crop_pan_smoothing": 0.85,
+            "crop_tilt_smoothing": 0.85,
+            "crop_zoom_smoothing": 0.80,
+            "crop_upper_body_bias": 0.00,
+            "crop_upper_body_ratio": 0.60,
+            "crop_upper_body_edge_smoothing": 0.35,
+            "crop_pan_pid_kp": 0.35,
+            "crop_pan_pid_ki": 0.01,
+            "crop_pan_pid_kd": 0.12,
+            "crop_tilt_pid_kp": 0.35,
+            "crop_tilt_pid_ki": 0.01,
+            "crop_tilt_pid_kd": 0.12,
+            "crop_pan_target_offset_x": 0.00,
+            "crop_pan_target_offset_y": 0.00,
+        }
+
+    def _build_audio_defaults(self) -> dict[str, float | int | str]:
+        denoise_backends = _audio_denoise_backend_options()
+        return {
+            "audio_enabled": "false",
+            "audio_input_device": "default",
+            "audio_output_device": "default",
+            "audio_sample_rate": 48000,
+            "audio_channels": 1,
+            "audio_frame_ms": 20,
+            "audio_denoise_enabled": "false",
+            "audio_denoise_backend": denoise_backends[0],
+            "audio_denoise_strength": 0.5,
+            "audio_gate_threshold_db": -42.0,
+            "audio_gate_hysteresis_db": 3.0,
+            "audio_gate_min_voice_band_ratio": 0.55,
+            "audio_gate_attack_ms": 20,
+            "audio_gate_hold_ms": 140,
+            "audio_gate_release_ms": 220,
+            "audio_gate_open_gain": 1.0,
+            "audio_gate_closed_gain": 0.0,
+        }
+
+    def _reset_video_settings(self) -> None:
+        defaults = self._build_video_defaults()
+        for key, value in defaults.items():
+            self._set_var(key, value)
+        self._on_input_device_changed()
+        self._on_input_width_changed()
+
+    def _reset_audio_settings(self) -> None:
+        defaults = self._build_audio_defaults()
+        for key, value in defaults.items():
+            self._set_var(key, value)
 
     def _load_existing_config(self):
         config_path = Path(self.output_path).expanduser()
@@ -550,6 +698,233 @@ class ConfigGui:
             f"- hysteresisDb: {hysteresis_db:.1f}\n"
             f"- minVoiceBandRatio: {min_voice_ratio:.2f}",
         )
+
+    def _run_audio_gate_test(self):
+        try:
+            config = self._build_config()
+        except Exception as exc:
+            messagebox.showerror("Audio gate test error", str(exc))
+            return
+
+        audio_cfg = config.get("audio") or {}
+        if audio_cfg.get("enabled", False) is False:
+            proceed = messagebox.askyesno(
+                "오디오 게이트 테스트",
+                "audio.enabled 값이 false입니다.\n현재 값으로 테스트를 진행할까요?",
+            )
+            if not proceed:
+                return
+
+        try:
+            gate_config = AudioGateConfig.from_dict(audio_cfg.get("gate") or {})
+        except Exception as exc:
+            messagebox.showerror("Audio gate test error", f"게이트 설정이 유효하지 않습니다: {exc}")
+            return
+
+        sample_rate = int(audio_cfg.get("sampleRate", 48000))
+        frame_ms = int(audio_cfg.get("frameMs", 20))
+        frame_samples = max(1, int(sample_rate * frame_ms / 1000))
+        channels = max(1, int(audio_cfg.get("channels", 1)))
+        input_device = audio_cfg.get("inputDevice") or "default"
+        gate = NoiseGate(gate_config, frame_ms=frame_ms)
+
+        if sd is None:
+            messagebox.showerror(
+                "Audio gate test error",
+                "sounddevice 모듈이 없습니다. ./bin/avc setup 후 다시 시도하세요.",
+            )
+            return
+
+        window = tk.Toplevel(self.root)
+        window.title("오디오 게이트 실시간 테스트")
+        window.geometry("580x300")
+        window.resizable(False, False)
+        window.grab_set()
+
+        title = ttk.Label(window, text="오디오 게이트 테스트", font=("Arial", 12, "bold"))
+        title.pack(anchor="w", padx=12, pady=(12, 8))
+
+        info = ttk.Label(
+            window,
+            text=f"샘플레이트: {sample_rate}Hz / 프레임: {frame_ms}ms / 채널: {channels} / 입력: {input_device}",
+        )
+        info.pack(anchor="w", padx=12, pady=(0, 8))
+
+        state_var = tk.StringVar(value="-")
+        level_var = tk.StringVar(value="- dB")
+        ratio_var = tk.StringVar(value="-")
+        threshold_var = tk.StringVar(value="-")
+        gate_var = tk.StringVar(value="-")
+        match_var = tk.StringVar(value="-")
+        pass_var = tk.StringVar(value="-")
+        summary_var = tk.StringVar(value="측정 준비")
+        runtime_var = tk.StringVar(value="실행 시간: 0.0s")
+
+        for text, variable in [
+            ("현재 게이트 상태", state_var),
+            ("입력 레벨", level_var),
+            ("대역 매칭", ratio_var),
+            ("데시벨 판정", threshold_var),
+            ("대역 매칭 판정", match_var),
+            ("게이트 통과", gate_var),
+            ("pass 통과", pass_var),
+        ]:
+            row = ttk.Frame(window)
+            row.pack(fill="x", padx=12, pady=2)
+            ttk.Label(row, text=f"{text}").pack(side="left")
+            ttk.Label(row, textvariable=variable, width=34, anchor="e").pack(side="right")
+
+        level_bar = ttk.Progressbar(window, length=540, maximum=100)
+        level_bar.pack(padx=12, pady=(8, 2))
+        ratio_bar = ttk.Progressbar(window, length=540, maximum=100)
+        ratio_bar.pack(padx=12, pady=(2, 8))
+
+        ttk.Label(window, textvariable=runtime_var).pack(anchor="w", padx=12, pady=(0, 8))
+        ttk.Label(window, textvariable=summary_var).pack(anchor="w", padx=12, pady=(0, 10))
+
+        control = ttk.Frame(window)
+        control.pack(fill="x", padx=12, pady=(0, 10))
+        stop_btn = ttk.Button(control, text="중지")
+        stop_btn.pack(side="right")
+
+        self._audio_gate_test_running = True
+        self._audio_gate_test_error = None
+        self._audio_gate_test_queue = deque(maxlen=120)
+        self._audio_gate_test_window = window
+        self._audio_gate_test_gate = gate
+        self._audio_gate_test_threshold_db = gate_config.thresholdDb
+        self._audio_gate_test_min_ratio = gate_config.minVoiceBandRatio
+        self._audio_gate_test_sample_count = 0
+        self._audio_gate_test_pass_count = 0
+        self._audio_gate_test_match_count = 0
+        self._audio_gate_test_started_at = time.time()
+
+        def close_window():
+            self._stop_audio_gate_test()
+            if window.winfo_exists():
+                window.destroy()
+
+        stop_btn.configure(command=close_window)
+        window.protocol("WM_DELETE_WINDOW", close_window)
+
+        try:
+            stream = sd.InputStream(
+                device=input_device,
+                channels=channels,
+                samplerate=sample_rate,
+                blocksize=frame_samples,
+                dtype="float32",
+                callback=self._audio_gate_test_callback,
+            )
+            self._audio_gate_test_stream = stream
+            stream.start()
+        except Exception as exc:
+            self._stop_audio_gate_test()
+            window.destroy()
+            messagebox.showerror("Audio gate test error", f"마이크 입력 스트림 열기 실패: {exc}")
+            return
+
+        def refresh() -> None:
+            if not self._audio_gate_test_running or not self._audio_gate_test_window:
+                return
+            if not self._audio_gate_test_window.winfo_exists():
+                self._stop_audio_gate_test()
+                return
+
+            if self._audio_gate_test_error is not None:
+                summary_var.set(f"오류: {self._audio_gate_test_error}")
+                stop_btn.state(["disabled"])
+                self._stop_audio_gate_test()
+                return
+
+            latest = None
+            with self._audio_gate_test_lock:
+                while self._audio_gate_test_queue:
+                    latest = self._audio_gate_test_queue.popleft()
+            if latest is not None:
+                level_db, ratio, gate_state, gain = latest
+                state_text = gate_state.upper()
+                level_var.set(f"{level_db:.1f} dB")
+                ratio_var.set(f"{ratio:.2f}")
+
+                passes_db = level_db >= self._audio_gate_test_threshold_db
+                matches_band = ratio >= self._audio_gate_test_min_ratio
+                passes_gate = gate_state in {"open", "hold"}
+
+                threshold_var.set("PASS" if passes_db else "BLOCK")
+                match_var.set("PASS" if matches_band else "BLOCK")
+                gate_var.set("PASS" if passes_gate else "BLOCK")
+                pass_var.set("PASS" if (passes_db and matches_band and passes_gate) else "BLOCK")
+                state_var.set(f"{state_text} (gain={gain:.2f})")
+
+                level_norm = max(0.0, min(100.0, (level_db - (-80.0)) / 80.0 * 100.0))
+                ratio_norm = max(0.0, min(100.0, ratio * 100.0))
+                level_bar["value"] = level_norm
+                ratio_bar["value"] = ratio_norm
+
+                if self._audio_gate_test_sample_count > 0:
+                    pass_ratio = self._audio_gate_test_pass_count / float(self._audio_gate_test_sample_count) * 100.0
+                    match_ratio = self._audio_gate_test_match_count / float(self._audio_gate_test_sample_count) * 100.0
+                    summary = f"실시간 통과률: 게이트 {pass_ratio:.1f}% / 대역매칭 {match_ratio:.1f}%"
+                    summary_var.set(summary)
+
+            elapsed = time.time() - self._audio_gate_test_started_at
+            runtime_var.set(f"실행 시간: {elapsed:.1f}s")
+            self._audio_gate_test_after_id = self.root.after(80, refresh)
+
+        self._audio_gate_test_after_id = self.root.after(80, refresh)
+
+    def _audio_gate_test_callback(self, indata, frames, time_info, status):
+        if not self._audio_gate_test_running or self._audio_gate_test_gate is None:
+            return
+        try:
+            mono = np.mean(np.asarray(indata, dtype=np.float32), axis=1)
+            level_db = self._rms_dbfs(mono)
+            ratio = self._voice_band_ratio(mono, int(self.vars["audio_sample_rate"].get()))
+            result = self._audio_gate_test_gate.step(input_level_db=level_db, voice_band_ratio=ratio)
+            state = str(result.state.value)
+            with self._audio_gate_test_lock:
+                self._audio_gate_test_queue.append((level_db, ratio, state, result.gain))
+                self._audio_gate_test_sample_count += 1
+                if state in {"open", "hold"}:
+                    self._audio_gate_test_pass_count += 1
+                if ratio >= self._audio_gate_test_min_ratio:
+                    self._audio_gate_test_match_count += 1
+        except Exception as exc:
+            self._audio_gate_test_error = str(exc)
+
+    def _stop_audio_gate_test(self) -> None:
+        self._audio_gate_test_running = False
+        after_id = self._audio_gate_test_after_id
+        if after_id is not None:
+            try:
+                self.root.after_cancel(after_id)
+            except Exception:
+                pass
+            self._audio_gate_test_after_id = None
+
+        stream = self._audio_gate_test_stream
+        if stream is not None:
+            try:
+                stream.stop()
+            except Exception:
+                pass
+            try:
+                stream.close()
+            except Exception:
+                pass
+        self._audio_gate_test_stream = None
+        self._audio_gate_test_gate = None
+        self._audio_gate_test_window = None
+
+    def _build_test_waveform(self, kind: str, sample_rate: int, seconds: float):
+        frames = max(1, int(sample_rate * seconds))
+        t = np.arange(frames, dtype=np.float32) / float(sample_rate)
+        if kind == "speech":
+            return 0.25 * (np.sin(2 * np.pi * 800.0 * t).astype(np.float32))
+        if kind == "non_voice":
+            return 0.20 * (np.sin(2 * np.pi * 140.0 * t).astype(np.float32))
+        return np.zeros(frames, dtype=np.float32)
 
     def _record_audio_block(self, seconds: float, sample_rate: int, channels: int):
         try:

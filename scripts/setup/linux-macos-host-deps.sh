@@ -105,7 +105,7 @@ cleanup_v4l2loopback_dkms_state() {
 install_base_packages() {
   log "Installing base packages"
   run apt-get update
-  apt_install ca-certificates curl gnupg gnupg2 lsb-release software-properties-common python3 python3-venv python3-pip
+  apt_install ca-certificates curl gnupg gnupg2 lsb-release software-properties-common python3 python3-venv python3-pip libportaudio2 portaudio19-dev
 }
 
 setup_docker_repo() {
@@ -237,7 +237,6 @@ install_v4l2loopback() {
 
   log "Installing and configuring v4l2loopback"
   cleanup_v4l2loopback_dkms_state
-  apt_install v4l2-utils
   if ! install_v4l2loopback_from_source; then
     fail "v4l2loopback installation failed via source build."
   fi
@@ -326,31 +325,17 @@ install_python_runtime_packages() {
   run "$venv_path/bin/python3" -m pip install --upgrade pip
 
   log "Installing Python runtime dependencies (video/audio base)"
-  run "$venv_path/bin/python3" -m pip install opencv-python numpy mediapipe==0.10.14 pyvirtualcam==0.14.0 sounddevice
+  run "$venv_path/bin/python3" -m pip install "numpy<2" "opencv-python>=4.10.0.84,<4.13.0" mediapipe==0.10.14 pyvirtualcam==0.14.0 sounddevice
 
   log "Installing noise-cancel dependencies"
-  # rnnoise Python wrapper (best-effort)
-  if ! run "$venv_path/bin/python3" -m pip install rnnoise; then
-    log "WARN: rnnoise Python package install failed. denoise.backend=rnnoise runtime may be unavailable."
-  fi
+  # rnnoise Python wrapper is currently not published on default PyPI index in a stable package.
+  log "WARN: rnnoise install is skipped (package availability issue). denoise backend remains placeholder."
   # deepfilternet is Linux-only in our current policy.
   if [[ "$OS_KIND" == "linux" ]]; then
-    log "Installing deepfilternet without dependency churn (preserve current numpy constraints)"
+    log "Installing deepfilternet without dependency churn"
     if ! run "$venv_path/bin/python3" -m pip install --no-deps deepfilternet; then
       log "WARN: deepfilternet install failed. denoise.backend=deepfilternet runtime may be unavailable."
     fi
-  fi
-
-  if ! run "$venv_path/bin/python3" - <<'PY'
-import sys
-import numpy as np
-if int(np.__version__.split(".")[0]) < 2:
-    print("numpy_major_minor_mismatch")
-    sys.exit(1)
-PY
-  then
-    log "WARN: numpy < 2 detected after dependency setup. Re-aligning base packages."
-    run "$venv_path/bin/python3" -m pip install "numpy>=2.0.0" "opencv-python>=4.8.0"
   fi
 }
 
