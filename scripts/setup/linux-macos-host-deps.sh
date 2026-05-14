@@ -215,6 +215,9 @@ install_v4l2loopback_from_source() {
   local src_dir="/tmp/v4l2loopback-avc"
   run rm -rf "$src_dir"
   run git clone --depth 1 https://github.com/umlaeute/v4l2loopback.git "$src_dir"
+  if grep -q "strlcpy" "$src_dir/v4l2loopback.c"; then
+    run bash -c "cd '$src_dir' && sed -i 's/\\bstrlcpy\\b/strscpy/g' v4l2loopback.c"
+  fi
   run bash -c "cd '$src_dir' && make"
   run bash -c "cd '$src_dir' && make install DKMS=1"
 }
