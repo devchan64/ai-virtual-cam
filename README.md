@@ -16,7 +16,7 @@
 - `config`: CLI 설정 생성기
 - `config-gui`: GUI 설정 생성기(프리뷰 포함)
 - `serve`: 저장된 설정으로 스트리밍 실행
-- `audio-mixer`: 마이크 게이트용 가상 오디오 믹서 스켈레톤 실행
+- `audio-mixer`: 마이크 게이트 기반 가상 오디오 믹서 실행 (Linux: 실시간 입력/출력 스트림)
 - `doctor`: 기본 런타임 점검
 
 ## 플랫폼 정책
@@ -40,13 +40,14 @@
 ./bin/avc serve        # audio.enabled 값을 그대로 사용
 ```
 
-오디오 게이트 정책(구조 기준):
+오디오 게이트 정책:
 
 - 레벨(`thresholdDb`)만으로 열지 않고, 음성 대역 비율(`minVoiceBandRatio`) 조건을 함께 사용
 - 음악/주변소음처럼 음성 유사도가 낮은 입력은 게이트를 열지 않도록 설계
 - 사용자 음색에 맞게 `thresholdDb`, `hysteresisDb`, `minVoiceBandRatio`를 `config-gui`에서 조정 가능
 - 오디오 탭의 `게이트 자동 튜닝`으로 무음/발화 측정 후 게이트 추천값 자동 적용
 - 오디오 탭에서 노이즈캔슬 속성(`denoise.enabled/backend/strength`) 저장 지원
+- `audio-mixer`는 게이트 처리된 오디오를 출력 장치로 전달합니다.
 - 노이즈캔슬 backend는 OS별로 분리 선택:
   - macOS: `none`, `rnnoise`
   - Linux: `none`, `rnnoise`, `deepfilternet`

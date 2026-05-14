@@ -1,29 +1,82 @@
 from __future__ import annotations
 
+import threading
 import time
+from typing import Any
 
+import numpy as np
 from src.audio.gate import NoiseGate
 from src.domain.config import AudioMixerConfig
 
+try:
+    import sounddevice as sd
+    SOUNDDEVICE_IMPORT_ERROR = None
+except ModuleNotFoundError as exc:
+    sd = None
+    SOUNDDEVICE_IMPORT_ERROR = exc
+
 
 class VirtualAudioMixer:
-    """Virtual audio mixer scaffold.
+    """Virtual audio mixer implementation.
 
-    Phase 1 scope:
-    - define gate behavior/state transition
-    - keep runtime contract and logs ready for real I/O integration
+    Current scope:
+    - real-time capture/playback via sounddevice
+    - level + voice-band metrics feeding existing gate state machine
+    - log output for troubleshooting
     """
 
     def __init__(self, config: AudioMixerConfig) -> None:
         self._cfg = config
         self._gate = NoiseGate(config.gate, frame_ms=config.frameMs)
         self._running = False
+        self._steps = 0
+        self._stream = None
+        self._denoise_warned = False
 
     def run(self, max_steps: int = 0) -> None:
+        if sd is None:
+            raise RuntimeError(
+                "sounddevice is required for audio mixer. Install via: ./bin/avc setup"
+            ) from SOUNDDEVICE_IMPORT_ERROR
+
+        frame_samples = max(1, int(self._cfg.sampleRate * self._cfg.frameMs / 1000.0))
+        input_device = self._cfg.inputDevice
+        output_device = self._cfg.outputDevice
+        in_channels = self._cfg.channels
+        out_channels = self._cfg.channels
+
+        try:
+            input_info = sd.query_devices(input_device, kind="input")
+            output_info = sd.query_devices(output_device, kind="output")
+            if in_channels > int(input_info.get("max_input_channels", in_channels)):
+                in_channels = int(input_info.get("max_input_channels", in_channels))
+                print(
+                    f"[audio] adjusted input channels to {in_channels} (device max)",
+                    flush=True,
+                )
+            if out_channels > int(output_info.get("max_output_channels", out_channels)):
+                out_channels = int(output_info.get("max_output_channels", out_channels))
+                print(
+                    f"[audio] adjusted output channels to {out_channels} (device max)",
+                    flush=True,
+                )
+            if in_channels <= 0 or out_channels <= 0:
+                raise RuntimeError("selected input/output device has no usable channels")
+        except Exception as exc:
+            raise RuntimeError(f"audio device open failed: {exc}") from exc
+
+        if in_channels != self._cfg.channels or out_channels != self._cfg.channels:
+            print(
+                "[audio] channel mismatch: "
+                f"configured={self._cfg.channels}, in={in_channels}, out={out_channels}",
+                flush=True,
+            )
+
         print(
             "[audio] mixer starting: "
-            f"in={self._cfg.inputDevice} out={self._cfg.outputDevice} "
-            f"{self._cfg.sampleRate}Hz/{self._cfg.channels}ch frame={self._cfg.frameMs}ms",
+            f"in={input_device} out={output_device} "
+            f"{self._cfg.sampleRate}Hz/{in_channels}->{out_channels}ch "
+            f"frame={self._cfg.frameMs}ms ({frame_samples}frames)",
             flush=True,
         )
         print(
@@ -39,24 +92,118 @@ class VirtualAudioMixer:
             f"minVoiceBandRatio={self._cfg.gate.minVoiceBandRatio:.2f}",
             flush=True,
         )
+        if self._cfg.denoiseEnabled and self._cfg.denoiseBackend != "none":
+            print(
+                f"[audio] denoise requested but runtime backend is placeholder: {self._cfg.denoiseBackend}",
+                flush=True,
+            )
+
         self._running = True
-        steps = 0
-        while self._running:
-            # TODO: replace with real microphone RMS/peak + spectral voice-band ratio.
-            level_db = -90.0
-            voice_band_ratio = 0.0
+        self._steps = 0
+
+        def callback(
+            indata: np.ndarray,
+            outdata: np.ndarray,
+            frames: int,
+            _time: dict[str, Any],
+            status: sd.CallbackFlags,
+        ) -> None:
+            if status.input_overflow:
+                print("[audio] input overflow", flush=True)
+            if status.output_underflow:
+                print("[audio] output underflow", flush=True)
+
+            if frames <= 0 or not self._running:
+                outdata.fill(0.0)
+                return
+
+            if not self._running:
+                outdata.fill(0.0)
+                return
+
+            data = indata.astype(np.float32, copy=True)
+            mono = data.mean(axis=1) if data.shape[1] > 1 else data[:, 0]
+            mono = np.clip(mono, -1.0, 1.0)
+
+            level_db = self._rms_dbfs(mono)
+            voice_band_ratio = self._voice_band_ratio(mono, self._cfg.sampleRate)
             gate = self._gate.step(level_db, voice_band_ratio=voice_band_ratio)
-            steps += 1
-            if steps == 1 or steps % 50 == 0:
+            gain = float(gate.gain)
+
+            processed = self._apply_denoise(data, sample_rate=self._cfg.sampleRate)
+            if processed.shape[1] != outdata.shape[1]:
+                base = processed.mean(axis=1, keepdims=True)
+                if outdata.shape[1] == 1:
+                    processed = base
+                else:
+                    processed = np.repeat(base, outdata.shape[1], axis=1)
+            outdata[:] = processed * gain
+            np.clip(outdata, -1.0, 1.0, out=outdata)
+
+            self._steps += 1
+            if self._steps == 1 or self._steps % 50 == 0:
                 print(
-                    f"[audio] gate heartbeat: step={steps} levelDb={gate.inputLevelDb:.1f} "
+                    f"[audio] gate heartbeat: step={self._steps} levelDb={gate.inputLevelDb:.1f} "
                     f"voiceRatio={gate.voiceBandRatio:.2f} state={gate.state.value} gain={gate.gain:.2f}",
                     flush=True,
                 )
-            if max_steps > 0 and steps >= max_steps:
-                break
-            time.sleep(max(0.001, self._cfg.frameMs / 1000.0))
+
+            if max_steps > 0 and self._steps >= max_steps:
+                self._running = False
+                raise sd.CallbackStop
+
+        try:
+            with sd.Stream(
+                samplerate=self._cfg.sampleRate,
+                blocksize=frame_samples,
+                dtype="float32",
+                channels=(in_channels, out_channels),
+                device=(input_device, output_device),
+                callback=callback,
+            ):
+                while self._running:
+                    time.sleep(max(0.001, self._cfg.frameMs / 1000.0))
+                if max_steps > 0:
+                    print(f"[audio] reached max_steps={max_steps}, stopping", flush=True)
+        finally:
+            # Explicitly clear mixer state on stream termination.
+            self._running = False
         print("[audio] mixer stopped", flush=True)
 
     def stop(self) -> None:
         self._running = False
+
+    def _apply_denoise(self, data: np.ndarray, sample_rate: int) -> np.ndarray:
+        if not self._cfg.denoiseEnabled or self._cfg.denoiseBackend == "none":
+            return data
+        if not self._denoise_warned:
+            print(
+                "[audio] denoise runtime hook is currently pass-through. "
+                "Keep denoise.enabled=false or set backend='none' for real output now.",
+                flush=True,
+            )
+            self._denoise_warned = True
+        return data
+
+    def _rms_dbfs(self, mono: np.ndarray) -> float:
+        if mono.size == 0:
+            return -120.0
+        mono = np.asarray(mono, dtype=np.float32)
+        rms = float(np.sqrt(np.mean(np.square(mono)) + 1e-12))
+        return float(20.0 * np.log10(max(rms, 1e-12)))
+
+    def _voice_band_ratio(self, mono: np.ndarray, sample_rate: int) -> float:
+        if mono.size < 32:
+            return 0.0
+        window = np.hanning(mono.size).astype(np.float32)
+        spec = np.fft.rfft((mono.astype(np.float32) * window))
+        power = np.abs(spec) ** 2
+        freqs = np.fft.rfftfreq(mono.size, d=1.0 / float(sample_rate))
+
+        total_band = (freqs >= 80.0) & (freqs <= 8000.0)
+        voice_band = (freqs >= 300.0) & (freqs <= 3400.0)
+        total_power = float(np.sum(power[total_band]))
+        if total_power <= 1e-12:
+            return 0.0
+        voice_power = float(np.sum(power[voice_band]))
+        return float(max(0.0, min(1.0, voice_power / total_power)))
