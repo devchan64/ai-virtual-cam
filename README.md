@@ -114,7 +114,7 @@ Docker에서 설정 GUI 실행(선택):
 
 권장 저장소:
 
-- `<dockerhub-id>/ai-virtual-cam`
+- `devchan64/ai-virtual-cam`
 
 권장 태그:
 
@@ -145,19 +145,19 @@ Docker에서 설정 GUI 실행(선택):
 수동 배포 예시:
 
 ```bash
-docker build -f Dockerfile.linux -t <dockerhub-id>/ai-virtual-cam:linux-latest .
-docker tag <dockerhub-id>/ai-virtual-cam:linux-latest <dockerhub-id>/ai-virtual-cam:linux-v0.1.0
-docker tag <dockerhub-id>/ai-virtual-cam:linux-latest <dockerhub-id>/ai-virtual-cam:linux-$(git rev-parse --short HEAD)
+docker build -f Dockerfile.linux -t devchan64/ai-virtual-cam:linux-latest .
+docker tag devchan64/ai-virtual-cam:linux-latest devchan64/ai-virtual-cam:linux-v0.1.0
+docker tag devchan64/ai-virtual-cam:linux-latest devchan64/ai-virtual-cam:linux-$(git rev-parse --short HEAD)
 
-docker push <dockerhub-id>/ai-virtual-cam:linux-latest
-docker push <dockerhub-id>/ai-virtual-cam:linux-v0.1.0
-docker push <dockerhub-id>/ai-virtual-cam:linux-$(git rev-parse --short HEAD)
+docker push devchan64/ai-virtual-cam:linux-latest
+docker push devchan64/ai-virtual-cam:linux-v0.1.0
+docker push devchan64/ai-virtual-cam:linux-$(git rev-parse --short HEAD)
 
-docker build -f Dockerfile.macos -t <dockerhub-id>/ai-virtual-cam:macos-latest .
-docker tag <dockerhub-id>/ai-virtual-cam:macos-latest <dockerhub-id>/ai-virtual-cam:macos-v0.1.0
+docker build -f Dockerfile.macos -t devchan64/ai-virtual-cam:macos-latest .
+docker tag devchan64/ai-virtual-cam:macos-latest devchan64/ai-virtual-cam:macos-v0.1.0
 
-docker push <dockerhub-id>/ai-virtual-cam:macos-latest
-docker push <dockerhub-id>/ai-virtual-cam:macos-v0.1.0
+docker push devchan64/ai-virtual-cam:macos-latest
+docker push devchan64/ai-virtual-cam:macos-v0.1.0
 ```
 
 ### macOS 필수 체크
