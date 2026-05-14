@@ -6,7 +6,7 @@ from typing import Any, Callable
 
 import numpy as np
 from src.audio.gate import NoiseGate
-from src.domain.config import AudioMixerConfig
+from src.domain.config import AudioMixerConfig, _coerce_audio_output_device
 
 try:
     import sounddevice as sd
@@ -49,6 +49,13 @@ class VirtualAudioMixer:
         frame_samples = max(1, int(self._cfg.sampleRate * self._cfg.frameMs / 1000.0))
         input_device = self._cfg.inputDevice
         output_device = self._cfg.outputDevice
+        resolved_output_device = _coerce_audio_output_device(output_device)
+        if resolved_output_device != output_device:
+            print(
+                f"[audio] output device fallback: configured='{output_device}' -> '{resolved_output_device}'",
+                flush=True,
+            )
+            output_device = resolved_output_device
         in_channels = self._cfg.channels
         out_channels = self._cfg.channels
 
