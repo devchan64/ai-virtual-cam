@@ -33,6 +33,7 @@
 - 생성 시 `exclusive_caps=1`을 우선 적용합니다.
 - `exclusive_caps=1`은 Chrome/Google Meet(WebRTC) 장치 목록 노출 호환성을 높이기 위한 기본값입니다.
 - 실패 시 `exclusive_caps=0` 및 일반 옵션으로 순차 폴백합니다.
+- 생성 시 `devices=1`, `max_buffers=2`를 함께 적용해 재시작 후 장치 상태 일관성을 높입니다.
 
 권한이 필요한 환경에서는 먼저 아래를 실행한 뒤 GUI에서 생성/제거를 수행하세요.
 
@@ -58,6 +59,10 @@ sudo -v
   - 실패한 설정 값
   - 실제 실패 이유(예: 디바이스 미존재, ffmpeg 초기화 실패, 채널 미지원)
   - 해결을 위한 설정 재적용 필요성
+- Linux `v4l2loopback` 출력은 시작 시 장치 상태가 stale한 경우를 대비해 1회 자동 복구를 시도합니다.
+  - `v4l2loopback-ctl set-caps/set-fps` 및 `v4l2-ctl set-fmt` 재적용 후 ffmpeg 초기화를 재시도합니다.
+  - 자동 복구까지 실패하면 `serve`에서 `sudo -n` 기반 모듈 재생성(`modprobe -r/load`)을 1회 추가 시도합니다.
+  - 모듈 재생성까지 실패하면 즉시 종료하며, `config-gui`에서 가상 카메라 제거/재생성이 필요합니다.
 
 문제가 발생하면 설정을 수정 후 `./bin/avc config-gui`로 다시 저장하고 `./bin/avc serve`를 재실행하세요.
 

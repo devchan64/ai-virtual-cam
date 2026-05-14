@@ -459,6 +459,159 @@ def _set_v4l2_device_format(device_path: str, width: int, height: int, pixel_for
     return False, last_error
 
 
+def _recover_v4l2_device_runtime_state(
+    device_path: str,
+    width: int,
+    height: int,
+    fps: int,
+    pixel_format: str,
+) -> tuple[bool, str]:
+    """Best-effort runtime recovery for stale loopback state after abrupt stop/start."""
+    fourcc = _ffmpeg_pix_fmt_to_fourcc(pixel_format) or "YU12"
+    caps = f"{fourcc}:{width}x{height}@{fps}"
+    gst_fmt_map = {
+        "YU12": "I420",
+        "YUYV": "YUY2",
+        "BGR3": "BGR",
+        "RGB3": "RGB",
+        "NV12": "NV12",
+    }
+    gst_fmt = gst_fmt_map.get(fourcc, "I420")
+    gst_caps = f"video/x-raw,format={gst_fmt},width={width},height={height},framerate={fps}/1"
+    notes: list[str] = []
+    used = False
+
+    ctl = shutil.which("v4l2loopback-ctl")
+    if ctl is not None:
+        used = True
+        def _try_ctl_variants(variants: list[list[str]]) -> tuple[bool, str]:
+            last = "unknown"
+            for args in variants:
+                try:
+                    proc = subprocess.run(
+                        args,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=2.0,
+                    )
+                except Exception as exc:  # pragma: no cover
+                    last = f"exception: {exc}"
+                    continue
+                if proc.returncode == 0:
+                    return True, "ok"
+                last = (proc.stderr or proc.stdout or "").strip() or f"rc={proc.returncode}"
+            return False, last
+
+        try:
+            ok_caps = False
+            detail_caps = "unknown"
+            caps_candidates = [caps, gst_caps, "any"]
+            for candidate in caps_candidates:
+                ok_caps, detail_caps = _try_ctl_variants(
+                    [
+                        [ctl, "set-caps", device_path, candidate],
+                        [ctl, "set-caps", candidate, device_path],
+                    ]
+                )
+                if ok_caps:
+                    caps = candidate
+                    break
+            if ok_caps:
+                notes.append(f"set-caps ok ({caps})")
+            else:
+                notes.append(f"set-caps failed {detail_caps}")
+        except Exception as exc:  # pragma: no cover
+            notes.append(f"set-caps exception: {exc}")
+
+        try:
+            ok_fps, detail_fps = _try_ctl_variants(
+                [
+                    [ctl, "set-fps", str(fps), device_path],
+                    [ctl, "set-fps", device_path, str(fps)],
+                ]
+            )
+            if ok_fps:
+                notes.append(f"set-fps ok ({fps})")
+            else:
+                notes.append(f"set-fps failed {detail_fps}")
+        except Exception as exc:  # pragma: no cover
+            notes.append(f"set-fps exception: {exc}")
+
+    ok, detail = _set_v4l2_device_format(device_path, width, height, pixel_format)
+    notes.append(f"set-fmt {'ok' if ok else 'failed'}: {detail}")
+    if used or ok:
+        return True, "; ".join(notes)
+    return False, "recovery tools unavailable"
+
+
+def _recreate_v4l2loopback_device_noninteractive(device_path: str) -> tuple[bool, str]:
+    """Try recreating v4l2loopback module without blocking for password input."""
+    video_no = None
+    m = re.match(r"^/dev/video(\d+)$", device_path)
+    if m:
+        video_no = m.group(1)
+    if video_no is None:
+        return False, f"cannot parse video number from device path: {device_path}"
+
+    notes: list[str] = []
+    try:
+        proc = subprocess.run(
+            ["sudo", "-n", "modprobe", "-r", "v4l2loopback"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=4.0,
+        )
+        if proc.returncode != 0:
+            err = (proc.stderr or proc.stdout or "").strip()
+            notes.append(f"modprobe -r rc={proc.returncode} {err}")
+        else:
+            notes.append("modprobe -r ok")
+    except Exception as exc:  # pragma: no cover
+        notes.append(f"modprobe -r exception: {exc}")
+
+    try:
+        subprocess.run(
+            ["sudo", "-n", "modprobe", "videodev"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=4.0,
+        )
+    except Exception:
+        pass
+
+    try:
+        proc = subprocess.run(
+            [
+                "sudo",
+                "-n",
+                "modprobe",
+                "v4l2loopback",
+                "devices=1",
+                f"video_nr={video_no}",
+                "card_label=ai-virtual-cam",
+                "exclusive_caps=1",
+                "max_buffers=2",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=4.0,
+        )
+    except Exception as exc:  # pragma: no cover
+        return False, "; ".join(notes + [f"modprobe load exception: {exc}"])
+
+    if proc.returncode != 0:
+        err = (proc.stderr or proc.stdout or "").strip()
+        return False, "; ".join(notes + [f"modprobe load rc={proc.returncode} {err}"])
+
+    if not Path(device_path).exists():
+        return False, "; ".join(notes + [f"device missing after recreate: {device_path}"])
+    return True, "; ".join(notes + ["modprobe load ok"])
+
+
 def _probe_ffmpeg_profile(proc: subprocess.Popen[bytes], width: int, height: int) -> tuple[bool, str]:
     probe_frame = bytes(width * height * 3)
     try:
@@ -571,104 +724,123 @@ class V4L2LoopbackOutput(OutputSink):
             attempted_profiles.append(profile)
 
         last_error = ""
-        for profile in attempted_profiles:
-            for enforce_output_pix_fmt in (True, False):
-                if enforce_output_pix_fmt and not Path(device_path).exists():
-                    continue
-                cmd = self._make_ffmpeg_cmd(
-                    config,
+        for recover_round in (0, 1, 2):
+            if recover_round == 1:
+                recovered, detail = _recover_v4l2_device_runtime_state(
                     device_path,
-                    profile.pixel_format,
-                    profile.width,
-                    profile.height,
+                    selected.width,
+                    selected.height,
+                    int(config.fps),
+                    selected.pixel_format,
                 )
-                cmd[0] = ffmpeg
-                mode = "strict" if enforce_output_pix_fmt else "auto"
-                if enforce_output_pix_fmt:
-                    success, detail = _set_v4l2_device_format(
+                print(
+                    f"[output] v4l2loopback startup recovery {'applied' if recovered else 'skipped'}: {detail}",
+                    flush=True,
+                )
+            elif recover_round == 2:
+                recreated, detail = _recreate_v4l2loopback_device_noninteractive(device_path)
+                print(
+                    f"[output] v4l2loopback module recreate {'applied' if recreated else 'skipped'}: {detail}",
+                    flush=True,
+                )
+            for profile in attempted_profiles:
+                for enforce_output_pix_fmt in (True, False):
+                    if enforce_output_pix_fmt and not Path(device_path).exists():
+                        continue
+                    cmd = self._make_ffmpeg_cmd(
+                        config,
                         device_path,
+                        profile.pixel_format,
                         profile.width,
                         profile.height,
-                        profile.pixel_format,
                     )
-                    if not success:
+                    cmd[0] = ffmpeg
+                    mode = "strict" if enforce_output_pix_fmt else "auto"
+                    if enforce_output_pix_fmt:
+                        success, detail = _set_v4l2_device_format(
+                            device_path,
+                            profile.width,
+                            profile.height,
+                            profile.pixel_format,
+                        )
+                        if not success:
+                            print(
+                                f"[output] v4l2loopback strict mode skipped for pix_fmt={profile.pixel_format} "
+                                f"size={profile.width}x{profile.height}: {detail}",
+                                flush=True,
+                            )
+                            continue
                         print(
-                            f"[output] v4l2loopback strict mode skipped for pix_fmt={profile.pixel_format} "
-                            f"size={profile.width}x{profile.height}: {detail}",
+                            f"[output] v4l2loopback strict mode pre-seeded format for pix_fmt={profile.pixel_format} "
+                            f"size={profile.width}x{profile.height}",
+                            flush=True,
+                        )
+                    try:
+                        proc = subprocess.Popen(
+                            cmd,
+                            stdin=subprocess.PIPE,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.PIPE,
+                        )
+                    except Exception as exc:  # pragma: no cover
+                        last_error = f"Failed to start ffmpeg for v4l2 output: {exc}"
+                        print(
+                            f"[output] v4l2loopback ffmpeg start failure mode={mode} "
+                            f"pix_fmt={profile.pixel_format} size={profile.width}x{profile.height}: {last_error}",
                             flush=True,
                         )
                         continue
-                    print(
-                        f"[output] v4l2loopback strict mode pre-seeded format for pix_fmt={profile.pixel_format} "
-                        f"size={profile.width}x{profile.height}",
-                        flush=True,
-                    )
-                try:
-                    proc = subprocess.Popen(
-                        cmd,
-                        stdin=subprocess.PIPE,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.PIPE,
-                    )
-                except Exception as exc:  # pragma: no cover
-                    last_error = f"Failed to start ffmpeg for v4l2 output: {exc}"
-                    print(
-                        f"[output] v4l2loopback ffmpeg start failure mode={mode} "
-                        f"pix_fmt={profile.pixel_format} size={profile.width}x{profile.height}: {last_error}",
-                        flush=True,
-                    )
-                    continue
 
-                time.sleep(0.25)
-                if proc.poll() is not None:
-                    stderr_msg = ""
-                    if proc.stderr is not None:
+                    time.sleep(0.25)
+                    if proc.poll() is not None:
+                        stderr_msg = ""
+                        if proc.stderr is not None:
+                            try:
+                                stderr_msg = proc.stderr.read().decode("utf-8", errors="ignore").strip()
+                            except Exception:
+                                stderr_msg = ""
+                        last_error = (
+                            f"selected pix_fmt={profile.pixel_format} selected size={profile.width}x{profile.height}. "
+                            f"mode={mode}. return_code={proc.returncode}. stderr={stderr_msg or '<empty>'}"
+                        )
+                        print(
+                            f"[output] v4l2loopback ffmpeg start failure mode={mode} "
+                            f"pix_fmt={profile.pixel_format} size={profile.width}x{profile.height}: {last_error}",
+                            flush=True,
+                        )
+                        continue
+
+                    ok, probe_error = _probe_ffmpeg_profile(proc, profile.width, profile.height)
+                    if not ok:
+                        stderr_msg = probe_error or _read_nonblocking_stderr(proc)
+                        last_error = (
+                            f"selected pix_fmt={profile.pixel_format} selected size={profile.width}x{profile.height}. "
+                            f"mode={mode}. {stderr_msg or 'probe failed'}"
+                        )
+                        print(
+                            f"[output] v4l2loopback ffmpeg profile probe failure mode={mode} "
+                            f"pix_fmt={profile.pixel_format} size={profile.width}x{profile.height}: {last_error}",
+                            flush=True,
+                        )
                         try:
-                            stderr_msg = proc.stderr.read().decode("utf-8", errors="ignore").strip()
+                            proc.stdin.close()
                         except Exception:
-                            stderr_msg = ""
-                    last_error = (
-                        f"selected pix_fmt={profile.pixel_format} selected size={profile.width}x{profile.height}. "
-                        f"mode={mode}. return_code={proc.returncode}. stderr={stderr_msg or '<empty>'}"
-                    )
+                            pass
+                        try:
+                            proc.kill()
+                        except Exception:
+                            pass
+                        continue
+
+                    self._ffmpeg_format = profile.pixel_format
+                    self._stream_width = profile.width
+                    self._stream_height = profile.height
                     print(
-                        f"[output] v4l2loopback ffmpeg start failure mode={mode} "
-                        f"pix_fmt={profile.pixel_format} size={profile.width}x{profile.height}: {last_error}",
+                        f"[output] v4l2loopback ffmpeg started with pix_fmt={profile.pixel_format} "
+                        f"size={profile.width}x{profile.height} mode={mode}",
                         flush=True,
                     )
-                    continue
-
-                ok, probe_error = _probe_ffmpeg_profile(proc, profile.width, profile.height)
-                if not ok:
-                    stderr_msg = probe_error or _read_nonblocking_stderr(proc)
-                    last_error = (
-                        f"selected pix_fmt={profile.pixel_format} selected size={profile.width}x{profile.height}. "
-                        f"mode={mode}. {stderr_msg or 'probe failed'}"
-                    )
-                    print(
-                        f"[output] v4l2loopback ffmpeg profile probe failure mode={mode} "
-                        f"pix_fmt={profile.pixel_format} size={profile.width}x{profile.height}: {last_error}",
-                        flush=True,
-                    )
-                    try:
-                        proc.stdin.close()
-                    except Exception:
-                        pass
-                    try:
-                        proc.kill()
-                    except Exception:
-                        pass
-                    continue
-
-                self._ffmpeg_format = profile.pixel_format
-                self._stream_width = profile.width
-                self._stream_height = profile.height
-                print(
-                    f"[output] v4l2loopback ffmpeg started with pix_fmt={profile.pixel_format} "
-                    f"size={profile.width}x{profile.height} mode={mode}",
-                    flush=True,
-                )
-                return proc
+                    return proc
 
         raise RuntimeError(
             f"ffmpeg initialization failed for v4l2 output device={device_path} "
