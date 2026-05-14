@@ -79,11 +79,15 @@ class ConfigGui:
         self._audio_gate_test_after_id: str | None = None
         self._audio_gate_test_stream = None
         self._audio_gate_test_gate: NoiseGate | None = None
-        self._audio_gate_test_queue: deque[tuple[float, float, str, float]] = deque(maxlen=120)
+        self._audio_gate_test_queue: deque[tuple[float, float, str, float, bool]] = deque(maxlen=120)
         self._audio_gate_test_error: str | None = None
         self._audio_gate_test_sample_count = 0
         self._audio_gate_test_pass_count = 0
         self._audio_gate_test_match_count = 0
+        self._audio_gate_test_stream_pass_count = 0
+        self._audio_gate_test_stream_open_count = 0
+        self._audio_gate_test_stream_close_count = 0
+        self._audio_gate_test_prev_stream_open = False
         self._audio_gate_test_started_at = 0.0
         self._audio_gate_test_threshold_db = -42.0
         self._audio_gate_test_min_ratio = 0.55
@@ -737,18 +741,23 @@ class ConfigGui:
 
         window = tk.Toplevel(self.root)
         window.title("오디오 게이트 실시간 테스트")
-        window.geometry("580x300")
-        window.resizable(False, False)
+        window.geometry("1280x720")
+        window.minsize(420, 240)
+        window.resizable(True, True)
         window.grab_set()
 
-        title = ttk.Label(window, text="오디오 게이트 테스트", font=("Arial", 12, "bold"))
-        title.pack(anchor="w", padx=12, pady=(12, 8))
+        content = ttk.Frame(window, padding=12)
+        content.pack(fill="both", expand=True)
+        content.columnconfigure(0, weight=1)
+
+        title = ttk.Label(content, text="오디오 게이트 테스트", font=("Arial", 12, "bold"))
+        title.grid(row=0, column=0, sticky="ew", padx=(0, 0), pady=(0, 8))
 
         info = ttk.Label(
-            window,
+            content,
             text=f"샘플레이트: {sample_rate}Hz / 프레임: {frame_ms}ms / 채널: {channels} / 입력: {input_device}",
         )
-        info.pack(anchor="w", padx=12, pady=(0, 8))
+        info.grid(row=1, column=0, sticky="ew", pady=(0, 8))
 
         state_var = tk.StringVar(value="-")
         level_var = tk.StringVar(value="- dB")
@@ -757,9 +766,12 @@ class ConfigGui:
         gate_var = tk.StringVar(value="-")
         match_var = tk.StringVar(value="-")
         pass_var = tk.StringVar(value="-")
+        stream_state_var = tk.StringVar(value="-")
+        stream_open_count_var = tk.StringVar(value="0")
+        stream_close_count_var = tk.StringVar(value="0")
         summary_var = tk.StringVar(value="측정 준비")
         runtime_var = tk.StringVar(value="실행 시간: 0.0s")
-
+        row_index = 2
         for text, variable in [
             ("현재 게이트 상태", state_var),
             ("입력 레벨", level_var),
@@ -768,24 +780,36 @@ class ConfigGui:
             ("대역 매칭 판정", match_var),
             ("게이트 통과", gate_var),
             ("pass 통과", pass_var),
+            ("스트림 상태", stream_state_var),
+            ("스트림 오픈 횟수", stream_open_count_var),
+            ("스트림 클로즈 횟수", stream_close_count_var),
         ]:
-            row = ttk.Frame(window)
-            row.pack(fill="x", padx=12, pady=2)
-            ttk.Label(row, text=f"{text}").pack(side="left")
-            ttk.Label(row, textvariable=variable, width=34, anchor="e").pack(side="right")
+            row = ttk.Frame(content)
+            row.grid(row=row_index, column=0, sticky="ew", pady=2)
+            row.columnconfigure(0, weight=1)
+            row.columnconfigure(1, weight=1)
+            ttk.Label(row, text=f"{text}").grid(row=0, column=0, sticky="w")
+            ttk.Label(row, textvariable=variable).grid(row=0, column=1, sticky="e")
+            row_index += 1
 
-        level_bar = ttk.Progressbar(window, length=540, maximum=100)
-        level_bar.pack(padx=12, pady=(8, 2))
-        ratio_bar = ttk.Progressbar(window, length=540, maximum=100)
-        ratio_bar.pack(padx=12, pady=(2, 8))
+        level_bar = ttk.Progressbar(content, maximum=100)
+        level_bar.grid(row=row_index, column=0, sticky="ew", pady=(8, 2))
+        row_index += 1
+        ratio_bar = ttk.Progressbar(content, maximum=100)
+        ratio_bar.grid(row=row_index, column=0, sticky="ew", pady=(2, 8))
+        row_index += 1
 
-        ttk.Label(window, textvariable=runtime_var).pack(anchor="w", padx=12, pady=(0, 8))
-        ttk.Label(window, textvariable=summary_var).pack(anchor="w", padx=12, pady=(0, 10))
+        runtime_label = ttk.Label(content, textvariable=runtime_var)
+        runtime_label.grid(row=row_index, column=0, sticky="w")
+        row_index += 1
+        summary_label = ttk.Label(content, textvariable=summary_var)
+        summary_label.grid(row=row_index, column=0, sticky="w", pady=(0, 10))
+        row_index += 1
 
-        control = ttk.Frame(window)
-        control.pack(fill="x", padx=12, pady=(0, 10))
+        control = ttk.Frame(content)
+        control.grid(row=row_index, column=0, sticky="ew")
         stop_btn = ttk.Button(control, text="중지")
-        stop_btn.pack(side="right")
+        stop_btn.pack(anchor="e")
 
         self._audio_gate_test_running = True
         self._audio_gate_test_error = None
@@ -797,6 +821,10 @@ class ConfigGui:
         self._audio_gate_test_sample_count = 0
         self._audio_gate_test_pass_count = 0
         self._audio_gate_test_match_count = 0
+        self._audio_gate_test_stream_pass_count = 0
+        self._audio_gate_test_stream_open_count = 0
+        self._audio_gate_test_stream_close_count = 0
+        self._audio_gate_test_prev_stream_open = False
         self._audio_gate_test_started_at = time.time()
 
         def close_window():
@@ -842,7 +870,7 @@ class ConfigGui:
                 while self._audio_gate_test_queue:
                     latest = self._audio_gate_test_queue.popleft()
             if latest is not None:
-                level_db, ratio, gate_state, gain = latest
+                level_db, ratio, gate_state, gain, stream_open = latest
                 state_text = gate_state.upper()
                 level_var.set(f"{level_db:.1f} dB")
                 ratio_var.set(f"{ratio:.2f}")
@@ -856,6 +884,9 @@ class ConfigGui:
                 gate_var.set("PASS" if passes_gate else "BLOCK")
                 pass_var.set("PASS" if (passes_db and matches_band and passes_gate) else "BLOCK")
                 state_var.set(f"{state_text} (gain={gain:.2f})")
+                stream_state_var.set("열림" if stream_open else "닫힘")
+                stream_open_count_var.set(f"{self._audio_gate_test_stream_open_count}")
+                stream_close_count_var.set(f"{self._audio_gate_test_stream_close_count}")
 
                 level_norm = max(0.0, min(100.0, (level_db - (-80.0)) / 80.0 * 100.0))
                 ratio_norm = max(0.0, min(100.0, ratio * 100.0))
@@ -865,7 +896,12 @@ class ConfigGui:
                 if self._audio_gate_test_sample_count > 0:
                     pass_ratio = self._audio_gate_test_pass_count / float(self._audio_gate_test_sample_count) * 100.0
                     match_ratio = self._audio_gate_test_match_count / float(self._audio_gate_test_sample_count) * 100.0
-                    summary = f"실시간 통과률: 게이트 {pass_ratio:.1f}% / 대역매칭 {match_ratio:.1f}%"
+                    stream_ratio = self._audio_gate_test_stream_pass_count / float(self._audio_gate_test_sample_count) * 100.0
+                    summary = (
+                        f"실시간 통과률: 게이트 {pass_ratio:.1f}% / "
+                        f"대역매칭 {match_ratio:.1f}% / "
+                        f"PASS 스트림 {stream_ratio:.1f}%"
+                    )
                     summary_var.set(summary)
 
             elapsed = time.time() - self._audio_gate_test_started_at
@@ -883,13 +919,22 @@ class ConfigGui:
             ratio = self._voice_band_ratio(mono, int(self.vars["audio_sample_rate"].get()))
             result = self._audio_gate_test_gate.step(input_level_db=level_db, voice_band_ratio=ratio)
             state = str(result.state.value)
+            stream_open = state in {"open", "hold"}
             with self._audio_gate_test_lock:
-                self._audio_gate_test_queue.append((level_db, ratio, state, result.gain))
+                self._audio_gate_test_queue.append((level_db, ratio, state, result.gain, stream_open))
                 self._audio_gate_test_sample_count += 1
                 if state in {"open", "hold"}:
                     self._audio_gate_test_pass_count += 1
                 if ratio >= self._audio_gate_test_min_ratio:
                     self._audio_gate_test_match_count += 1
+                if stream_open and level_db >= self._audio_gate_test_threshold_db and ratio >= self._audio_gate_test_min_ratio:
+                    self._audio_gate_test_stream_pass_count += 1
+                if stream_open != self._audio_gate_test_prev_stream_open:
+                    if stream_open:
+                        self._audio_gate_test_stream_open_count += 1
+                    else:
+                        self._audio_gate_test_stream_close_count += 1
+                    self._audio_gate_test_prev_stream_open = stream_open
         except Exception as exc:
             self._audio_gate_test_error = str(exc)
 
