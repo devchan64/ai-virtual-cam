@@ -334,12 +334,16 @@ def _coerce_audio_output_device(device_name: str) -> str:
             return names[0]
 
         if "ai-virtual-cam" in lowered or "virtual-cam" in lowered or "virtual" in lowered:
+            if "pulse" in names:
+                return "pulse"
             return names[0]
 
         if name == "pulse":
+            if "pulse" in names:
+                return "pulse"
             return names[0]
         if "pulse" in names:
-            return names[0]
+            return "pulse"
     except Exception:
         pass
     return device_name
@@ -402,6 +406,7 @@ def build_config(
         audio_output_device = _default_audio_output_device()
     if not audio_output_device or str(audio_output_device).strip().lower() == "default":
         audio_output_device = _default_audio_output_device()
+    audio_output_device = _coerce_audio_output_device(audio_output_device)
     if not audio_input_device or str(audio_input_device).strip().lower() == "default":
         audio_input_device = _default_audio_input_device()
     audio_input_device = _coerce_audio_input_device(audio_input_device)

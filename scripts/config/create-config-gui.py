@@ -78,35 +78,127 @@ def _run_cmd(cmd: list[str], *, check: bool = False, timeout: float | None = 1.5
         raise RuntimeError(f"command not found: {cmd[0]}") from exc
 
 
-def _is_v4l2_capture_capable(device_path: str) -> tuple[bool, str]:
+def _run_sudo_cmd_noninteractive(
+    args: list[str],
+    *,
+    check: bool = False,
+    timeout: float | None = 4.0,
+) -> subprocess.CompletedProcess:
+    """Run sudo without password prompt to avoid GUI freeze on non-TTY contexts."""
+    return _run_cmd(["sudo", "-n", *args], check=check, timeout=timeout)
+
+
+def _is_v4l2_capture_capable(device_path: str) -> tuple[bool | None, str]:
     """Return whether a v4l2 node exposes Video Capture capability."""
+    def _has_capture(capability_text: str) -> bool:
+        normalized = capability_text.lower()
+        return "video capture" in normalized
+
     try:
         proc = _run_cmd(["v4l2-ctl", "--all", "-d", device_path], check=False, timeout=2.0)
     except Exception as exc:
-        return False, f"v4l2-ctl 실행 실패: {exc}"
-    if proc.returncode != 0:
-        err = (proc.stderr or "").strip()
-        return False, f"v4l2-ctl 실패(code={proc.returncode}): {err}" if err else f"v4l2-ctl 실패(code={proc.returncode})"
-
+        return None, f"v4l2-ctl 실행 실패: {exc}"
     stdout = (proc.stdout or "").lower()
-    for line in stdout.splitlines():
-        lowered = line.lower()
-        if "video capture" in lowered and "video output" in lowered:
-            return True, "video capture/output 동시 지원"
-        if "video capture" in lowered and "video output" not in lowered:
-            return True, "video capture 전용 지원"
+    stderr = (proc.stderr or "").lower()
+    combined = f"{stdout}\n{stderr}" if stderr else stdout
+    if proc.returncode != 0 and not combined:
+        return None, f"v4l2-ctl 실패(code={proc.returncode})로 캡처 capability 확인 불가"
+
+    if _has_capture(combined) and "video output" in combined:
+        return True, "video capture/output 동시 지원"
+    if _has_capture(combined) and "video output" not in combined:
+        return True, "video capture 전용 지원"
+    if proc.returncode != 0:
+        return None, "video capture capability 조회 결과가 불명확합니다"
     return False, "v4l2-ctl 결과에서 video capture capability를 확인하지 못함"
 
 
-def _probe_v4l2_capture(device_path: str, retries: int = 5, delay_sec: float = 0.2) -> tuple[bool, str]:
+def _is_v4l2_output_capable(device_path: str) -> tuple[bool | None, str]:
+    """Return whether a v4l2 node exposes Video Output capability."""
+    def _has_output(capability_text: str) -> bool:
+        normalized = capability_text.lower()
+        return "video output" in normalized
+
+    try:
+        proc = _run_cmd(["v4l2-ctl", "--all", "-d", device_path], check=False, timeout=2.0)
+    except Exception as exc:
+        return None, f"v4l2-ctl 실행 실패: {exc}"
+    stdout = (proc.stdout or "").lower()
+    stderr = (proc.stderr or "").lower()
+    combined = f"{stdout}\n{stderr}" if stderr else stdout
+    if proc.returncode != 0 and not combined:
+        return None, f"v4l2-ctl 실패(code={proc.returncode})로 출력 capability 확인 불가"
+
+    if _has_output(combined):
+        if "video capture" in combined:
+            return True, "video capture/output 동시 지원"
+        return True, "video output 전용 지원"
+    if proc.returncode != 0:
+        return None, "video output capability 조회 결과가 불명확합니다"
+    return False, "v4l2-ctl 결과에서 video output capability를 확인하지 못함"
+
+
+def _probe_v4l2_capture(
+    device_path: str,
+    *,
+    retries: int = 5,
+    delay_sec: float = 0.2,
+    require_output: bool = False,
+) -> tuple[bool, str]:
     if not Path(device_path).exists():
         return False, f"{device_path} not found"
+
+    detail = "not ready"
+    if require_output:
+        def _check(path: str) -> tuple[bool, str]:
+            output_capable, output_detail = _is_v4l2_output_capable(path)
+            capture_capable, capture_detail = _is_v4l2_capture_capable(path)
+            if output_capable is False:
+                return False, f"output-capable check failed: {output_detail}"
+            if capture_capable is False:
+                return False, f"capture-capable check failed: {capture_detail}"
+            return True, f"{output_detail}; {capture_detail}"
+        check_fn = _check
+    else:
+        check_fn = _is_v4l2_capture_capable
     for _ in range(max(1, retries)):
-        capable, detail = _is_v4l2_capture_capable(device_path)
+        capable, detail = check_fn(device_path)
         if capable:
             return True, detail
         time.sleep(delay_sec)
     return False, detail
+
+
+def _default_virtual_output_device(cameras: list[dict[str, str]]) -> str:
+    def _is_loopback_candidate(path: str) -> bool:
+        output_capable, output_detail = _is_v4l2_output_capable(path)
+        capture_capable, capture_detail = _is_v4l2_capture_capable(path)
+        if output_capable is False:
+            _log(f"skip virtual output candidate due output check failed: {path}, {output_detail}")
+            return False
+        if capture_capable is False:
+            _log(f"skip virtual output candidate due capture check failed: {path}, {capture_detail}")
+            return False
+        return True
+
+    for camera in cameras:
+        label = (camera.get("label") or camera.get("name", "") or "").lower()
+        path = str(camera["devicePath"])
+        if ("v4l2loopback" in label or "virtual" in label or "ai-virtual-cam" in label) and _is_loopback_candidate(path):
+            return path
+
+    video10_path = "/dev/video10"
+    if Path(video10_path).exists() and _is_loopback_candidate(video10_path):
+        return video10_path
+
+    for camera in cameras:
+        path = str(camera["devicePath"])
+        if _is_loopback_candidate(path):
+            return path
+
+    if not cameras:
+        return video10_path
+    return str(cameras[0]["devicePath"])
 
 
 def _audio_default_output_device() -> str:
@@ -244,11 +336,15 @@ def _coerce_audio_output_device_for_sounddevice(device_name: str) -> str:
         if is_monitor:
             return name
         if "ai-virtual-cam" in lowered or "virtual-cam" in lowered or "virtual" in lowered or "monitor" in lowered:
+            if "pulse" in names:
+                return "pulse"
             return names[0]
         if name == "pulse" and names:
+            if "pulse" in names:
+                return "pulse"
             return names[0]
         if "pulse" in names:
-            return names[0]
+            return "pulse"
     except Exception:
         return name
     return name
@@ -532,6 +628,7 @@ class ConfigGui:
         self._preview_window_name = "ai-virtual-cam preview (press q or esc to close)"
         self._widgets: dict[str, object] = {}
         self._input_modes: list[tuple[int, int, str]] = []
+        self._output_modes: list[tuple[int, int, str]] = []
         self._slider_value_vars: dict[str, tk.StringVar] = {}
         self._slider_formatters: dict[str, Callable[[float], str]] = {}
         self._audio_gate_test_running = False
@@ -644,13 +741,54 @@ class ConfigGui:
 
         self._add_combo(tab_io, row, "output_backend", "Output backend", _output_backend_options(), _output_backend_options()[0])
         row += 1
-        default_output_device = "virtual-cam" if is_macos else "/dev/video10"
+        default_output_device = (
+            "virtual-cam" if is_macos else _default_virtual_output_device(discover_cameras())
+        )
+        initial_output_modes = discover_camera_mode_options(default_output_device)
+        self._output_modes = initial_output_modes
+        output_width_values = sorted({str(w) for w, _h, _fps in initial_output_modes}, key=lambda v: int(v))
+        output_default_w = output_width_values[0] if output_width_values else "1280"
+        output_height_values = sorted(
+            {str(h) for w, h, _fps in initial_output_modes if str(w) == output_default_w},
+            key=lambda v: int(v),
+        )
+        output_default_h = output_height_values[0] if output_height_values else "720"
+        output_fps_values = sorted(
+            {
+                str(int(round(float(fps))))
+                for w, h, fps in initial_output_modes
+                if str(w) == output_default_w and str(h) == output_default_h
+            },
+            key=lambda v: int(v),
+        )
         self._add_text(tab_io, row, "output_device", "Output path", default_output_device)
         row += 1
-        self._add_int(tab_io, row, "output_width", "Output width", 1280)
-        self._add_int(tab_io, row, "output_height", "Output height", 720, col_offset=2)
+        self._add_combo(
+            tab_io,
+            row,
+            "output_width",
+            "Output width",
+            output_width_values or ["1280"],
+            output_default_w,
+        )
         row += 1
-        self._add_int(tab_io, row, "output_fps", "Output FPS", 30)
+        self._add_combo(
+            tab_io,
+            row,
+            "output_height",
+            "Output height",
+            output_height_values or ["720"],
+            output_default_h,
+        )
+        row += 1
+        self._add_combo(
+            tab_io,
+            row,
+            "output_fps",
+            "Output FPS",
+            output_fps_values or ["30"],
+            output_fps_values[0] if output_fps_values else "30",
+        )
         row += 1
         ttk.Button(tab_io, text="가상 카메라 생성", command=self._create_virtual_camera).grid(
             row=row, column=0, columnspan=2, sticky="ew", padx=4, pady=(6, 0)
@@ -812,6 +950,16 @@ class ConfigGui:
         input_height_widget = self._widgets.get("input_height")
         if input_height_widget is not None:
             input_height_widget.bind("<<ComboboxSelected>>", self._on_input_height_changed)
+        output_device_widget = self._widgets.get("output_device")
+        if output_device_widget is not None:
+            output_device_widget.bind("<FocusOut>", self._on_output_device_changed)
+            output_device_widget.bind("<Return>", self._on_output_device_changed)
+        output_width_widget = self._widgets.get("output_width")
+        if output_width_widget is not None:
+            output_width_widget.bind("<<ComboboxSelected>>", self._on_output_width_changed)
+        output_height_widget = self._widgets.get("output_height")
+        if output_height_widget is not None:
+            output_height_widget.bind("<<ComboboxSelected>>", self._on_output_height_changed)
 
     def _on_scroll_canvas_configure(self, event) -> None:
         self._scroll_canvas.itemconfigure(self._scroll_window, width=event.width)
@@ -964,6 +1112,86 @@ class ConfigGui:
         if current not in fps_values:
             self.vars["input_fps"].set(fps_values[0])
 
+    def _output_mode_options(self, device_path: str) -> list[tuple[int, int, str]]:
+        if not device_path:
+            return [(1280, 720, "30")]
+        return discover_camera_mode_options(device_path) or [(1280, 720, "30")]
+
+    def _refresh_output_height_values(self) -> None:
+        width_raw = self.vars["output_width"].get().strip()
+        try:
+            w = int(width_raw)
+        except ValueError:
+            return
+        heights = sorted(
+            {str(h) for ww, h, _fps in self._output_modes if ww == w},
+            key=lambda v: int(v),
+        )
+        if not heights:
+            heights = ["720"]
+        height_combo = self._widgets.get("output_height")
+        if height_combo is not None:
+            height_combo["values"] = heights
+        current_h = self.vars["output_height"].get().strip()
+        if current_h not in heights:
+            self.vars["output_height"].set(heights[0])
+
+    def _refresh_output_fps_values(self) -> None:
+        try:
+            w = int(self.vars["output_width"].get().strip())
+            h = int(self.vars["output_height"].get().strip())
+        except ValueError:
+            return
+        fps_values = sorted(
+            {
+                str(int(round(float(fps))))
+                for ww, hh, fps in self._output_modes
+                if ww == w and hh == h
+            },
+            key=lambda v: int(v),
+        )
+        if not fps_values:
+            fps_values = ["30"]
+        fps_combo = self._widgets.get("output_fps")
+        if fps_combo is not None:
+            fps_combo["values"] = fps_values
+        current_fps = self.vars["output_fps"].get().strip()
+        if current_fps not in fps_values:
+            self.vars["output_fps"].set(fps_values[0])
+
+    def _on_output_device_changed(self, _event=None) -> None:
+        output_device = ""
+        if self.vars.get("output_device") is not None:
+            output_device = str(self.vars["output_device"].get()).strip()
+        self._output_modes = self._output_mode_options(output_device)
+        width_values = sorted({str(w) for w, _h, _fps in self._output_modes}, key=lambda v: int(v))
+        width_combo = self._widgets.get("output_width")
+        if width_combo is not None:
+            width_combo["values"] = width_values
+        current_w = self.vars["output_width"].get().strip()
+        if current_w not in width_values:
+            self.vars["output_width"].set(width_values[0] if width_values else "1280")
+        self._refresh_output_height_values()
+        self._refresh_output_fps_values()
+
+    def _on_output_width_changed(self, _event=None) -> None:
+        self._refresh_output_height_values()
+        self._refresh_output_fps_values()
+
+    def _on_output_height_changed(self, _event=None) -> None:
+        try:
+            w = int(self.vars["output_width"].get().strip())
+            h = int(self.vars["output_height"].get().strip())
+        except ValueError:
+            return
+        valid_pairs = {(ww, hh) for ww, hh, _fps in self._output_modes}
+        if self._output_modes and (w, h) not in valid_pairs:
+            w0, h0, _fps0 = self._output_modes[0]
+            self.vars["output_width"].set(str(w0))
+            self.vars["output_height"].set(str(h0))
+            self._refresh_output_height_values()
+        self._refresh_output_fps_values()
+
     def _pick_bg_image(self):
         selected = filedialog.askopenfilename(title="Select background image")
         if selected:
@@ -978,6 +1206,11 @@ class ConfigGui:
         input_width = int(input_modes[0][0])
         input_height = int(input_modes[0][1])
         input_fps = int(float(input_modes[0][2]))
+        output_device = "virtual-cam" if is_macos else _default_virtual_output_device(cameras)
+        output_modes = discover_camera_mode_options(output_device) or [(1280, 720, "30")]
+        output_width = int(output_modes[0][0])
+        output_height = int(output_modes[0][1])
+        output_fps = int(float(output_modes[0][2]))
 
         return {
             "input_device": input_device,
@@ -986,10 +1219,10 @@ class ConfigGui:
             "input_fps": input_fps,
             "input_software_zoom": 1.0,
             "output_backend": _output_backend_options()[0],
-            "output_device": "virtual-cam" if is_macos else "/dev/video10",
-            "output_width": 1280,
-            "output_height": 720,
-            "output_fps": 30,
+            "output_device": output_device,
+            "output_width": output_width,
+            "output_height": output_height,
+            "output_fps": output_fps,
             "seg_backend": "selfie",
             "seg_threshold": 0.65,
             "seg_edge_smoothness": 0.50,
@@ -1036,10 +1269,12 @@ class ConfigGui:
             return
 
         _log(f"Create virtual camera: video_no={video_no} label={VIRTUAL_CAMERA_LABEL}")
+        # Browser(WebRTC) compatibility is best with exclusive_caps=1.
+        # Keep fallback args for hosts where this mode is unavailable.
         camera_args = [
-            [f"video_nr={video_no}", f"card_label={VIRTUAL_CAMERA_LABEL}", "exclusive_caps=1"],
-            [f"video_nr={video_no}", f"card_label={VIRTUAL_CAMERA_LABEL}"],
-            [f"video_nr={video_no}", f"card_label={VIRTUAL_CAMERA_LABEL}", "exclusive_caps=0"],
+            ["devices=1", f"video_nr={video_no}", f"card_label={VIRTUAL_CAMERA_LABEL}", "exclusive_caps=1", "max_buffers=2"],
+            ["devices=1", f"video_nr={video_no}", f"card_label={VIRTUAL_CAMERA_LABEL}", "exclusive_caps=0", "max_buffers=2"],
+            ["devices=1", f"video_nr={video_no}", f"card_label={VIRTUAL_CAMERA_LABEL}", "max_buffers=2"],
         ]
 
         last_error = ""
@@ -1047,8 +1282,8 @@ class ConfigGui:
             if idx > 0:
                 _log("Reconfigure virtual camera with fallback args (capture compatibility attempt)")
                 try:
-                    reload_proc = _run_cmd(
-                        ["sudo", "modprobe", "-r", "v4l2loopback"],
+                    reload_proc = _run_sudo_cmd_noninteractive(
+                        ["modprobe", "-r", "v4l2loopback"],
                         check=False,
                         timeout=4.0,
                     )
@@ -1057,26 +1292,40 @@ class ConfigGui:
                 except Exception as exc:
                     _log(f"modprobe -r 실패(무시): {exc}")
 
-            cmd = ["sudo", "modprobe", "v4l2loopback", *args]
+            cmd = ["modprobe", "v4l2loopback", *args]
             try:
-                proc = _run_cmd(cmd, check=False, timeout=4.0)
+                _run_sudo_cmd_noninteractive(["modprobe", "videodev"], check=False, timeout=4.0)
+                proc = _run_sudo_cmd_noninteractive(cmd, check=False, timeout=4.0)
             except Exception as exc:
                 last_error = f"modprobe 실행 예외: {exc}"
                 _log(last_error)
                 continue
             if proc.returncode != 0:
                 err = (proc.stderr or proc.stdout or "").strip()
+                if "a password is required" in err.lower() or "sudo" in err.lower():
+                    messagebox.showerror(
+                        "가상 카메라 생성",
+                        "sudo 비밀번호 입력이 필요한 상태입니다.\n"
+                        "GUI에서는 비밀번호 프롬프트를 처리할 수 없어 중단했습니다.\n\n"
+                        "터미널에서 `sudo -v` 실행 후 다시 시도하세요.",
+                    )
+                    return
                 last_error = f"modprobe 로드 실패(code={proc.returncode}): {err}"
                 _log(last_error)
                 continue
 
-            ready, detail = _probe_v4l2_capture(device, retries=10, delay_sec=0.2)
+            ready, detail = _probe_v4l2_capture(
+                device,
+                retries=10,
+                delay_sec=0.2,
+                require_output=True,
+            )
             if ready:
-                _log(f"Virtual camera capture-capable confirmed on {device}: {detail} (args={args})")
+                _log(f"Virtual camera webcam-capable confirmed on {device}: {detail} (args={args})")
                 messagebox.showinfo("가상 카메라 생성", f"가상 카메라를 생성했습니다: {device}")
                 return
 
-            last_error = f"{device} created but not capture-capable: {detail} (args={args})"
+            last_error = f"{device} created but not webcam-capable: {detail} (args={args})"
             _log(last_error)
 
         messagebox.showerror(
@@ -1091,12 +1340,20 @@ class ConfigGui:
 
         _log("Remove virtual camera: modprobe -r v4l2loopback")
         try:
-            proc = _run_cmd(["sudo", "modprobe", "-r", "v4l2loopback"], check=False, timeout=4.0)
+            proc = _run_sudo_cmd_noninteractive(["modprobe", "-r", "v4l2loopback"], check=False, timeout=4.0)
         except Exception as exc:
             messagebox.showerror("가상 카메라 제거", f"모듈 제거 실패: {exc}")
             return
 
         if proc.returncode != 0:
+            err = (proc.stderr or proc.stdout or "").strip()
+            if "a password is required" in err.lower() or "sudo" in err.lower():
+                messagebox.showerror(
+                    "가상 카메라 제거",
+                    "sudo 비밀번호 입력이 필요한 상태입니다.\n"
+                    "터미널에서 `sudo -v` 실행 후 다시 시도하세요.",
+                )
+                return
             messagebox.showerror(
                 "가상 카메라 제거",
                 f"모듈 제거 실패 (code={proc.returncode})\n{proc.stdout or ''}{proc.stderr or ''}".strip(),
@@ -1243,6 +1500,8 @@ class ConfigGui:
             self._set_var(key, value)
         self._on_input_device_changed()
         self._on_input_width_changed()
+        self._on_output_device_changed()
+        self._on_output_height_changed()
 
     def _reset_audio_settings(self) -> None:
         defaults = self._build_audio_defaults()
@@ -1313,6 +1572,8 @@ class ConfigGui:
         self._load_audio_settings_from_config(audio_cfg)
         self._on_input_device_changed()
         self._on_input_width_changed()
+        self._on_output_device_changed()
+        self._on_output_height_changed()
 
     def _load_audio_settings_from_config(self, audio_cfg: dict) -> None:
         defaults = self._build_audio_defaults()
@@ -1332,8 +1593,16 @@ class ConfigGui:
         resolved_output_device = (
             defaults["audio_output_device"]
             if raw_output_device.lower() == "default" or not raw_output_device
-            else raw_output_device
+            else _coerce_audio_output_device_for_sounddevice(raw_output_device)
         )
+        if (
+            resolved_output_device != raw_output_device
+            and raw_output_device
+            and raw_output_device.lower() != "default"
+        ):
+            _log(
+                f"audio output device was normalized: raw='{raw_output_device}' -> '{resolved_output_device}'"
+            )
         self._set_var("audio_input_device", resolved_input_device)
         input_widget = self._widgets.get("audio_input_device")
         if isinstance(input_widget, ttk.Combobox):

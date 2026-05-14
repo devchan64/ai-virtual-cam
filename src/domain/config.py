@@ -186,12 +186,17 @@ def _coerce_audio_output_device(device_name: str) -> str:
 
         # If config uses PulseAudio short-name (e.g., ai-virtual-cam), force a safe default.
         if "ai-virtual-cam" in lowered or "virtual" in lowered:
+            if "pulse" in names:
+                return "pulse"
+            virtual = _pick_virtual_output(names)
+            if virtual is not None:
+                return virtual
             if names:
                 return names[0]
 
         # Fallback to explicit PulseAudio/PipeWire aggregate.
         if "pulse" in names and name == "pulse":
-            return names[0]
+            return "pulse"
         if "pulse" in names:
             return "pulse"
     except Exception:
@@ -619,6 +624,7 @@ class AudioMixerConfig:
         output_device = str(raw.get("outputDevice", _default_audio_output_device())).strip()
         if not output_device or output_device.lower() == "default":
             output_device = _default_audio_output_device()
+        output_device = _coerce_audio_output_device(output_device)
         config = cls(
             enabled=bool(raw.get("enabled", True)),
             inputDevice=input_device,

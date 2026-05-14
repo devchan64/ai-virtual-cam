@@ -48,13 +48,35 @@ class VirtualAudioMixer:
 
         frame_samples = max(1, int(self._cfg.sampleRate * self._cfg.frameMs / 1000.0))
         input_device = self._cfg.inputDevice
-        output_device = self._cfg.outputDevice
+        output_device = str(self._cfg.outputDevice).strip()
         in_channels = self._cfg.channels
         out_channels = self._cfg.channels
 
         try:
             input_info = sd.query_devices(input_device, kind="input")
+        except Exception as exc:
+            raise RuntimeError(f"audio input device open failed: configured input '{input_device}': {exc}") from exc
+
+        try:
             output_info = sd.query_devices(output_device, kind="output")
+        except Exception as exc:
+            try:
+                output_names = [
+                    str(device.get("name", "")).strip()
+                    for device in sd.query_devices()
+                    if int(device.get("max_output_channels", 0)) > 0
+                ]
+                output_names = [name for name in output_names if name]
+            except Exception:
+                output_names = []
+            raise RuntimeError(
+                f"audio output device open failed: configured output '{output_device}': {exc}. "
+                f"Available output devices: {output_names or ['<none>']}"
+            ) from exc
+
+        try:
+            if int(output_info.get("max_output_channels", 0)) <= 0:
+                raise RuntimeError(f"configured output device '{output_device}' has no output channels")
             if in_channels > int(input_info.get("max_input_channels", in_channels)):
                 in_channels = int(input_info.get("max_input_channels", in_channels))
                 print(

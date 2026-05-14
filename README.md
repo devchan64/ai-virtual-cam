@@ -25,6 +25,22 @@
 - macOS: OBS Virtual Camera 경로만 지원(`pyvirtualcam`)
 - CMIO 관련 기능은 폐기
 
+## Linux 가상 카메라 생성 동작
+
+- `config-gui`의 `가상 카메라 생성/제거`는 `sudo modprobe`가 필요합니다.
+- GUI는 `sudo -n`(비대화식)으로 실행하므로, 비밀번호 프롬프트를 띄우지 않고 즉시 실패 처리합니다.
+- GUI가 멈추지 않도록 설계되어 있으며, 권한이 없으면 안내 메시지를 표시합니다.
+- 생성 시 `exclusive_caps=1`을 우선 적용합니다.
+- `exclusive_caps=1`은 Chrome/Google Meet(WebRTC) 장치 목록 노출 호환성을 높이기 위한 기본값입니다.
+- 실패 시 `exclusive_caps=0` 및 일반 옵션으로 순차 폴백합니다.
+
+권한이 필요한 환경에서는 먼저 아래를 실행한 뒤 GUI에서 생성/제거를 수행하세요.
+
+```bash
+sudo -v
+./bin/avc config-gui
+```
+
 ## 빠른 시작
 
 ```bash
@@ -32,6 +48,18 @@
 ./bin/avc config-gui
 ./bin/avc serve
 ```
+
+## 설정 동작 정책 (중요)
+
+- `설정 우선` 원칙으로 동작합니다.
+- `output.device`, `audio.inputDevice`, `audio.outputDevice`, `outputCamera` 해상도/FPS/픽셀 포맷은 실행 시점에 그대로 사용됩니다.
+- 장치/포맷이 존재하지 않거나 초기화에 실패하면 자동으로 다른 값으로 대체하지 않고 **즉시 종료**합니다.
+- 에러 로그는 다음을 포함합니다.
+  - 실패한 설정 값
+  - 실제 실패 이유(예: 디바이스 미존재, ffmpeg 초기화 실패, 채널 미지원)
+  - 해결을 위한 설정 재적용 필요성
+
+문제가 발생하면 설정을 수정 후 `./bin/avc config-gui`로 다시 저장하고 `./bin/avc serve`를 재실행하세요.
 
 `./bin/avc setup`은 런타임 의존성만 설치합니다(가상 카메라/스피커 생성 없음).
 가상 카메라/가상 마이크 생성 및 제거는 다음을 사용하세요.
