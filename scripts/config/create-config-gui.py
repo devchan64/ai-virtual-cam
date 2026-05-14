@@ -6,6 +6,7 @@ import argparse
 import json
 import sys
 import time
+import threading
 from pathlib import Path
 import cv2
 import platform
@@ -94,6 +95,24 @@ class ConfigGui:
         self._audio_gate_test_started_at = 0.0
         self._audio_gate_test_threshold_db = -42.0
         self._audio_gate_test_min_ratio = 0.55
+        self._audio_tune_window: tk.Toplevel | None = None
+        self._audio_tune_action_btn: ttk.Button | None = None
+        self._audio_tune_running = False
+        self._audio_tune_cancelled = False
+        self._audio_tune_is_recording = False
+        self._audio_tune_after_id: str | int | None = None
+        self._audio_tune_step_var: tk.StringVar | None = None
+        self._audio_tune_step_list_var: tk.StringVar | None = None
+        self._audio_tune_timer_var: tk.StringVar | None = None
+        self._audio_tune_status_var: tk.StringVar | None = None
+        self._audio_tune_summary_var: tk.StringVar | None = None
+        self._audio_tune_step: int = 0
+        self._audio_tune_ambient = None
+        self._audio_tune_step_deadline: float = 0.0
+        self._audio_tune_error: str | None = None
+        self._audio_tune_result_text: str = ""
+        self._audio_tune_progress: str = ""
+        self._audio_tune_done: bool = False
         self._build_form()
         self._load_existing_config()
 
@@ -254,17 +273,17 @@ class ConfigGui:
         row += 1
         self._add_slider(tab_audio, row, "audio_denoise_strength", "NC strength", 0.50, 0.0, 1.0, resolution=0.01)
         row += 1
-        self._add_slider(tab_audio, row, "audio_gate_threshold_db", "Gate threshold dB", -42.0, -80.0, 0.0, resolution=0.5)
+        self._add_slider(tab_audio, row, "audio_gate_threshold_db", "Gate threshold dB", -40.0, -80.0, 0.0, resolution=0.5)
         row += 1
-        self._add_slider(tab_audio, row, "audio_gate_hysteresis_db", "Gate hysteresis dB", 3.0, 0.0, 20.0, resolution=0.5)
+        self._add_slider(tab_audio, row, "audio_gate_hysteresis_db", "Gate hysteresis dB", 4.0, 0.0, 20.0, resolution=0.5)
         row += 1
-        self._add_slider(tab_audio, row, "audio_gate_min_voice_band_ratio", "Min voice band ratio", 0.55, 0.0, 1.0, resolution=0.01)
+        self._add_slider(tab_audio, row, "audio_gate_min_voice_band_ratio", "Min voice band ratio", 0.50, 0.0, 1.0, resolution=0.01)
         row += 1
-        self._add_slider(tab_audio, row, "audio_gate_attack_ms", "Gate attack ms", 20, 0, 500, resolution=1)
+        self._add_slider(tab_audio, row, "audio_gate_attack_ms", "Gate attack ms", 30, 0, 500, resolution=1)
         row += 1
-        self._add_slider(tab_audio, row, "audio_gate_hold_ms", "Gate hold ms", 140, 0, 2000, resolution=1)
+        self._add_slider(tab_audio, row, "audio_gate_hold_ms", "Gate hold ms", 160, 0, 2000, resolution=1)
         row += 1
-        self._add_slider(tab_audio, row, "audio_gate_release_ms", "Gate release ms", 220, 0, 2000, resolution=1)
+        self._add_slider(tab_audio, row, "audio_gate_release_ms", "Gate release ms", 500, 0, 4000, resolution=1)
         row += 1
         self._add_slider(tab_audio, row, "audio_gate_open_gain", "Gate open gain", 1.0, 0.0, 2.0, resolution=0.01)
         row += 1
@@ -502,12 +521,12 @@ class ConfigGui:
             "audio_denoise_enabled": "false",
             "audio_denoise_backend": denoise_backends[0],
             "audio_denoise_strength": 0.5,
-            "audio_gate_threshold_db": -42.0,
-            "audio_gate_hysteresis_db": 3.0,
-            "audio_gate_min_voice_band_ratio": 0.55,
-            "audio_gate_attack_ms": 20,
-            "audio_gate_hold_ms": 140,
-            "audio_gate_release_ms": 220,
+            "audio_gate_threshold_db": -40.0,
+            "audio_gate_hysteresis_db": 4.0,
+            "audio_gate_min_voice_band_ratio": 0.50,
+            "audio_gate_attack_ms": 30,
+            "audio_gate_hold_ms": 160,
+            "audio_gate_release_ms": 500,
             "audio_gate_open_gain": 1.0,
             "audio_gate_closed_gain": 0.0,
         }
@@ -654,6 +673,8 @@ class ConfigGui:
                 "sounddevice 모듈이 없습니다. ./bin/avc setup 후 다시 시도하세요.",
             )
             return
+        if self._audio_tune_running:
+            return
         try:
             sample_rate = int(self.vars["audio_sample_rate"].get())
             channels = int(self.vars["audio_channels"].get())
@@ -663,48 +684,298 @@ class ConfigGui:
         if channels <= 0:
             channels = 1
 
-        messagebox.showinfo(
-            "게이트 자동 튜닝 1/2",
-            "2초 동안 조용히 있어 주세요.\n(배경 소음 기준 측정)",
-        )
-        ambient = self._record_audio_block(seconds=2.0, sample_rate=sample_rate, channels=channels)
-        if ambient is None:
-            return
+        if self._audio_tune_window is None or not self._audio_tune_window.winfo_exists():
+            self._audio_tune_window = tk.Toplevel(self.root)
+            self._audio_tune_window.title("오디오 게이트 자동 튜닝")
+            self._audio_tune_window.geometry("560x260")
+            self._audio_tune_window.resizable(False, False)
+            self._audio_tune_window.grab_set()
 
-        messagebox.showinfo(
-            "게이트 자동 튜닝 2/2",
-            "3초 동안 평소 회의 톤으로 말해 주세요.\n(음성 기준 측정)",
-        )
-        speech = self._record_audio_block(seconds=3.0, sample_rate=sample_rate, channels=channels)
-        if speech is None:
-            return
+            container = ttk.Frame(self._audio_tune_window, padding=12)
+            container.grid(sticky="nsew")
+            for c in range(1):
+                container.columnconfigure(c, weight=1)
 
-        ambient_db = self._rms_dbfs(ambient)
-        speech_db = self._rms_dbfs(speech)
-        ambient_voice = self._voice_band_ratio(ambient, sample_rate)
-        speech_voice = self._voice_band_ratio(speech, sample_rate)
+            self._audio_tune_step_var = tk.StringVar(value="대기 중")
+            self._audio_tune_step_list_var = tk.StringVar(value="")
+            self._audio_tune_timer_var = tk.StringVar(value="타이머: -")
+            self._audio_tune_status_var = tk.StringVar(value="작업을 시작합니다.")
+            self._audio_tune_summary_var = tk.StringVar(value="결과가 여기에 표시됩니다.")
 
-        if speech_db <= ambient_db + 1.0:
-            threshold_db = ambient_db + 2.0
-            hysteresis_db = 6.0
+            ttk.Label(container, text="오디오 게이트 자동 튜닝", font=("Arial", 12, "bold")).grid(
+                row=0, column=0, sticky="ew", pady=(0, 8)
+            )
+            ttk.Label(container, textvariable=self._audio_tune_step_var).grid(row=1, column=0, sticky="w")
+            ttk.Label(container, textvariable=self._audio_tune_step_list_var, justify="left", wraplength=520).grid(
+                row=2, column=0, sticky="w", pady=(4, 0)
+            )
+            ttk.Label(container, textvariable=self._audio_tune_status_var).grid(row=3, column=0, sticky="w", pady=(4, 0))
+            ttk.Label(container, textvariable=self._audio_tune_timer_var).grid(row=4, column=0, sticky="w", pady=(4, 0))
+            ttk.Label(container, textvariable=self._audio_tune_summary_var, wraplength=520).grid(
+                row=5, column=0, sticky="w", pady=(8, 0)
+            )
+
+            btn_row = ttk.Frame(container)
+            btn_row.grid(row=6, column=0, sticky="ew", pady=(12, 0))
+            self._audio_tune_action_btn = ttk.Button(btn_row, text="1단계 시작", command=self._run_audio_tune_next_step)
+            self._audio_tune_action_btn.pack(side="left")
+            close_btn = ttk.Button(btn_row, text="닫기", command=self._close_auto_tune_window)
+            close_btn.pack(side="right")
+            self._audio_tune_window.protocol("WM_DELETE_WINDOW", self._close_auto_tune_window)
         else:
-            threshold_db = ambient_db + (speech_db - ambient_db) * 0.35
-            hysteresis_db = (speech_db - ambient_db) * 0.18
-        threshold_db = float(max(-80.0, min(0.0, threshold_db)))
-        hysteresis_db = float(max(1.5, min(12.0, hysteresis_db)))
-        min_voice_ratio = float(max(0.10, min(0.95, (ambient_voice + speech_voice) * 0.5 + 0.05)))
+            self._audio_tune_window.lift()
+            if self._audio_tune_step_var is not None:
+                self._audio_tune_step_var.set("대기 중")
+            if self._audio_tune_step_list_var is not None:
+                self._audio_tune_step_list_var.set("")
+            if self._audio_tune_status_var is not None:
+                self._audio_tune_status_var.set("작업을 시작합니다.")
+            if self._audio_tune_timer_var is not None:
+                self._audio_tune_timer_var.set("타이머: -")
+            if self._audio_tune_summary_var is not None:
+                self._audio_tune_summary_var.set("결과가 여기에 표시됩니다.")
+            if self._audio_tune_action_btn is not None and self._audio_tune_action_btn.winfo_exists():
+                self._audio_tune_action_btn.configure(text="1단계 시작", state="normal")
+            elif self._audio_tune_window is not None and self._audio_tune_window.winfo_exists():
+                # Keep button state consistent even if internal handle was lost.
+                for widget in self._audio_tune_window.winfo_children():
+                    for child in widget.winfo_children():
+                        if isinstance(child, ttk.Button) and child.cget("text") == "1단계 시작":
+                            self._audio_tune_action_btn = child
+                            break
 
-        self.vars["audio_gate_threshold_db"].set(threshold_db)
-        self.vars["audio_gate_hysteresis_db"].set(hysteresis_db)
-        self.vars["audio_gate_min_voice_band_ratio"].set(min_voice_ratio)
+        self._audio_tune_window.protocol("WM_DELETE_WINDOW", self._close_auto_tune_window)
 
-        messagebox.showinfo(
-            "게이트 자동 튜닝 완료",
-            "추천값을 반영했습니다.\n"
-            f"- thresholdDb: {threshold_db:.1f}\n"
-            f"- hysteresisDb: {hysteresis_db:.1f}\n"
-            f"- minVoiceBandRatio: {min_voice_ratio:.2f}",
-        )
+        self._audio_tune_running = True
+        self._audio_tune_cancelled = False
+        self._audio_tune_is_recording = False
+        self._audio_tune_done = False
+        self._audio_tune_error = None
+        self._audio_tune_result_text = ""
+        self._audio_tune_ambient = None
+        self._audio_tune_step = 0
+        self._audio_tune_progress = "1단계를 시작하려면 버튼을 누르세요."
+        if self._audio_tune_step_var is not None:
+            self._audio_tune_step_var.set("단계 0/2")
+        if self._audio_tune_step_list_var is not None:
+            self._audio_tune_step_list_var.set("1) 조용한 환경 오디오 수집 (대기)\\n2) 음성 샘플 수집 (대기)")
+        if self._audio_tune_status_var is not None:
+            self._audio_tune_status_var.set("1단계 버튼을 눌러 진행하세요.")
+        if self._audio_tune_summary_var is not None:
+            self._audio_tune_summary_var.set("결과는 단계 완료 후 계산됩니다.")
+        if self._audio_tune_timer_var is not None:
+            self._audio_tune_timer_var.set("타이머: -")
+
+        self._auto_tune_audio_gate_tick()
+
+    def _run_audio_tune_next_step(self) -> None:
+        if self._audio_tune_cancelled or not self._audio_tune_running or self._audio_tune_is_recording:
+            return
+        if self._audio_tune_done or self._audio_tune_error is not None:
+            return
+
+        try:
+            sample_rate = int(self.vars["audio_sample_rate"].get())
+            channels = int(self.vars["audio_channels"].get())
+        except Exception:
+            self._audio_tune_error = "audio sample rate/channels 값이 올바르지 않습니다."
+            self._audio_tune_running = False
+            return
+        if channels <= 0:
+            channels = 1
+
+        if self._audio_tune_step == 0:
+            self._start_tune_step_ambient(sample_rate, channels)
+        elif self._audio_tune_step == 1:
+            self._start_tune_step_speech(sample_rate, channels)
+
+    def _start_tune_step_ambient(self, sample_rate: int, channels: int) -> None:
+        if self._audio_tune_running is False:
+            return
+
+        self._audio_tune_is_recording = True
+        self._audio_tune_step = 1
+        self._audio_tune_progress = "2초 동안 조용히 있어 주세요. (배경 소음 기준 측정)"
+        self._audio_tune_step_deadline = time.time() + 2.0
+        if self._audio_tune_step_list_var is not None:
+            self._audio_tune_step_list_var.set("1) 조용한 환경 오디오 수집 (진행 중)\\n2) 음성 샘플 수집 (대기)")
+        if self._audio_tune_status_var is not None:
+            self._audio_tune_status_var.set("1단계 녹음을 진행 중입니다.")
+
+        def _worker() -> None:
+            try:
+                ambient = self._record_audio_block(seconds=2.0, sample_rate=sample_rate, channels=channels, show_error=False)
+                if self._audio_tune_cancelled:
+                    return
+                if ambient is None:
+                    self._audio_tune_error = "배경 소음 측정에 실패했습니다."
+                    self._audio_tune_running = False
+                    return
+
+                self._audio_tune_ambient = ambient
+                self._audio_tune_progress = "1단계 완료. 2단계를 시작하세요."
+                if self._audio_tune_step_list_var is not None:
+                    self._audio_tune_step_list_var.set("1) 조용한 환경 오디오 수집 (완료)\\n2) 음성 샘플 수집 (대기)")
+            except Exception as exc:
+                self._audio_tune_error = str(exc)
+                self._audio_tune_running = False
+            finally:
+                self._audio_tune_is_recording = False
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _start_tune_step_speech(self, sample_rate: int, channels: int) -> None:
+        if self._audio_tune_running is False:
+            return
+        if self._audio_tune_ambient is None:
+            self._audio_tune_error = "1단계가 먼저 필요합니다."
+            self._audio_tune_running = False
+            return
+
+        self._audio_tune_is_recording = True
+        self._audio_tune_step = 2
+        self._audio_tune_progress = "3초 동안 평소 회의 톤으로 말해 주세요. (음성 기준 측정)"
+        self._audio_tune_step_deadline = time.time() + 3.0
+        if self._audio_tune_step_list_var is not None:
+            self._audio_tune_step_list_var.set("1) 조용한 환경 오디오 수집 (완료)\\n2) 음성 샘플 수집 (진행 중)")
+        if self._audio_tune_status_var is not None:
+            self._audio_tune_status_var.set("2단계 녹음을 진행 중입니다.")
+
+        def _worker() -> None:
+            try:
+                speech = self._record_audio_block(seconds=3.0, sample_rate=sample_rate, channels=channels, show_error=False)
+                if self._audio_tune_cancelled:
+                    return
+                if speech is None:
+                    self._audio_tune_error = "음성 샘플 측정에 실패했습니다."
+                    self._audio_tune_running = False
+                    return
+
+                ambient = self._audio_tune_ambient
+                if ambient is None:
+                    self._audio_tune_error = "1단계 데이터가 없습니다."
+                    self._audio_tune_running = False
+                    return
+
+                ambient_db = self._rms_dbfs(ambient)
+                speech_db = self._rms_dbfs(speech)
+                ambient_voice = self._voice_band_ratio(ambient, sample_rate)
+                speech_voice = self._voice_band_ratio(speech, sample_rate)
+
+                if speech_db <= ambient_db + 1.0:
+                    threshold_db = ambient_db + 2.0
+                    hysteresis_db = 6.0
+                else:
+                    threshold_db = ambient_db + (speech_db - ambient_db) * 0.35
+                    hysteresis_db = (speech_db - ambient_db) * 0.18
+                threshold_db = float(max(-80.0, min(0.0, threshold_db)))
+                hysteresis_db = float(max(1.5, min(12.0, hysteresis_db)))
+                min_voice_ratio = float(max(0.10, min(0.95, (ambient_voice + speech_voice) * 0.5 + 0.05)))
+
+                self.vars["audio_gate_threshold_db"].set(threshold_db)
+                self.vars["audio_gate_hysteresis_db"].set(hysteresis_db)
+                self.vars["audio_gate_min_voice_band_ratio"].set(min_voice_ratio)
+                self._audio_tune_result_text = (
+                    "추천값을 반영했습니다.\\n"
+                    f"- thresholdDb: {threshold_db:.1f}\\n"
+                    f"- hysteresisDb: {hysteresis_db:.1f}\\n"
+                    f"- minVoiceBandRatio: {min_voice_ratio:.2f}"
+                )
+                self._audio_tune_done = True
+                self._audio_tune_progress = "완료"
+                self._audio_tune_running = False
+                if self._audio_tune_step_list_var is not None:
+                    self._audio_tune_step_list_var.set("1) 조용한 환경 오디오 수집 (완료)\\n2) 음성 샘플 수집 (완료)")
+            except Exception as exc:
+                self._audio_tune_error = str(exc)
+                self._audio_tune_running = False
+            finally:
+                self._audio_tune_is_recording = False
+                self._audio_tune_running = False
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _auto_tune_audio_gate_tick(self):
+        if self._audio_tune_window is None or not self._audio_tune_window.winfo_exists():
+            self._audio_tune_running = False
+            return
+
+        if self._audio_tune_step_var is not None:
+            self._audio_tune_step_var.set(f"단계 {self._audio_tune_step}/2")
+        if self._audio_tune_status_var is not None:
+            self._audio_tune_status_var.set(self._audio_tune_progress or "처리 중...")
+
+        remaining = 0.0
+        if (
+            self._audio_tune_running
+            and self._audio_tune_is_recording
+            and self._audio_tune_step in (1, 2)
+            and self._audio_tune_step_deadline > 0.0
+        ):
+            remaining = max(0.0, self._audio_tune_step_deadline - time.time())
+        if self._audio_tune_timer_var is not None:
+            self._audio_tune_timer_var.set(f"타이머: {remaining:.1f}s")
+
+        if self._audio_tune_summary_var is not None:
+            if self._audio_tune_error is not None:
+                self._audio_tune_summary_var.set(f"오류: {self._audio_tune_error}")
+            elif self._audio_tune_done:
+                self._audio_tune_summary_var.set(self._audio_tune_result_text)
+            else:
+                self._audio_tune_summary_var.set(self._audio_tune_progress)
+
+        if self._audio_tune_action_btn is not None:
+            if self._audio_tune_error is not None or self._audio_tune_done:
+                self._audio_tune_action_btn.configure(state="disabled")
+            elif self._audio_tune_is_recording:
+                self._audio_tune_action_btn.configure(state="disabled")
+            elif self._audio_tune_step == 0:
+                self._audio_tune_action_btn.configure(text="1단계 시작", state="normal")
+            elif self._audio_tune_step == 1:
+                self._audio_tune_action_btn.configure(text="2단계 시작", state="normal")
+            elif self._audio_tune_step >= 2:
+                self._audio_tune_action_btn.configure(state="disabled")
+
+        if self._audio_tune_running or self._audio_tune_is_recording:
+            self._audio_tune_after_id = self.root.after(100, self._auto_tune_audio_gate_tick)
+            return
+
+        if self._audio_tune_done:
+            if self._audio_tune_step_list_var is not None:
+                self._audio_tune_step_list_var.set("1) 조용한 환경 오디오 수집 (완료)\\n2) 음성 샘플 수집 (완료)")
+            if self._audio_tune_summary_var is not None:
+                self._audio_tune_summary_var.set(self._audio_tune_result_text or "완료")
+            if self._audio_tune_step_var is not None:
+                self._audio_tune_step_var.set("완료")
+            if self._audio_tune_status_var is not None:
+                self._audio_tune_status_var.set("오디오 게이트 자동 튜닝이 완료되었습니다.")
+            if self._audio_tune_timer_var is not None:
+                self._audio_tune_timer_var.set("타이머: 0.0s")
+        elif self._audio_tune_error is not None:
+            if self._audio_tune_step_list_var is not None:
+                self._audio_tune_step_list_var.set("1) 조용한 환경 오디오 수집 (완료/실패)\\n2) 음성 샘플 수집 (완료/실패)")
+            if self._audio_tune_step_var is not None:
+                self._audio_tune_step_var.set("실패")
+            if self._audio_tune_status_var is not None:
+                self._audio_tune_status_var.set("오류가 발생해 중단되었습니다.")
+
+    def _close_auto_tune_window(self) -> None:
+        self._audio_tune_cancelled = True
+        self._audio_tune_running = False
+        after_id = self._audio_tune_after_id
+        if after_id is not None:
+            try:
+                self.root.after_cancel(after_id)
+            except Exception:
+                pass
+            self._audio_tune_after_id = None
+        self._audio_tune_action_btn = None
+        if self._audio_tune_window is not None:
+            try:
+                self._audio_tune_window.destroy()
+            except Exception:
+                pass
+        self._audio_tune_window = None
 
     def _run_audio_gate_test(self):
         try:
@@ -974,16 +1245,18 @@ class ConfigGui:
             return 0.20 * (np.sin(2 * np.pi * 140.0 * t).astype(np.float32))
         return np.zeros(frames, dtype=np.float32)
 
-    def _record_audio_block(self, seconds: float, sample_rate: int, channels: int):
+    def _record_audio_block(self, seconds: float, sample_rate: int, channels: int, show_error: bool = True):
         try:
             frames = max(1, int(seconds * sample_rate))
             data = sd.rec(frames, samplerate=sample_rate, channels=channels, dtype="float32")
             sd.wait()
         except Exception as exc:
-            messagebox.showerror("Audio tuning error", f"마이크 입력 측정 실패:\n{exc}")
+            if show_error:
+                messagebox.showerror("Audio tuning error", f"마이크 입력 측정 실패:\n{exc}")
             return None
         if data is None or len(data) == 0:
-            messagebox.showerror("Audio tuning error", "빈 오디오 데이터가 수집되었습니다.")
+            if show_error:
+                messagebox.showerror("Audio tuning error", "빈 오디오 데이터가 수집되었습니다.")
             return None
         mono = np.mean(np.asarray(data, dtype=np.float32), axis=1)
         return mono
