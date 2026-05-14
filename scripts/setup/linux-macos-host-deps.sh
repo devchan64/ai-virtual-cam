@@ -40,6 +40,14 @@ run_as_user() {
   fi
 }
 
+run_pactl() {
+  if [[ "${EUID}" -eq 0 && -n "${SUDO_USER:-}" ]]; then
+    run_as_user "$@"
+  else
+    run "$@"
+  fi
+}
+
 run() {
   if [[ "$DRY_RUN" -eq 1 ]]; then
     printf '[dry-run] %s\n' "$*"
@@ -296,12 +304,38 @@ audio_sink_exists() {
   if ! command -v pactl >/dev/null 2>&1; then
     return 1
   fi
+  run_pactl pactl list short sinks | awk '{print $2}' | grep -Fxq "$1"
+}
 
-  if [[ "${EUID}" -eq 0 && -n "${SUDO_USER:-}" ]]; then
-    sudo -u "$SUDO_USER" -- pactl list short sinks | awk '{print $2}' | grep -Fxq "$1"
-  else
-    pactl list short sinks | awk '{print $2}' | grep -Fxq "$1"
+ensure_audio_daemon() {
+  if [[ "$DRY_RUN" -eq 1 ]] || ! command -v pactl >/dev/null 2>&1; then
+    return 0
   fi
+
+  log "Checking audio server state for ${SUDO_USER:-$(whoami)}"
+  if run_pactl pactl list short sinks >/tmp/avc_pactl_check.txt 2>/tmp/avc_pactl_check.err; then
+    return 0
+  fi
+
+  log "Attempting to recover user audio services"
+  if [[ "${EUID}" -eq 0 && -n "${SUDO_USER:-}" ]]; then
+    run runuser -u "$SUDO_USER" -- systemctl --user daemon-reload || true
+    run runuser -u "$SUDO_USER" -- systemctl --user restart pipewire-pulse.service || true
+    run runuser -u "$SUDO_USER" -- systemctl --user restart wireplumber.service || true
+    run runuser -u "$SUDO_USER" -- systemctl --user restart pulseaudio.service || true
+  else
+    run systemctl --user daemon-reload || true
+    run systemctl --user restart pipewire-pulse.service || true
+    run systemctl --user restart wireplumber.service || true
+    run systemctl --user restart pulseaudio.service || true
+  fi
+
+  sleep 1
+  if run_pactl pactl list short sinks >/tmp/avc_pactl_check.txt 2>/tmp/avc_pactl_check.err; then
+    return 0
+  fi
+  warn "Could not recover PulseAudio/PipeWire-Pulse connection automatically."
+  cat /tmp/avc_pactl_check.err 2>/dev/null || true
 }
 
 ensure_audio_virtual_sink() {
@@ -319,6 +353,7 @@ ensure_audio_virtual_sink() {
     return 0
   fi
 
+  ensure_audio_daemon || true
   if audio_sink_exists "$AUDIO_SINK_NAME"; then
     log "Audio virtual sink already exists: ${AUDIO_SINK_NAME}"
     return 0
@@ -331,8 +366,12 @@ ensure_audio_virtual_sink() {
     return 0
   fi
 
-  if ! run_as_user pactl load-module module-null-sink "sink_name=${AUDIO_SINK_NAME}" "sink_properties=device.description=${AUDIO_SINK_NAME}" ; then
-    warn "Failed to load virtual audio sink by pactl; proceed without auto-created virtual sink."
+  if ! run_pactl pactl load-module module-null-sink "sink_name=${AUDIO_SINK_NAME}" "sink_properties=device.description=${AUDIO_SINK_NAME}"; then
+    warn "Failed to load virtual audio sink by pactl; try recovering audio server once and retry."
+    ensure_audio_daemon || true
+    if ! run_pactl pactl load-module module-null-sink "sink_name=${AUDIO_SINK_NAME}" "sink_properties=device.description=${AUDIO_SINK_NAME}"; then
+      warn "Failed to load virtual audio sink by pactl; proceed without auto-created virtual sink."
+    fi
   fi
 }
 
