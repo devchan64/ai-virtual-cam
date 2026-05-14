@@ -104,7 +104,15 @@ Linux 오디오 장치 ID 정책:
   - 예: `alsa_input...__source`, `ai-virtual-cam`
 - `serve`는 시스템 기본 source/sink를 변경하지 않습니다.
 - `serve`는 시스템 sink/source 볼륨을 제어하지 않습니다.
-- 오디오 경로는 GStreamer(`pulsesrc -> level -> pulsesink`) 기준으로 동작하며, `inputDevice`/`outputDevice`는 Pulse 장치 ID가 실제로 존재해야 합니다.
+- 오디오 경로는 GStreamer 기반으로 동작합니다.
+  - 레벨 모니터: `input src -> level -> fakesink`
+  - 출력 스트림: `input src` 또는 `audiotestsrc wave=silence` -> `pulsesink`
+- `outputDevice`는 Pulse sink ID가 실제로 존재해야 합니다.
+- 게이트 닫힘 상태에서는 마이크를 끄는 대신 `audiotestsrc wave=silence` 기반 무음 스트림을 출력으로 전달합니다.
+- 게이트 열림 상태에서는 실제 입력 장치 스트림을 출력으로 전달합니다.
+- 입력 장치(`inputDevice`)는 다음을 지원합니다.
+  - Pulse source ID(예: `alsa_input...__source`) -> `pulsesrc`
+  - ALSA `hw:X,Y` 장치명(예: `hw:0,0`, `sof-hda-dsp: - (hw:0,0)`) -> `alsasrc`
 - 설정값이 실제 런타임에서 열 수 없는 ID이면 자동 변환/폴백 없이 에러로 종료합니다.
 - 권장 예시:
   - 입력: `alsa_input...__source` 또는 `default`

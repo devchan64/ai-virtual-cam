@@ -352,48 +352,58 @@ def _coerce_audio_output_device_for_sounddevice(device_name: str) -> str:
 
 def _coerce_audio_input_device_for_sounddevice(device_name: str) -> str:
     if sd is None:
-        return device_name
+        return str(device_name).strip()
     name = str(device_name).strip()
     if not name:
         return name
     lowered = name.lower()
+    if name.lower() == "default":
+        return "default"
     try:
-        names = [
+        # 1) exact name first
+        sd.query_devices(name, kind="input")
+        return name
+    except Exception:
+        pass
+
+    try:
+        devices = [
             str(d.get("name", "")).strip()
             for d in sd.query_devices()
             if int(d.get("max_input_channels", 0)) > 0
         ]
-        names = [n for n in names if n]
-        if not names:
-            return name
-        if name in names:
-            return name
-        if name == "default":
-            if "default" in names:
-                return "default"
-            return names[0]
-        if (
-            ".monitor" in lowered
-            or lowered.startswith("alsa_input.")
-            or lowered.startswith("alsa_output.")
-        ):
-            if "pulse" in names:
-                return "pulse"
-            return names[0]
-        if "monitor" in lowered:
-            for candidate in names:
-                if "monitor" in candidate.lower():
-                    return candidate
-        if "ai-virtual-cam" in lowered or "virtual-cam" in lowered or "virtual" in lowered:
-            for candidate in names:
-                lower_candidate = candidate.lower()
-                if "virtual" in lower_candidate or "monitor" in lower_candidate:
-                    return candidate
-            if "pulse" in names:
-                return "pulse"
-        return names[0]
+        devices = [d for d in devices if d]
     except Exception:
         return name
+
+    if not devices:
+        return name
+
+    # 2) resolve hw token to a concrete sounddevice name
+    hw_match = __import__("re").search(r"\b(hw:[0-9]+,[0-9]+)\b", name)
+    if hw_match is not None:
+        hw_token = hw_match.group(1).lower()
+        for candidate in devices:
+            if hw_token in candidate.lower():
+                return candidate
+
+    # 2-1) map Pulse source ID (alsa_input...__source) to hw token when possible
+    if lowered.startswith("alsa_input.") or lowered.startswith("alsa_output."):
+        # Examples:
+        # - alsa_input....__hw_sofhdadsp_6__source -> hw:0,6
+        # - alsa_input....__hw_sofhdadsp__source   -> hw:0,0
+        m_hw = __import__("re").search(r"__hw_[^_]+_([0-9]+)__source$", lowered)
+        if m_hw is not None:
+            hw_token = f"hw:0,{m_hw.group(1)}"
+        else:
+            m_hw = __import__("re").search(r"__hw_[^_]+__source$", lowered)
+            hw_token = "hw:0,0" if m_hw is not None else None
+        if hw_token is not None:
+            for candidate in devices:
+                if hw_token in candidate.lower():
+                    return candidate
+
+    # 3) no implicit fallback to pulse/default here: keep configured value
     return name
 
 
@@ -520,9 +530,8 @@ def _audio_device_candidates(kind: str) -> list[str]:
     seen = {"default"}
 
     channel_key = "max_input_channels" if kind == "input" else "max_output_channels"
-    pactl_kind = "source" if kind == "input" else "sink"
     print(
-        f"[avc] 오디오 {kind} 디바이스 채널키={channel_key}, pactl_kind={pactl_kind}",
+        f"[avc] 오디오 {kind} 디바이스 채널키={channel_key}",
         flush=True,
     )
     if sd is not None:
@@ -541,42 +550,31 @@ def _audio_device_candidates(kind: str) -> list[str]:
             print(f"[avc] 오디오 {kind} sounddevice 조회 실패: 예외 발생", flush=True)
             pass
 
-    # Add PulseAudio/pipewire short device names to avoid missing monitor/source entries
+    pactl_kind = "source" if kind == "input" else "sink"
     try:
-        proc_list = subprocess.run(
+        proc = subprocess.run(
             ["pactl", "list", "short", f"{pactl_kind}s"],
             capture_output=True,
             text=True,
             check=False,
             timeout=1.5,
         )
-        print(
-            f"[avc] 오디오 {kind} pactl list short {pactl_kind}s rc={proc_list.returncode}",
-            flush=True,
-        )
-        if proc_list.returncode == 0:
-            for line in proc_list.stdout.splitlines():
+        if proc.returncode == 0:
+            for line in proc.stdout.splitlines():
                 parts = line.split()
                 if len(parts) < 2:
                     continue
-                name = parts[1].strip()
-                if not name:
+                dev_id = parts[1].strip()
+                if not dev_id:
                     continue
-                if name not in seen:
-                    seen.add(name)
-                    values.append(name)
-                    print(f"[avc] 오디오 {kind} 후보(pactl): {name}", flush=True)
+                if dev_id not in seen:
+                    seen.add(dev_id)
+                    values.append(dev_id)
+                    print(f"[avc] 오디오 {kind} 후보(pactl): {dev_id}", flush=True)
+        else:
+            print(f"[avc] 오디오 {kind} pactl 조회 실패: rc={proc.returncode}", flush=True)
     except Exception:
         print(f"[avc] 오디오 {kind} pactl 조회 실패: 예외 발생", flush=True)
-        pass
-
-    if kind in {"input", "output"}:
-        pactl_default = _pactl_default_audio_device(pactl_kind)
-        print(f"[avc] 오디오 {kind} 기본값 후보: {pactl_default}", flush=True)
-        if pactl_default != "default" and pactl_default not in seen:
-            seen.add(pactl_default)
-            values.append(pactl_default)
-            print(f"[avc] 오디오 {kind} 기본값 후보 강제 추가: {pactl_default}", flush=True)
 
     if not values:
         values.append("default")
@@ -695,6 +693,24 @@ def _pactl_short_entries(kind: str) -> list[tuple[str, str, str]]:
             continue
         items.append((parts[0], parts[1], " ".join(parts[2:])))
     return items
+
+
+def _validate_pulse_runtime_device(kind: str, device_name: str) -> None:
+    if platform.system() != "Linux":
+        return
+    name = str(device_name).strip()
+    if not name or name.lower() == "default":
+        raise ValueError(
+            f"audio {kind} device는 Linux runtime에서 명시값이 필요합니다. "
+            f"현재값='{device_name}'. config에서 실제 장치 ID를 선택하세요."
+        )
+    entries = _pactl_short_entries("source" if kind == "input" else "sink")
+    names = [entry_name for _idx, entry_name, _rest in entries if entry_name.strip()]
+    if name not in names:
+        raise ValueError(
+            f"audio {kind} device가 Pulse runtime에 존재하지 않습니다: '{name}'. "
+            f"config에서 Pulse 장치 ID(source/sink)를 다시 선택하세요."
+        )
 
 
 def _audio_sink_exists(name: str) -> bool:
@@ -1583,21 +1599,7 @@ class ConfigGui:
                 f"module_id={source_proc.stdout.strip()}"
             )
 
-        default_source = _run_cmd(
-            ["pactl", "set-default-source", AUDIO_VIRTUAL_SOURCE_NAME],
-            check=False,
-            timeout=2.0,
-        )
-        if default_source.returncode != 0:
-            _log(f"set-default-source failed: code={default_source.returncode} err={default_source.stderr.strip()}")
-
         _log(f"Virtual microphone sink created: {AUDIO_VIRTUAL_SINK_NAME} module_id={proc.stdout.strip()}")
-        output_widget = self._widgets.get("audio_output_device")
-        if isinstance(output_widget, ttk.Combobox):
-            output_values = list(output_widget["values"])
-            if AUDIO_VIRTUAL_SINK_NAME not in output_values:
-                output_widget["values"] = tuple(output_values + [AUDIO_VIRTUAL_SINK_NAME])
-            self._set_var("audio_output_device", AUDIO_VIRTUAL_SINK_NAME)
         messagebox.showinfo(
             "가상 마이크 생성",
             f"가상 마이크를 생성했습니다: {AUDIO_VIRTUAL_SOURCE_NAME} (source)\n"
@@ -2513,9 +2515,25 @@ class ConfigGui:
             self._audio_input_meter_stream = stream
             stream.start()
         except Exception as exc:
+            available = []
+            try:
+                available = [
+                    str(d.get("name", "")).strip()
+                    for d in sd.query_devices()
+                    if int(d.get("max_input_channels", 0)) > 0 and str(d.get("name", "")).strip()
+                ]
+            except Exception:
+                available = []
             self._stop_audio_input_meter()
             window.destroy()
-            messagebox.showerror("Input dB meter error", f"마이크 입력 스트림 열기 실패: {exc}")
+            messagebox.showerror(
+                "Input dB meter error",
+                "마이크 입력 스트림 열기 실패: "
+                f"{exc}\n"
+                f"configured={input_device_requested}\n"
+                f"runtime={input_device}\n"
+                f"available={available if available else ['<none>']}",
+            )
             return
 
         def refresh() -> None:
@@ -2773,6 +2791,8 @@ class ConfigGui:
             iv["audio_output_device"].get().strip(),
             getattr(self, "_audio_output_display_to_raw", {}),
         )
+        _validate_pulse_runtime_device("input", raw_audio_input)
+        _validate_pulse_runtime_device("output", raw_audio_output)
 
         return build_config(
             input_device=iv["input_device"].get(),
