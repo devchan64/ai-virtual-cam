@@ -103,10 +103,12 @@ Linux 오디오 장치 ID 정책:
 - `config-gui`는 오디오 장치 값을 `setting.json`에 원본 ID 그대로 저장합니다.
   - 예: `alsa_input...__source`, `ai-virtual-cam`
 - `serve`는 시스템 기본 source/sink를 변경하지 않습니다.
-- 설정값이 `sounddevice`에서 직접 열 수 없는 ID이면 자동 변환/폴백 없이 에러로 종료합니다.
-- 권장: `serve`에 사용할 오디오 장치는 `sounddevice`에서 조회 가능한 값으로 저장하세요.
-  - 예: `default`, `pulse`, `sof-hda-dsp: - (hw:0,0)` 등
-  - `pactl` 전용 ID(예: `alsa_input...`, `ai-virtual-cam`)는 환경에 따라 `sounddevice` 직접 오픈이 실패할 수 있습니다.
+- `serve`는 시스템 sink/source 볼륨을 제어하지 않습니다.
+- 오디오 경로는 GStreamer(`pulsesrc -> level -> pulsesink`) 기준으로 동작하며, `inputDevice`/`outputDevice`는 Pulse 장치 ID가 실제로 존재해야 합니다.
+- 설정값이 실제 런타임에서 열 수 없는 ID이면 자동 변환/폴백 없이 에러로 종료합니다.
+- 권장 예시:
+  - 입력: `alsa_input...__source` 또는 `default`
+  - 출력: `ai-virtual-cam` (가상 마이크 sink)
 
 기본 설정 파일 경로:
 

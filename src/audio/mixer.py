@@ -44,8 +44,6 @@ class VirtualAudioMixer:
         self._stream_open = False
         self._last_gate_state = "closed"
         self._gst_proc: subprocess.Popen | None = None
-        self._gst_sink_input_id: str | None = None
-        self._gst_sink_input_muted: bool | None = None
 
     def run(self, max_steps: int = 0) -> None:
         if platform.system() != "Linux":
@@ -353,8 +351,6 @@ class VirtualAudioMixer:
                 proc = self._gst_proc
                 if proc is None or proc.stdout is None:
                     return
-                self._refresh_gst_sink_input_id()
-                self._set_gst_sink_input_mute(True)
                 while self._running:
                     line = proc.stdout.readline()
                     if not line:
@@ -385,7 +381,6 @@ class VirtualAudioMixer:
                     stream_open = state in {"attack", "open", "hold", "release"}
                     if stream_open != self._stream_open:
                         self._stream_open = stream_open
-                        self._set_gst_sink_input_mute(not stream_open)
                         if self._on_stream_state is not None:
                             self._on_stream_state(stream_open, state, self._steps)
 
@@ -412,9 +407,6 @@ class VirtualAudioMixer:
             self._running = False
             proc = self._gst_proc
             self._gst_proc = None
-            self._set_gst_sink_input_mute(True)
-            self._gst_sink_input_id = None
-            self._gst_sink_input_muted = None
             if proc is not None and proc.poll() is None:
                 try:
                     proc.terminate()
@@ -497,66 +489,6 @@ class VirtualAudioMixer:
                 proc.terminate()
             except Exception:
                 pass
-
-    def _refresh_gst_sink_input_id(self) -> None:
-        if platform.system() != "Linux":
-            return
-        proc = self._gst_proc
-        if proc is None:
-            return
-        pid = str(proc.pid)
-        try:
-            out = subprocess.run(
-                ["pactl", "list", "sink-inputs"],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=1.5,
-            )
-        except Exception:
-            return
-        if out.returncode != 0:
-            return
-        current_id: str | None = None
-        matched_id: str | None = None
-        for raw in out.stdout.splitlines():
-            line = raw.strip()
-            if line.startswith("Sink Input #"):
-                current_id = line.split("#", 1)[1].strip()
-                continue
-            if current_id and 'application.process.id = "' in line:
-                if f'"{pid}"' in line:
-                    matched_id = current_id
-                    break
-        if matched_id:
-            self._gst_sink_input_id = matched_id
-
-    def _set_gst_sink_input_mute(self, mute: bool) -> None:
-        if platform.system() != "Linux":
-            return
-        if self._gst_sink_input_muted is mute:
-            return
-        if self._gst_sink_input_id is None:
-            self._refresh_gst_sink_input_id()
-        if self._gst_sink_input_id is None:
-            return
-        try:
-            proc = subprocess.run(
-                [
-                    "pactl",
-                    "set-sink-input-mute",
-                    self._gst_sink_input_id,
-                    "1" if mute else "0",
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=1.5,
-            )
-            if proc.returncode == 0:
-                self._gst_sink_input_muted = mute
-        except Exception:
-            return
 
     def _resolve_sounddevice_input_device(self, configured: str) -> str:
         name = str(configured).strip()
