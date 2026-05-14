@@ -166,6 +166,54 @@ def _coerce_audio_output_device(device_name: str) -> str:
     return device_name
 
 
+def _coerce_audio_input_device(device_name: str) -> str:
+    try:
+        import sounddevice as sd
+    except Exception:
+        return device_name
+
+    if not isinstance(device_name, str):
+        return device_name
+    name = device_name.strip()
+    if not name:
+        return device_name
+
+    lowered = name.lower()
+    try:
+        devices = sd.query_devices()
+        names = [str(d.get("name", "")).strip() for d in devices if int(d.get("max_input_channels", 0)) > 0]
+        names = [n for n in names if n]
+        if not names:
+            return device_name
+
+        if name in names:
+            return name
+
+        if name == "default":
+            if "default" in names:
+                return "default"
+            return names[0]
+
+        if "pulse" in lowered and "pulse" in names:
+            return "pulse"
+        if "monitor" in lowered:
+            for candidate in names:
+                if "monitor" in candidate.lower():
+                    return candidate
+        if "ai-virtual-cam" in lowered or "virtual-cam" in lowered or "virtual" in lowered:
+            for candidate in names:
+                lower_candidate = candidate.lower()
+                if "virtual" in lower_candidate or "monitor" in lower_candidate:
+                    return candidate
+            if "pulse" in names:
+                return "pulse"
+
+        return names[0]
+    except Exception:
+        pass
+    return device_name
+
+
 def _pactl_default_audio_device(kind: str) -> str:
     if platform.system() != "Linux" or kind not in {"source", "sink"}:
         return "default"
@@ -534,6 +582,7 @@ class AudioMixerConfig:
         input_device = str(raw.get("inputDevice", "default")).strip()
         if not input_device or input_device.lower() == "default":
             input_device = _default_audio_input_device()
+        input_device = _coerce_audio_input_device(input_device)
         output_device = str(raw.get("outputDevice", _default_audio_output_device())).strip()
         if not output_device or output_device.lower() == "default":
             output_device = _default_audio_output_device()

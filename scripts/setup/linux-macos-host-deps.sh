@@ -2,15 +2,10 @@
 
 set -euo pipefail
 
-OUTPUT_DEVICE=10
 INPUT_DEVICE=0
-CARD_LABEL="ai-virtual-cam"
 DRY_RUN=0
 SKIP_DOCKER=0
 SKIP_NVIDIA_TOOLKIT=0
-SKIP_V4L2LOOPBACK=0
-AUDIO_SINK_NAME="ai-virtual-cam"
-SKIP_AUDIO_VIRTUAL_DEVICE=0
 OS_KIND=""
 LINUX_DISTRO_ID=""
 
@@ -27,27 +22,6 @@ warn() {
   printf '[ai-virtual-cam] WARN: %s\n' "$*"
 }
 
-run_as_user() {
-  if [[ "${EUID}" -eq 0 && -n "${SUDO_USER:-}" ]]; then
-    local runtime_dir="/run/user/$(id -u "$SUDO_USER")"
-    if [[ -z "${XDG_RUNTIME_DIR:-}" && -d "$runtime_dir" ]]; then
-      run runuser -u "$SUDO_USER" -- env "XDG_RUNTIME_DIR=$runtime_dir" "$@"
-    else
-      run runuser -u "$SUDO_USER" -- "$@"
-    fi
-  else
-    run "$@"
-  fi
-}
-
-run_pactl() {
-  if [[ "${EUID}" -eq 0 && -n "${SUDO_USER:-}" ]]; then
-    run_as_user "$@"
-  else
-    run "$@"
-  fi
-}
-
 run() {
   if [[ "$DRY_RUN" -eq 1 ]]; then
     printf '[dry-run] %s\n' "$*"
@@ -62,17 +36,12 @@ usage() {
 Usage: ./bin/avc setup [options]
 
 Install host dependencies for ai-virtual-cam on Linux (Debian/Ubuntu) or macOS.
+This command no longer creates virtual devices; it only prepares runtime dependencies.
 
 Options:
-  --output-device N        V4L2 loopback device number to create (default: 10)
   --input-device N         Expected USB camera device number (default: 0)
-  --card-label LABEL       v4l2loopback card label (default: ai-virtual-cam)
   --skip-docker            Do not install Docker Engine
   --skip-nvidia-toolkit    Do not install NVIDIA Container Toolkit
-  --skip-v4l2loopback      Do not install or configure v4l2loopback
-  --skip-audio-virtual-device
-                          Do not create PulseAudio/pipewire virtual audio sink
-  --audio-sink-name NAME   Name for created virtual audio sink (default: ai-virtual-cam)
   --dry-run                Print commands without executing them
   -h, --help               Show this help
 EOF
@@ -111,25 +80,6 @@ load_os_release() {
 
 apt_install() {
   run apt-get install -y "$@"
-}
-
-cleanup_v4l2loopback_dkms_state() {
-  if [[ "$DRY_RUN" -eq 1 ]]; then
-    printf '[dry-run] rm -rf /var/crash/v4l2loopback*.crash\n'
-    printf '[dry-run] rm -rf /var/lib/dkms/v4l2loopback\n'
-    printf '[dry-run] dpkg --purge v4l2loopback-dkms\n'
-    printf '[dry-run] dkms remove v4l2loopback/0.12.7 --all\n'
-    return 0
-  fi
-
-  rm -f /var/crash/v4l2loopback*.crash || true
-  rm -rf /var/lib/dkms/v4l2loopback || true
-  if dpkg -s v4l2loopback-dkms >/dev/null 2>&1; then
-    run apt-get purge -y --auto-remove v4l2loopback-dkms
-  fi
-  if command -v dkms >/dev/null 2>&1; then
-    dkms remove v4l2loopback/0.12.7 --all || true
-  fi
 }
 
 install_base_packages() {
@@ -222,164 +172,6 @@ install_nvidia_container_toolkit() {
   run systemctl restart docker
 }
 
-install_v4l2loopback_from_source() {
-  log "Falling back to v4l2loopback source build"
-  cleanup_v4l2loopback_dkms_state
-  apt_install build-essential dkms linux-headers-"$(uname -r)" git make
-
-  if [[ "$DRY_RUN" -eq 1 ]]; then
-    log "[dry-run] clone/build/install v4l2loopback from GitHub"
-    return 0
-  fi
-
-  local src_dir="/tmp/v4l2loopback-avc"
-  run rm -rf "$src_dir"
-  run git clone --depth 1 https://github.com/umlaeute/v4l2loopback.git "$src_dir"
-  if grep -q "strlcpy" "$src_dir/v4l2loopback.c"; then
-    run bash -c "cd '$src_dir' && sed -i 's/\\bstrlcpy\\b/strscpy/g' v4l2loopback.c"
-  fi
-  run bash -c "cd '$src_dir' && make"
-  run bash -c "cd '$src_dir' && make install DKMS=1"
-}
-
-load_v4l2loopback_module() {
-  if [[ "$DRY_RUN" -eq 0 ]] && lsmod | grep -q '^v4l2loopback'; then
-    run modprobe -r v4l2loopback
-  fi
-
-  if [[ "$DRY_RUN" -eq 1 ]]; then
-    printf '[dry-run] modprobe v4l2loopback video_nr=%s card_label=%s exclusive_caps=1\n' "$OUTPUT_DEVICE" "$CARD_LABEL"
-    return 0
-  fi
-
-  run modprobe v4l2loopback "video_nr=${OUTPUT_DEVICE}" "card_label=${CARD_LABEL}" exclusive_caps=1
-}
-
-install_v4l2loopback() {
-  if [[ "$OS_KIND" == "macos" ]]; then
-    log "Skipping v4l2loopback: not available on macOS."
-    return 0
-  fi
-  if [[ "$SKIP_V4L2LOOPBACK" -eq 1 ]]; then
-    log "Skipping v4l2loopback installation"
-    return 0
-  fi
-
-  log "Installing and configuring v4l2loopback"
-  cleanup_v4l2loopback_dkms_state
-  if ! install_v4l2loopback_from_source; then
-    fail "v4l2loopback installation failed via source build."
-  fi
-
-  if [[ "$DRY_RUN" -eq 0 ]]; then
-    cat >/etc/modules-load.d/ai-virtual-cam.conf <<EOF
-v4l2loopback
-EOF
-    cat >/etc/modprobe.d/ai-virtual-cam-v4l2loopback.conf <<EOF
-options v4l2loopback video_nr=${OUTPUT_DEVICE} card_label=${CARD_LABEL} exclusive_caps=1
-EOF
-  else
-    printf '[dry-run] write /etc/modules-load.d/ai-virtual-cam.conf\n'
-    printf '[dry-run] write /etc/modprobe.d/ai-virtual-cam-v4l2loopback.conf\n'
-  fi
-
-  if ! load_v4l2loopback_module; then
-    cleanup_v4l2loopback_dkms_state
-    log "Failed to load v4l2loopback module after install. Trying source rebuild."
-    if ! install_v4l2loopback_from_source; then
-      fail "v4l2loopback module rebuild failed."
-    fi
-    if ! load_v4l2loopback_module; then
-      fail "v4l2loopback module load failed after fallback build."
-    fi
-  fi
-}
-
-audio_sink_exists() {
-  if [[ "$DRY_RUN" -eq 1 ]]; then
-    printf '[dry-run] pactl list short sinks\n'
-    return 0
-  fi
-
-  if ! command -v pactl >/dev/null 2>&1; then
-    return 1
-  fi
-  run_pactl pactl list short sinks | awk '{print $2}' | grep -Fxq "$1"
-}
-
-ensure_audio_daemon() {
-  if [[ "$DRY_RUN" -eq 1 ]] || ! command -v pactl >/dev/null 2>&1; then
-    return 0
-  fi
-
-  log "Checking audio server state for ${SUDO_USER:-$(whoami)}"
-  if run_pactl pactl list short sinks >/tmp/avc_pactl_check.txt 2>/tmp/avc_pactl_check.err; then
-    return 0
-  fi
-
-  log "Attempting to recover user audio services"
-  if [[ "${EUID}" -eq 0 && -n "${SUDO_USER:-}" ]]; then
-    run runuser -u "$SUDO_USER" -- systemctl --user daemon-reload || true
-    run runuser -u "$SUDO_USER" -- systemctl --user restart pipewire-pulse.service || true
-    run runuser -u "$SUDO_USER" -- systemctl --user restart wireplumber.service || true
-    run runuser -u "$SUDO_USER" -- systemctl --user restart pulseaudio.service || true
-  else
-    run systemctl --user daemon-reload || true
-    run systemctl --user restart pipewire-pulse.service || true
-    run systemctl --user restart wireplumber.service || true
-    run systemctl --user restart pulseaudio.service || true
-  fi
-
-  sleep 1
-  if run_pactl pactl list short sinks >/tmp/avc_pactl_check.txt 2>/tmp/avc_pactl_check.err; then
-    return 0
-  fi
-  warn "Could not recover PulseAudio/PipeWire-Pulse connection automatically."
-  cat /tmp/avc_pactl_check.err 2>/dev/null || true
-}
-
-ensure_audio_virtual_sink() {
-  if [[ "$SKIP_AUDIO_VIRTUAL_DEVICE" -eq 1 ]]; then
-    log "Skipping audio virtual sink creation"
-    return 0
-  fi
-
-  if [[ "$OS_KIND" != "linux" ]]; then
-    return 0
-  fi
-
-  if ! command -v pactl >/dev/null 2>&1; then
-    warn "pactl is not available; skip audio virtual sink creation."
-    return 0
-  fi
-
-  ensure_audio_daemon || true
-  if audio_sink_exists "$AUDIO_SINK_NAME"; then
-    log "Audio virtual sink already exists: ${AUDIO_SINK_NAME}"
-    return 0
-  fi
-
-  log "Creating audio virtual sink: ${AUDIO_SINK_NAME}"
-  if [[ "$DRY_RUN" -eq 1 ]]; then
-    printf '[dry-run] pactl load-module module-null-sink sink_name=%s sink_properties=device.description=%s\n' \
-      "$AUDIO_SINK_NAME" "$AUDIO_SINK_NAME"
-    return 0
-  fi
-
-  if ! run_pactl pactl load-module module-null-sink "sink_name=${AUDIO_SINK_NAME}" "sink_properties=device.description=${AUDIO_SINK_NAME}"; then
-    warn "Failed to load virtual audio sink by pactl; try recovering audio server once and retry."
-    ensure_audio_daemon || true
-    if ! run_pactl pactl load-module module-null-sink "sink_name=${AUDIO_SINK_NAME}" "sink_properties=device.description=${AUDIO_SINK_NAME}"; then
-      return 1
-    fi
-  fi
-
-  if ! audio_sink_exists "$AUDIO_SINK_NAME"; then
-    return 1
-  fi
-  return 0
-}
-
 verify_host_contract() {
   log "Verifying host contract"
 
@@ -393,24 +185,16 @@ verify_host_contract() {
   fi
 
   if [[ "$OS_KIND" == "linux" ]]; then
-  if [[ "$SKIP_NVIDIA_TOOLKIT" -eq 0 ]] && ! command -v nvidia-ctk >/dev/null 2>&1; then
+    if [[ "$SKIP_NVIDIA_TOOLKIT" -eq 0 ]] && ! command -v nvidia-ctk >/dev/null 2>&1; then
       fail "nvidia-ctk is not available after installation."
-  fi
-
-  if ! command -v ffmpeg >/dev/null 2>&1; then
-    fail "ffmpeg is not available after installation."
-  fi
-
-  if [[ ! -e "/dev/video${INPUT_DEVICE}" ]]; then
-    fail "Expected input camera /dev/video${INPUT_DEVICE} is missing."
-  fi
-
-  if [[ "$SKIP_V4L2LOOPBACK" -eq 0 ]] && [[ ! -e "/dev/video${OUTPUT_DEVICE}" ]]; then
-      fail "Expected output virtual camera /dev/video${OUTPUT_DEVICE} is missing."
     fi
 
-    if [[ "$SKIP_AUDIO_VIRTUAL_DEVICE" -eq 0 ]] && ! audio_sink_exists "$AUDIO_SINK_NAME"; then
-      warn "Expected audio sink ${AUDIO_SINK_NAME} is missing."
+    if ! command -v ffmpeg >/dev/null 2>&1; then
+      fail "ffmpeg is not available after installation."
+    fi
+
+    if [[ ! -e "/dev/video${INPUT_DEVICE}" ]]; then
+      fail "Expected input camera /dev/video${INPUT_DEVICE} is missing."
     fi
     return 0
   fi
@@ -433,7 +217,15 @@ install_python_runtime_packages() {
   venv_path="$(pwd)/.venv"
 
   if [[ "$OS_KIND" == "macos" ]]; then
-    py_bootstrap="/opt/homebrew/bin/python3.12"
+    if [[ -x /opt/homebrew/bin/python3.12 ]]; then
+      py_bootstrap="/opt/homebrew/bin/python3.12"
+    elif [[ -x /usr/local/bin/python3.12 ]]; then
+      py_bootstrap="/usr/local/bin/python3.12"
+    elif command -v python3.12 >/dev/null 2>&1; then
+      py_bootstrap="$(command -v python3.12)"
+    else
+      py_bootstrap="python3"
+    fi
   else
     py_bootstrap="python3"
   fi
@@ -465,16 +257,8 @@ install_python_runtime_packages() {
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --output-device)
-        OUTPUT_DEVICE="$2"
-        shift 2
-        ;;
       --input-device)
         INPUT_DEVICE="$2"
-        shift 2
-        ;;
-      --card-label)
-        CARD_LABEL="$2"
         shift 2
         ;;
       --skip-docker)
@@ -484,18 +268,6 @@ parse_args() {
       --skip-nvidia-toolkit)
         SKIP_NVIDIA_TOOLKIT=1
         shift
-        ;;
-      --skip-v4l2loopback)
-        SKIP_V4L2LOOPBACK=1
-        shift
-        ;;
-      --skip-audio-virtual-device)
-        SKIP_AUDIO_VIRTUAL_DEVICE=1
-        shift
-        ;;
-      --audio-sink-name)
-        AUDIO_SINK_NAME="$2"
-        shift 2
         ;;
       --dry-run)
         DRY_RUN=1
@@ -530,13 +302,11 @@ main() {
   fi
   install_docker
   install_nvidia_container_toolkit
-  install_v4l2loopback
-  if ! ensure_audio_virtual_sink; then
-    fail "Failed to create or detect virtual audio sink '${AUDIO_SINK_NAME}'."
-  fi
+  log "Setup now installs dependencies only; create virtual devices in config."
   install_python_runtime_packages
   verify_host_contract
   log "Host dependency setup completed"
+  log "Setup does not create virtual devices. Use config GUI for virtual camera/speaker create/remove."
 }
 
 main "$@"

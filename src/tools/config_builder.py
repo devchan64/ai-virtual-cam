@@ -209,6 +209,110 @@ def _default_audio_input_device() -> str:
     return pactl_default if pactl_default != "default" else "default"
 
 
+def _coerce_audio_input_device(device_name: str) -> str:
+    try:
+        import sounddevice as sd
+    except Exception:
+        return device_name
+
+    if not isinstance(device_name, str):
+        return device_name
+    name = device_name.strip()
+    if not name:
+        return device_name
+
+    lowered = name.lower()
+    try:
+        names = [
+            str(d.get("name", "")).strip()
+            for d in sd.query_devices()
+            if int(d.get("max_input_channels", 0)) > 0
+        ]
+        names = [n for n in names if n]
+        if not names:
+            return device_name
+
+        if name in names:
+            return name
+
+        if name == "default":
+            if "default" in names:
+                return "default"
+            return names[0]
+
+        if "pulse" in lowered and "pulse" in names:
+            return "pulse"
+        if "monitor" in lowered:
+            for candidate in names:
+                if "monitor" in candidate.lower():
+                    return candidate
+        if "ai-virtual-cam" in lowered or "virtual-cam" in lowered or "virtual" in lowered:
+            for candidate in names:
+                lower_candidate = candidate.lower()
+                if "virtual" in lower_candidate or "monitor" in lower_candidate:
+                    return candidate
+            if "pulse" in names:
+                return "pulse"
+
+        return names[0]
+    except Exception:
+        pass
+    return device_name
+
+
+def _coerce_audio_output_device(device_name: str) -> str:
+    try:
+        import sounddevice as sd
+    except Exception:
+        if str(device_name).strip() == "default":
+            return "pulse"
+        return device_name
+
+    if not isinstance(device_name, str):
+        return device_name
+    name = device_name.strip()
+    if not name:
+        return device_name
+
+    lowered = name.lower()
+    try:
+        names = [
+            str(device.get("name", "")).strip()
+            for device in sd.query_devices()
+            if int(device.get("max_output_channels", 0)) > 0
+        ]
+        names = [n for n in names if n]
+        if not names:
+            return device_name
+
+        if name in names:
+            return name
+
+        if name == "default":
+            if "pulse" in names:
+                return "pulse"
+            return names[0]
+
+        for candidate in names:
+            lowered_candidate = candidate.lower()
+            if "virtual" in lowered_candidate and "default" not in lowered_candidate:
+                return candidate
+
+        if "ai-virtual-cam" in lowered or "virtual-cam" in lowered or "virtual" in lowered:
+            if "pulse" in names:
+                return "pulse"
+            return names[0]
+
+        if "pulse" in names:
+            return "pulse"
+
+        if name == "pulse":
+            return names[0]
+    except Exception:
+        pass
+    return device_name
+
+
 def build_config(
     *,
     input_device: str,
@@ -268,6 +372,8 @@ def build_config(
         audio_output_device = _default_audio_output_device()
     if not audio_input_device or str(audio_input_device).strip().lower() == "default":
         audio_input_device = _default_audio_input_device()
+    audio_input_device = _coerce_audio_input_device(audio_input_device)
+    audio_output_device = _coerce_audio_output_device(audio_output_device)
 
     tilt_smoothing = float(crop_pan_smoothing if crop_tilt_smoothing is None else crop_tilt_smoothing)
     tilt_kp = float(crop_pan_pid_kp if crop_tilt_pid_kp is None else crop_tilt_pid_kp)

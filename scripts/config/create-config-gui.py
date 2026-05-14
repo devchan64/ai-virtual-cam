@@ -62,6 +62,22 @@ def _audio_denoise_backend_options():
     return ["none", "rnnoise", "deepfilternet"]
 
 
+AUDIO_VIRTUAL_SINK_NAME = "ai-virtual-cam"
+VIRTUAL_CAMERA_LABEL = "ai-virtual-cam"
+AUDIO_VIRTUAL_SOURCE_NAME = "ai-virtual-cam"
+
+
+def _log(msg: str) -> None:
+    print(f"[avc] {msg}", flush=True)
+
+
+def _run_cmd(cmd: list[str], *, check: bool = False, timeout: float | None = 1.5) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, check=check, timeout=timeout)
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"command not found: {cmd[0]}") from exc
+
+
 def _audio_default_output_device() -> str:
     if platform.system() != "Linux":
         return "default"
@@ -78,16 +94,16 @@ def _audio_default_output_device() -> str:
                 continue
             sound_names.append(name)
         if sound_names:
-            if "pulse" in sound_names:
-                return "pulse"
             for name in sound_names:
                 lowered = name.lower()
                 if "virtual" in lowered and "default" not in lowered:
                     return name
             for name in sound_names:
                 lowered = name.lower()
-                if "default" not in lowered:
+                if "default" not in lowered and "(hw:" not in lowered and "sof-hda" not in lowered:
                     return name
+            if "pulse" in sound_names:
+                return "pulse"
             return sound_names[0]
     except Exception:
         pactl_default = _pactl_default_audio_device("sink")
@@ -162,14 +178,55 @@ def _coerce_audio_output_device_for_sounddevice(device_name: str) -> str:
             return name
         if name in names:
             return name
-        if "ai-virtual-cam" in lowered or "virtual" in lowered or "monitor" in lowered:
+        for candidate in names:
+            lower_candidate = candidate.lower()
+            if "virtual" in lower_candidate and "default" not in lower_candidate:
+                return candidate
+        if "ai-virtual-cam" in lowered or "virtual-cam" in lowered or "virtual" in lowered or "monitor" in lowered:
             if "pulse" in names:
                 return "pulse"
             return names[0]
         if "pulse" in names:
             return "pulse"
-        if name == "pulse":
+    except Exception:
+        return name
+    return name
+
+
+def _coerce_audio_input_device_for_sounddevice(device_name: str) -> str:
+    if sd is None:
+        return device_name
+    name = str(device_name).strip()
+    if not name:
+        return name
+    lowered = name.lower()
+    try:
+        names = [
+            str(d.get("name", "")).strip()
+            for d in sd.query_devices()
+            if int(d.get("max_input_channels", 0)) > 0
+        ]
+        names = [n for n in names if n]
+        if not names:
+            return name
+        if name in names:
+            return name
+        if name == "default":
+            if "default" in names:
+                return "default"
             return names[0]
+        if "monitor" in lowered:
+            for candidate in names:
+                if "monitor" in candidate.lower():
+                    return candidate
+        if "ai-virtual-cam" in lowered or "virtual-cam" in lowered or "virtual" in lowered:
+            for candidate in names:
+                lower_candidate = candidate.lower()
+                if "virtual" in lower_candidate or "monitor" in lower_candidate:
+                    return candidate
+            if "pulse" in names:
+                return "pulse"
+        return names[0]
     except Exception:
         return name
     return name
@@ -339,6 +396,64 @@ def _audio_output_device_candidates() -> list[str]:
     return _audio_device_candidates("output")
 
 
+def _parse_video_device_number(device_path: str) -> str | None:
+    value = device_path.strip()
+    if not value.startswith("/dev/video"):
+        return None
+    tail = value[len("/dev/video"):]
+    if not tail.isdigit():
+        return None
+    return tail
+
+
+def _pactl_short_entries(kind: str) -> list[tuple[str, str, str]]:
+    if platform.system() != "Linux":
+        return []
+    try:
+        proc = _run_cmd(["pactl", "list", "short", f"{kind}s"], check=False, timeout=1.5)
+    except Exception as exc:
+        _log(f"pactl list short {kind}s failed: {exc}")
+        return []
+    if proc.returncode != 0:
+        return []
+    items: list[tuple[str, str, str]] = []
+    for raw in proc.stdout.splitlines():
+        parts = raw.split()
+        if len(parts) < 3:
+            continue
+        items.append((parts[0], parts[1], " ".join(parts[2:])))
+    return items
+
+
+def _audio_sink_exists(name: str) -> bool:
+    return any(sink_id == name for _, sink_id, _ in _pactl_short_entries("sink"))
+
+
+def _audio_source_exists(name: str) -> bool:
+    return any(source_id == name for _, source_id, _ in _pactl_short_entries("source"))
+
+
+def _get_module_ids(module_name: str, arg_key: str, name: str) -> list[str]:
+    ids: list[str] = []
+    for mod_id, _module, args in _pactl_short_entries("module"):
+        if not args:
+            continue
+        if module_name not in _module:
+            continue
+        if f"{arg_key}={name}" not in args:
+            continue
+        ids.append(mod_id)
+    return ids
+
+
+def _get_audio_sink_module_ids(name: str) -> list[str]:
+    return _get_module_ids("module-null-sink", "sink_name", name)
+
+
+def _get_audio_source_module_ids(name: str) -> list[str]:
+    return _get_module_ids("module-remap-source", "source_name", name)
+
+
 class ConfigGui:
     def __init__(self, root: tk.Tk, output_path: str) -> None:
         self.root = root
@@ -476,6 +591,13 @@ class ConfigGui:
         row += 1
         self._add_int(tab_io, row, "output_fps", "Output FPS", 30)
         row += 1
+        ttk.Button(tab_io, text="가상 카메라 생성", command=self._create_virtual_camera).grid(
+            row=row, column=0, columnspan=2, sticky="ew", padx=4, pady=(6, 0)
+        )
+        ttk.Button(tab_io, text="가상 카메라 제거", command=self._remove_virtual_camera).grid(
+            row=row, column=2, columnspan=2, sticky="ew", padx=4, pady=(6, 0)
+        )
+        row += 1
         ttk.Button(tab_io, text="비디오 기본값 복원", command=self._reset_video_settings).grid(
             row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0)
         )
@@ -565,6 +687,13 @@ class ConfigGui:
             "Output device",
             audio_output_candidates,
             audio_output_default,
+        )
+        row += 1
+        ttk.Button(tab_audio, text="가상 마이크 생성", command=self._create_virtual_speaker).grid(
+            row=row, column=0, columnspan=2, sticky="ew", padx=4, pady=(6, 0)
+        )
+        ttk.Button(tab_audio, text="가상 마이크 제거", command=self._remove_virtual_speaker).grid(
+            row=row, column=2, columnspan=2, sticky="ew", padx=4, pady=(6, 0)
         )
         row += 1
         self._add_int(tab_audio, row, "audio_sample_rate", "Sample rate", 48000)
@@ -829,6 +958,68 @@ class ConfigGui:
             "crop_pan_target_offset_y": 0.00,
         }
 
+    def _create_virtual_camera(self) -> None:
+        if platform.system() != "Linux":
+            messagebox.showerror("가상 카메라 생성", "Linux에서만 가상 카메라 생성이 가능합니다.")
+            return
+
+        backend = self.vars.get("output_backend").get() if self.vars.get("output_backend") else ""
+        if backend != "v4l2loopback":
+            messagebox.showerror("가상 카메라 생성", "output_backend가 v4l2loopback이어야 생성할 수 있습니다.")
+            return
+
+        device = (self.vars.get("output_device").get() if self.vars.get("output_device") else "").strip()
+        video_no = _parse_video_device_number(device)
+        if not video_no:
+            messagebox.showerror("가상 카메라 생성", f"출력 경로가 /dev/videoN 형식이 아닙니다: {device}")
+            return
+
+        _log(f"Create virtual camera: video_no={video_no} label={VIRTUAL_CAMERA_LABEL}")
+        try:
+            proc = _run_cmd(
+                ["sudo", "modprobe", "v4l2loopback", f"video_nr={video_no}", f"card_label={VIRTUAL_CAMERA_LABEL}", "exclusive_caps=1"],
+                check=False,
+                timeout=4.0,
+            )
+        except Exception as exc:
+            messagebox.showerror("가상 카메라 생성", f"modprobe 실행에 실패했습니다: {exc}")
+            return
+
+        if proc.returncode != 0:
+            messagebox.showerror(
+                "가상 카메라 생성",
+                f"모듈 로드 실패 (code={proc.returncode})\n{proc.stdout or ''}{proc.stderr or ''}".strip(),
+            )
+            return
+
+        if (Path(device)).exists():
+            _log(f"Virtual camera created and available: {device}")
+            messagebox.showinfo("가상 카메라 생성", f"가상 카메라를 생성했습니다: {device}")
+        else:
+            _log(f"Virtual camera command succeeded but {device} not found yet. check module availability")
+            messagebox.showwarning("가상 카메라 생성", "모듈은 로드되었지만 디바이스가 즉시 보이지 않을 수 있습니다.")
+
+    def _remove_virtual_camera(self) -> None:
+        if platform.system() != "Linux":
+            messagebox.showerror("가상 카메라 제거", "Linux에서만 가상 카메라 제거가 가능합니다.")
+            return
+
+        _log("Remove virtual camera: modprobe -r v4l2loopback")
+        try:
+            proc = _run_cmd(["sudo", "modprobe", "-r", "v4l2loopback"], check=False, timeout=4.0)
+        except Exception as exc:
+            messagebox.showerror("가상 카메라 제거", f"모듈 제거 실패: {exc}")
+            return
+
+        if proc.returncode != 0:
+            messagebox.showerror(
+                "가상 카메라 제거",
+                f"모듈 제거 실패 (code={proc.returncode})\n{proc.stdout or ''}{proc.stderr or ''}".strip(),
+            )
+            return
+        _log("Virtual camera removed: modprobe -r v4l2loopback")
+        messagebox.showinfo("가상 카메라 제거", "가상 카메라 모듈을 언로드했습니다.")
+
     def _build_audio_defaults(self) -> dict[str, float | int | str]:
         denoise_backends = _audio_denoise_backend_options()
         return {
@@ -850,6 +1041,110 @@ class ConfigGui:
             "audio_gate_open_gain": 1.0,
             "audio_gate_closed_gain": 0.0,
         }
+
+    def _create_virtual_speaker(self) -> None:
+        if platform.system() != "Linux":
+            messagebox.showerror("가상 마이크 생성", "Linux에서만 가상 마이크 생성이 가능합니다.")
+            return
+
+        if _audio_sink_exists(AUDIO_VIRTUAL_SINK_NAME):
+            _log(f"Virtual microphone already exists: {AUDIO_VIRTUAL_SINK_NAME}")
+            messagebox.showinfo("가상 마이크 생성", f"이미 가상 마이크가 존재합니다: {AUDIO_VIRTUAL_SINK_NAME}")
+            return
+
+        _log(f"Create virtual microphone sink: {AUDIO_VIRTUAL_SINK_NAME}")
+        try:
+            proc = _run_cmd(
+                [
+                    "pactl",
+                    "load-module",
+                    "module-null-sink",
+                    f"sink_name={AUDIO_VIRTUAL_SINK_NAME}",
+                    f"sink_properties=device.description={AUDIO_VIRTUAL_SINK_NAME}",
+                ],
+                check=False,
+                timeout=2.0,
+            )
+        except Exception as exc:
+            messagebox.showerror("가상 마이크 생성", f"pactl 실행 실패: {exc}")
+            return
+
+        if proc.returncode != 0:
+            messagebox.showerror(
+                "가상 마이크 생성",
+                f"pactl load-module 실패 (code={proc.returncode})\n{proc.stderr}".strip(),
+            )
+            return
+
+        if not _audio_sink_exists(AUDIO_VIRTUAL_SINK_NAME):
+            messagebox.showerror("가상 마이크 생성", "모듈은 로드되었지만 sink 목록에 반영되지 않았습니다.")
+            return
+
+        source_proc = _run_cmd(
+            [
+                "pactl",
+                "load-module",
+                "module-remap-source",
+                f"master={AUDIO_VIRTUAL_SINK_NAME}.monitor",
+                f"source_name={AUDIO_VIRTUAL_SOURCE_NAME}",
+                f"source_properties=device.description={AUDIO_VIRTUAL_SOURCE_NAME}",
+            ],
+            check=False,
+            timeout=2.0,
+        )
+        if source_proc.returncode != 0:
+            _log(f"Remap source create failed: code={source_proc.returncode} err={source_proc.stderr.strip()}")
+        else:
+            _log(
+                f"Virtual microphone source created: {AUDIO_VIRTUAL_SOURCE_NAME} "
+                f"module_id={source_proc.stdout.strip()}"
+            )
+
+        default_source = _run_cmd(
+            ["pactl", "set-default-source", AUDIO_VIRTUAL_SOURCE_NAME],
+            check=False,
+            timeout=2.0,
+        )
+        if default_source.returncode != 0:
+            _log(f"set-default-source failed: code={default_source.returncode} err={default_source.stderr.strip()}")
+
+        _log(f"Virtual microphone sink created: {AUDIO_VIRTUAL_SINK_NAME} module_id={proc.stdout.strip()}")
+        messagebox.showinfo(
+            "가상 마이크 생성",
+            f"가상 마이크를 생성했습니다: {AUDIO_VIRTUAL_SOURCE_NAME} (source)\n"
+            f"회의 앱 입력으로는 '{AUDIO_VIRTUAL_SOURCE_NAME}' 또는 '{AUDIO_VIRTUAL_SINK_NAME}.monitor'를 선택하세요.",
+        )
+
+    def _remove_virtual_speaker(self) -> None:
+        if platform.system() != "Linux":
+            messagebox.showerror("가상 마이크 제거", "Linux에서만 가상 마이크 제거가 가능합니다.")
+            return
+
+        source_module_ids = _get_audio_source_module_ids(AUDIO_VIRTUAL_SOURCE_NAME)
+        sink_module_ids = _get_audio_sink_module_ids(AUDIO_VIRTUAL_SINK_NAME)
+        if not source_module_ids and not sink_module_ids:
+            _log(f"Virtual microphone remove skipped: no related modules for {AUDIO_VIRTUAL_SINK_NAME}")
+            messagebox.showinfo(
+                "가상 마이크 제거",
+                f"제거할 {AUDIO_VIRTUAL_SINK_NAME} 모듈이 없습니다.",
+            )
+            return
+
+        failed: list[str] = []
+        for mod_id in source_module_ids + sink_module_ids:
+            _log(f"Unload module {mod_id} for virtual microphone {AUDIO_VIRTUAL_SINK_NAME}")
+            try:
+                proc = _run_cmd(["pactl", "unload-module", mod_id], check=False, timeout=2.0)
+            except Exception as exc:
+                failed.append(f"{mod_id}:{exc}")
+                continue
+            if proc.returncode != 0:
+                failed.append(f"{mod_id}:{proc.returncode}:{proc.stderr.strip()}")
+        if failed:
+            messagebox.showerror("가상 마이크 제거", "일부 모듈 제거 실패:\n" + "\n".join(failed))
+            return
+        _log(f"Virtual microphone removed: {AUDIO_VIRTUAL_SINK_NAME}")
+        messagebox.showinfo("가상 마이크 제거", f"가상 마이크 모듈을 제거했습니다: {AUDIO_VIRTUAL_SINK_NAME}")
 
     def _reset_video_settings(self) -> None:
         defaults = self._build_video_defaults()
@@ -941,7 +1236,7 @@ class ConfigGui:
         resolved_input_device = (
             defaults["audio_input_device"]
             if raw_input_device.lower() == "default" or not raw_input_device
-            else raw_input_device
+            else _coerce_audio_input_device_for_sounddevice(raw_input_device)
         )
         resolved_output_device = (
             defaults["audio_output_device"]
