@@ -370,9 +370,14 @@ ensure_audio_virtual_sink() {
     warn "Failed to load virtual audio sink by pactl; try recovering audio server once and retry."
     ensure_audio_daemon || true
     if ! run_pactl pactl load-module module-null-sink "sink_name=${AUDIO_SINK_NAME}" "sink_properties=device.description=${AUDIO_SINK_NAME}"; then
-      warn "Failed to load virtual audio sink by pactl; proceed without auto-created virtual sink."
+      return 1
     fi
   fi
+
+  if ! audio_sink_exists "$AUDIO_SINK_NAME"; then
+    return 1
+  fi
+  return 0
 }
 
 verify_host_contract() {
@@ -526,7 +531,9 @@ main() {
   install_docker
   install_nvidia_container_toolkit
   install_v4l2loopback
-  ensure_audio_virtual_sink
+  if ! ensure_audio_virtual_sink; then
+    fail "Failed to create or detect virtual audio sink '${AUDIO_SINK_NAME}'."
+  fi
   install_python_runtime_packages
   verify_host_contract
   log "Host dependency setup completed"
