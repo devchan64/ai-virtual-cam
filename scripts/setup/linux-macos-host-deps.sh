@@ -86,11 +86,17 @@ apt_install() {
 cleanup_v4l2loopback_dkms_state() {
   if [[ "$DRY_RUN" -eq 1 ]]; then
     printf '[dry-run] rm -rf /var/crash/v4l2loopback*.crash\n'
+    printf '[dry-run] rm -rf /var/lib/dkms/v4l2loopback\n'
+    printf '[dry-run] dpkg --purge v4l2loopback-dkms\n'
     printf '[dry-run] dkms remove v4l2loopback/0.12.7 --all\n'
     return 0
   fi
 
   rm -f /var/crash/v4l2loopback*.crash || true
+  rm -rf /var/lib/dkms/v4l2loopback || true
+  if dpkg -s v4l2loopback-dkms >/dev/null 2>&1; then
+    run apt-get purge -y --auto-remove v4l2loopback-dkms
+  fi
   if command -v dkms >/dev/null 2>&1; then
     dkms remove v4l2loopback/0.12.7 --all || true
   fi
