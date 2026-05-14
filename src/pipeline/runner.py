@@ -33,19 +33,22 @@ class PipelineRunner:
         start_ts = time.monotonic()
         try:
             while self._running:
-                frame = self._capture.read()
+                try:
+                    frame = self._capture.read()
+                except RuntimeError:
+                    if not self._running:
+                        print("[pipeline] capture stopped during shutdown", flush=True)
+                        break
+                    raise
                 output_frame = self._processor.process(frame)
                 self._output.write(output_frame)
 
                 frame_count += 1
-                if frame_count % 120 == 0:
-                    elapsed = max(time.monotonic() - start_ts, 1e-6)
-                    fps = frame_count / elapsed
+                if max_frames > 0 and frame_count >= max_frames:
                     print(
-                        f"[pipeline] streaming heartbeat: frames={frame_count} avg_fps={fps:.2f}",
+                        f"[pipeline] stop condition reached: max_frames={max_frames}",
                         flush=True,
                     )
-                if max_frames > 0 and frame_count >= max_frames:
                     break
         finally:
             self._capture.release()

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import platform
+import re
+import shutil
 import subprocess
 import threading
 import time
@@ -41,12 +43,19 @@ class VirtualAudioMixer:
         self._on_stream_state = on_stream_state
         self._stream_open = False
         self._last_gate_state = "closed"
+        self._gst_proc: subprocess.Popen | None = None
+        self._gst_sink_input_id: str | None = None
+        self._gst_sink_input_muted: bool | None = None
 
     def run(self, max_steps: int = 0) -> None:
-        if sd is None:
+        if platform.system() != "Linux":
+            raise RuntimeError("audio mixer runtime is Linux GStreamer-only now.")
+        if not self._can_use_gstreamer():
             raise RuntimeError(
-                "sounddevice is required for audio mixer. Install via: ./bin/avc setup"
-            ) from SOUNDDEVICE_IMPORT_ERROR
+                "gst-launch-1.0 is required for audio mixer runtime. Run ./bin/avc setup."
+            )
+        self._run_with_gstreamer(max_steps=max_steps)
+        return
 
         frame_samples = max(1, int(self._cfg.sampleRate * self._cfg.frameMs / 1000.0))
         configured_input = str(self._cfg.inputDevice).strip()
@@ -271,6 +280,184 @@ class VirtualAudioMixer:
                 _report_stream_state(False, "stop")
         print("[audio] mixer stopped", flush=True)
 
+    def _can_use_gstreamer(self) -> bool:
+        return shutil.which("gst-launch-1.0") is not None
+
+    def _run_with_gstreamer(self, max_steps: int = 0) -> None:
+        input_device = str(self._cfg.inputDevice).strip()
+        output_device = str(self._cfg.outputDevice).strip()
+        if not input_device:
+            input_device = "default"
+        if not output_device:
+            output_device = "default"
+
+        gate = NoiseGate(self._cfg.gate, frame_ms=self._cfg.frameMs)
+        self._steps = 0
+        self._last_gate_state = "closed"
+
+        cmd = ["gst-launch-1.0", "-m", "-e"]
+        cmd.append("pulsesrc")
+        if input_device.lower() not in {"default"}:
+            cmd.append(f"device={input_device}")
+        cmd.extend(
+            [
+                "!",
+                "audioconvert",
+                "!",
+                "audioresample",
+                "!",
+                f"audio/x-raw,rate={int(self._cfg.sampleRate)},channels={int(self._cfg.channels)}",
+                "!",
+                "level",
+                "message=true",
+                f"interval={int(self._cfg.frameMs) * 1000000}",
+                "!",
+                "queue",
+                "!",
+                "pulsesink",
+            ]
+        )
+        if output_device.lower() not in {"default"}:
+            cmd.append(f"device={output_device}")
+
+        print(
+            "[audio] mixer starting (gstreamer): "
+            f"in={input_device} out={output_device} "
+            f"{self._cfg.sampleRate}Hz/{self._cfg.channels}ch frame={self._cfg.frameMs}ms",
+            flush=True,
+        )
+        print(f"[audio] gst cmd: {' '.join(cmd)}", flush=True)
+        print(
+            "[audio] gstreamer input validation: "
+            f"configured_input='{input_device}' configured_output='{output_device}'",
+            flush=True,
+        )
+        print(
+            "[audio] policy: system default sink/source is not modified by this process",
+            flush=True,
+        )
+
+        self._running = True
+        self._stream_open = False
+        if self._on_stream_state is not None:
+            self._on_stream_state(False, "closed", 0)
+        try:
+            self._gst_proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+            def _reader() -> None:
+                proc = self._gst_proc
+                if proc is None or proc.stdout is None:
+                    return
+                self._refresh_gst_sink_input_id()
+                self._set_gst_sink_input_mute(True)
+                while self._running:
+                    line = proc.stdout.readline()
+                    if not line:
+                        break
+                    low = line.lower()
+                    if "level" not in low:
+                        continue
+                    if self._steps == 0:
+                        print(f"[audio] gst level bus sample: {line.strip()}", flush=True)
+                    parsed_level = self._parse_level_db_from_gst_line(line)
+                    if parsed_level is None:
+                        continue
+                    level_db = parsed_level
+                    if level_db < -120.0:
+                        level_db = -120.0
+                    voice_ratio = 1.0
+                    self._steps += 1
+                    gate_state = gate.step(level_db, voice_band_ratio=voice_ratio)
+                    state = gate_state.state.value
+                    if state != self._last_gate_state:
+                        prev = self._last_gate_state
+                        self._last_gate_state = state
+                        print(
+                            f"[audio] gate transition: step={self._steps} "
+                            f"{prev} -> {state} levelDb={level_db:.1f}",
+                            flush=True,
+                        )
+                    stream_open = state in {"attack", "open", "hold", "release"}
+                    if stream_open != self._stream_open:
+                        self._stream_open = stream_open
+                        self._set_gst_sink_input_mute(not stream_open)
+                        if self._on_stream_state is not None:
+                            self._on_stream_state(stream_open, state, self._steps)
+
+            reader_thread = threading.Thread(target=_reader, daemon=True)
+            reader_thread.start()
+            if max_steps > 0:
+                timeout_sec = max(1, int((max_steps * self._cfg.frameMs) / 1000))
+                end_at = time.time() + timeout_sec
+                while self._running and self._gst_proc.poll() is None and time.time() < end_at:
+                    time.sleep(0.1)
+                self.stop()
+            else:
+                no_signal_deadline = time.time() + 3.0
+                while self._running and self._gst_proc.poll() is None:
+                    if self._steps <= 0 and time.time() >= no_signal_deadline:
+                        raise RuntimeError(
+                            "audio input signal was not detected from gstreamer level messages within 3s. "
+                            f"configured input='{input_device}', output='{output_device}'. "
+                            "입력 장치 ID를 config에서 다시 선택하고 저장한 뒤 재시도하세요."
+                        )
+                    time.sleep(0.2)
+            reader_thread.join(timeout=0.5)
+        finally:
+            self._running = False
+            proc = self._gst_proc
+            self._gst_proc = None
+            self._set_gst_sink_input_mute(True)
+            self._gst_sink_input_id = None
+            self._gst_sink_input_muted = None
+            if proc is not None and proc.poll() is None:
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=1.0)
+                except Exception:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+            if self._on_stream_state is not None:
+                self._on_stream_state(False, "stop", 0)
+            print("[audio] mixer stopped (gstreamer)", flush=True)
+
+    def _parse_level_db_from_gst_line(self, line: str) -> float | None:
+        text = str(line)
+        value = self._extract_gst_level_value(text, "rms")
+        if value is not None:
+            return value
+        value = self._extract_gst_level_value(text, "peak")
+        if value is not None:
+            return value
+        return None
+
+    def _extract_gst_level_value(self, text: str, field: str) -> float | None:
+        marker = f"{field}=(GValueArray)<"
+        low = text.lower()
+        idx = low.find(marker.lower())
+        if idx < 0:
+            return None
+        tail = text[idx + len(marker):]
+        end_idx = tail.find(">")
+        if end_idx < 0:
+            return None
+        token = tail[:end_idx].strip().split(",")[0].strip().lower()
+        if not token:
+            return None
+        if token in {"-inf", "inf", "+inf", "-nan", "nan", "+nan"}:
+            return -120.0
+        try:
+            return float(token)
+        except Exception:
+            return None
+
     def _is_virtual_mic_sink_available(self) -> bool:
         if platform.system() != "Linux":
             return False
@@ -304,6 +491,72 @@ class VirtualAudioMixer:
 
     def stop(self) -> None:
         self._running = False
+        proc = self._gst_proc
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+
+    def _refresh_gst_sink_input_id(self) -> None:
+        if platform.system() != "Linux":
+            return
+        proc = self._gst_proc
+        if proc is None:
+            return
+        pid = str(proc.pid)
+        try:
+            out = subprocess.run(
+                ["pactl", "list", "sink-inputs"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=1.5,
+            )
+        except Exception:
+            return
+        if out.returncode != 0:
+            return
+        current_id: str | None = None
+        matched_id: str | None = None
+        for raw in out.stdout.splitlines():
+            line = raw.strip()
+            if line.startswith("Sink Input #"):
+                current_id = line.split("#", 1)[1].strip()
+                continue
+            if current_id and 'application.process.id = "' in line:
+                if f'"{pid}"' in line:
+                    matched_id = current_id
+                    break
+        if matched_id:
+            self._gst_sink_input_id = matched_id
+
+    def _set_gst_sink_input_mute(self, mute: bool) -> None:
+        if platform.system() != "Linux":
+            return
+        if self._gst_sink_input_muted is mute:
+            return
+        if self._gst_sink_input_id is None:
+            self._refresh_gst_sink_input_id()
+        if self._gst_sink_input_id is None:
+            return
+        try:
+            proc = subprocess.run(
+                [
+                    "pactl",
+                    "set-sink-input-mute",
+                    self._gst_sink_input_id,
+                    "1" if mute else "0",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=1.5,
+            )
+            if proc.returncode == 0:
+                self._gst_sink_input_muted = mute
+        except Exception:
+            return
 
     def _resolve_sounddevice_input_device(self, configured: str) -> str:
         name = str(configured).strip()
