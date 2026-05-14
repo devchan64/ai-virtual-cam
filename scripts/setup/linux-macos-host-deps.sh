@@ -347,9 +347,22 @@ install_python_runtime_packages() {
   fi
   # deepfilternet is Linux-only in our current policy.
   if [[ "$OS_KIND" == "linux" ]]; then
-    if ! run "$venv_path/bin/python3" -m pip install deepfilternet; then
+    log "Installing deepfilternet without dependency churn (preserve current numpy constraints)"
+    if ! run "$venv_path/bin/python3" -m pip install --no-deps deepfilternet; then
       log "WARN: deepfilternet install failed. denoise.backend=deepfilternet runtime may be unavailable."
     fi
+  fi
+
+  if ! run "$venv_path/bin/python3" - <<'PY'
+import sys
+import numpy as np
+if int(np.__version__.split(".")[0]) < 2:
+    print("numpy_major_minor_mismatch")
+    sys.exit(1)
+PY
+  then
+    log "WARN: numpy < 2 detected after dependency setup. Re-aligning base packages."
+    run "$venv_path/bin/python3" -m pip install "numpy>=2.0.0" "opencv-python>=4.8.0"
   fi
 }
 
