@@ -38,6 +38,7 @@ class VirtualAudioMixer:
         self._denoise_warned = False
         self._on_stream_state = on_stream_state
         self._stream_open = False
+        self._last_gate_state = "closed"
 
     def run(self, max_steps: int = 0) -> None:
         if sd is None:
@@ -107,6 +108,7 @@ class VirtualAudioMixer:
         self._running = True
         self._steps = 0
         self._stream_open = False
+        self._last_gate_state = "closed"
 
         def _report_stream_state(opened: bool, state: str) -> None:
             if not self._running:
@@ -143,7 +145,25 @@ class VirtualAudioMixer:
             voice_band_ratio = self._voice_band_ratio(mono, self._cfg.sampleRate)
             gate = self._gate.step(level_db, voice_band_ratio=voice_band_ratio)
             gain = float(gate.gain)
-            stream_open = gate.state.value in {"open", "hold"} if self._cfg.gate.enabled else True
+            current_gate_state = gate.state.value
+            if current_gate_state != self._last_gate_state:
+                prev_gate_state = self._last_gate_state
+                self._last_gate_state = current_gate_state
+                if self._on_stream_state is not None:
+                    opened_for_event = current_gate_state in {"attack", "open", "hold", "release"}
+                    self._on_stream_state(opened_for_event, current_gate_state, self._steps)
+                print(
+                    f"[audio] gate transition: step={self._steps} "
+                    f"{prev_gate_state} -> {current_gate_state} "
+                    f"levelDb={gate.inputLevelDb:.1f} voiceRatio={gate.voiceBandRatio:.2f}",
+                    flush=True,
+                )
+            # Keep stream open during RELEASE to preserve tail-ramp behavior.
+            stream_open = (
+                current_gate_state in {"attack", "open", "hold", "release"}
+                if self._cfg.gate.enabled
+                else True
+            )
             if stream_open != self._stream_open:
                 _report_stream_state(stream_open, gate.state.value)
 

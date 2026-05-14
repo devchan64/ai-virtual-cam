@@ -31,6 +31,8 @@ class NoiseGate:
         self._state = GateState.CLOSED
         self._gain = config.closedGain
         self._hold_left_ms = 0
+        self._state_elapsed_ms = 0
+        self._state_start_gain = config.closedGain
 
     def step(self, input_level_db: float, voice_band_ratio: float = 1.0) -> GateStepResult:
         if not self._cfg.enabled:
@@ -49,30 +51,53 @@ class NoiseGate:
 
         if self._state == GateState.CLOSED:
             if above_open:
-                self._state = GateState.ATTACK
+                self._enter_state(GateState.ATTACK)
         elif self._state == GateState.ATTACK:
             if below_close:
-                self._state = GateState.RELEASE
-            elif self._gain >= self._cfg.openGain - 1e-6:
-                self._state = GateState.OPEN
+                self._enter_state(GateState.RELEASE)
+            elif self._state_elapsed_ms >= self._cfg.attackMs:
+                self._enter_state(GateState.OPEN)
         elif self._state == GateState.OPEN:
             if below_close:
-                self._state = GateState.HOLD
+                self._enter_state(GateState.HOLD)
                 self._hold_left_ms = self._cfg.holdMs
         elif self._state == GateState.HOLD:
             if above_open:
-                self._state = GateState.OPEN
+                self._enter_state(GateState.OPEN)
             else:
                 self._hold_left_ms -= self._frame_ms
                 if self._hold_left_ms <= 0:
-                    self._state = GateState.RELEASE
+                    self._enter_state(GateState.RELEASE)
         elif self._state == GateState.RELEASE:
             if above_open:
-                self._state = GateState.ATTACK
-            elif self._gain <= self._cfg.closedGain + 1e-6:
-                self._state = GateState.CLOSED
+                self._enter_state(GateState.ATTACK)
+            elif self._state_elapsed_ms >= self._cfg.releaseMs:
+                self._enter_state(GateState.CLOSED)
+        else:
+            self._enter_state(GateState.CLOSED)
 
-        self._gain = self._advance_gain(self._state)
+        if self._state == GateState.OPEN or self._state == GateState.HOLD:
+            self._gain = self._cfg.openGain
+        elif self._state == GateState.CLOSED:
+            self._gain = self._cfg.closedGain
+        elif self._state == GateState.ATTACK:
+            self._state_elapsed_ms += self._frame_ms
+            self._gain = _ramp_towards(
+                self._state_start_gain,
+                self._cfg.openGain,
+                self._cfg.attackMs,
+                self._state_elapsed_ms,
+            )
+        elif self._state == GateState.RELEASE:
+            self._state_elapsed_ms += self._frame_ms
+            self._gain = _ramp_towards(
+                self._state_start_gain,
+                self._cfg.closedGain,
+                self._cfg.releaseMs,
+                self._state_elapsed_ms,
+            )
+        else:
+            self._gain = self._cfg.closedGain
         return GateStepResult(
             state=self._state,
             gain=self._gain,
@@ -80,23 +105,15 @@ class NoiseGate:
             voiceBandRatio=voice_band_ratio,
         )
 
-    def _advance_gain(self, state: GateState) -> float:
-        if state in {GateState.OPEN, GateState.HOLD}:
-            return self._cfg.openGain
-        if state == GateState.CLOSED:
-            return self._cfg.closedGain
-        if state == GateState.ATTACK:
-            return _ramp_towards(self._gain, self._cfg.openGain, self._cfg.attackMs, self._frame_ms)
-        if state == GateState.RELEASE:
-            return _ramp_towards(self._gain, self._cfg.closedGain, self._cfg.releaseMs, self._frame_ms)
-        return self._gain
+    def _enter_state(self, state: GateState) -> None:
+        if self._state != state:
+            self._state = state
+            self._state_elapsed_ms = 0
+            self._state_start_gain = self._gain
 
 
-def _ramp_towards(current: float, target: float, duration_ms: int, frame_ms: int) -> float:
+def _ramp_towards(start: float, target: float, duration_ms: int, elapsed_ms: int) -> float:
     if duration_ms <= 0:
         return target
-    step = (target - current) * min(1.0, float(frame_ms) / float(duration_ms))
-    out = current + step
-    if target >= current:
-        return min(target, out)
-    return max(target, out)
+    ratio = min(1.0, float(elapsed_ms) / float(duration_ms))
+    return start + (target - start) * ratio

@@ -6,6 +6,27 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+def _default_audio_output_device() -> str:
+    if platform.system() != "Linux":
+        return "default"
+    try:
+        import sounddevice as sd
+    except Exception:
+        return "default"
+
+    try:
+        for device in sd.query_devices():
+            name = str(device.get("name", ""))
+            if int(device.get("max_output_channels", 0)) <= 0:
+                continue
+            lowered = name.lower()
+            if "ai-virtual-cam" in lowered or "virtual-cam" in lowered or "virtual" in lowered:
+                return name
+    except Exception:
+        return "default"
+    return "default"
+
+
 @dataclass(frozen=True)
 class Rect:
     x: int
@@ -254,14 +275,14 @@ class AudioGateConfig:
     def from_dict(cls, raw: dict) -> "AudioGateConfig":
         config = cls(
             enabled=bool(raw.get("enabled", True)),
-            thresholdDb=float(raw.get("thresholdDb", -42.0)),
-            hysteresisDb=float(raw.get("hysteresisDb", 3.0)),
-            attackMs=int(raw.get("attackMs", 20)),
-            holdMs=int(raw.get("holdMs", 140)),
-            releaseMs=int(raw.get("releaseMs", 220)),
+            thresholdDb=float(raw.get("thresholdDb", -40.0)),
+            hysteresisDb=float(raw.get("hysteresisDb", 4.0)),
+            attackMs=int(raw.get("attackMs", 30)),
+            holdMs=int(raw.get("holdMs", 160)),
+            releaseMs=int(raw.get("releaseMs", 2000)),
             openGain=float(raw.get("openGain", 1.0)),
             closedGain=float(raw.get("closedGain", 0.0)),
-            minVoiceBandRatio=float(raw.get("minVoiceBandRatio", 0.55)),
+            minVoiceBandRatio=float(raw.get("minVoiceBandRatio", 0.50)),
         )
         if config.attackMs < 0 or config.holdMs < 0 or config.releaseMs < 0:
             raise ValueError("audio.gate attack/hold/release must be >= 0")
@@ -291,7 +312,7 @@ class AudioMixerConfig:
         config = cls(
             enabled=bool(raw.get("enabled", True)),
             inputDevice=str(raw.get("inputDevice", "default")),
-            outputDevice=str(raw.get("outputDevice", "default")),
+            outputDevice=str(raw.get("outputDevice", _default_audio_output_device())),
             sampleRate=int(raw.get("sampleRate", 48000)),
             channels=int(raw.get("channels", 1)),
             frameMs=int(raw.get("frameMs", 20)),

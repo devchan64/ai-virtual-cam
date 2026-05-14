@@ -9,6 +9,8 @@ DRY_RUN=0
 SKIP_DOCKER=0
 SKIP_NVIDIA_TOOLKIT=0
 SKIP_V4L2LOOPBACK=0
+AUDIO_SINK_NAME="ai-virtual-cam"
+SKIP_AUDIO_VIRTUAL_DEVICE=0
 OS_KIND=""
 LINUX_DISTRO_ID=""
 
@@ -19,6 +21,23 @@ log() {
 fail() {
   printf '[ai-virtual-cam] ERROR: %s\n' "$*" >&2
   exit 1
+}
+
+warn() {
+  printf '[ai-virtual-cam] WARN: %s\n' "$*"
+}
+
+run_as_user() {
+  if [[ "${EUID}" -eq 0 && -n "${SUDO_USER:-}" ]]; then
+    local runtime_dir="/run/user/$(id -u "$SUDO_USER")"
+    if [[ -z "${XDG_RUNTIME_DIR:-}" && -d "$runtime_dir" ]]; then
+      run runuser -u "$SUDO_USER" -- env "XDG_RUNTIME_DIR=$runtime_dir" "$@"
+    else
+      run runuser -u "$SUDO_USER" -- "$@"
+    fi
+  else
+    run "$@"
+  fi
 }
 
 run() {
@@ -43,6 +62,9 @@ Options:
   --skip-docker            Do not install Docker Engine
   --skip-nvidia-toolkit    Do not install NVIDIA Container Toolkit
   --skip-v4l2loopback      Do not install or configure v4l2loopback
+  --skip-audio-virtual-device
+                          Do not create PulseAudio/pipewire virtual audio sink
+  --audio-sink-name NAME   Name for created virtual audio sink (default: ai-virtual-cam)
   --dry-run                Print commands without executing them
   -h, --help               Show this help
 EOF
@@ -105,7 +127,7 @@ cleanup_v4l2loopback_dkms_state() {
 install_base_packages() {
   log "Installing base packages"
   run apt-get update
-  apt_install ca-certificates curl gnupg gnupg2 lsb-release software-properties-common python3 python3-venv python3-pip libportaudio2 portaudio19-dev ffmpeg
+  apt_install ca-certificates curl gnupg gnupg2 lsb-release software-properties-common python3 python3-venv python3-pip libportaudio2 portaudio19-dev ffmpeg pulseaudio-utils
 }
 
 setup_docker_repo() {
@@ -265,6 +287,55 @@ EOF
   fi
 }
 
+audio_sink_exists() {
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    printf '[dry-run] pactl list short sinks\n'
+    return 0
+  fi
+
+  if ! command -v pactl >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if [[ "${EUID}" -eq 0 && -n "${SUDO_USER:-}" ]]; then
+    sudo -u "$SUDO_USER" -- pactl list short sinks | awk '{print $2}' | grep -Fxq "$1"
+  else
+    pactl list short sinks | awk '{print $2}' | grep -Fxq "$1"
+  fi
+}
+
+ensure_audio_virtual_sink() {
+  if [[ "$SKIP_AUDIO_VIRTUAL_DEVICE" -eq 1 ]]; then
+    log "Skipping audio virtual sink creation"
+    return 0
+  fi
+
+  if [[ "$OS_KIND" != "linux" ]]; then
+    return 0
+  fi
+
+  if ! command -v pactl >/dev/null 2>&1; then
+    warn "pactl is not available; skip audio virtual sink creation."
+    return 0
+  fi
+
+  if audio_sink_exists "$AUDIO_SINK_NAME"; then
+    log "Audio virtual sink already exists: ${AUDIO_SINK_NAME}"
+    return 0
+  fi
+
+  log "Creating audio virtual sink: ${AUDIO_SINK_NAME}"
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    printf '[dry-run] pactl load-module module-null-sink sink_name=%s sink_properties=device.description=%s\n' \
+      "$AUDIO_SINK_NAME" "$AUDIO_SINK_NAME"
+    return 0
+  fi
+
+  if ! run_as_user pactl load-module module-null-sink "sink_name=${AUDIO_SINK_NAME}" "sink_properties=device.description=${AUDIO_SINK_NAME}" ; then
+    warn "Failed to load virtual audio sink by pactl; proceed without auto-created virtual sink."
+  fi
+}
+
 verify_host_contract() {
   log "Verifying host contract"
 
@@ -290,8 +361,12 @@ verify_host_contract() {
     fail "Expected input camera /dev/video${INPUT_DEVICE} is missing."
   fi
 
-    if [[ "$SKIP_V4L2LOOPBACK" -eq 0 ]] && [[ ! -e "/dev/video${OUTPUT_DEVICE}" ]]; then
+  if [[ "$SKIP_V4L2LOOPBACK" -eq 0 ]] && [[ ! -e "/dev/video${OUTPUT_DEVICE}" ]]; then
       fail "Expected output virtual camera /dev/video${OUTPUT_DEVICE} is missing."
+    fi
+
+    if [[ "$SKIP_AUDIO_VIRTUAL_DEVICE" -eq 0 ]] && ! audio_sink_exists "$AUDIO_SINK_NAME"; then
+      warn "Expected audio sink ${AUDIO_SINK_NAME} is missing."
     fi
     return 0
   fi
@@ -370,6 +445,14 @@ parse_args() {
         SKIP_V4L2LOOPBACK=1
         shift
         ;;
+      --skip-audio-virtual-device)
+        SKIP_AUDIO_VIRTUAL_DEVICE=1
+        shift
+        ;;
+      --audio-sink-name)
+        AUDIO_SINK_NAME="$2"
+        shift 2
+        ;;
       --dry-run)
         DRY_RUN=1
         shift
@@ -404,6 +487,7 @@ main() {
   install_docker
   install_nvidia_container_toolkit
   install_v4l2loopback
+  ensure_audio_virtual_sink
   install_python_runtime_packages
   verify_host_contract
   log "Host dependency setup completed"

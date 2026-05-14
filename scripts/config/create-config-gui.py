@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections import deque
 import sys
 import time
 import threading
 from pathlib import Path
+from typing import Callable
 import cv2
 import platform
-from collections import deque
 from threading import Lock
 import numpy as np
 
@@ -60,6 +61,22 @@ def _audio_denoise_backend_options():
     return ["none", "rnnoise", "deepfilternet"]
 
 
+def _audio_default_output_device() -> str:
+    if platform.system() != "Linux" or sd is None:
+        return "default"
+    try:
+        for device in sd.query_devices():
+            name = str(device.get("name", ""))
+            if int(device.get("max_output_channels", 0)) <= 0:
+                continue
+            lowered = name.lower()
+            if "ai-virtual-cam" in lowered or "virtual-cam" in lowered or "virtual" in lowered:
+                return name
+    except Exception:
+        return "default"
+    return "default"
+
+
 class ConfigGui:
     def __init__(self, root: tk.Tk, output_path: str) -> None:
         self.root = root
@@ -77,6 +94,8 @@ class ConfigGui:
         self._preview_window_name = "ai-virtual-cam preview (press q or esc to close)"
         self._widgets: dict[str, object] = {}
         self._input_modes: list[tuple[int, int, str]] = []
+        self._slider_value_vars: dict[str, tk.StringVar] = {}
+        self._slider_formatters: dict[str, Callable[[float], str]] = {}
         self._audio_gate_test_running = False
         self._audio_gate_test_lock: Lock = Lock()
         self._audio_gate_test_window: tk.Toplevel | None = None
@@ -94,7 +113,8 @@ class ConfigGui:
         self._audio_gate_test_prev_stream_open = False
         self._audio_gate_test_started_at = 0.0
         self._audio_gate_test_threshold_db = -42.0
-        self._audio_gate_test_min_ratio = 0.55
+        self._audio_gate_test_threshold_db = -40.0
+        self._audio_gate_test_min_ratio = 0.50
         self._audio_tune_window: tk.Toplevel | None = None
         self._audio_tune_action_btn: ttk.Button | None = None
         self._audio_tune_running = False
@@ -259,7 +279,14 @@ class ConfigGui:
         self._add_bool_switch(tab_audio, row, "audio_enabled", "Audio mixer", True)
         row += 1
         self._add_text(tab_audio, row, "audio_input_device", "Input device", "default")
-        self._add_text(tab_audio, row, "audio_output_device", "Output device", "default", col_offset=2)
+        self._add_text(
+            tab_audio,
+            row,
+            "audio_output_device",
+            "Output device",
+            _audio_default_output_device(),
+            col_offset=2,
+        )
         row += 1
         self._add_int(tab_audio, row, "audio_sample_rate", "Sample rate", 48000)
         self._add_int(tab_audio, row, "audio_channels", "Channels", 1, col_offset=2)
@@ -283,7 +310,7 @@ class ConfigGui:
         row += 1
         self._add_slider(tab_audio, row, "audio_gate_hold_ms", "Gate hold ms", 160, 0, 2000, resolution=1)
         row += 1
-        self._add_slider(tab_audio, row, "audio_gate_release_ms", "Gate release ms", 500, 0, 4000, resolution=1)
+        self._add_slider(tab_audio, row, "audio_gate_release_ms", "Gate release ms", 2000, 0, 4000, resolution=1)
         row += 1
         self._add_slider(tab_audio, row, "audio_gate_open_gain", "Gate open gain", 1.0, 0.0, 2.0, resolution=0.01)
         row += 1
@@ -380,6 +407,8 @@ class ConfigGui:
             row=row, column=1, columnspan=2, sticky="ew", padx=4
         )
         ttk.Label(parent, textvariable=value_var).grid(row=row, column=3, sticky="e")
+        self._slider_value_vars[key] = value_var
+        self._slider_formatters[key] = format_value
 
     def _add_combo(self, parent, row, key, label, values, default, readonly=False, col_offset=0):
         ttk.Label(parent, text=label).grid(row=row, column=col_offset, sticky="w")
@@ -526,7 +555,7 @@ class ConfigGui:
         return {
             "audio_enabled": True,
             "audio_input_device": "default",
-            "audio_output_device": "default",
+            "audio_output_device": _audio_default_output_device(),
             "audio_sample_rate": 48000,
             "audio_channels": 1,
             "audio_frame_ms": 20,
@@ -538,7 +567,7 @@ class ConfigGui:
             "audio_gate_min_voice_band_ratio": 0.50,
             "audio_gate_attack_ms": 30,
             "audio_gate_hold_ms": 160,
-            "audio_gate_release_ms": 500,
+            "audio_gate_release_ms": 2000,
             "audio_gate_open_gain": 1.0,
             "audio_gate_closed_gain": 0.0,
         }
@@ -662,6 +691,30 @@ class ConfigGui:
             return
         if isinstance(var, tk.BooleanVar):
             var.set(self._parse_bool(value))
+            return
+        if isinstance(var, tk.DoubleVar):
+            try:
+                float_value = float(value)
+            except (TypeError, ValueError):
+                return
+            var.set(float_value)
+            value_var = self._slider_value_vars.get(key)
+            if value_var is not None:
+                formatter = self._slider_formatters.get(key)
+                if formatter is not None:
+                    value_var.set(formatter(float_value))
+            return
+        if isinstance(var, tk.IntVar):
+            try:
+                int_value = int(float(value))
+            except (TypeError, ValueError):
+                return
+            var.set(int_value)
+            value_var = self._slider_value_vars.get(key)
+            if value_var is not None:
+                formatter = self._slider_formatters.get(key)
+                if formatter is not None:
+                    value_var.set(formatter(float(int_value)))
             return
         var.set(str(value))
 

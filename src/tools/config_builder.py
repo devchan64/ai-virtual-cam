@@ -1,5 +1,28 @@
 from __future__ import annotations
 
+import platform
+
+
+def _default_audio_output_device() -> str:
+    if platform.system() != "Linux":
+        return "default"
+    try:
+        import sounddevice as sd
+    except Exception:
+        return "default"
+
+    try:
+        for device in sd.query_devices():
+            name = str(device.get("name", ""))
+            if int(device.get("max_output_channels", 0)) <= 0:
+                continue
+            lowered = name.lower()
+            if "ai-virtual-cam" in lowered or "virtual-cam" in lowered or "virtual" in lowered:
+                return name
+    except Exception:
+        return "default"
+    return "default"
+
 
 def build_config(
     *,
@@ -37,7 +60,7 @@ def build_config(
     crop_pan_target_offset_y: float = 0.0,
     audio_enabled: bool = True,
     audio_input_device: str = "default",
-    audio_output_device: str = "default",
+    audio_output_device: str | None = None,
     audio_sample_rate: int = 48000,
     audio_channels: int = 1,
     audio_frame_ms: int = 20,
@@ -49,11 +72,14 @@ def build_config(
     audio_gate_hysteresis_db: float = 4.0,
     audio_gate_attack_ms: int = 30,
     audio_gate_hold_ms: int = 160,
-    audio_gate_release_ms: int = 500,
+    audio_gate_release_ms: int = 2000,
     audio_gate_open_gain: float = 1.0,
     audio_gate_closed_gain: float = 0.0,
     audio_gate_min_voice_band_ratio: float = 0.50,
 ) -> dict:
+    if audio_output_device is None:
+        audio_output_device = _default_audio_output_device()
+
     tilt_smoothing = float(crop_pan_smoothing if crop_tilt_smoothing is None else crop_tilt_smoothing)
     tilt_kp = float(crop_pan_pid_kp if crop_tilt_pid_kp is None else crop_tilt_pid_kp)
     tilt_ki = float(crop_pan_pid_ki if crop_tilt_pid_ki is None else crop_tilt_pid_ki)
