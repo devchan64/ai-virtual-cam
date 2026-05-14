@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import platform
+import subprocess
 import threading
 import time
 from typing import Any, Callable
@@ -47,8 +49,22 @@ class VirtualAudioMixer:
             ) from SOUNDDEVICE_IMPORT_ERROR
 
         frame_samples = max(1, int(self._cfg.sampleRate * self._cfg.frameMs / 1000.0))
-        input_device = self._cfg.inputDevice
-        output_device = str(self._cfg.outputDevice).strip()
+        configured_input = str(self._cfg.inputDevice).strip()
+        configured_output = str(self._cfg.outputDevice).strip()
+        if self._is_virtual_mic_sink_available() and configured_input.lower() == "default":
+            raise RuntimeError(
+                "audio input is ambiguous. configured input='default'. "
+                "가상 마이크 경로에서는 inputDevice를 monitor/source ID로 명시하세요 "
+                "(예: ai-virtual-cam.monitor 또는 alsa_input...__source)."
+            )
+        if self._is_virtual_mic_sink_available() and not self._is_virtual_mic_output_selected(configured_output):
+            raise RuntimeError(
+                "audio output is not virtual-mic sink. "
+                f"configured='{configured_output}'. "
+                "가상 마이크로 전달하려면 outputDevice를 'ai-virtual-cam'으로 설정하세요."
+            )
+        input_device = self._resolve_sounddevice_input_device(configured_input)
+        output_device = self._resolve_sounddevice_output_device(configured_output)
         in_channels = self._cfg.channels
         out_channels = self._cfg.channels
 
@@ -98,6 +114,17 @@ class VirtualAudioMixer:
             print(
                 "[audio] channel mismatch: "
                 f"configured={self._cfg.channels}, in={in_channels}, out={out_channels}",
+                flush=True,
+            )
+
+        if input_device != configured_input:
+            print(
+                f"[audio] input device resolved: configured='{configured_input}' runtime='{input_device}'",
+                flush=True,
+            )
+        if output_device != configured_output:
+            print(
+                f"[audio] output device resolved: configured='{configured_output}' runtime='{output_device}'",
                 flush=True,
             )
 
@@ -165,6 +192,12 @@ class VirtualAudioMixer:
 
             level_db = self._rms_dbfs(mono)
             voice_band_ratio = self._voice_band_ratio(mono, self._cfg.sampleRate)
+            if self._steps == 0 or self._steps % 50 == 0:
+                print(
+                    f"[audio] input heartbeat: step={self._steps} "
+                    f"levelDb={level_db:.1f} voiceRatio={voice_band_ratio:.2f}",
+                    flush=True,
+                )
             gate = self._gate.step(level_db, voice_band_ratio=voice_band_ratio)
             gain = float(gate.gain)
             current_gate_state = gate.state.value
@@ -238,8 +271,121 @@ class VirtualAudioMixer:
                 _report_stream_state(False, "stop")
         print("[audio] mixer stopped", flush=True)
 
+    def _is_virtual_mic_sink_available(self) -> bool:
+        if platform.system() != "Linux":
+            return False
+        try:
+            proc = subprocess.run(
+                ["pactl", "list", "short", "sinks"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=1.5,
+            )
+            if proc.returncode != 0:
+                return False
+            for line in proc.stdout.splitlines():
+                parts = line.split()
+                if len(parts) < 2:
+                    continue
+                if parts[1].strip() == "ai-virtual-cam":
+                    return True
+        except Exception:
+            return False
+        return False
+
+    def _is_virtual_mic_output_selected(self, configured_output: str) -> bool:
+        lowered = str(configured_output).strip().lower()
+        if not lowered:
+            return False
+        if lowered == "ai-virtual-cam":
+            return True
+        return lowered.endswith("ai-virtual-cam")
+
     def stop(self) -> None:
         self._running = False
+
+    def _resolve_sounddevice_input_device(self, configured: str) -> str:
+        name = str(configured).strip()
+        if platform.system() != "Linux" or sd is None or not name:
+            return name
+        if name.lower() == "default":
+            return "default"
+        try:
+            sd.query_devices(name, kind="input")
+            return name
+        except Exception:
+            pass
+        # Bridge pactl source names (e.g. ai-virtual-cam.monitor) to sounddevice "pulse".
+        if ".monitor" in name.lower() or "alsa_input." in name.lower() or "alsa_output." in name.lower():
+            try:
+                proc = subprocess.run(
+                    ["pactl", "set-default-source", name],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=1.5,
+                )
+                if proc.returncode == 0:
+                    print(f"[audio] input source mapped via pactl default-source: {name} -> pulse", flush=True)
+                    return "pulse"
+            except Exception:
+                pass
+        return name
+
+    def _pick_preferred_monitor_source(self) -> str | None:
+        try:
+            proc = subprocess.run(
+                ["pactl", "list", "short", "sources"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=1.5,
+            )
+            if proc.returncode != 0:
+                return None
+            source_names = []
+            for line in proc.stdout.splitlines():
+                parts = line.split()
+                if len(parts) < 2:
+                    continue
+                source_names.append(parts[1].strip())
+            for candidate in source_names:
+                if candidate == "ai-virtual-cam.monitor":
+                    return candidate
+            for candidate in source_names:
+                if candidate.endswith(".monitor"):
+                    return candidate
+        except Exception:
+            return None
+        return None
+
+    def _resolve_sounddevice_output_device(self, configured: str) -> str:
+        name = str(configured).strip()
+        if platform.system() != "Linux" or sd is None or not name:
+            return name
+        if name.lower() == "default":
+            return "default"
+        try:
+            sd.query_devices(name, kind="output")
+            return name
+        except Exception:
+            pass
+        if "alsa_output." in name.lower() or "ai-virtual-cam" in name.lower():
+            try:
+                proc = subprocess.run(
+                    ["pactl", "set-default-sink", name],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=1.5,
+                )
+                if proc.returncode == 0:
+                    print(f"[audio] output sink mapped via pactl default-sink: {name} -> pulse", flush=True)
+                    return "pulse"
+            except Exception:
+                pass
+        return name
 
     def _apply_denoise(self, data: np.ndarray, sample_rate: int) -> np.ndarray:
         if not self._cfg.denoiseEnabled or self._cfg.denoiseBackend == "none":

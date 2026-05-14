@@ -618,13 +618,11 @@ class AudioMixerConfig:
     def from_dict(cls, raw: dict) -> "AudioMixerConfig":
         gate_raw = raw.get("gate") or {}
         input_device = str(raw.get("inputDevice", "default")).strip()
-        if not input_device or input_device.lower() == "default":
+        if not input_device:
             input_device = _default_audio_input_device()
-        input_device = _coerce_audio_input_device(input_device)
         output_device = str(raw.get("outputDevice", _default_audio_output_device())).strip()
-        if not output_device or output_device.lower() == "default":
+        if not output_device:
             output_device = _default_audio_output_device()
-        output_device = _coerce_audio_output_device(output_device)
         config = cls(
             enabled=bool(raw.get("enabled", True)),
             inputDevice=input_device,

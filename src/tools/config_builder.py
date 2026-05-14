@@ -172,6 +172,38 @@ def _pactl_default_audio_device(kind: str) -> str:
 def _default_audio_input_device() -> str:
     if platform.system() != "Linux":
         return "default"
+
+    def _preferred_monitor_source() -> str | None:
+        try:
+            proc = subprocess.run(
+                ["pactl", "list", "short", "sources"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=1.5,
+            )
+            if proc.returncode != 0:
+                return None
+            names = []
+            for line in proc.stdout.splitlines():
+                parts = line.split()
+                if len(parts) < 2:
+                    continue
+                names.append(parts[1].strip())
+            for candidate in names:
+                if candidate == "ai-virtual-cam.monitor":
+                    return candidate
+            for candidate in names:
+                if candidate.endswith(".monitor"):
+                    return candidate
+        except Exception:
+            return None
+        return None
+
+    monitor = _preferred_monitor_source()
+    if monitor is not None:
+        return monitor
+
     try:
         import sounddevice as sd
     except Exception:
@@ -404,12 +436,15 @@ def build_config(
 ) -> dict:
     if audio_output_device is None:
         audio_output_device = _default_audio_output_device()
-    if not audio_output_device or str(audio_output_device).strip().lower() == "default":
+    if not audio_output_device:
         audio_output_device = _default_audio_output_device()
-    audio_output_device = _coerce_audio_output_device(audio_output_device)
-    if not audio_input_device or str(audio_input_device).strip().lower() == "default":
+    else:
+        audio_output_device = str(audio_output_device).strip()
+
+    if not audio_input_device:
         audio_input_device = _default_audio_input_device()
-    audio_input_device = _coerce_audio_input_device(audio_input_device)
+    else:
+        audio_input_device = str(audio_input_device).strip()
 
     tilt_smoothing = float(crop_pan_smoothing if crop_tilt_smoothing is None else crop_tilt_smoothing)
     tilt_kp = float(crop_pan_pid_kp if crop_tilt_pid_kp is None else crop_tilt_pid_kp)

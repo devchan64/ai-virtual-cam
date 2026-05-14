@@ -54,6 +54,9 @@ sudo -v
 
 - `설정 우선` 원칙으로 동작합니다.
 - `output.device`, `audio.inputDevice`, `audio.outputDevice`, `outputCamera` 해상도/FPS/픽셀 포맷은 실행 시점에 그대로 사용됩니다.
+- 오디오 디바이스(`audio.inputDevice`, `audio.outputDevice`)는 저장/로드/실행 시 자동 정규화하지 않습니다.
+  - 사용자가 `default`를 선택하면 `default` 그대로 유지합니다.
+  - 장치명 치환/정규화는 `config-gui`의 가상 마이크 생성/제거 동작에서만 수행합니다.
 - 장치/포맷이 존재하지 않거나 초기화에 실패하면 자동으로 다른 값으로 대체하지 않고 **즉시 종료**합니다.
 - 에러 로그는 다음을 포함합니다.
   - 실패한 설정 값

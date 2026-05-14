@@ -357,6 +357,24 @@ def _coerce_audio_input_device_for_sounddevice(device_name: str) -> str:
     if not name:
         return name
     lowered = name.lower()
+    # Bridge PulseAudio source IDs (e.g. alsa_input..., *.monitor) to sounddevice's pulse endpoint.
+    if (
+        ".monitor" in lowered
+        or lowered.startswith("alsa_input.")
+        or lowered.startswith("alsa_output.")
+    ):
+        try:
+            proc = subprocess.run(
+                ["pactl", "set-default-source", name],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=1.5,
+            )
+            if proc.returncode == 0:
+                return "pulse"
+        except Exception:
+            pass
     try:
         names = [
             str(d.get("name", "")).strip()
@@ -438,6 +456,38 @@ def _pactl_default_audio_device(kind: str) -> str:
 def _audio_default_input_device() -> str:
     if platform.system() != "Linux":
         return "default"
+
+    def _preferred_monitor_source() -> str | None:
+        try:
+            proc = subprocess.run(
+                ["pactl", "list", "short", "sources"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=1.5,
+            )
+            if proc.returncode != 0:
+                return None
+            names = []
+            for line in proc.stdout.splitlines():
+                parts = line.split()
+                if len(parts) < 2:
+                    continue
+                names.append(parts[1].strip())
+            for candidate in names:
+                if candidate == "ai-virtual-cam.monitor":
+                    return candidate
+            for candidate in names:
+                if candidate.endswith(".monitor"):
+                    return candidate
+        except Exception:
+            return None
+        return None
+
+    monitor = _preferred_monitor_source()
+    if monitor is not None:
+        return monitor
+
     if sd is None:
         pactl_default = _pactl_default_audio_device("source")
         return pactl_default if pactl_default != "default" else "default"
@@ -553,6 +603,81 @@ def _audio_output_device_candidates() -> list[str]:
     return _audio_device_candidates("output")
 
 
+def _audio_device_description_map(kind: str) -> dict[str, str]:
+    if platform.system() != "Linux":
+        return {}
+    if kind not in {"input", "output"}:
+        return {}
+    target = "sources" if kind == "input" else "sinks"
+    try:
+        env = dict(__import__("os").environ)
+        env["LC_ALL"] = "C"
+        env["LANG"] = "C"
+        proc = subprocess.run(
+            ["pactl", "list", target],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2.5,
+            env=env,
+        )
+        if proc.returncode != 0:
+            return {}
+    except Exception:
+        return {}
+
+    mapping: dict[str, str] = {}
+    current_name: str | None = None
+    current_desc: str | None = None
+    for raw_line in proc.stdout.splitlines():
+        line = raw_line.strip()
+        if line.startswith("Name:"):
+            if current_name and current_desc:
+                mapping[current_name] = current_desc
+            current_name = line.split(":", 1)[1].strip()
+            current_desc = None
+            continue
+        if line.startswith("Description:"):
+            current_desc = line.split(":", 1)[1].strip()
+            continue
+        if not line and current_name and current_desc:
+            mapping[current_name] = current_desc
+            current_name = None
+            current_desc = None
+    if current_name and current_desc:
+        mapping[current_name] = current_desc
+    return mapping
+
+
+def _audio_device_display_values(kind: str, raw_values: list[str]) -> tuple[list[str], dict[str, str]]:
+    desc_map = _audio_device_description_map(kind)
+    display_values: list[str] = []
+    display_to_raw: dict[str, str] = {}
+    for raw in raw_values:
+        base = str(raw).strip()
+        if not base:
+            continue
+        desc = desc_map.get(base, "")
+        display = f"{desc} | {base}" if desc else base
+        if display in display_to_raw:
+            continue
+        display_values.append(display)
+        display_to_raw[display] = base
+    return display_values, display_to_raw
+
+
+def _audio_device_raw_from_display(value: str, mapping: dict[str, str]) -> str:
+    key = str(value).strip()
+    if not key:
+        return key
+    mapped = mapping.get(key)
+    if mapped:
+        return mapped
+    if " | " in key:
+        return key.rsplit(" | ", 1)[-1].strip()
+    return key
+
+
 def _parse_video_device_number(device_path: str) -> str | None:
     value = device_path.strip()
     if not value.startswith("/dev/video"):
@@ -650,6 +775,14 @@ class ConfigGui:
         self._audio_gate_test_threshold_db = -42.0
         self._audio_gate_test_threshold_db = -40.0
         self._audio_gate_test_min_ratio = 0.50
+        self._audio_input_meter_running = False
+        self._audio_input_meter_after_id: str | None = None
+        self._audio_input_meter_stream = None
+        self._audio_input_meter_queue: deque[float] = deque(maxlen=120)
+        self._audio_input_meter_lock: Lock = Lock()
+        self._audio_input_meter_window: tk.Toplevel | None = None
+        self._audio_input_meter_error: str | None = None
+        self._audio_input_meter_started_at = 0.0
         self._audio_tune_window: tk.Toplevel | None = None
         self._audio_tune_action_btn: ttk.Button | None = None
         self._audio_tune_running = False
@@ -866,26 +999,44 @@ class ConfigGui:
         audio_input_default = _audio_default_input_device()
         if audio_input_default not in audio_input_candidates:
             audio_input_candidates.append(audio_input_default)
+        audio_input_display_values, self._audio_input_display_to_raw = _audio_device_display_values(
+            "input", audio_input_candidates
+        )
+        audio_input_default_display = next(
+            (k for k, v in self._audio_input_display_to_raw.items() if v == audio_input_default),
+            audio_input_default,
+        )
         self._add_combo(
             tab_audio,
             row,
             "audio_input_device",
             "Input device",
-            audio_input_candidates,
-            audio_input_default,
+            audio_input_display_values,
+            audio_input_default_display,
+        )
+        row += 1
+        ttk.Button(tab_audio, text="마이크 dB 측정", command=self._run_audio_input_meter).grid(
+            row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0)
         )
         row += 1
         audio_output_candidates = _audio_output_device_candidates()
         audio_output_default = _audio_default_output_device()
         if audio_output_default not in audio_output_candidates:
             audio_output_candidates.append(audio_output_default)
+        audio_output_display_values, self._audio_output_display_to_raw = _audio_device_display_values(
+            "output", audio_output_candidates
+        )
+        audio_output_default_display = next(
+            (k for k, v in self._audio_output_display_to_raw.items() if v == audio_output_default),
+            audio_output_default,
+        )
         self._add_combo(
             tab_audio,
             row,
             "audio_output_device",
             "Output device",
-            audio_output_candidates,
-            audio_output_default,
+            audio_output_display_values,
+            audio_output_default_display,
         )
         row += 1
         ttk.Button(tab_audio, text="가상 마이크 생성", command=self._create_virtual_speaker).grid(
@@ -1585,38 +1736,32 @@ class ConfigGui:
         raw_output_device = (
             str(audio_cfg.get("outputDevice", "")).strip() if isinstance(audio_cfg.get("outputDevice"), str) else ""
         )
-        resolved_input_device = (
-            defaults["audio_input_device"]
-            if raw_input_device.lower() == "default" or not raw_input_device
-            else _coerce_audio_input_device_for_sounddevice(raw_input_device)
-        )
-        resolved_output_device = (
-            defaults["audio_output_device"]
-            if raw_output_device.lower() == "default" or not raw_output_device
-            else _coerce_audio_output_device_for_sounddevice(raw_output_device)
-        )
-        if (
-            resolved_output_device != raw_output_device
-            and raw_output_device
-            and raw_output_device.lower() != "default"
-        ):
-            _log(
-                f"audio output device was normalized: raw='{raw_output_device}' -> '{resolved_output_device}'"
-            )
+        resolved_input_device = defaults["audio_input_device"] if not raw_input_device else raw_input_device
+        resolved_output_device = defaults["audio_output_device"] if not raw_output_device else raw_output_device
         self._set_var("audio_input_device", resolved_input_device)
         input_widget = self._widgets.get("audio_input_device")
         if isinstance(input_widget, ttk.Combobox):
             input_values = list(input_widget["values"])
-            if resolved_input_device not in input_values:
-                input_widget["values"] = tuple(input_values + [resolved_input_device])
-            self.vars["audio_input_device"].set(resolved_input_device)
+            input_display = next(
+                (k for k, v in getattr(self, "_audio_input_display_to_raw", {}).items() if v == resolved_input_device),
+                resolved_input_device,
+            )
+            if input_display not in input_values:
+                input_widget["values"] = tuple(input_values + [input_display])
+                getattr(self, "_audio_input_display_to_raw", {})[input_display] = resolved_input_device
+            self.vars["audio_input_device"].set(input_display)
         self._set_var("audio_output_device", resolved_output_device)
         output_widget = self._widgets.get("audio_output_device")
         if isinstance(output_widget, ttk.Combobox):
             output_values = list(output_widget["values"])
-            if resolved_output_device not in output_values:
-                output_widget["values"] = tuple(output_values + [resolved_output_device])
-            self.vars["audio_output_device"].set(resolved_output_device)
+            output_display = next(
+                (k for k, v in getattr(self, "_audio_output_display_to_raw", {}).items() if v == resolved_output_device),
+                resolved_output_device,
+            )
+            if output_display not in output_values:
+                output_widget["values"] = tuple(output_values + [output_display])
+                getattr(self, "_audio_output_display_to_raw", {})[output_display] = resolved_output_device
+            self.vars["audio_output_device"].set(output_display)
         self._set_var("audio_sample_rate", audio_cfg.get("sampleRate", defaults["audio_sample_rate"]))
         self._set_var("audio_channels", audio_cfg.get("channels", defaults["audio_channels"]))
         self._set_var("audio_frame_ms", audio_cfg.get("frameMs", defaults["audio_frame_ms"]))
@@ -2040,9 +2185,14 @@ class ConfigGui:
         frame_ms = int(audio_cfg.get("frameMs", 20))
         frame_samples = max(1, int(sample_rate * frame_ms / 1000))
         channels = max(1, int(audio_cfg.get("channels", 1)))
-        input_device = audio_cfg.get("inputDevice")
-        if not isinstance(input_device, str) or not input_device.strip() or input_device.strip().lower() == "default":
-            input_device = _audio_default_input_device()
+        input_device_requested = audio_cfg.get("inputDevice")
+        if (
+            not isinstance(input_device_requested, str)
+            or not input_device_requested.strip()
+            or input_device_requested.strip().lower() == "default"
+        ):
+            input_device_requested = _audio_default_input_device()
+        input_device = _coerce_audio_input_device_for_sounddevice(input_device_requested)
         gate = NoiseGate(gate_config, frame_ms=frame_ms)
 
         if sd is None:
@@ -2068,7 +2218,11 @@ class ConfigGui:
 
         info = ttk.Label(
             content,
-            text=f"샘플레이트: {sample_rate}Hz / 프레임: {frame_ms}ms / 채널: {channels} / 입력: {input_device}",
+            text=(
+                f"샘플레이트: {sample_rate}Hz / 프레임: {frame_ms}ms / 채널: {channels} / "
+                f"입력: {input_device_requested}"
+                + (f" (테스트 런타임: {input_device})" if input_device != input_device_requested else "")
+            ),
         )
         info.grid(row=1, column=0, sticky="ew", pady=(0, 8))
 
@@ -2274,6 +2428,168 @@ class ConfigGui:
         self._audio_gate_test_stream = None
         self._audio_gate_test_gate = None
         self._audio_gate_test_window = None
+
+    def _run_audio_input_meter(self):
+        try:
+            config = self._build_config()
+        except Exception as exc:
+            messagebox.showerror("Input dB meter error", str(exc))
+            return
+
+        audio_cfg = config.get("audio") or {}
+        sample_rate = int(audio_cfg.get("sampleRate", 48000))
+        frame_ms = int(audio_cfg.get("frameMs", 20))
+        frame_samples = max(1, int(sample_rate * frame_ms / 1000))
+        channels = max(1, int(audio_cfg.get("channels", 1)))
+        input_device_requested = audio_cfg.get("inputDevice")
+        if not isinstance(input_device_requested, str) or not input_device_requested.strip():
+            input_device_requested = _audio_default_input_device()
+        input_device = _coerce_audio_input_device_for_sounddevice(input_device_requested)
+
+        if sd is None:
+            messagebox.showerror(
+                "Input dB meter error",
+                "sounddevice 모듈이 없습니다. ./bin/avc setup 후 다시 시도하세요.",
+            )
+            return
+
+        window = tk.Toplevel(self.root)
+        window.title("마이크 입력 dB 측정")
+        window.geometry("640x480")
+        window.minsize(640, 480)
+        window.resizable(True, True)
+        window.grab_set()
+
+        content = ttk.Frame(window, padding=12)
+        content.pack(fill="both", expand=True)
+        content.columnconfigure(0, weight=1)
+
+        ttk.Label(content, text="마이크 입력 dB 측정", font=("Arial", 12, "bold")).grid(
+            row=0, column=0, sticky="ew", pady=(0, 8)
+        )
+        ttk.Label(
+            content,
+            text=(
+                f"입력: {input_device_requested}"
+                + (f" (테스트 런타임: {input_device})" if input_device != input_device_requested else "")
+                + f" / 샘플레이트: {sample_rate}Hz / 프레임: {frame_ms}ms / 채널: {channels}"
+            ),
+        ).grid(row=1, column=0, sticky="ew", pady=(0, 8))
+
+        level_var = tk.StringVar(value="- dB")
+        runtime_var = tk.StringVar(value="실행 시간: 0.0s")
+        summary_var = tk.StringVar(value="측정 준비")
+
+        row = ttk.Frame(content)
+        row.grid(row=2, column=0, sticky="ew", pady=2)
+        row.columnconfigure(0, weight=1)
+        row.columnconfigure(1, weight=1)
+        ttk.Label(row, text="입력 레벨").grid(row=0, column=0, sticky="w")
+        ttk.Label(row, textvariable=level_var).grid(row=0, column=1, sticky="e")
+
+        level_bar = ttk.Progressbar(content, maximum=100)
+        level_bar.grid(row=3, column=0, sticky="ew", pady=(8, 8))
+        ttk.Label(content, textvariable=runtime_var).grid(row=4, column=0, sticky="w")
+        ttk.Label(content, textvariable=summary_var).grid(row=5, column=0, sticky="w", pady=(0, 10))
+
+        control = ttk.Frame(content)
+        control.grid(row=6, column=0, sticky="ew")
+        stop_btn = ttk.Button(control, text="중지")
+        stop_btn.pack(anchor="e")
+
+        self._audio_input_meter_running = True
+        self._audio_input_meter_error = None
+        self._audio_input_meter_queue = deque(maxlen=120)
+        self._audio_input_meter_window = window
+        self._audio_input_meter_started_at = time.time()
+
+        def close_window():
+            self._stop_audio_input_meter()
+            if window.winfo_exists():
+                window.destroy()
+
+        stop_btn.configure(command=close_window)
+        window.protocol("WM_DELETE_WINDOW", close_window)
+
+        try:
+            stream = sd.InputStream(
+                device=input_device,
+                channels=channels,
+                samplerate=sample_rate,
+                blocksize=frame_samples,
+                dtype="float32",
+                callback=self._audio_input_meter_callback,
+            )
+            self._audio_input_meter_stream = stream
+            stream.start()
+        except Exception as exc:
+            self._stop_audio_input_meter()
+            window.destroy()
+            messagebox.showerror("Input dB meter error", f"마이크 입력 스트림 열기 실패: {exc}")
+            return
+
+        def refresh() -> None:
+            if not self._audio_input_meter_running or not self._audio_input_meter_window:
+                return
+            if not self._audio_input_meter_window.winfo_exists():
+                self._stop_audio_input_meter()
+                return
+            if self._audio_input_meter_error is not None:
+                summary_var.set(f"오류: {self._audio_input_meter_error}")
+                stop_btn.state(["disabled"])
+                self._stop_audio_input_meter()
+                return
+
+            latest = None
+            with self._audio_input_meter_lock:
+                while self._audio_input_meter_queue:
+                    latest = self._audio_input_meter_queue.popleft()
+            if latest is not None:
+                level_db = latest
+                level_var.set(f"{level_db:.1f} dB")
+                level_norm = max(0.0, min(100.0, (level_db - (-80.0)) / 80.0 * 100.0))
+                level_bar["value"] = level_norm
+                summary_var.set("입력 신호 측정 중")
+
+            elapsed = time.time() - self._audio_input_meter_started_at
+            runtime_var.set(f"실행 시간: {elapsed:.1f}s")
+            self._audio_input_meter_after_id = self.root.after(80, refresh)
+
+        self._audio_input_meter_after_id = self.root.after(80, refresh)
+
+    def _audio_input_meter_callback(self, indata, frames, time_info, status):
+        if not self._audio_input_meter_running:
+            return
+        try:
+            mono = np.mean(np.asarray(indata, dtype=np.float32), axis=1)
+            level_db = self._rms_dbfs(mono)
+            with self._audio_input_meter_lock:
+                self._audio_input_meter_queue.append(level_db)
+        except Exception as exc:
+            self._audio_input_meter_error = str(exc)
+
+    def _stop_audio_input_meter(self) -> None:
+        self._audio_input_meter_running = False
+        after_id = self._audio_input_meter_after_id
+        if after_id is not None:
+            try:
+                self.root.after_cancel(after_id)
+            except Exception:
+                pass
+            self._audio_input_meter_after_id = None
+
+        stream = self._audio_input_meter_stream
+        if stream is not None:
+            try:
+                stream.stop()
+            except Exception:
+                pass
+            try:
+                stream.close()
+            except Exception:
+                pass
+        self._audio_input_meter_stream = None
+        self._audio_input_meter_window = None
 
     def _build_test_waveform(self, kind: str, sample_rate: int, seconds: float):
         frames = max(1, int(sample_rate * seconds))
@@ -2493,8 +2809,14 @@ class ConfigGui:
             crop_pan_target_offset_x=float(iv["crop_pan_target_offset_x"].get()),
             crop_pan_target_offset_y=float(iv["crop_pan_target_offset_y"].get()),
             audio_enabled=self._parse_bool(iv["audio_enabled"].get()),
-            audio_input_device=iv["audio_input_device"].get().strip(),
-            audio_output_device=iv["audio_output_device"].get().strip(),
+            audio_input_device=_audio_device_raw_from_display(
+                iv["audio_input_device"].get().strip(),
+                getattr(self, "_audio_input_display_to_raw", {}),
+            ),
+            audio_output_device=_audio_device_raw_from_display(
+                iv["audio_output_device"].get().strip(),
+                getattr(self, "_audio_output_display_to_raw", {}),
+            ),
             audio_sample_rate=int(iv["audio_sample_rate"].get()),
             audio_channels=int(iv["audio_channels"].get()),
             audio_frame_ms=int(iv["audio_frame_ms"].get()),
