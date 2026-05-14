@@ -12,6 +12,7 @@ class PipelineRunner:
         self._config = config
         self._capture = capture
         self._output = output
+        self._running = True
         self._processor = FrameProcessor(
             config.segmentation,
             config.background,
@@ -20,11 +21,18 @@ class PipelineRunner:
             config.outputCamera.height,
         )
 
+    def stop(self) -> None:
+        self._running = False
+        try:
+            self._capture.release()
+        except Exception:
+            pass
+
     def run(self, max_frames: int = 0) -> None:
         frame_count = 0
         start_ts = time.monotonic()
         try:
-            while True:
+            while self._running:
                 frame = self._capture.read()
                 output_frame = self._processor.process(frame)
                 self._output.write(output_frame)

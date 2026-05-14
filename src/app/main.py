@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import signal
 import sys
 import threading
 from pathlib import Path
@@ -70,8 +71,22 @@ def main() -> int:
     else:
         print("[avc] audio mixer disabled by config (audio.enabled=false)", flush=True)
 
+    def _request_shutdown(signum: int, frame_obj) -> None:
+        print(f"[avc] received signal {signum}, stopping pipeline...", flush=True)
+        runner.stop()
+        if audio_mixer is not None:
+            audio_mixer.stop()
+
+    signal.signal(signal.SIGINT, _request_shutdown)
+    signal.signal(signal.SIGTERM, _request_shutdown)
+
     try:
         runner.run(max_frames=args.max_frames)
+    except KeyboardInterrupt:
+        runner.stop()
+        if audio_mixer is not None:
+            audio_mixer.stop()
+        raise
     finally:
         if audio_mixer is not None:
             audio_mixer.stop()

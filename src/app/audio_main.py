@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import signal
 import sys
 from pathlib import Path
 
 from src.audio.mixer import VirtualAudioMixer
 from src.domain.config import AppConfig
-
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run virtual audio mixer (gate scaffold).")
@@ -37,7 +37,20 @@ def main() -> int:
         raise RuntimeError("audio.enabled is false. Enable it to run mixer.")
 
     mixer = VirtualAudioMixer(config.audio)
-    mixer.run(max_steps=args.max_steps)
+
+    def _request_shutdown(signum: int, frame_obj) -> None:
+        print(f"[audio] received signal {signum}, stopping...", flush=True)
+        mixer.stop()
+
+    signal.signal(signal.SIGINT, _request_shutdown)
+    signal.signal(signal.SIGTERM, _request_shutdown)
+
+    try:
+        mixer.run(max_steps=args.max_steps)
+    except KeyboardInterrupt:
+        mixer.stop()
+        raise
+
     return 0
 
 
