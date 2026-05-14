@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  ./bin/avc docker-macos serve [--config PATH] [--max-frames N]
+  ./bin/avc docker-macos config [--output PATH]
+
+Examples:
+  ./bin/avc docker-macos serve --config ~/.avc/setting.json
+  ./bin/avc docker-macos config --output ~/.avc/setting.json
+EOF
+}
+
+mode="${1:-}"
+if [[ -z "$mode" || "$mode" == "-h" || "$mode" == "--help" ]]; then
+  usage
+  exit 0
+fi
+shift || true
+
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "[avc-docker-macos] 이 명령은 macOS 전용입니다." >&2
+  echo "[avc-docker-macos] Linux에서는 ./bin/avc serve --docker 또는 ./bin/avc config --docker 를 사용하세요." >&2
+  exit 2
+fi
+
+export AVC_DOCKER_IMAGE="${AVC_DOCKER_IMAGE:-devchan64/ai-virtual-cam:macos-latest}"
+export AVC_DOCKERFILE="${AVC_DOCKERFILE:-$ROOT_DIR/Dockerfile.darwin-host}"
+
+case "$mode" in
+  serve)
+    config_path="${HOME}/.avc/setting.json"
+    passthrough=()
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --config)
+          config_path="$2"
+          shift 2
+          ;;
+        *)
+          passthrough+=("$1")
+          shift
+          ;;
+      esac
+    done
+    exec "$ROOT_DIR/scripts/bin/avc-docker-run" serve "$config_path" "${passthrough[@]}"
+    ;;
+  config)
+    output_path="${HOME}/.avc/setting.json"
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --output)
+          output_path="$2"
+          shift 2
+          ;;
+        *)
+          echo "unknown option: $1" >&2
+          exit 2
+          ;;
+      esac
+    done
+    exec "$ROOT_DIR/scripts/bin/avc-docker-run" config "$output_path"
+    ;;
+  *)
+    echo "unknown mode: $mode" >&2
+    usage >&2
+    exit 2
+    ;;
+esac

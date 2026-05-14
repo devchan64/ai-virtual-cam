@@ -219,46 +219,8 @@ install_macos_packages() {
 }
 
 install_python_runtime_packages() {
-  local venv_path
-  local py_bootstrap
-  venv_path="$(pwd)/.venv"
-
-  if [[ "$OS_KIND" == "macos" ]]; then
-    if [[ -x /opt/homebrew/bin/python3.12 ]]; then
-      py_bootstrap="/opt/homebrew/bin/python3.12"
-    elif [[ -x /usr/local/bin/python3.12 ]]; then
-      py_bootstrap="/usr/local/bin/python3.12"
-    elif command -v python3.12 >/dev/null 2>&1; then
-      py_bootstrap="$(command -v python3.12)"
-    else
-      py_bootstrap="python3"
-    fi
-  else
-    py_bootstrap="python3"
-  fi
-
-  if [[ ! -x "$venv_path/bin/python3" ]]; then
-    log "Creating shared venv: $venv_path"
-    run "$py_bootstrap" -m venv "$venv_path"
-  else
-    log "Using existing venv: $venv_path"
-  fi
-
-  run "$venv_path/bin/python3" -m pip install --upgrade pip
-
-  log "Installing Python runtime dependencies (video/audio base)"
-  run "$venv_path/bin/python3" -m pip install "numpy<2" "opencv-python>=4.10.0.84,<4.13.0" mediapipe==0.10.14 pyvirtualcam==0.14.0 sounddevice
-
-  log "Installing noise-cancel dependencies"
-  # rnnoise Python wrapper is currently not published on default PyPI index in a stable package.
-  log "WARN: rnnoise install is skipped (package availability issue). denoise backend remains placeholder."
-  # deepfilternet is Linux-only in our current policy.
-  if [[ "$OS_KIND" == "linux" ]]; then
-    log "Installing deepfilternet without dependency churn"
-    if ! run "$venv_path/bin/python3" -m pip install --no-deps deepfilternet; then
-      log "WARN: deepfilternet install failed. denoise.backend=deepfilternet runtime may be unavailable."
-    fi
-  fi
+  log "Syncing Python runtime dependencies from requirements.lock"
+  run "$(pwd)/scripts/bin/avc-env" sync
 }
 
 parse_args() {

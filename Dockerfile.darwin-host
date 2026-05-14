@@ -25,6 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     libnss3 \
     libsm6 \
+    libportaudio2 \
     libusb-1.0-0 \
     libv4l-0 \
     libxext6 \

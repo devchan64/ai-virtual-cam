@@ -21,7 +21,7 @@ ensure_image() {
   if [[ -z "$dockerfile_path" ]]; then
     case "$(uname -s)" in
       Darwin)
-        dockerfile_path="$ROOT_DIR/Dockerfile.macos"
+        dockerfile_path="$ROOT_DIR/Dockerfile.darwin-host"
         ;;
       Linux)
         dockerfile_path="$ROOT_DIR/Dockerfile.linux"
@@ -59,26 +59,35 @@ run_serve() {
     exit 2
   fi
 
-  local extra_args=()
-  local network_args=()
   if [[ "$(uname -s)" == "Linux" ]]; then
-    extra_args+=(--gpus all)
-    network_args+=(--network host)
+    docker run --rm -it \
+      --gpus all \
+      --network host \
+      -v "$ROOT_DIR:/workspace" \
+      -v "$config_dir:/host-config" \
+      -v /tmp/.X11-unix:/tmp/.X11-unix \
+      -e DISPLAY="${DISPLAY:-}" \
+      "$IMAGE_NAME" \
+      python3 -m src.app.main --config "/host-config/$config_file" "$@"
+  else
+    docker run --rm -it \
+      -v "$ROOT_DIR:/workspace" \
+      -v "$config_dir:/host-config" \
+      -v /tmp/.X11-unix:/tmp/.X11-unix \
+      -e DISPLAY="${DISPLAY:-}" \
+      -e REQUIRE_GPU=0 \
+      "$IMAGE_NAME" \
+      python3 -m src.app.main --config "/host-config/$config_file" "$@"
   fi
-
-  docker run --rm -it \
-    "${extra_args[@]}" \
-    "${network_args[@]}" \
-    -v "$ROOT_DIR:/workspace" \
-    -v "$config_dir:/host-config" \
-    -v /tmp/.X11-unix:/tmp/.X11-unix \
-    -e DISPLAY="${DISPLAY:-}" \
-    "$IMAGE_NAME" \
-    python3 -m src.app.main --config "/host-config/$config_file" "$@"
 }
 
 run_config() {
   local output_path="${1:-$HOME/.avc/setting.json}"
+
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    echo "[avc-docker] macOS 카메라/오디오 장치 탐색은 호스트 런타임에서 수행합니다." >&2
+    exec python3 "$ROOT_DIR/scripts/config/create-config-gui.py" --output "$output_path"
+  fi
 
   if [[ -z "${DISPLAY:-}" ]]; then
     echo "DISPLAY is not set. docker config(gui) requires X11 forwarding." >&2
@@ -90,13 +99,8 @@ run_config() {
   local output_file
   output_file="$(basename "$output_path")"
 
-  local network_args=()
-  if [[ "$(uname -s)" == "Linux" ]]; then
-    network_args+=(--network host)
-  fi
-
   docker run --rm -it \
-    "${network_args[@]}" \
+    --network host \
     -v "$ROOT_DIR:/workspace" \
     -v "$output_dir:/host-config" \
     -v /tmp/.X11-unix:/tmp/.X11-unix \
