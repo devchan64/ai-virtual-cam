@@ -186,22 +186,6 @@ install_nvidia_container_toolkit() {
   run systemctl restart docker
 }
 
-log_v4l2loopback_dkms_log() {
-  if [[ "$DRY_RUN" -eq 1 ]]; then
-    return 0
-  fi
-
-  local latest_log
-  latest_log="$(ls -1t /var/lib/dkms/v4l2loopback/*/build/make.log 2>/dev/null | head -n 1 || true)"
-  if [[ -z "$latest_log" ]]; then
-    log "No v4l2loopback DKMS build log found."
-    return 0
-  fi
-
-  log "Latest v4l2loopback DKMS log: $latest_log"
-  sed -n '1,60p' "$latest_log"
-}
-
 install_v4l2loopback_from_source() {
   log "Falling back to v4l2loopback source build"
   cleanup_v4l2loopback_dkms_state
@@ -247,13 +231,9 @@ install_v4l2loopback() {
 
   log "Installing and configuring v4l2loopback"
   cleanup_v4l2loopback_dkms_state
-  if ! apt_install v4l2loopback-dkms v4l2loopback-utils v4l-utils; then
-    cleanup_v4l2loopback_dkms_state
-    log "DKMS package install failed. Trying source fallback."
-    log_v4l2loopback_dkms_log
-    if ! install_v4l2loopback_from_source; then
-      fail "v4l2loopback installation failed (package and source fallback)."
-    fi
+  apt_install v4l2-utils
+  if ! install_v4l2loopback_from_source; then
+    fail "v4l2loopback installation failed via source build."
   fi
 
   if [[ "$DRY_RUN" -eq 0 ]]; then
@@ -271,7 +251,6 @@ EOF
   if ! load_v4l2loopback_module; then
     cleanup_v4l2loopback_dkms_state
     log "Failed to load v4l2loopback module after install. Trying source rebuild."
-    log_v4l2loopback_dkms_log
     if ! install_v4l2loopback_from_source; then
       fail "v4l2loopback module rebuild failed."
     fi
