@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import time
 
 import cv2
 import numpy as np
@@ -104,6 +105,8 @@ class V4L2LoopbackOutput(OutputSink):
                 f"[output] v4l2loopback resolved: configured={config.devicePath} -> {self._device_path}",
                 flush=True,
             )
+        self._ffmpeg_formats = ["yuv420p", "yuyv422", "nv12", "bgr24"]
+        self._format_index = 0
         self._proc = self._spawn_ffmpeg(config, self._device_path)
         self._frames_sent = 0
         print(
@@ -111,6 +114,32 @@ class V4L2LoopbackOutput(OutputSink):
             flush=True,
         )
         print(f"[output] v4l2loopback actual device: {self._device_path}", flush=True)
+
+    def _make_ffmpeg_cmd(self, config: OutputCameraConfig, device_path: str, pixel_format: str) -> list[str]:
+        return [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "bgr24",
+            "-s",
+            f"{config.width}x{config.height}",
+            "-r",
+            str(config.fps),
+            "-i",
+            "-",
+            "-an",
+            "-vf",
+            f"format={pixel_format}",
+            "-f",
+            "v4l2",
+            "-pix_fmt",
+            pixel_format,
+            device_path,
+        ]
 
     def _spawn_ffmpeg(
         self, config: OutputCameraConfig, device_path: str
@@ -126,32 +155,41 @@ class V4L2LoopbackOutput(OutputSink):
         if ffmpeg is None:
             raise RuntimeError("ffmpeg not found. Run './bin/avc setup' first.")
 
-        cmd = [
-            ffmpeg,
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-f",
-            "rawvideo",
-            "-pix_fmt",
-            "bgr24",
-            "-s",
-            f"{config.width}x{config.height}",
-            "-r",
-            str(config.fps),
-            "-i",
-            "-",
-            "-an",
-            "-f",
-            "v4l2",
-            "-pix_fmt",
-            "yuv420p",
-            device_path,
-        ]
-        try:
-            return subprocess.Popen(cmd, stdin=subprocess.PIPE)
-        except Exception as exc:  # pragma: no cover
-            raise RuntimeError(f"Failed to start ffmpeg for v4l2 output: {exc}") from exc
+        last_error = "not started"
+        for idx, fmt in enumerate(self._ffmpeg_formats):
+            cmd = self._make_ffmpeg_cmd(config, device_path, fmt)
+            cmd[0] = ffmpeg
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                )
+            except Exception as exc:  # pragma: no cover
+                last_error = f"spawn_failed format={fmt}: {exc}"
+                continue
+
+            time.sleep(0.2)
+            if proc.poll() is not None:
+                stderr_msg = ""
+                if proc.stderr is not None:
+                    try:
+                        stderr_msg = proc.stderr.read().decode("utf-8", errors="ignore").strip()
+                    except Exception:
+                        stderr_msg = ""
+                last_error = f"format={fmt} exit_code={proc.returncode} err={stderr_msg}"
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                continue
+
+            print(f"[output] v4l2loopback ffmpeg started with pix_fmt={fmt}", flush=True)
+            self._format_index = idx
+            return proc
+
+        raise RuntimeError(f"Failed to start ffmpeg for v4l2 output. {last_error}")
 
     def write(self, frame: np.ndarray) -> None:
         if self._proc.stdin is None:
@@ -166,6 +204,21 @@ class V4L2LoopbackOutput(OutputSink):
             elif self._frames_sent % 120 == 0:
                 print(f"[output] streaming ok: frames_sent={self._frames_sent}", flush=True)
         except BrokenPipeError as exc:
+            if self._format_index < len(self._ffmpeg_formats) - 1:
+                retry_fmt = self._ffmpeg_formats[self._format_index + 1]
+                print(
+                    f"[output] v4l2loopback stream error; retrying with pix_fmt={retry_fmt}",
+                    flush=True,
+                )
+                self._format_index += 1
+                if self._proc is not None:
+                    try:
+                        self._proc.kill()
+                    except Exception:
+                        pass
+                self._proc = self._spawn_ffmpeg(self._config, self._device_path)
+                self._frames_sent = 0
+                return self.write(frame)
             raise RuntimeError("ffmpeg pipe to v4l2loopback is broken.") from exc
 
     def release(self) -> None:
