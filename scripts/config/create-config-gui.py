@@ -533,9 +533,6 @@ def _audio_default_input_device() -> str:
 
 def _audio_device_candidates(kind: str) -> list[str]:
     print(f"[avc] 오디오 {kind} 디바이스 후보 수집 시작 (sd_imported={sd is not None})", flush=True)
-    if platform.system() != "Linux":
-        print("[avc] 오디오 디바이스 후보: 플랫폼 비 Linux, 기본값 ['default'] 사용", flush=True)
-        return ["default"]
     values: list[str] = ["default"]
     seen = {"default"}
 
@@ -560,31 +557,40 @@ def _audio_device_candidates(kind: str) -> list[str]:
             print(f"[avc] 오디오 {kind} sounddevice 조회 실패: 예외 발생", flush=True)
             pass
 
-    pactl_kind = "source" if kind == "input" else "sink"
-    try:
-        proc = subprocess.run(
-            ["pactl", "list", "short", f"{pactl_kind}s"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=1.5,
-        )
-        if proc.returncode == 0:
-            for line in proc.stdout.splitlines():
-                parts = line.split()
-                if len(parts) < 2:
-                    continue
-                dev_id = parts[1].strip()
-                if not dev_id:
-                    continue
-                if dev_id not in seen:
-                    seen.add(dev_id)
-                    values.append(dev_id)
-                    print(f"[avc] 오디오 {kind} 후보(pactl): {dev_id}", flush=True)
-        else:
-            print(f"[avc] 오디오 {kind} pactl 조회 실패: rc={proc.returncode}", flush=True)
-    except Exception:
-        print(f"[avc] 오디오 {kind} pactl 조회 실패: 예외 발생", flush=True)
+    if platform.system() == "Darwin":
+        macos_virtual_candidates = ["BlackHole 2ch", "BlackHole 16ch", "BlackHole 64ch"]
+        for candidate in macos_virtual_candidates:
+            if candidate not in seen:
+                seen.add(candidate)
+                values.append(candidate)
+                print(f"[avc] 오디오 {kind} 후보(macos-virtual): {candidate}", flush=True)
+
+    if platform.system() == "Linux":
+        pactl_kind = "source" if kind == "input" else "sink"
+        try:
+            proc = subprocess.run(
+                ["pactl", "list", "short", f"{pactl_kind}s"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=1.5,
+            )
+            if proc.returncode == 0:
+                for line in proc.stdout.splitlines():
+                    parts = line.split()
+                    if len(parts) < 2:
+                        continue
+                    dev_id = parts[1].strip()
+                    if not dev_id:
+                        continue
+                    if dev_id not in seen:
+                        seen.add(dev_id)
+                        values.append(dev_id)
+                        print(f"[avc] 오디오 {kind} 후보(pactl): {dev_id}", flush=True)
+            else:
+                print(f"[avc] 오디오 {kind} pactl 조회 실패: rc={proc.returncode}", flush=True)
+        except Exception:
+            print(f"[avc] 오디오 {kind} pactl 조회 실패: 예외 발생", flush=True)
 
     if not values:
         values.append("default")
