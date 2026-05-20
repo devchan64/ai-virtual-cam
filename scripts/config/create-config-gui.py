@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from collections import deque
 import sys
 import time
@@ -857,6 +858,7 @@ class ConfigGui:
         self._audio_tune_progress: str = ""
         self._audio_tune_done: bool = False
         self._language_var = tk.StringVar(value=self._lang)
+        self._preview_qt_check_done = False
         self._build_form()
         self._load_existing_config()
 
@@ -2742,10 +2744,41 @@ class ConfigGui:
             self._stop_preview()
             return
         try:
+            self._check_preview_runtime_ready()
             config = self._build_config()
             self._start_preview(config)
         except Exception as exc:
-            messagebox.showerror("Preview error", str(exc))
+            self._report_preview_error(str(exc))
+
+    def _check_preview_runtime_ready(self) -> None:
+        if self._preview_qt_check_done:
+            return
+        display = str(os.environ.get("DISPLAY", "")).strip()
+        if not display:
+            raise RuntimeError("DISPLAY가 비어 있습니다. X11 환경에서 실행하세요.")
+
+        plugin_path = Path(cv2.__file__).resolve().parent / "qt" / "plugins" / "platforms" / "libqxcb.so"
+        if not plugin_path.exists():
+            self._preview_qt_check_done = True
+            return
+
+        try:
+            proc = _run_cmd(["ldd", str(plugin_path)], check=False, timeout=2.0)
+        except Exception as exc:
+            raise RuntimeError(f"Qt xcb 의존성 검사 실패: {exc}") from exc
+        missing = []
+        for line in (proc.stdout or "").splitlines():
+            if "=> not found" not in line:
+                continue
+            missing.append(line.strip().split("=>", 1)[0].strip())
+        if missing:
+            unique_missing = list(dict.fromkeys(missing))
+            missing_text = ", ".join(unique_missing)
+            raise RuntimeError(
+                "Preview에서 Qt xcb 플러그인 의존성이 누락되었습니다. "
+                f"누락 라이브러리: {missing_text}"
+            )
+        self._preview_qt_check_done = True
 
     def _start_preview(self, config: dict) -> None:
         from src.adapter.capture.opencv_capture import OpenCVCapture
@@ -2808,10 +2841,14 @@ class ConfigGui:
                 return
         except Exception as exc:
             self._stop_preview()
-            messagebox.showerror("Preview error", str(exc))
+            self._report_preview_error(str(exc))
             return
 
         self.root.after(1, self._preview_tick)
+
+    def _report_preview_error(self, message: str) -> None:
+        _log(f"Preview error: {message}")
+        messagebox.showerror("Preview error", message)
 
     def _background_signature(self, background: dict):
         return (

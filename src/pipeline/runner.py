@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import cv2
 import time
 
 from src.domain.config import AppConfig
@@ -53,4 +52,3 @@ class PipelineRunner:
         finally:
             self._capture.release()
             self._output.release()
-            cv2.destroyAllWindows()

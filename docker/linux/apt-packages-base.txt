@@ -1,0 +1,17 @@
+ffmpeg
+fonts-noto-cjk
+gstreamer1.0-plugins-bad
+gstreamer1.0-plugins-base
+gstreamer1.0-plugins-good
+gstreamer1.0-plugins-ugly
+gstreamer1.0-tools
+libgl1
+libglib2.0-0
+libportaudio2
+locales
+portaudio19-dev
+pulseaudio-utils
+python3-tk
+tk
+v4l-utils
+xauth

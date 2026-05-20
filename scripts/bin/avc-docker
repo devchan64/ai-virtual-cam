@@ -142,7 +142,7 @@ case "$cmd" in
     require_device "${AVC_INPUT_DEVICE:-$DEFAULT_INPUT_DEVICE}" "AVC_INPUT_DEVICE"
     require_device "${AVC_OUTPUT_DEVICE:-$DEFAULT_OUTPUT_DEVICE}" "AVC_OUTPUT_DEVICE"
     [[ -f "$CONFIG_FILE" ]] || fail "Config file not found: $CONFIG_FILE. Run './bin/avc docker config' first or provide AVC_CONFIG_DIR."
-    run_compose avc-serve ./bin/avc serve --config "$CONTAINER_CONFIG_FILE" "$@"
+    run_compose avc-serve python3 -m src.app.main --config "$CONTAINER_CONFIG_FILE" "$@"
     ;;
   *)
     fail "Unknown docker command: $cmd"
