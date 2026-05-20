@@ -65,10 +65,39 @@ def _audio_denoise_backend_options():
 AUDIO_VIRTUAL_SINK_NAME = "ai-virtual-cam"
 VIRTUAL_CAMERA_LABEL = "ai-virtual-cam"
 AUDIO_VIRTUAL_SOURCE_NAME = "ai-virtual-cam"
+LANG_PACK_DIR = ROOT_DIR / "config" / "i18n"
 
 
 def _log(msg: str) -> None:
     print(f"[avc] {msg}", flush=True)
+
+
+def _read_flat_yaml(path: Path) -> dict[str, str]:
+    data: dict[str, str] = {}
+    if not path.exists():
+        return data
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip()
+        value = value.strip()
+        if value.startswith(("'", '"')) and value.endswith(("'", '"')) and len(value) >= 2:
+            value = value[1:-1]
+        data[key] = value
+    return data
+
+
+def _load_language_pack(language: str) -> dict[str, str]:
+    normalized = (language or "ko").strip().lower()
+    if normalized not in {"ko", "en"}:
+        normalized = "ko"
+    fallback = _read_flat_yaml(LANG_PACK_DIR / "config-gui.en.yaml")
+    selected = _read_flat_yaml(LANG_PACK_DIR / f"config-gui.{normalized}.yaml")
+    merged = dict(fallback)
+    merged.update(selected)
+    return merged
 
 
 def _run_cmd(cmd: list[str], *, check: bool = False, timeout: float | None = 1.5) -> subprocess.CompletedProcess:
@@ -759,10 +788,14 @@ def _get_audio_source_module_ids(name: str) -> list[str]:
 
 
 class ConfigGui:
-    def __init__(self, root: tk.Tk, output_path: str) -> None:
+    def __init__(self, root: tk.Tk, output_path: str, language: str = "ko") -> None:
         self.root = root
         self.output_path = output_path
-        self.root.title("ai-virtual-cam config GUI")
+        self._lang = (language or "ko").strip().lower()
+        if self._lang not in {"ko", "en"}:
+            self._lang = "ko"
+        self._i18n = _load_language_pack(self._lang)
+        self.root.title(self._tr("title.main", "ai-virtual-cam config GUI"))
         self.root.geometry("640x640")
         self.root.minsize(640, 480)
         self.root.resizable(True, True)
@@ -823,8 +856,15 @@ class ConfigGui:
         self._audio_tune_result_text: str = ""
         self._audio_tune_progress: str = ""
         self._audio_tune_done: bool = False
+        self._language_var = tk.StringVar(value=self._lang)
         self._build_form()
         self._load_existing_config()
+
+    def _tr(self, key: str, default: str) -> str:
+        value = self._i18n.get(key)
+        if value is None:
+            return default
+        return value
 
     def _build_form(self) -> None:
         frame = ttk.Frame(self.root, padding=12)
@@ -860,11 +900,11 @@ class ConfigGui:
         tab_bg = ttk.Frame(notebook, padding=8)
         tab_crop = ttk.Frame(notebook, padding=8)
         tab_audio = ttk.Frame(notebook, padding=8)
-        notebook.add(tab_io, text="입출력")
-        notebook.add(tab_seg, text="세그멘테이션")
-        notebook.add(tab_bg, text="배경")
-        notebook.add(tab_crop, text="프레이밍")
-        notebook.add(tab_audio, text="오디오")
+        notebook.add(tab_io, text=self._tr("title.tab.io", "I/O"))
+        notebook.add(tab_seg, text=self._tr("title.tab.seg", "Segmentation"))
+        notebook.add(tab_bg, text=self._tr("title.tab.bg", "Background"))
+        notebook.add(tab_crop, text=self._tr("title.tab.crop", "Framing"))
+        notebook.add(tab_audio, text=self._tr("title.tab.audio", "Audio"))
         for tab in (tab_io, tab_seg, tab_bg, tab_crop, tab_audio):
             for col in range(4):
                 tab.columnconfigure(col, weight=1 if col in (1, 3) else 0)
@@ -874,7 +914,15 @@ class ConfigGui:
         camera_values = [c["devicePath"] for c in cameras] or (["0"] if is_macos else ["/dev/video0"])
 
         row = 0
-        self._add_combo(tab_io, row, "input_device", "Input device", camera_values, camera_values[0], readonly=True)
+        self._add_combo(
+            tab_io,
+            row,
+            "input_device",
+            self._tr("label.input_device", "Input device"),
+            camera_values,
+            camera_values[0],
+            readonly=True,
+        )
         row += 1
         initial_modes = discover_camera_mode_options(camera_values[0]) if camera_values else [(1280, 720, "30")]
         width_values = sorted({str(w) for w, _h, _fps in initial_modes}, key=lambda v: int(v))
@@ -916,7 +964,7 @@ class ConfigGui:
             },
             key=lambda v: int(v),
         )
-        self._add_text(tab_io, row, "output_device", "Output path", default_output_device)
+        self._add_text(tab_io, row, "output_device", self._tr("label.output_path", "Output path"), default_output_device)
         row += 1
         self._add_combo(
             tab_io,
@@ -1114,8 +1162,22 @@ class ConfigGui:
         action_frame.grid(row=action_row, column=0, sticky="ew", pady=(10, 0))
         action_frame.columnconfigure(0, weight=1)
         action_frame.columnconfigure(1, weight=1)
-        ttk.Button(action_frame, text="Preview", command=self._preview).grid(row=0, column=0, sticky="ew", padx=4)
-        ttk.Button(action_frame, text="Save JSON", command=self._save).grid(row=0, column=1, sticky="ew", padx=4)
+        ttk.Button(action_frame, text=self._tr("button.preview", "Preview"), command=self._preview).grid(
+            row=0, column=0, sticky="ew", padx=4
+        )
+        ttk.Button(action_frame, text=self._tr("button.save", "Save JSON"), command=self._save).grid(
+            row=0, column=1, sticky="ew", padx=4
+        )
+        ttk.Label(action_frame, text=self._tr("label.language", "Language")).grid(
+            row=1, column=0, sticky="w", padx=4, pady=(8, 0)
+        )
+        lang_combo = ttk.Combobox(
+            action_frame,
+            values=("ko", "en"),
+            state="readonly",
+            textvariable=self._language_var,
+        )
+        lang_combo.grid(row=1, column=1, sticky="ew", padx=4, pady=(8, 0))
         input_device_widget = self._widgets.get("input_device")
         if input_device_widget is not None:
             input_device_widget.bind("<<ComboboxSelected>>", self._on_input_device_changed)
@@ -1676,8 +1738,18 @@ class ConfigGui:
         try:
             raw = json.loads(config_path.read_text(encoding="utf-8"))
         except Exception as exc:
-            messagebox.showwarning("Load warning", f"Failed to parse config file:\n{config_path}\n\n{exc}")
+            messagebox.showwarning(
+                self._tr("msg.load_warning.title", "Load warning"),
+                self._tr("msg.load_warning.body", "Failed to parse config file:\n{path}\n\n{error}").format(
+                    path=config_path,
+                    error=exc,
+                ),
+            )
             return
+        meta_cfg = raw.get("meta") or {}
+        lang = str(meta_cfg.get("language", "")).strip().lower()
+        if lang in {"ko", "en"}:
+            self._language_var.set(lang)
 
         input_cfg = raw.get("inputCamera") or {}
         output_cfg = raw.get("outputCamera") or {}
@@ -1853,10 +1925,14 @@ class ConfigGui:
     def _save(self):
         try:
             config = self._build_config()
+            config.setdefault("meta", {})["language"] = self._language_var.get().strip().lower() or self._lang
             write_config(self.output_path, config)
-            messagebox.showinfo("Saved", f"Config saved to {self.output_path}")
+            messagebox.showinfo(
+                self._tr("msg.saved.title", "Saved"),
+                self._tr("msg.saved.body", "Config saved to {path}").format(path=self.output_path),
+            )
         except Exception as exc:
-            messagebox.showerror("Validation error", str(exc))
+            messagebox.showerror(self._tr("msg.validation_error.title", "Validation error"), str(exc))
 
     def _auto_tune_audio_gate(self):
         if sd is None:
@@ -2868,6 +2944,7 @@ class ConfigGui:
 def parse_args():
     parser = argparse.ArgumentParser(description="GUI config generator for ai-virtual-cam")
     parser.add_argument("--output", default="~/.avc/setting.json")
+    parser.add_argument("--lang", choices=["ko", "en"], default="ko")
     return parser.parse_args()
 
 
@@ -2883,7 +2960,7 @@ def main() -> int:
 
     args = parse_args()
     root = tk.Tk()
-    ConfigGui(root, args.output)
+    ConfigGui(root, args.output, args.lang)
     root.mainloop()
     return 0
 

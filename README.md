@@ -34,8 +34,11 @@ Python 의존성만 재동기화:
 ```
 
 - 저장 경로: `~/.avc/setting.json`
+- 언어 선택: GUI 하단 `Language`에서 `ko`/`en` 선택
+- 시작 언어 지정: `./bin/avc config --lang ko` 또는 `./bin/avc config --lang en`
 - 영상: 입력 카메라, 출력 해상도/FPS, 세그멘테이션, 배경, 프레이밍
 - 오디오: `audio.enabled`, 입/출력 장치, 게이트/노이즈캔슬
+- 선택한 언어는 `setting.json`의 `meta.language`에 저장됩니다.
 
 macOS 오디오 권장:
 
