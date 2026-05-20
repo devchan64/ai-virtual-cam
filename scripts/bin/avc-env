@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VENV_DIR="$ROOT_DIR/.venv"
 VENV_PY="$VENV_DIR/bin/python3"
 LOCK_FILE="$ROOT_DIR/requirements.lock"
+INSTALL_DEEPFILTERNET="${AVC_INSTALL_DEEPFILTERNET:-0}"
 
 usage() {
   cat <<'EOF'
@@ -38,12 +39,15 @@ if [[ ! -x "$VENV_PY" ]]; then
   fi
 fi
 
-"$VENV_PY" -m pip install --upgrade pip setuptools wheel
 "$VENV_PY" -m pip install -r "$LOCK_FILE"
 
 if [[ "$(uname -s)" == "Linux" ]]; then
-  if ! "$VENV_PY" -m pip install --no-deps deepfilternet; then
-    echo "[avc-env] WARN: deepfilternet install failed; denoise.backend=deepfilternet may be unavailable." >&2
+  if [[ "$INSTALL_DEEPFILTERNET" == "1" ]]; then
+    if ! "$VENV_PY" -m pip install --no-deps deepfilternet; then
+      echo "[avc-env] WARN: deepfilternet install failed; denoise.backend=deepfilternet may be unavailable." >&2
+    fi
+  else
+    echo "[avc-env] info: skipping optional deepfilternet install (set AVC_INSTALL_DEEPFILTERNET=1 to enable)." >&2
   fi
 fi
 

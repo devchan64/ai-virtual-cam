@@ -1,0 +1,66 @@
+services:
+  avc-config:
+    build:
+      context: ../..
+      dockerfile: docker/linux/Dockerfile
+      args:
+        UID: ${AVC_UID:-1000}
+        GID: ${AVC_GID:-1000}
+    image: ai-virtual-cam-linux:latest
+    user: ${AVC_UID:-1000}:${AVC_GID:-1000}
+    working_dir: /workspace
+    network_mode: host
+    environment:
+      DISPLAY: ${DISPLAY:?DISPLAY is required for GUI config}
+      XAUTHORITY: /tmp/.docker.xauth
+      AVC_INPUT_DEVICE: ${AVC_INPUT_DEVICE:-/dev/video0}
+      AVC_CONFIG_PATH: /home/avc/.avc/setting.json
+      PULSE_SERVER: unix:${AVC_RUNTIME_DIR:-/run/user/1000}/pulse/native
+      XDG_RUNTIME_DIR: ${AVC_RUNTIME_DIR:-/run/user/1000}
+    devices:
+      - ${AVC_INPUT_DEVICE:-/dev/video0}:${AVC_INPUT_DEVICE:-/dev/video0}
+    group_add:
+      - ${AVC_INPUT_GID:-44}
+    volumes:
+      - ../..:/workspace
+      - ${AVC_CONFIG_DIR:-~/.avc}:/home/avc/.avc
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ${AVC_XAUTHORITY_HOST:?AVC_XAUTHORITY_HOST is required}:/tmp/.docker.xauth:ro
+      - ${AVC_RUNTIME_DIR:-/run/user/1000}:${AVC_RUNTIME_DIR:-/run/user/1000}
+    command:
+      - ./bin/avc
+      - config
+      - --output
+      - /home/avc/.avc/setting.json
+
+  avc-serve:
+    build:
+      context: ../..
+      dockerfile: docker/linux/Dockerfile
+      args:
+        UID: ${AVC_UID:-1000}
+        GID: ${AVC_GID:-1000}
+    image: ai-virtual-cam-linux:latest
+    user: ${AVC_UID:-1000}:${AVC_GID:-1000}
+    working_dir: /workspace
+    network_mode: host
+    environment:
+      AVC_INPUT_DEVICE: ${AVC_INPUT_DEVICE:-/dev/video0}
+      AVC_OUTPUT_DEVICE: ${AVC_OUTPUT_DEVICE:?AVC_OUTPUT_DEVICE is required}
+      AVC_CONFIG_PATH: /home/avc/.avc/setting.json
+      PULSE_SERVER: unix:${AVC_RUNTIME_DIR:-/run/user/1000}/pulse/native
+      XDG_RUNTIME_DIR: ${AVC_RUNTIME_DIR:-/run/user/1000}
+    devices:
+      - ${AVC_INPUT_DEVICE:-/dev/video0}:${AVC_INPUT_DEVICE:-/dev/video0}
+      - ${AVC_OUTPUT_DEVICE:?AVC_OUTPUT_DEVICE is required}:${AVC_OUTPUT_DEVICE:?AVC_OUTPUT_DEVICE is required}
+    group_add:
+      - ${AVC_INPUT_GID:-44}
+    volumes:
+      - ../..:/workspace
+      - ${AVC_CONFIG_DIR:-~/.avc}:/home/avc/.avc
+      - ${AVC_RUNTIME_DIR:-/run/user/1000}:${AVC_RUNTIME_DIR:-/run/user/1000}
+    command:
+      - ./bin/avc
+      - serve
+      - --config
+      - /home/avc/.avc/setting.json

@@ -11,7 +11,12 @@
 ```
 
 - Linux: 런타임 의존성 설치
+- Linux Docker 사용 시 `docker`, `docker compose`, `xauth`, `xhost` 포함
 - macOS: OBS Studio + BlackHole 2ch + Python 런타임 의존성 설치
+
+Linux Docker 메모:
+
+- 기존 `docker-ce`/`docker-compose-plugin` 환경이 있으면 `setup`은 이를 재사용하고 `docker.io`로 덮어쓰지 않습니다.
 
 Python 의존성만 재동기화:
 
@@ -20,6 +25,7 @@ Python 의존성만 재동기화:
 ```
 
 - `.venv`를 생성/재사용하고 `requirements.lock` 기준으로 정확히 설치합니다.
+- Linux의 `deepfilternet`는 기본 미설치입니다. 필요하면 `AVC_INSTALL_DEEPFILTERNET=1 ./bin/avc env sync`로 별도 시도하세요.
 
 ### 2) 설정
 
@@ -42,6 +48,76 @@ macOS 오디오 권장:
 ```bash
 ./bin/avc serve
 ```
+
+### Linux Docker 실행
+
+호스트 준비:
+
+- `v4l2loopback` 장치는 호스트에서 먼저 생성해야 합니다.
+- `config` GUI는 X11 전달이 필요합니다.
+- PulseAudio/PipeWire를 쓸 경우 사용자 런타임 디렉터리(`/run/user/<uid>`)가 컨테이너에 마운트됩니다.
+- `./bin/avc setup`은 Docker/Compose/X11 유틸까지 설치하지만, `docker` 그룹 반영을 위해 재로그인이 필요할 수 있습니다.
+- `docker build` 전에 `docker info` 또는 `docker ps`가 일반 사용자로 동작해야 합니다.
+
+이미지 빌드:
+
+```bash
+./bin/avc docker build
+```
+
+빌드 동작:
+
+- Compose 파일 `docker/linux/compose.yml` 기준으로 Linux 런타임 이미지를 빌드합니다.
+- 기본 이미지 태그는 `ai-virtual-cam-linux:latest`입니다.
+- 빌드 시점에는 카메라/X11/Pulse 장치가 실제로 연결돼 있을 필요는 없습니다.
+
+빌드 전 점검:
+
+```bash
+docker --version
+docker compose version
+docker ps
+```
+
+`docker ps`가 권한 오류로 실패하면:
+
+```bash
+sudo systemctl restart docker
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+`/var/run/docker.sock` 권한이 비정상일 때 확인:
+
+```bash
+ls -l /var/run/docker.sock
+```
+
+- 일반적으로 `root docker` 소유여야 합니다.
+- `nobody:nogroup` 등으로 잘못 잡혀 있으면 Docker daemon 상태를 먼저 복구하세요.
+
+GUI 설정:
+
+```bash
+xhost +si:localuser:$USER
+export AVC_INPUT_DEVICE=/dev/video0
+./bin/avc docker config
+```
+
+스트리밍 실행:
+
+```bash
+export AVC_INPUT_DEVICE=/dev/video0
+export AVC_OUTPUT_DEVICE=/dev/video10
+./bin/avc docker serve
+```
+
+운영 원칙:
+
+- `config`와 `serve` 모두 `~/.avc/setting.json`을 동일하게 사용
+- 장치 경로는 컨테이너 내부에서도 호스트와 동일한 절대 경로로 마운트
+- `serve`는 `AVC_OUTPUT_DEVICE`가 없으면 즉시 실패
+- `config`는 `DISPLAY` 또는 X11 소켓이 없으면 즉시 실패
 
 ### 4) 회의 앱 연결
 
@@ -68,6 +144,7 @@ macOS 오디오 권장:
 - `env`: Python 환경 동기화 (`env sync`)
 - `config`: GUI 설정 생성기(프리뷰 포함)
 - `serve`: 저장된 설정으로 스트리밍 실행
+- `docker`: Linux Docker 기반 `config`/`serve` 실행
 - `audio-mixer`: 마이크 게이트 기반 가상 오디오 믹서 실행 (Linux: 실시간 입력/출력 스트림)
 - `doctor`: 기본 런타임 점검
 
@@ -90,6 +167,7 @@ macOS 오디오 권장:
 ## 플랫폼별 동작
 
 - Linux: OBS 비의존 `v4l2loopback` 경로
+- Linux Docker: 호스트 `v4l2loopback` + 컨테이너 실행 경로
 - macOS: OBS Virtual Camera(`pyvirtualcam`) 경로
 - macOS 오디오 루프백: BlackHole 장치 사용 권장
 - CMIO 관련 기능은 폐기
@@ -111,6 +189,7 @@ pluginkit -m -A -D | grep -Ei "obs|virtual.?camera|cameraextension|coremedia"
 - GUI는 `sudo -n`(비대화식)으로 실행되어, 권한 없으면 즉시 실패/안내
 - 기본 생성 옵션: `exclusive_caps=1`, `devices=1`, `max_buffers=2`
 - 실패 시 `exclusive_caps=0` 순차 폴백
+- Docker 실행은 가상 카메라 생성을 대체하지 않음. 장치는 호스트에서 먼저 준비해야 함.
 
 권한 준비 후 실행:
 
@@ -135,6 +214,12 @@ Linux `v4l2loopback` 복구 정책:
 - 최종 실패 시 즉시 종료, `config`에서 가상 카메라 재생성 필요
 
 문제 발생 시 `config`에서 수정 후 재저장하고 `serve` 재실행하세요.
+
+Linux Docker 정책:
+
+- 컨테이너는 `AVC_INPUT_DEVICE`, `AVC_OUTPUT_DEVICE`, `~/.avc` 마운트가 정확히 들어와야만 실행
+- 누락 시 자동 탐색/대체 없이 즉시 종료
+- X11, Pulse/PipeWire 소켓도 누락 시 즉시 종료 또는 기능 실패로 반환
 
 ## 오디오 운영 가이드
 

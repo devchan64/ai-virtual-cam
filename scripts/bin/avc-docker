@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+COMPOSE_FILE="$ROOT_DIR/docker/linux/compose.yml"
+CONFIG_DIR="${AVC_CONFIG_DIR:-$HOME/.avc}"
+CONFIG_FILE="$CONFIG_DIR/setting.json"
+PROJECT_NAME="${AVC_DOCKER_PROJECT:-ai-virtual-cam}"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  ./bin/avc docker <command> [args...]
+
+Commands:
+  config           Run GUI config inside Docker on Linux
+  serve            Run pipeline inside Docker on Linux
+  build            Build/update Docker image
+
+Environment:
+  AVC_CONFIG_DIR       Config directory mounted into container (default: ~/.avc)
+  AVC_INPUT_DEVICE     Input camera device path (default: /dev/video0)
+  AVC_OUTPUT_DEVICE    Output camera device path (required for serve, e.g. /dev/video10)
+  AVC_RUNTIME_DIR      Host runtime dir for Pulse/PipeWire socket mount (default: /run/user/<uid>)
+  AVC_UID              UID mapped into container (default: current uid)
+  AVC_GID              GID mapped into container (default: current gid)
+  DISPLAY              Required for config GUI
+EOF
+}
+
+fail() {
+  echo "[avc-docker] ERROR: $*" >&2
+  exit 2
+}
+
+require_linux() {
+  if [[ "$(uname -s)" != "Linux" ]]; then
+    fail "Docker workflow is supported only on Linux."
+  fi
+}
+
+require_compose() {
+  if docker compose version >/dev/null 2>&1; then
+    return 0
+  fi
+  fail "docker compose is not available. Install Docker Compose v2 and retry."
+}
+
+ensure_config_dir() {
+  mkdir -p "$CONFIG_DIR"
+}
+
+default_runtime_dir() {
+  local uid
+  uid="${AVC_UID:-$(id -u)}"
+  echo "/run/user/$uid"
+}
+
+device_gid() {
+  local path="$1"
+  stat -c '%g' "$path"
+}
+
+require_x11() {
+  [[ -n "${DISPLAY:-}" ]] || fail "DISPLAY is not set. Export DISPLAY and allow local Docker access before running config."
+  [[ -S /tmp/.X11-unix/X0 || -d /tmp/.X11-unix ]] || fail "/tmp/.X11-unix is missing. X11 socket mount is required for GUI config."
+}
+
+require_device() {
+  local path="$1"
+  local label="$2"
+  [[ -n "$path" ]] || fail "$label is empty."
+  [[ -e "$path" ]] || fail "$label does not exist: $path"
+}
+
+run_compose() {
+  local service="$1"
+  shift
+
+  local runtime_dir
+  runtime_dir="${AVC_RUNTIME_DIR:-$(default_runtime_dir)}"
+  local uid gid
+  uid="${AVC_UID:-$(id -u)}"
+  gid="${AVC_GID:-$(id -g)}"
+  local xauthority
+  xauthority="${XAUTHORITY:-$HOME/.Xauthority}"
+  local input_gid
+  input_gid="${AVC_INPUT_GID:-$(device_gid "${AVC_INPUT_DEVICE:-/dev/video0}")}"
+
+  AVC_UID="$uid" \
+  AVC_GID="$gid" \
+  AVC_CONFIG_DIR="$CONFIG_DIR" \
+  AVC_RUNTIME_DIR="$runtime_dir" \
+  AVC_INPUT_GID="$input_gid" \
+  AVC_XAUTHORITY_HOST="$xauthority" \
+  docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" run --rm "$service" "$@"
+}
+
+cmd="${1:-}"
+if [[ -z "$cmd" || "$cmd" == "-h" || "$cmd" == "--help" ]]; then
+  usage
+  exit 0
+fi
+shift || true
+
+require_linux
+require_compose
+ensure_config_dir
+
+case "$cmd" in
+  build)
+    AVC_INPUT_DEVICE="${AVC_INPUT_DEVICE:-/dev/video0}" \
+    AVC_OUTPUT_DEVICE="${AVC_OUTPUT_DEVICE:-/dev/video10}" \
+    AVC_RUNTIME_DIR="${AVC_RUNTIME_DIR:-$(default_runtime_dir)}" \
+    AVC_XAUTHORITY_HOST="${AVC_XAUTHORITY_HOST:-${XAUTHORITY:-/tmp/.docker.xauth}}" \
+    AVC_UID="${AVC_UID:-$(id -u)}" \
+    AVC_GID="${AVC_GID:-$(id -g)}" \
+    AVC_INPUT_GID="${AVC_INPUT_GID:-44}" \
+    docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" build
+    ;;
+  config)
+    require_x11
+    require_device "${AVC_INPUT_DEVICE:-/dev/video0}" "AVC_INPUT_DEVICE"
+    run_compose avc-config "$@"
+    ;;
+  serve)
+    require_device "${AVC_INPUT_DEVICE:-/dev/video0}" "AVC_INPUT_DEVICE"
+    require_device "${AVC_OUTPUT_DEVICE:-}" "AVC_OUTPUT_DEVICE"
+    [[ -f "$CONFIG_FILE" ]] || fail "Config file not found: $CONFIG_FILE. Run './bin/avc docker config' first or provide AVC_CONFIG_DIR."
+    run_compose avc-serve "$@"
+    ;;
+  *)
+    fail "Unknown docker command: $cmd"
+    ;;
+esac

@@ -6,6 +6,8 @@ INPUT_DEVICE=0
 DRY_RUN=0
 OS_KIND=""
 LINUX_DISTRO_ID=""
+INVOKING_USER="${SUDO_USER:-${USER:-}}"
+INVOKING_GROUP=""
 
 log() {
   printf '[ai-virtual-cam] %s\n' "$*"
@@ -29,12 +31,28 @@ run() {
   "$@"
 }
 
+run_as_invoking_user() {
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    printf '[dry-run] %s\n' "$*"
+    return 0
+  fi
+
+  if [[ "$OS_KIND" == "linux" && -n "${SUDO_USER:-}" && "$EUID" -eq 0 ]]; then
+    sudo -u "$SUDO_USER" "$@"
+    return 0
+  fi
+
+  "$@"
+}
+
 usage() {
   cat <<'EOF'
 Usage: ./bin/avc setup [options]
 
 Install host dependencies for ai-virtual-cam on Linux (Debian/Ubuntu) or macOS.
 This command no longer creates virtual devices; it only prepares runtime dependencies.
+
+Linux setup also installs Docker host dependencies for `./bin/avc docker`.
 
 Options:
   --input-device N         Expected USB camera device number (default: 0)
@@ -60,6 +78,18 @@ detect_os() {
   esac
 }
 
+detect_invoking_user() {
+  if [[ -z "$INVOKING_USER" ]]; then
+    fail "Cannot determine invoking user."
+  fi
+
+  if [[ "$OS_KIND" == "linux" ]]; then
+    INVOKING_GROUP="$(id -gn "$INVOKING_USER")"
+  else
+    INVOKING_GROUP="$(id -gn)"
+  fi
+}
+
 load_os_release() {
   if [[ ! -f /etc/os-release ]]; then
     fail "Cannot detect OS: /etc/os-release is missing."
@@ -78,11 +108,63 @@ apt_install() {
   run apt-get install -y "$@"
 }
 
+package_available() {
+  apt-cache show "$1" >/dev/null 2>&1
+}
+
+has_docker_engine() {
+  command -v docker >/dev/null 2>&1
+}
+
+has_docker_compose_v2() {
+  docker compose version >/dev/null 2>&1
+}
+
+install_linux_docker_packages() {
+  log "Installing Linux Docker host packages"
+
+  if has_docker_engine; then
+    log "Existing Docker engine detected: $(docker --version)"
+  else
+    apt_install docker.io
+  fi
+
+  if has_docker_compose_v2; then
+    log "Existing Docker Compose v2 detected"
+  elif package_available docker-compose-plugin; then
+    apt_install docker-compose-plugin
+  elif package_available docker-compose-v2; then
+    apt_install docker-compose-v2
+  else
+    fail "No supported Docker Compose v2 package found. Install docker-compose-plugin or docker-compose-v2."
+  fi
+}
+
 install_base_packages() {
   log "Installing base packages"
   run apt-get update
   apt_install ca-certificates curl gnupg gnupg2 lsb-release software-properties-common python3 python3-venv python3-pip libportaudio2 portaudio19-dev ffmpeg pulseaudio-utils \
-    gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly
+    gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \
+    xauth x11-xserver-utils
+  install_linux_docker_packages
+}
+
+verify_linux_docker_contract() {
+  if ! command -v docker >/dev/null 2>&1; then
+    fail "docker is not available after installation."
+  fi
+
+  if ! docker compose version >/dev/null 2>&1; then
+    fail "docker compose v2 is not available after installation."
+  fi
+
+  if ! command -v xhost >/dev/null 2>&1; then
+    fail "xhost is not available after installation. Docker config GUI requires X11 access control."
+  fi
+
+  if ! command -v xauth >/dev/null 2>&1; then
+    fail "xauth is not available after installation. Docker config GUI requires Xauthority forwarding."
+  fi
 }
 
 verify_host_contract() {
@@ -97,6 +179,8 @@ verify_host_contract() {
     if ! command -v ffmpeg >/dev/null 2>&1; then
       fail "ffmpeg is not available after installation."
     fi
+
+    verify_linux_docker_contract
 
     if [[ ! -e "/dev/video${INPUT_DEVICE}" ]]; then
       fail "Expected input camera /dev/video${INPUT_DEVICE} is missing."
@@ -125,7 +209,21 @@ install_macos_packages() {
 
 install_python_runtime_packages() {
   log "Syncing Python runtime dependencies from requirements.lock"
-  run "$(pwd)/scripts/bin/avc-env" sync
+  run_as_invoking_user "$(pwd)/scripts/bin/avc-env" sync
+}
+
+repair_workspace_permissions() {
+  if [[ "$OS_KIND" != "linux" || "$EUID" -ne 0 ]]; then
+    return 0
+  fi
+  if [[ -z "$INVOKING_GROUP" ]]; then
+    fail "Cannot determine invoking group for permission repair."
+  fi
+
+  if [[ -e "$(pwd)/.venv" ]]; then
+    log "Repairing .venv ownership for $INVOKING_USER:$INVOKING_GROUP"
+    run chown -R "$INVOKING_USER:$INVOKING_GROUP" "$(pwd)/.venv"
+  fi
 }
 
 parse_args() {
@@ -153,6 +251,7 @@ parse_args() {
 main() {
   parse_args "$@"
   detect_os
+  detect_invoking_user
   require_privileges
   if [[ "$OS_KIND" == "linux" ]]; then
     if ! command -v apt-get >/dev/null 2>&1; then
@@ -167,9 +266,14 @@ main() {
     install_macos_packages
   fi
   log "Setup now installs dependencies only; create virtual devices in config."
+  repair_workspace_permissions
   install_python_runtime_packages
   verify_host_contract
   log "Host dependency setup completed"
+  if [[ "$OS_KIND" == "linux" ]]; then
+    log "Linux Docker host deps installed: docker, docker compose, xauth, xhost"
+    log "If current user cannot run docker, add user to docker group and re-login: sudo usermod -aG docker <user>"
+  fi
   log "Setup does not create virtual devices. Use config GUI for virtual camera/speaker create/remove."
 }
 

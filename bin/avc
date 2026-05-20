@@ -16,6 +16,7 @@ Commands:
   env              Manage Python environment (.venv)
   config           Launch GUI config generator
   serve            Start virtual camera stream service from saved config
+  docker           Run Linux Docker workflows for config/serve
   audio-mixer      Run virtual audio mixer (microphone gate scaffold)
   doctor           Basic runtime checks (python3)
 USAGE
@@ -33,6 +34,7 @@ case "$cmd" in
   env) exec "$ROOT_DIR/scripts/bin/avc-env" "$@" ;;
   config) exec "$ROOT_DIR/scripts/bin/avc-config" "$@" ;;
   serve) exec "$ROOT_DIR/scripts/bin/avc-serve" "$@" ;;
+  docker) exec "$ROOT_DIR/scripts/bin/avc-docker" "$@" ;;
   audio-mixer) exec "$ROOT_DIR/scripts/bin/avc-audio-mixer" "$@" ;;
   doctor) exec "$ROOT_DIR/scripts/bin/avc-doctor" "$@" ;;
   -h|--help) usage ;;

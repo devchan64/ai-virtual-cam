@@ -6,6 +6,22 @@
 - macOS: OBS Virtual Camera 경로만 지원 (`pyvirtualcam`)
 - CMIO 관련 기능은 폐기
 
+## Linux Docker 설계
+
+- 호스트 책임:
+  - `v4l2loopback` 모듈 로드 및 `/dev/videoN` 생성
+  - X11 소켓(`/tmp/.X11-unix`)과 `DISPLAY` 제공
+  - PulseAudio/PipeWire 런타임 소켓(`/run/user/<uid>`) 제공
+- 컨테이너 책임:
+  - `config` GUI 실행 및 `~/.avc/setting.json` 저장
+  - `serve` 파이프라인 실행
+  - 설정값 검증 실패 시 즉시 종료
+- 분리 원칙:
+  - `config`와 `serve`를 별도 compose 서비스로 둔다
+  - 둘 다 같은 설정 디렉터리 볼륨을 공유한다
+  - 장치 경로는 호스트/컨테이너에서 동일한 절대 경로를 유지한다
+  - `serve`는 `AVC_OUTPUT_DEVICE`가 반드시 필요하다
+
 ## 실행 진입점
 
 ```bash
