@@ -28,6 +28,7 @@ class FrameProcessor:
         self._output_width = output_width
         self._output_height = output_height
         self._low_mask_ratio_logged = False
+        self._dark_fallback_warn_count = 0
 
     def process(self, frame: np.ndarray) -> np.ndarray:
         raw_mask = self._segmenter.segment(frame)
@@ -62,12 +63,15 @@ class FrameProcessor:
             source_mean = float(frame.mean())
             composed_mean = float(composed.mean())
             if source_mean > 20.0 and composed_mean < 8.0:
-                print(
-                    "[seg] warning: composed frame is too dark under low foreground ratio "
-                    f"(fg={foreground_ratio:.3f}, src_mean={source_mean:.2f}, out_mean={composed_mean:.2f}); "
-                    "passthrough source frame.",
-                    flush=True,
-                )
+                self._dark_fallback_warn_count += 1
+                # Log only first and periodic events to avoid noisy runtime output.
+                if self._dark_fallback_warn_count == 1 or self._dark_fallback_warn_count % 120 == 0:
+                    print(
+                        "[seg] warning: composed frame is too dark under low foreground ratio "
+                        f"(fg={foreground_ratio:.3f}, src_mean={source_mean:.2f}, out_mean={composed_mean:.2f}); "
+                        f"passthrough source frame (count={self._dark_fallback_warn_count}).",
+                        flush=True,
+                    )
                 return crop_and_resize(
                     frame,
                     self._bounds.as_rect(bounds),
