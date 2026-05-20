@@ -6,6 +6,10 @@ COMPOSE_FILE="$ROOT_DIR/docker/linux/compose.yml"
 CONFIG_DIR="${AVC_CONFIG_DIR:-$HOME/.avc}"
 CONFIG_FILE="$CONFIG_DIR/setting.json"
 PROJECT_NAME="${AVC_DOCKER_PROJECT:-ai-virtual-cam}"
+LOG_DIR="$ROOT_DIR/.tmp"
+DEFAULT_INPUT_DEVICE="/dev/video0"
+DEFAULT_OUTPUT_DEVICE="/dev/video10"
+CONTAINER_CONFIG_FILE="/home/avc/.avc/setting.json"
 
 usage() {
   cat <<'EOF'
@@ -20,7 +24,7 @@ Commands:
 Environment:
   AVC_CONFIG_DIR       Config directory mounted into container (default: ~/.avc)
   AVC_INPUT_DEVICE     Input camera device path (default: /dev/video0)
-  AVC_OUTPUT_DEVICE    Output camera device path (required for serve, e.g. /dev/video10)
+  AVC_OUTPUT_DEVICE    Output camera device path (default: /dev/video10)
   AVC_RUNTIME_DIR      Host runtime dir for Pulse/PipeWire socket mount (default: /run/user/<uid>)
   AVC_UID              UID mapped into container (default: current uid)
   AVC_GID              GID mapped into container (default: current gid)
@@ -73,6 +77,10 @@ require_device() {
   [[ -e "$path" ]] || fail "$label does not exist: $path"
 }
 
+timestamp_utc() {
+  date -u +"%Y%m%dT%H%M%SZ"
+}
+
 run_compose() {
   local service="$1"
   shift
@@ -85,12 +93,16 @@ run_compose() {
   local xauthority
   xauthority="${XAUTHORITY:-$HOME/.Xauthority}"
   local input_gid
-  input_gid="${AVC_INPUT_GID:-$(device_gid "${AVC_INPUT_DEVICE:-/dev/video0}")}"
+  input_gid="${AVC_INPUT_GID:-$(device_gid "${AVC_INPUT_DEVICE:-$DEFAULT_INPUT_DEVICE}")}"
+  local output_device
+  output_device="${AVC_OUTPUT_DEVICE:-$DEFAULT_OUTPUT_DEVICE}"
 
   AVC_UID="$uid" \
   AVC_GID="$gid" \
   AVC_CONFIG_DIR="$CONFIG_DIR" \
   AVC_RUNTIME_DIR="$runtime_dir" \
+  AVC_INPUT_DEVICE="${AVC_INPUT_DEVICE:-$DEFAULT_INPUT_DEVICE}" \
+  AVC_OUTPUT_DEVICE="$output_device" \
   AVC_INPUT_GID="$input_gid" \
   AVC_XAUTHORITY_HOST="$xauthority" \
   docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" run --rm "$service" "$@"
@@ -109,25 +121,28 @@ ensure_config_dir
 
 case "$cmd" in
   build)
-    AVC_INPUT_DEVICE="${AVC_INPUT_DEVICE:-/dev/video0}" \
-    AVC_OUTPUT_DEVICE="${AVC_OUTPUT_DEVICE:-/dev/video10}" \
+    mkdir -p "$LOG_DIR"
+    build_log="$LOG_DIR/docker-build-$(timestamp_utc).log"
+    echo "[avc-docker] build log: $build_log"
+    AVC_INPUT_DEVICE="${AVC_INPUT_DEVICE:-$DEFAULT_INPUT_DEVICE}" \
+    AVC_OUTPUT_DEVICE="${AVC_OUTPUT_DEVICE:-$DEFAULT_OUTPUT_DEVICE}" \
     AVC_RUNTIME_DIR="${AVC_RUNTIME_DIR:-$(default_runtime_dir)}" \
     AVC_XAUTHORITY_HOST="${AVC_XAUTHORITY_HOST:-${XAUTHORITY:-/tmp/.docker.xauth}}" \
     AVC_UID="${AVC_UID:-$(id -u)}" \
     AVC_GID="${AVC_GID:-$(id -g)}" \
     AVC_INPUT_GID="${AVC_INPUT_GID:-44}" \
-    docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" build
+    docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" build 2>&1 | tee "$build_log"
     ;;
   config)
     require_x11
-    require_device "${AVC_INPUT_DEVICE:-/dev/video0}" "AVC_INPUT_DEVICE"
+    require_device "${AVC_INPUT_DEVICE:-$DEFAULT_INPUT_DEVICE}" "AVC_INPUT_DEVICE"
     run_compose avc-config "$@"
     ;;
   serve)
-    require_device "${AVC_INPUT_DEVICE:-/dev/video0}" "AVC_INPUT_DEVICE"
-    require_device "${AVC_OUTPUT_DEVICE:-}" "AVC_OUTPUT_DEVICE"
+    require_device "${AVC_INPUT_DEVICE:-$DEFAULT_INPUT_DEVICE}" "AVC_INPUT_DEVICE"
+    require_device "${AVC_OUTPUT_DEVICE:-$DEFAULT_OUTPUT_DEVICE}" "AVC_OUTPUT_DEVICE"
     [[ -f "$CONFIG_FILE" ]] || fail "Config file not found: $CONFIG_FILE. Run './bin/avc docker config' first or provide AVC_CONFIG_DIR."
-    run_compose avc-serve "$@"
+    run_compose avc-serve ./bin/avc serve --config "$CONTAINER_CONFIG_FILE" "$@"
     ;;
   *)
     fail "Unknown docker command: $cmd"

@@ -7,6 +7,7 @@ ARG GID=1000
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ffmpeg \
+        fonts-noto-cjk \
         gstreamer1.0-plugins-bad \
         gstreamer1.0-plugins-base \
         gstreamer1.0-plugins-good \
@@ -15,16 +16,25 @@ RUN apt-get update \
         libgl1 \
         libglib2.0-0 \
         libportaudio2 \
+        locales \
         portaudio19-dev \
         pulseaudio-utils \
         python3-tk \
         tk \
         v4l-utils \
         xauth \
+    && sed -i 's/^# *ko_KR.UTF-8 UTF-8/ko_KR.UTF-8 UTF-8/' /etc/locale.gen \
+    && locale-gen \
+    && update-locale LANG=ko_KR.UTF-8 \
     && rm -rf /var/lib/apt/lists/*
 
-RUN groupadd --gid "${GID}" avc \
-    && useradd --uid "${UID}" --gid "${GID}" --create-home --shell /bin/bash avc
+RUN set -eux; \
+    if ! getent group "${GID}" >/dev/null; then \
+      groupadd --gid "${GID}" avc; \
+    fi; \
+    if ! getent passwd "${UID}" >/dev/null; then \
+      useradd --uid "${UID}" --gid "${GID}" --create-home --shell /bin/bash avc; \
+    fi
 
 WORKDIR /workspace
 
@@ -38,6 +48,8 @@ COPY docker/linux/entrypoint.sh /usr/local/bin/avc-docker-entrypoint
 RUN chmod +x /usr/local/bin/avc-docker-entrypoint
 
 ENV HOME=/home/avc
+ENV LANG=ko_KR.UTF-8
+ENV LC_ALL=ko_KR.UTF-8
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/workspace
 

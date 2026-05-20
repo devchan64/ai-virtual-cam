@@ -100,23 +100,27 @@ GUI 설정:
 
 ```bash
 xhost +si:localuser:$USER
-export AVC_INPUT_DEVICE=/dev/video0
 ./bin/avc docker config
 ```
+
+- 환경변수를 지정하지 않으면 입력 카메라는 기본값 `/dev/video0`를 사용합니다.
+- 설정은 로컬 `~/.avc/setting.json`에 저장됩니다.
 
 스트리밍 실행:
 
 ```bash
-export AVC_INPUT_DEVICE=/dev/video0
-export AVC_OUTPUT_DEVICE=/dev/video10
 ./bin/avc docker serve
 ```
+
+- 환경변수를 지정하지 않으면 입력 `/dev/video0`, 출력 `/dev/video10` 기본값으로 실행합니다.
+- `serve`는 항상 로컬 `~/.avc/setting.json` 존재 여부를 먼저 확인하고 없으면 즉시 실패합니다.
+- `./bin/avc docker build` 로그는 `.tmp/docker-build-<UTC_TIMESTAMP>.log`로 저장됩니다.
 
 운영 원칙:
 
 - `config`와 `serve` 모두 `~/.avc/setting.json`을 동일하게 사용
 - 장치 경로는 컨테이너 내부에서도 호스트와 동일한 절대 경로로 마운트
-- `serve`는 `AVC_OUTPUT_DEVICE`가 없으면 즉시 실패
+- 기본 장치 경로는 입력 `/dev/video0`, 출력 `/dev/video10`
 - `config`는 `DISPLAY` 또는 X11 소켓이 없으면 즉시 실패
 
 ### 4) 회의 앱 연결
