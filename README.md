@@ -57,6 +57,7 @@ macOS 오디오 권장:
 호스트 준비:
 
 - `v4l2loopback` 장치는 호스트에서 먼저 생성해야 합니다.
+- 가상 카메라 생성/제거는 반드시 호스트 `./bin/avc config`에서 수행해야 합니다. (`docker config`에서는 생성/제거 불가)
 - `config` GUI는 X11 전달이 필요합니다.
 - PulseAudio/PipeWire를 쓸 경우 사용자 런타임 디렉터리(`/run/user/<uid>`)가 컨테이너에 마운트됩니다.
 - `./bin/avc setup`은 Docker/Compose/X11 유틸까지 설치하지만, `docker` 그룹 반영을 위해 재로그인이 필요할 수 있습니다.
@@ -124,6 +125,7 @@ xhost +si:localuser:$USER
 - `config`와 `serve` 모두 `~/.avc/setting.json`을 동일하게 사용
 - 장치 경로는 컨테이너 내부에서도 호스트와 동일한 절대 경로로 마운트
 - 기본 장치 경로는 입력 `/dev/video0`, 출력 `/dev/video10`
+- 가상 카메라 생성/삭제는 호스트 `config` 전용 기능
 - `config`는 `DISPLAY` 또는 X11 소켓이 없으면 즉시 실패
 
 ### 4) 회의 앱 연결
@@ -197,6 +199,7 @@ pluginkit -m -A -D | grep -Ei "obs|virtual.?camera|cameraextension|coremedia"
 - 기본 생성 옵션: `exclusive_caps=1`, `devices=1`, `max_buffers=2`
 - 실패 시 `exclusive_caps=0` 순차 폴백
 - Docker 실행은 가상 카메라 생성을 대체하지 않음. 장치는 호스트에서 먼저 준비해야 함.
+- Docker `config`에서 가상 카메라 생성/제거를 시도하지 말고, 호스트 `./bin/avc config`에서 먼저 생성/검증 후 Docker `serve`를 실행하세요.
 
 권한 준비 후 실행:
 

@@ -77,6 +77,22 @@ require_device() {
   [[ -e "$path" ]] || fail "$label does not exist: $path"
 }
 
+require_v4l2_output_capable() {
+  local path="$1"
+  if ! command -v v4l2-ctl >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local info
+  info="$(v4l2-ctl -D -d "$path" 2>&1 || true)"
+  if [[ -z "$info" ]]; then
+    fail "Failed to inspect V4L2 device: $path"
+  fi
+  if ! printf '%s' "$info" | grep -qi "Video Output"; then
+    fail "Configured output device is not V4L2 video output capable: $path. Recreate v4l2loopback device and retry."
+  fi
+}
+
 timestamp_utc() {
   date -u +"%Y%m%dT%H%M%SZ"
 }
@@ -141,6 +157,7 @@ case "$cmd" in
   serve)
     require_device "${AVC_INPUT_DEVICE:-$DEFAULT_INPUT_DEVICE}" "AVC_INPUT_DEVICE"
     require_device "${AVC_OUTPUT_DEVICE:-$DEFAULT_OUTPUT_DEVICE}" "AVC_OUTPUT_DEVICE"
+    require_v4l2_output_capable "${AVC_OUTPUT_DEVICE:-$DEFAULT_OUTPUT_DEVICE}"
     [[ -f "$CONFIG_FILE" ]] || fail "Config file not found: $CONFIG_FILE. Run './bin/avc docker config' first or provide AVC_CONFIG_DIR."
     run_compose avc-serve python3 -m src.app.main --config "$CONTAINER_CONFIG_FILE" "$@"
     ;;

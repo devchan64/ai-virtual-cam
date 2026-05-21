@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 from collections import deque
 import sys
 import time
@@ -114,8 +115,36 @@ def _run_sudo_cmd_noninteractive(
     check: bool = False,
     timeout: float | None = 4.0,
 ) -> subprocess.CompletedProcess:
-    """Run sudo without password prompt to avoid GUI freeze on non-TTY contexts."""
-    return _run_cmd(["sudo", "-n", *args], check=check, timeout=timeout)
+    """Run privileged command for GUI config.
+
+    Priority:
+    1) pkexec (GUI password prompt)
+    2) sudo -n (non-interactive fallback)
+    """
+    if _is_container_runtime():
+        raise RuntimeError(
+            "docker config에서는 sudo/modprobe를 사용할 수 없습니다. "
+            "호스트 ./bin/avc config에서 가상 장치를 생성한 뒤 다시 시도하세요."
+        )
+
+    if shutil.which("pkexec") is not None:
+        proc = _run_cmd(["pkexec", *args], check=False, timeout=timeout)
+        if check and proc.returncode != 0:
+            err = (proc.stderr or proc.stdout or "").strip() or f"code={proc.returncode}"
+            raise RuntimeError(f"pkexec 실행 실패: {err}")
+        return proc
+
+    if shutil.which("sudo") is not None:
+        return _run_cmd(["sudo", "-n", *args], check=check, timeout=timeout)
+
+    raise RuntimeError(
+        "권한 상승 명령(pkexec/sudo)을 찾을 수 없습니다. "
+        "호스트에서 설치 상태를 확인한 뒤 다시 시도하세요."
+    )
+
+
+def _is_container_runtime() -> bool:
+    return Path("/.dockerenv").exists()
 
 
 def _is_v4l2_capture_capable(device_path: str) -> tuple[bool | None, str]:
@@ -996,12 +1025,28 @@ class ConfigGui:
         )
         row += 1
         if platform.system() == "Linux":
-            ttk.Button(tab_io, text="가상 카메라 생성", command=self._create_virtual_camera).grid(
+            in_container = _is_container_runtime()
+            create_cam_btn = ttk.Button(tab_io, text="가상 카메라 생성", command=self._create_virtual_camera)
+            remove_cam_btn = ttk.Button(tab_io, text="가상 카메라 제거", command=self._remove_virtual_camera)
+            create_cam_btn.grid(
                 row=row, column=0, columnspan=2, sticky="ew", padx=4, pady=(6, 0)
             )
-            ttk.Button(tab_io, text="가상 카메라 제거", command=self._remove_virtual_camera).grid(
+            remove_cam_btn.grid(
                 row=row, column=2, columnspan=2, sticky="ew", padx=4, pady=(6, 0)
             )
+            if in_container:
+                create_cam_btn.configure(state="disabled")
+                remove_cam_btn.configure(state="disabled")
+                ttk.Label(
+                    tab_io,
+                    text="Docker config에서는 가상 카메라 생성/제거를 지원하지 않습니다. 호스트 ./bin/avc config를 사용하세요.",
+                    foreground="#a33",
+                ).grid(row=row + 1, column=0, columnspan=4, sticky="w", padx=4, pady=(4, 0))
+                _log(
+                    "docker config에서는 가상 카메라 생성/제거를 지원하지 않습니다. "
+                    "호스트 ./bin/avc config를 사용하세요."
+                )
+                row += 1
             row += 1
         ttk.Button(tab_io, text="비디오 기본값 복원", command=self._reset_video_settings).grid(
             row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0)
@@ -1113,12 +1158,28 @@ class ConfigGui:
         )
         row += 1
         if platform.system() == "Linux":
-            ttk.Button(tab_audio, text="가상 마이크 생성", command=self._create_virtual_speaker).grid(
+            in_container = _is_container_runtime()
+            create_mic_btn = ttk.Button(tab_audio, text="가상 마이크 생성", command=self._create_virtual_speaker)
+            remove_mic_btn = ttk.Button(tab_audio, text="가상 마이크 제거", command=self._remove_virtual_speaker)
+            create_mic_btn.grid(
                 row=row, column=0, columnspan=2, sticky="ew", padx=4, pady=(6, 0)
             )
-            ttk.Button(tab_audio, text="가상 마이크 제거", command=self._remove_virtual_speaker).grid(
+            remove_mic_btn.grid(
                 row=row, column=2, columnspan=2, sticky="ew", padx=4, pady=(6, 0)
             )
+            if in_container:
+                create_mic_btn.configure(state="disabled")
+                remove_mic_btn.configure(state="disabled")
+                ttk.Label(
+                    tab_audio,
+                    text="Docker config에서는 가상 마이크 생성/제거를 지원하지 않습니다. 호스트 ./bin/avc config를 사용하세요.",
+                    foreground="#a33",
+                ).grid(row=row + 1, column=0, columnspan=4, sticky="w", padx=4, pady=(4, 0))
+                _log(
+                    "docker config에서는 가상 마이크 생성/제거를 지원하지 않습니다. "
+                    "호스트 ./bin/avc config를 사용하세요."
+                )
+                row += 1
             row += 1
         self._add_int(tab_audio, row, "audio_sample_rate", "Sample rate", 48000)
         self._add_int(tab_audio, row, "audio_channels", "Channels", 1, col_offset=2)
@@ -1536,6 +1597,14 @@ class ConfigGui:
                 _run_sudo_cmd_noninteractive(["modprobe", "videodev"], check=False, timeout=4.0)
                 proc = _run_sudo_cmd_noninteractive(cmd, check=False, timeout=4.0)
             except Exception as exc:
+                if "sudo 명령이 없어" in str(exc):
+                    _log(f"가상 카메라 생성 실패: {exc}")
+                    messagebox.showerror("가상 카메라 생성", str(exc))
+                    return
+                if "docker config에서는 sudo/modprobe를 사용할 수 없습니다." in str(exc):
+                    _log(f"가상 카메라 생성 실패: {exc}")
+                    messagebox.showerror("가상 카메라 생성", str(exc))
+                    return
                 last_error = f"modprobe 실행 예외: {exc}"
                 _log(last_error)
                 continue
@@ -1571,6 +1640,7 @@ class ConfigGui:
             "가상 카메라 생성",
             f"사용 가능한 가상 카메라 장치 생성 실패: {last_error}",
         )
+        _log(f"가상 카메라 생성 실패: {last_error}")
 
     def _remove_virtual_camera(self) -> None:
         if platform.system() != "Linux":
@@ -1581,18 +1651,21 @@ class ConfigGui:
         try:
             proc = _run_sudo_cmd_noninteractive(["modprobe", "-r", "v4l2loopback"], check=False, timeout=4.0)
         except Exception as exc:
+            _log(f"가상 카메라 제거 실패: {exc}")
             messagebox.showerror("가상 카메라 제거", f"모듈 제거 실패: {exc}")
             return
 
         if proc.returncode != 0:
             err = (proc.stderr or proc.stdout or "").strip()
             if "a password is required" in err.lower() or "sudo" in err.lower():
+                _log("가상 카메라 제거 실패: sudo 비밀번호 입력 필요")
                 messagebox.showerror(
                     "가상 카메라 제거",
                     "sudo 비밀번호 입력이 필요한 상태입니다.\n"
                     "터미널에서 `sudo -v` 실행 후 다시 시도하세요.",
                 )
                 return
+            _log(f"가상 카메라 제거 실패(code={proc.returncode}): {err}")
             messagebox.showerror(
                 "가상 카메라 제거",
                 f"모듈 제거 실패 (code={proc.returncode})\n{proc.stdout or ''}{proc.stderr or ''}".strip(),
