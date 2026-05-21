@@ -671,6 +671,42 @@ class AudioMixerConfig:
 
 
 @dataclass(frozen=True)
+class FaceEnhanceConfig:
+    enabled: bool
+    gamma: float
+    offset: float
+    saturation: float
+    strength: float
+    minRegionRatio: float
+    edgeNoise: float
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> "FaceEnhanceConfig":
+        config = cls(
+            enabled=bool(raw.get("enabled", False)),
+            gamma=float(raw.get("gamma", 1.0)),
+            offset=float(raw.get("offset", raw.get("brightness", 0.0))),
+            saturation=float(raw.get("saturation", 1.0)),
+            strength=float(raw.get("strength", raw.get("blend", 0.65))),
+            minRegionRatio=float(raw.get("minRegionRatio", raw.get("minSizeRatio", 0.12))),
+            edgeNoise=float(raw.get("edgeNoise", raw.get("edgeDither", 0.25))),
+        )
+        if not 0.5 <= config.gamma <= 1.8:
+            raise ValueError("faceEnhance.gamma must be between 0.5 and 1.8")
+        if not -80.0 <= config.offset <= 80.0:
+            raise ValueError("faceEnhance.offset must be between -80 and 80")
+        if not 0.5 <= config.saturation <= 1.8:
+            raise ValueError("faceEnhance.saturation must be between 0.5 and 1.8")
+        if not 0.0 <= config.strength <= 1.0:
+            raise ValueError("faceEnhance.strength must be between 0.0 and 1.0")
+        if not 0.05 <= config.minRegionRatio <= 0.5:
+            raise ValueError("faceEnhance.minRegionRatio must be between 0.05 and 0.5")
+        if not 0.0 <= config.edgeNoise <= 1.0:
+            raise ValueError("faceEnhance.edgeNoise must be between 0.0 and 1.0")
+        return config
+
+
+@dataclass(frozen=True)
 class AppConfig:
     inputCamera: InputCameraConfig
     outputCamera: OutputCameraConfig
@@ -678,6 +714,7 @@ class AppConfig:
     background: BackgroundConfig
     crop: PersonCropConfig
     audio: AudioMixerConfig | None = None
+    faceEnhance: FaceEnhanceConfig = field(default_factory=lambda: FaceEnhanceConfig.from_dict({}))
 
     @classmethod
     def load(cls, path: Path) -> "AppConfig":
@@ -696,6 +733,7 @@ class AppConfig:
             background=BackgroundConfig.from_dict(raw["background"]),
             crop=crop_cfg,
             audio=AudioMixerConfig.from_dict(raw["audio"]) if raw.get("audio") else None,
+            faceEnhance=FaceEnhanceConfig.from_dict(raw.get("faceEnhance") or {}),
         )
 
 

@@ -52,59 +52,13 @@ def _segmentation_backend_options():
     return ["selfie", "selfie_ensemble", "mock", "onnxruntime", "tensorrt"]
 
 
-def _parse_scalar_value(raw: str):
-    text = raw.strip()
-    lowered = text.lower()
-    if lowered in {"true", "yes", "on"}:
-        return True
-    if lowered in {"false", "no", "off"}:
-        return False
-    if lowered in {"null", "none"}:
-        return None
-    if (text.startswith('"') and text.endswith('"')) or (text.startswith("'") and text.endswith("'")):
-        return text[1:-1]
-    try:
-        if any(ch in text for ch in (".", "e", "E")):
-            return float(text)
-        return int(text)
-    except ValueError:
-        return text
-
-
-def _parse_engine_options_text(raw: str) -> dict[str, object]:
-    text = (raw or "").strip()
-    if not text:
-        return {}
-    if text.startswith("{"):
-        parsed = json.loads(text)
-        if not isinstance(parsed, dict):
-            raise ValueError("Engine options JSON must be an object")
-        return parsed
-    options: dict[str, object] = {}
-    for idx, line in enumerate(text.splitlines(), start=1):
-        striped = line.strip()
-        if not striped or striped.startswith("#"):
-            continue
-        if ":" in striped:
-            key, value = striped.split(":", 1)
-        elif "=" in striped:
-            key, value = striped.split("=", 1)
-        else:
-            raise ValueError(f"Engine option parse error at line {idx}: '{line}'")
-        key = key.strip()
-        if not key:
-            raise ValueError(f"Engine option parse error at line {idx}: empty key")
-        options[key] = _parse_scalar_value(value)
-    return options
-
-
-def _dump_engine_options_text(options: dict[str, object]) -> str:
-    if not options:
-        return ""
-    lines: list[str] = []
-    for key in sorted(options.keys()):
-        lines.append(f"{key}: {options[key]}")
-    return "\n".join(lines)
+SEG_ENGINE_OPTION_FIELDS: dict[str, tuple[str, ...]] = {
+    "selfie": ("temporalAlpha", "maskBlur", "morphOpen", "morphClose", "maskGamma"),
+    "selfie_ensemble": ("modelBlend", "temporalAlpha", "maskBlur", "morphOpen", "morphClose", "maskGamma"),
+    "onnxruntime": ("temporalAlpha", "maskBlur", "morphOpen", "morphClose", "maskGamma"),
+    "mock": (),
+    "tensorrt": (),
+}
 
 
 def _output_backend_options():
@@ -943,7 +897,14 @@ class ConfigGui:
         self._audio_tune_done: bool = False
         self._language_var = tk.StringVar(value=self._lang)
         self._preview_qt_check_done = False
-        self._seg_engine_options_text_widget: tk.Text | None = None
+        self._seg_engine_option_keys = (
+            "seg_opt_model_blend",
+            "seg_opt_temporal_alpha",
+            "seg_opt_mask_blur",
+            "seg_opt_morph_open",
+            "seg_opt_morph_close",
+            "seg_opt_mask_gamma",
+        )
         self._build_form()
         self._load_existing_config()
 
@@ -987,12 +948,14 @@ class ConfigGui:
         tab_bg = ttk.Frame(notebook, padding=8)
         tab_crop = ttk.Frame(notebook, padding=8)
         tab_audio = ttk.Frame(notebook, padding=8)
+        tab_face = ttk.Frame(notebook, padding=8)
         notebook.add(tab_io, text=self._tr("title.tab.io", "I/O"))
         notebook.add(tab_seg, text=self._tr("title.tab.seg", "Segmentation"))
         notebook.add(tab_bg, text=self._tr("title.tab.bg", "Background"))
         notebook.add(tab_crop, text=self._tr("title.tab.crop", "Framing"))
+        notebook.add(tab_face, text="화질")
         notebook.add(tab_audio, text=self._tr("title.tab.audio", "Audio"))
-        for tab in (tab_io, tab_seg, tab_bg, tab_crop, tab_audio):
+        for tab in (tab_io, tab_seg, tab_bg, tab_crop, tab_audio, tab_face):
             for col in range(4):
                 tab.columnconfigure(col, weight=1 if col in (1, 3) else 0)
 
@@ -1104,7 +1067,7 @@ class ConfigGui:
                 )
                 row += 1
             row += 1
-        ttk.Button(tab_io, text="비디오 기본값 복원", command=self._reset_video_settings).grid(
+        ttk.Button(tab_io, text="입출력 탭 기본값 복원", command=self._reset_io_settings).grid(
             row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0)
         )
 
@@ -1121,27 +1084,29 @@ class ConfigGui:
         row += 1
         self._add_slider(tab_seg, row, "seg_selfie_smoothing", "Selfie temporal smoothing", 0.25, 0.0, 0.95, resolution=0.01)
         row += 1
-        ttk.Label(tab_seg, text="Engine options (YAML/JSON)").grid(row=row, column=0, sticky="w", padx=4, pady=(8, 0))
+        ttk.Label(tab_seg, text="Engine options").grid(row=row, column=0, sticky="w", padx=4, pady=(8, 0))
         row += 1
-        seg_opts = tk.Text(tab_seg, height=6, width=48, wrap="none")
-        seg_opts.grid(row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(0, 0))
-        seg_opts.insert(
-            "1.0",
-            "# 예시 (selfie_ensemble)\n"
-            "# modelBlend: 0.6\n"
-            "# temporalAlpha: 0.55\n"
-            "# maskBlur: 5\n"
-            "# morphOpen: 3\n"
-            "# morphClose: 5\n"
-            "# maskGamma: 0.9\n",
-        )
-        self._seg_engine_options_text_widget = seg_opts
+        self._add_slider(tab_seg, row, "seg_opt_model_blend", "Model blend", 0.60, 0.0, 1.0, resolution=0.01)
+        row += 1
+        self._add_slider(tab_seg, row, "seg_opt_temporal_alpha", "Temporal alpha override", 0.55, 0.0, 0.95, resolution=0.01)
+        row += 1
+        self._add_slider(tab_seg, row, "seg_opt_mask_blur", "Mask blur kernel", 5, 0, 21, resolution=1)
+        row += 1
+        self._add_slider(tab_seg, row, "seg_opt_morph_open", "Morph open kernel", 3, 0, 15, resolution=1)
+        row += 1
+        self._add_slider(tab_seg, row, "seg_opt_morph_close", "Morph close kernel", 5, 0, 15, resolution=1)
+        row += 1
+        self._add_slider(tab_seg, row, "seg_opt_mask_gamma", "Mask gamma", 0.90, 0.5, 1.5, resolution=0.01)
         row += 1
         ttk.Label(
             tab_seg,
-            text="선택 엔진별 추가 속성입니다. 빈 값이면 기본 동작을 사용합니다.",
+            text="선택한 엔진에서 지원하는 항목만 활성화됩니다.",
             foreground="#666",
         ).grid(row=row, column=0, columnspan=4, sticky="w", padx=4, pady=(2, 0))
+        row += 1
+        ttk.Button(tab_seg, text="세그멘테이션 탭 기본값 복원", command=self._reset_seg_settings).grid(
+            row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0)
+        )
 
         row = 0
         self._add_combo(tab_bg, row, "bg_mode", "Background mode", ["chroma", "image", "image_chroma"], "chroma")
@@ -1156,6 +1121,10 @@ class ConfigGui:
         ttk.Button(tab_bg, text="Pick Color", command=self._pick_chroma_color).grid(row=row, column=2, sticky="ew", padx=4)
         row += 1
         self._add_slider(tab_bg, row, "bg_blend_alpha", "Color blend alpha", 0.35, 0.0, 1.0, resolution=0.01)
+        row += 1
+        ttk.Button(tab_bg, text="배경 탭 기본값 복원", command=self._reset_bg_settings).grid(
+            row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0)
+        )
 
         row = 0
         self._add_slider(tab_crop, row, "crop_margin", "Person crop margin", 0.25, 0.0, 2.0, resolution=0.01)
@@ -1187,6 +1156,10 @@ class ConfigGui:
         self._add_slider(tab_crop, row, "crop_pan_target_offset_x", "Pan target offset X", 0.00, -1.0, 1.0, resolution=0.01)
         row += 1
         self._add_slider(tab_crop, row, "crop_pan_target_offset_y", "Pan target offset Y", 0.00, -1.0, 1.0, resolution=0.01)
+        row += 1
+        ttk.Button(tab_crop, text="프레이밍 탭 기본값 복원", command=self._reset_crop_settings).grid(
+            row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0)
+        )
 
         row = 0
         self._add_bool_switch(tab_audio, row, "audio_enabled", "Audio mixer", True)
@@ -1294,7 +1267,26 @@ class ConfigGui:
             row=row, column=2, columnspan=2, sticky="ew", padx=4, pady=(6, 0)
         )
         row += 1
-        ttk.Button(tab_audio, text="오디오 기본값 복원", command=self._reset_audio_settings).grid(
+        ttk.Button(tab_audio, text="오디오 탭 기본값 복원", command=self._reset_audio_settings).grid(
+            row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0)
+        )
+
+        row = 0
+        self._add_bool_switch(tab_face, row, "face_enhance_enabled", "얼굴 화질 보정 활성화", False)
+        row += 1
+        self._add_slider(tab_face, row, "face_enhance_gamma", "얼굴 감마", 1.0, 0.5, 1.8, resolution=0.01)
+        row += 1
+        self._add_slider(tab_face, row, "face_enhance_brightness", "얼굴 밝기", 0.0, -80.0, 80.0, resolution=1)
+        row += 1
+        self._add_slider(tab_face, row, "face_enhance_saturation", "얼굴 채도", 1.0, 0.5, 1.8, resolution=0.01)
+        row += 1
+        self._add_slider(tab_face, row, "face_enhance_blend", "보정 강도(블렌드)", 0.65, 0.0, 1.0, resolution=0.01)
+        row += 1
+        self._add_slider(tab_face, row, "face_enhance_min_size_ratio", "최소 얼굴 크기 비율", 0.12, 0.05, 0.50, resolution=0.01)
+        row += 1
+        self._add_slider(tab_face, row, "face_enhance_edge_dither", "얼굴 엣지 디더링", 0.25, 0.0, 1.0, resolution=0.01)
+        row += 1
+        ttk.Button(tab_face, text="화질 탭 기본값 복원", command=self._reset_face_settings).grid(
             row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0)
         )
 
@@ -1338,6 +1330,10 @@ class ConfigGui:
         output_height_widget = self._widgets.get("output_height")
         if output_height_widget is not None:
             output_height_widget.bind("<<ComboboxSelected>>", self._on_output_height_changed)
+        seg_backend_widget = self._widgets.get("seg_backend")
+        if seg_backend_widget is not None:
+            seg_backend_widget.bind("<<ComboboxSelected>>", self._on_seg_backend_changed)
+        self._on_seg_backend_changed()
 
     def _on_scroll_canvas_configure(self, event) -> None:
         self._scroll_canvas.itemconfigure(self._scroll_window, width=event.width)
@@ -1404,6 +1400,7 @@ class ConfigGui:
         ttk.Label(parent, textvariable=value_var).grid(row=row, column=3, sticky="e")
         self._slider_value_vars[key] = value_var
         self._slider_formatters[key] = format_value
+        self._widgets[key] = scale
 
     def _add_combo(self, parent, row, key, label, values, default, readonly=False, col_offset=0):
         ttk.Label(parent, text=label).grid(row=row, column=col_offset, sticky="w")
@@ -1607,6 +1604,12 @@ class ConfigGui:
             "seg_blend_feather": 0.35,
             "seg_selfie_model": 1,
             "seg_selfie_smoothing": 0.25,
+            "seg_opt_model_blend": 0.60,
+            "seg_opt_temporal_alpha": 0.55,
+            "seg_opt_mask_blur": 5,
+            "seg_opt_morph_open": 3,
+            "seg_opt_morph_close": 5,
+            "seg_opt_mask_gamma": 0.90,
             "bg_mode": "chroma",
             "bg_image": "",
             "bg_r": 0,
@@ -1628,6 +1631,13 @@ class ConfigGui:
             "crop_tilt_pid_kd": 0.12,
             "crop_pan_target_offset_x": 0.00,
             "crop_pan_target_offset_y": 0.00,
+            "face_enhance_enabled": False,
+            "face_enhance_gamma": 1.0,
+            "face_enhance_brightness": 0.0,
+            "face_enhance_saturation": 1.0,
+            "face_enhance_blend": 0.65,
+            "face_enhance_min_size_ratio": 0.12,
+            "face_enhance_edge_dither": 0.25,
         }
 
     def _create_virtual_camera(self) -> None:
@@ -1870,15 +1880,84 @@ class ConfigGui:
         _log(f"Virtual microphone removed: {AUDIO_VIRTUAL_SINK_NAME}")
         messagebox.showinfo("가상 마이크 제거", f"가상 마이크 모듈을 제거했습니다: {AUDIO_VIRTUAL_SINK_NAME}")
 
-    def _reset_video_settings(self) -> None:
+    def _reset_io_settings(self) -> None:
         defaults = self._build_video_defaults()
-        for key, value in defaults.items():
-            self._set_var(key, value)
-        self._set_seg_engine_options_text("")
+        for key in (
+            "input_device",
+            "input_width",
+            "input_height",
+            "input_fps",
+            "input_software_zoom",
+            "output_backend",
+            "output_device",
+            "output_width",
+            "output_height",
+            "output_fps",
+        ):
+            self._set_var(key, defaults.get(key))
         self._on_input_device_changed()
         self._on_input_width_changed()
         self._on_output_device_changed()
         self._on_output_height_changed()
+
+    def _reset_seg_settings(self) -> None:
+        defaults = self._build_video_defaults()
+        for key in (
+            "seg_backend",
+            "seg_threshold",
+            "seg_edge_smoothness",
+            "seg_blend_feather",
+            "seg_selfie_model",
+            "seg_selfie_smoothing",
+            "seg_opt_model_blend",
+            "seg_opt_temporal_alpha",
+            "seg_opt_mask_blur",
+            "seg_opt_morph_open",
+            "seg_opt_morph_close",
+            "seg_opt_mask_gamma",
+        ):
+            self._set_var(key, defaults.get(key))
+        self._on_seg_backend_changed()
+
+    def _reset_bg_settings(self) -> None:
+        defaults = self._build_video_defaults()
+        for key in ("bg_mode", "bg_image", "bg_r", "bg_g", "bg_b", "bg_blend_alpha"):
+            value = defaults.get(key)
+            self._set_var(key, value)
+
+    def _reset_crop_settings(self) -> None:
+        defaults = self._build_video_defaults()
+        for key in (
+            "crop_margin",
+            "crop_pan_smoothing",
+            "crop_tilt_smoothing",
+            "crop_zoom_smoothing",
+            "crop_upper_body_bias",
+            "crop_upper_body_ratio",
+            "crop_upper_body_edge_smoothing",
+            "crop_pan_pid_kp",
+            "crop_pan_pid_ki",
+            "crop_pan_pid_kd",
+            "crop_tilt_pid_kp",
+            "crop_tilt_pid_ki",
+            "crop_tilt_pid_kd",
+            "crop_pan_target_offset_x",
+            "crop_pan_target_offset_y",
+        ):
+            self._set_var(key, defaults.get(key))
+
+    def _reset_face_settings(self) -> None:
+        defaults = self._build_video_defaults()
+        for key in (
+            "face_enhance_enabled",
+            "face_enhance_gamma",
+            "face_enhance_brightness",
+            "face_enhance_saturation",
+            "face_enhance_blend",
+            "face_enhance_min_size_ratio",
+            "face_enhance_edge_dither",
+        ):
+            self._set_var(key, defaults.get(key))
 
     def _reset_audio_settings(self) -> None:
         defaults = self._build_audio_defaults()
@@ -1912,6 +1991,7 @@ class ConfigGui:
         bg_cfg = raw.get("background") or {}
         crop_cfg = raw.get("crop") or {}
         audio_cfg = raw.get("audio") or {}
+        face_cfg = raw.get("faceEnhance") or {}
 
         self._set_var("input_device", input_cfg.get("devicePath"))
         self._set_var("input_width", input_cfg.get("width"))
@@ -1938,7 +2018,7 @@ class ConfigGui:
             candidate = all_engine_options.get(seg_backend) or {}
             if isinstance(candidate, dict):
                 seg_engine_options = candidate
-        self._set_seg_engine_options_text(_dump_engine_options_text(seg_engine_options))
+        self._apply_seg_engine_options_to_form(seg_engine_options)
 
         self._set_var("bg_mode", bg_cfg.get("mode"))
         chroma = bg_cfg.get("chromaColor") or []
@@ -1964,6 +2044,13 @@ class ConfigGui:
         self._set_var("crop_tilt_pid_kd", crop_cfg.get("tiltPidKd", crop_cfg.get("panPidKd")))
         self._set_var("crop_pan_target_offset_x", crop_cfg.get("panTargetOffsetX"))
         self._set_var("crop_pan_target_offset_y", crop_cfg.get("panTargetOffsetY"))
+        self._set_var("face_enhance_enabled", face_cfg.get("enabled"))
+        self._set_var("face_enhance_gamma", face_cfg.get("gamma"))
+        self._set_var("face_enhance_brightness", face_cfg.get("offset", face_cfg.get("brightness")))
+        self._set_var("face_enhance_saturation", face_cfg.get("saturation"))
+        self._set_var("face_enhance_blend", face_cfg.get("strength", face_cfg.get("blend")))
+        self._set_var("face_enhance_min_size_ratio", face_cfg.get("minRegionRatio", face_cfg.get("minSizeRatio")))
+        self._set_var("face_enhance_edge_dither", face_cfg.get("edgeNoise", face_cfg.get("edgeDither")))
         self._load_audio_settings_from_config(audio_cfg)
         self._on_input_device_changed()
         self._on_input_width_changed()
@@ -2942,18 +3029,19 @@ class ConfigGui:
 
     def _start_preview(self, config: dict) -> None:
         from src.adapter.capture.opencv_capture import OpenCVCapture
-        from src.domain.config import BackgroundConfig, InputCameraConfig, PersonCropConfig, SegmentationConfig
+        from src.domain.config import BackgroundConfig, FaceEnhanceConfig, InputCameraConfig, PersonCropConfig, SegmentationConfig
         from src.pipeline.frame_processor import FrameProcessor
 
         input_cfg = InputCameraConfig.from_dict(config["inputCamera"])
         seg_cfg = SegmentationConfig.from_dict(config["segmentation"])
         bg_cfg = BackgroundConfig.from_dict(config["background"])
         crop_cfg = PersonCropConfig.from_dict(config["crop"])
+        face_cfg = FaceEnhanceConfig.from_dict(config.get("faceEnhance") or {})
         output_w = int(config["outputCamera"]["width"])
         output_h = int(config["outputCamera"]["height"])
 
         self._preview_capture = OpenCVCapture(input_cfg)
-        self._preview_processor = FrameProcessor(seg_cfg, bg_cfg, crop_cfg, output_w, output_h)
+        self._preview_processor = FrameProcessor(seg_cfg, bg_cfg, crop_cfg, face_cfg, output_w, output_h)
         self._preview_out_size = (output_w, output_h)
         self._preview_processing_signature = self._processing_signature(config)
         self._preview_active = True
@@ -2974,7 +3062,7 @@ class ConfigGui:
     def _preview_tick(self) -> None:
         if not self._preview_active:
             return
-        from src.domain.config import BackgroundConfig, PersonCropConfig, SegmentationConfig
+        from src.domain.config import BackgroundConfig, FaceEnhanceConfig, PersonCropConfig, SegmentationConfig
         from src.pipeline.frame_processor import FrameProcessor
 
         try:
@@ -2989,7 +3077,8 @@ class ConfigGui:
                 bg_cfg = BackgroundConfig.from_dict(config["background"])
                 seg_cfg = SegmentationConfig.from_dict(config["segmentation"])
                 crop_cfg = PersonCropConfig.from_dict(config["crop"])
-                self._preview_processor = FrameProcessor(seg_cfg, bg_cfg, crop_cfg, out_w, out_h)
+                face_cfg = FaceEnhanceConfig.from_dict(config.get("faceEnhance") or {})
+                self._preview_processor = FrameProcessor(seg_cfg, bg_cfg, crop_cfg, face_cfg, out_w, out_h)
                 self._preview_processing_signature = sig
 
             output_frame = self._preview_processor.process(frame)
@@ -3043,6 +3132,7 @@ class ConfigGui:
         seg = config["segmentation"]
         selfie = seg.get("selfie") or {}
         engine_options = (seg.get("engineOptions") or {}).get(seg.get("backend"), {})
+        face = config.get("faceEnhance") or {}
         return (
             seg.get("backend"),
             seg.get("threshold"),
@@ -3051,25 +3141,73 @@ class ConfigGui:
             selfie.get("modelSelection"),
             selfie.get("temporalSmoothing"),
             tuple(sorted((engine_options or {}).items())),
+            face.get("enabled"),
+            face.get("gamma"),
+            face.get("offset", face.get("brightness")),
+            face.get("saturation"),
+            face.get("strength", face.get("blend")),
+            face.get("minRegionRatio", face.get("minSizeRatio")),
+            face.get("edgeNoise", face.get("edgeDither")),
             self._background_signature(config["background"]),
             self._crop_signature(config["crop"]),
             int(config["outputCamera"]["width"]),
             int(config["outputCamera"]["height"]),
         )
 
-    def _get_seg_engine_options_text(self) -> str:
-        widget = self._seg_engine_options_text_widget
-        if widget is None:
-            return ""
-        return widget.get("1.0", "end").strip()
+    def _on_seg_backend_changed(self, _event=None) -> None:
+        backend = self.vars["seg_backend"].get().strip()
+        allowed = set(SEG_ENGINE_OPTION_FIELDS.get(backend, ()))
+        key_map = {
+            "seg_opt_model_blend": "modelBlend",
+            "seg_opt_temporal_alpha": "temporalAlpha",
+            "seg_opt_mask_blur": "maskBlur",
+            "seg_opt_morph_open": "morphOpen",
+            "seg_opt_morph_close": "morphClose",
+            "seg_opt_mask_gamma": "maskGamma",
+        }
+        for var_key, opt_key in key_map.items():
+            widget = self._widgets.get(var_key)
+            enabled = opt_key in allowed
+            if widget is None:
+                continue
+            if enabled:
+                widget.state(["!disabled"])
+            else:
+                widget.state(["disabled"])
 
-    def _set_seg_engine_options_text(self, value: str) -> None:
-        widget = self._seg_engine_options_text_widget
-        if widget is None:
-            return
-        widget.delete("1.0", "end")
-        if value:
-            widget.insert("1.0", value)
+    def _collect_seg_engine_options_from_form(self) -> dict[str, object]:
+        backend = self.vars["seg_backend"].get().strip()
+        allowed = set(SEG_ENGINE_OPTION_FIELDS.get(backend, ()))
+        options: dict[str, object] = {}
+        if "modelBlend" in allowed:
+            options["modelBlend"] = float(self.vars["seg_opt_model_blend"].get())
+        if "temporalAlpha" in allowed:
+            options["temporalAlpha"] = float(self.vars["seg_opt_temporal_alpha"].get())
+        if "maskBlur" in allowed:
+            options["maskBlur"] = int(round(float(self.vars["seg_opt_mask_blur"].get())))
+        if "morphOpen" in allowed:
+            options["morphOpen"] = int(round(float(self.vars["seg_opt_morph_open"].get())))
+        if "morphClose" in allowed:
+            options["morphClose"] = int(round(float(self.vars["seg_opt_morph_close"].get())))
+        if "maskGamma" in allowed:
+            options["maskGamma"] = float(self.vars["seg_opt_mask_gamma"].get())
+        return options
+
+    def _apply_seg_engine_options_to_form(self, options: dict[str, object]) -> None:
+        mapping = (
+            ("seg_opt_model_blend", "modelBlend"),
+            ("seg_opt_temporal_alpha", "temporalAlpha"),
+            ("seg_opt_mask_blur", "maskBlur"),
+            ("seg_opt_morph_open", "morphOpen"),
+            ("seg_opt_morph_close", "morphClose"),
+            ("seg_opt_mask_gamma", "maskGamma"),
+        )
+        for var_key, opt_key in mapping:
+            value = options.get(opt_key)
+            if value is None:
+                continue
+            self._set_var(var_key, value)
+        self._on_seg_backend_changed()
 
     def _build_config(self):
         iv = self.vars
@@ -3100,7 +3238,7 @@ class ConfigGui:
         )
         _validate_pulse_runtime_device("input", raw_audio_input)
         _validate_pulse_runtime_device("output", raw_audio_output)
-        seg_engine_options = _parse_engine_options_text(self._get_seg_engine_options_text())
+        seg_engine_options = self._collect_seg_engine_options_from_form()
 
         return build_config(
             input_device=iv["input_device"].get(),
@@ -3153,6 +3291,13 @@ class ConfigGui:
             audio_gate_release_ms=int(round(float(iv["audio_gate_release_ms"].get()))),
             audio_gate_open_gain=float(iv["audio_gate_open_gain"].get()),
             audio_gate_closed_gain=float(iv["audio_gate_closed_gain"].get()),
+            face_enhance_enabled=self._parse_bool(iv["face_enhance_enabled"].get()),
+            face_enhance_gamma=float(iv["face_enhance_gamma"].get()),
+            face_enhance_brightness=float(iv["face_enhance_brightness"].get()),
+            face_enhance_saturation=float(iv["face_enhance_saturation"].get()),
+            face_enhance_blend=float(iv["face_enhance_blend"].get()),
+            face_enhance_min_size_ratio=float(iv["face_enhance_min_size_ratio"].get()),
+            face_enhance_edge_dither=float(iv["face_enhance_edge_dither"].get()),
         )
 
 

@@ -16,6 +16,7 @@ class PipelineRunner:
             config.segmentation,
             config.background,
             config.crop,
+            config.faceEnhance,
             config.outputCamera.width,
             config.outputCamera.height,
         )

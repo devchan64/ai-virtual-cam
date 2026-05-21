@@ -434,6 +434,13 @@ def build_config(
     audio_gate_open_gain: float = 1.0,
     audio_gate_closed_gain: float = 0.0,
     audio_gate_min_voice_band_ratio: float = 0.50,
+    face_enhance_enabled: bool = False,
+    face_enhance_gamma: float = 1.0,
+    face_enhance_brightness: float = 0.0,
+    face_enhance_saturation: float = 1.0,
+    face_enhance_blend: float = 0.65,
+    face_enhance_min_size_ratio: float = 0.12,
+    face_enhance_edge_dither: float = 0.25,
 ) -> dict:
     if audio_output_device is None:
         audio_output_device = _default_audio_output_device()
@@ -521,5 +528,14 @@ def build_config(
                 "closedGain": float(audio_gate_closed_gain),
                 "minVoiceBandRatio": float(audio_gate_min_voice_band_ratio),
             },
+        },
+        "faceEnhance": {
+            "enabled": bool(face_enhance_enabled),
+            "gamma": float(face_enhance_gamma),
+            "offset": float(face_enhance_brightness),
+            "saturation": float(face_enhance_saturation),
+            "strength": float(face_enhance_blend),
+            "minRegionRatio": float(face_enhance_min_size_ratio),
+            "edgeNoise": float(face_enhance_edge_dither),
         },
     }

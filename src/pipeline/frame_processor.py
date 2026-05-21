@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import cv2
 import numpy as np
 
-from src.domain.config import BackgroundConfig, PersonCropConfig, SegmentationConfig
+from src.domain.config import BackgroundConfig, FaceEnhanceConfig, PersonCropConfig, SegmentationConfig
 from src.pipeline.background import BackgroundProvider
 from src.pipeline.bounds import BoundsTracker
 from src.pipeline.composer import Composer
@@ -17,6 +18,7 @@ class FrameProcessor:
         segmentation: SegmentationConfig,
         background: BackgroundConfig,
         crop: PersonCropConfig,
+        face_enhance: FaceEnhanceConfig,
         output_width: int,
         output_height: int,
     ) -> None:
@@ -25,12 +27,25 @@ class FrameProcessor:
         self._background = BackgroundProvider(background, output_width, output_height)
         self._bounds = BoundsTracker(crop, output_width, output_height)
         self._composer = Composer()
+        self._face_enhance = face_enhance
         self._output_width = output_width
         self._output_height = output_height
         self._low_mask_ratio_logged = False
         self._dark_fallback_warn_count = 0
+        self._face_cascade = None
+        self._face_warned = False
+        if self._face_enhance.enabled:
+            try:
+                self._face_cascade = cv2.CascadeClassifier(
+                    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+                )
+                if self._face_cascade.empty():
+                    self._face_cascade = None
+            except Exception:
+                self._face_cascade = None
 
     def process(self, frame: np.ndarray) -> np.ndarray:
+        frame = self._apply_face_enhance(frame)
         raw_mask = self._segmenter.segment(frame)
         mask = refine_mask(
             raw_mask,
@@ -84,3 +99,83 @@ class FrameProcessor:
             self._output_width,
             self._output_height,
         )
+
+    def _apply_face_enhance(self, frame: np.ndarray) -> np.ndarray:
+        if not self._face_enhance.enabled:
+            return frame
+        if self._face_cascade is None:
+            if not self._face_warned:
+                print("[face] warning: face detector unavailable; skip face enhancement.", flush=True)
+                self._face_warned = True
+            return frame
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = self._face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+        if len(faces) == 0:
+            return frame
+        h, w = frame.shape[:2]
+        min_size = int(min(h, w) * float(self._face_enhance.minRegionRatio))
+        out = frame.copy()
+        for x, y, fw, fh in faces:
+            if fw < min_size or fh < min_size:
+                continue
+            x0 = max(0, x)
+            y0 = max(0, y)
+            x1 = min(w, x + fw)
+            y1 = min(h, y + fh)
+            if x1 <= x0 or y1 <= y0:
+                continue
+            roi = out[y0:y1, x0:x1]
+            tuned = self._tune_roi(roi)
+            blend = float(self._face_enhance.strength)
+            alpha = self._build_face_alpha_mask(
+                roi.shape[0],
+                roi.shape[1],
+                blend,
+                float(self._face_enhance.edgeNoise),
+                seed=(x0 * 73856093) ^ (y0 * 19349663) ^ (fw * 83492791) ^ (fh * 2971215073),
+            )
+            alpha_3 = alpha[:, :, None].astype(np.float32)
+            blended = tuned.astype(np.float32) * alpha_3 + roi.astype(np.float32) * (1.0 - alpha_3)
+            out[y0:y1, x0:x1] = np.clip(blended, 0.0, 255.0).astype(np.uint8)
+        return out
+
+    def _tune_roi(self, roi: np.ndarray) -> np.ndarray:
+        f32 = roi.astype(np.float32) / 255.0
+        gamma = max(0.5, min(1.8, float(self._face_enhance.gamma)))
+        if abs(gamma - 1.0) > 1e-3:
+            f32 = np.power(np.clip(f32, 0.0, 1.0), 1.0 / gamma).astype(np.float32)
+        brightness = max(-80.0, min(80.0, float(self._face_enhance.offset))) / 255.0
+        if abs(brightness) > 1e-4:
+            f32 = np.clip(f32 + brightness, 0.0, 1.0)
+        bgr = (f32 * 255.0).astype(np.uint8)
+        sat = max(0.5, min(1.8, float(self._face_enhance.saturation)))
+        if abs(sat - 1.0) > 1e-3:
+            hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV).astype(np.float32)
+            hsv[:, :, 1] = np.clip(hsv[:, :, 1] * sat, 0.0, 255.0)
+            bgr = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
+        return bgr
+
+    def _build_face_alpha_mask(
+        self,
+        h: int,
+        w: int,
+        blend: float,
+        edge_dither: float,
+        seed: int,
+    ) -> np.ndarray:
+        yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+        cx = (w - 1) * 0.5
+        cy = (h - 1) * 0.5
+        rx = max(1.0, w * 0.55)
+        ry = max(1.0, h * 0.60)
+        dist = np.sqrt(((xx - cx) / rx) ** 2 + ((yy - cy) / ry) ** 2)
+        inner = 0.72
+        outer = 1.0
+        base = np.clip((outer - dist) / max(1e-6, (outer - inner)), 0.0, 1.0)
+        transition = ((dist > inner) & (dist < outer)).astype(np.float32)
+        if edge_dither > 0.0:
+            rng = np.random.default_rng(seed & 0xFFFFFFFF)
+            noise = rng.random((h, w), dtype=np.float32) - 0.5
+            base = np.clip(base + noise * float(edge_dither) * 0.35 * transition, 0.0, 1.0)
+        base = cv2.GaussianBlur(base, (0, 0), sigmaX=1.2, sigmaY=1.2)
+        return np.clip(base * float(blend), 0.0, 1.0).astype(np.float32)
