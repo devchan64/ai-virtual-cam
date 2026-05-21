@@ -312,8 +312,10 @@ Linux Docker 정책:
 - 프레이밍 실시간 조정: margin, zoom/pan/tilt smoothing, PID, X/Y 오프셋
 - 프리뷰 창에서 처리 결과 확인
 - 카메라 입력 모드 후보 기반(해상도/FPS 세트)
-- 화질 탭: 얼굴 감마/밝기/채도/블렌드 보정 + 얼굴 엣지 디더링
+- 화질 탭: 얼굴 감마/오프셋/채도/강도 보정 + 얼굴 엣지 노이즈(디더링)
 - `오디오 게이트 테스트`, 각 탭별 기본값 복원 버튼
+- 탭 순서: `입출력 -> 세그멘테이션 -> 배경 -> 프레이밍 -> 화질 -> 오디오`
+- `faceEnhance` 구키(`brightness`, `blend`, `minSizeRatio`, `edgeDither`) 하위호환은 지원하지 않음
 
 ## 설정 예시
 
@@ -372,6 +374,15 @@ Linux Docker 정책:
     "tiltPidKd": 0.12,
     "panTargetOffsetX": 0.0,
     "panTargetOffsetY": 0.0
+  },
+  "faceEnhance": {
+    "enabled": true,
+    "gamma": 1.1,
+    "offset": 8.0,
+    "saturation": 1.1,
+    "strength": 0.55,
+    "minRegionRatio": 0.12,
+    "edgeNoise": 0.25
   }
 }
 ```

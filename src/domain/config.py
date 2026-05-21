@@ -685,11 +685,11 @@ class FaceEnhanceConfig:
         config = cls(
             enabled=bool(raw.get("enabled", False)),
             gamma=float(raw.get("gamma", 1.0)),
-            offset=float(raw.get("offset", raw.get("brightness", 0.0))),
+            offset=float(raw.get("offset", 0.0)),
             saturation=float(raw.get("saturation", 1.0)),
-            strength=float(raw.get("strength", raw.get("blend", 0.65))),
-            minRegionRatio=float(raw.get("minRegionRatio", raw.get("minSizeRatio", 0.12))),
-            edgeNoise=float(raw.get("edgeNoise", raw.get("edgeDither", 0.25))),
+            strength=float(raw.get("strength", 0.65)),
+            minRegionRatio=float(raw.get("minRegionRatio", 0.12)),
+            edgeNoise=float(raw.get("edgeNoise", 0.25)),
         )
         if not 0.5 <= config.gamma <= 1.8:
             raise ValueError("faceEnhance.gamma must be between 0.5 and 1.8")

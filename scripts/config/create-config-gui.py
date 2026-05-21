@@ -2046,11 +2046,11 @@ class ConfigGui:
         self._set_var("crop_pan_target_offset_y", crop_cfg.get("panTargetOffsetY"))
         self._set_var("face_enhance_enabled", face_cfg.get("enabled"))
         self._set_var("face_enhance_gamma", face_cfg.get("gamma"))
-        self._set_var("face_enhance_brightness", face_cfg.get("offset", face_cfg.get("brightness")))
+        self._set_var("face_enhance_brightness", face_cfg.get("offset"))
         self._set_var("face_enhance_saturation", face_cfg.get("saturation"))
-        self._set_var("face_enhance_blend", face_cfg.get("strength", face_cfg.get("blend")))
-        self._set_var("face_enhance_min_size_ratio", face_cfg.get("minRegionRatio", face_cfg.get("minSizeRatio")))
-        self._set_var("face_enhance_edge_dither", face_cfg.get("edgeNoise", face_cfg.get("edgeDither")))
+        self._set_var("face_enhance_blend", face_cfg.get("strength"))
+        self._set_var("face_enhance_min_size_ratio", face_cfg.get("minRegionRatio"))
+        self._set_var("face_enhance_edge_dither", face_cfg.get("edgeNoise"))
         self._load_audio_settings_from_config(audio_cfg)
         self._on_input_device_changed()
         self._on_input_width_changed()
@@ -3143,11 +3143,11 @@ class ConfigGui:
             tuple(sorted((engine_options or {}).items())),
             face.get("enabled"),
             face.get("gamma"),
-            face.get("offset", face.get("brightness")),
+            face.get("offset"),
             face.get("saturation"),
-            face.get("strength", face.get("blend")),
-            face.get("minRegionRatio", face.get("minSizeRatio")),
-            face.get("edgeNoise", face.get("edgeDither")),
+            face.get("strength"),
+            face.get("minRegionRatio"),
+            face.get("edgeNoise"),
             self._background_signature(config["background"]),
             self._crop_signature(config["crop"]),
             int(config["outputCamera"]["width"]),
