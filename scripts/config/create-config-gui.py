@@ -48,8 +48,63 @@ from src.audio.gate import AudioGateConfig, NoiseGate
 
 def _segmentation_backend_options():
     if platform.system() == "Darwin":
-        return ["selfie", "mock", "onnxruntime"]
-    return ["selfie", "mock", "onnxruntime", "tensorrt"]
+        return ["selfie", "selfie_ensemble", "mock", "onnxruntime"]
+    return ["selfie", "selfie_ensemble", "mock", "onnxruntime", "tensorrt"]
+
+
+def _parse_scalar_value(raw: str):
+    text = raw.strip()
+    lowered = text.lower()
+    if lowered in {"true", "yes", "on"}:
+        return True
+    if lowered in {"false", "no", "off"}:
+        return False
+    if lowered in {"null", "none"}:
+        return None
+    if (text.startswith('"') and text.endswith('"')) or (text.startswith("'") and text.endswith("'")):
+        return text[1:-1]
+    try:
+        if any(ch in text for ch in (".", "e", "E")):
+            return float(text)
+        return int(text)
+    except ValueError:
+        return text
+
+
+def _parse_engine_options_text(raw: str) -> dict[str, object]:
+    text = (raw or "").strip()
+    if not text:
+        return {}
+    if text.startswith("{"):
+        parsed = json.loads(text)
+        if not isinstance(parsed, dict):
+            raise ValueError("Engine options JSON must be an object")
+        return parsed
+    options: dict[str, object] = {}
+    for idx, line in enumerate(text.splitlines(), start=1):
+        striped = line.strip()
+        if not striped or striped.startswith("#"):
+            continue
+        if ":" in striped:
+            key, value = striped.split(":", 1)
+        elif "=" in striped:
+            key, value = striped.split("=", 1)
+        else:
+            raise ValueError(f"Engine option parse error at line {idx}: '{line}'")
+        key = key.strip()
+        if not key:
+            raise ValueError(f"Engine option parse error at line {idx}: empty key")
+        options[key] = _parse_scalar_value(value)
+    return options
+
+
+def _dump_engine_options_text(options: dict[str, object]) -> str:
+    if not options:
+        return ""
+    lines: list[str] = []
+    for key in sorted(options.keys()):
+        lines.append(f"{key}: {options[key]}")
+    return "\n".join(lines)
 
 
 def _output_backend_options():
@@ -888,6 +943,7 @@ class ConfigGui:
         self._audio_tune_done: bool = False
         self._language_var = tk.StringVar(value=self._lang)
         self._preview_qt_check_done = False
+        self._seg_engine_options_text_widget: tk.Text | None = None
         self._build_form()
         self._load_existing_config()
 
@@ -1064,6 +1120,28 @@ class ConfigGui:
         self._add_slider(tab_seg, row, "seg_selfie_model", "Selfie model selection", 1, 0, 1, resolution=1)
         row += 1
         self._add_slider(tab_seg, row, "seg_selfie_smoothing", "Selfie temporal smoothing", 0.25, 0.0, 0.95, resolution=0.01)
+        row += 1
+        ttk.Label(tab_seg, text="Engine options (YAML/JSON)").grid(row=row, column=0, sticky="w", padx=4, pady=(8, 0))
+        row += 1
+        seg_opts = tk.Text(tab_seg, height=6, width=48, wrap="none")
+        seg_opts.grid(row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(0, 0))
+        seg_opts.insert(
+            "1.0",
+            "# 예시 (selfie_ensemble)\n"
+            "# modelBlend: 0.6\n"
+            "# temporalAlpha: 0.55\n"
+            "# maskBlur: 5\n"
+            "# morphOpen: 3\n"
+            "# morphClose: 5\n"
+            "# maskGamma: 0.9\n",
+        )
+        self._seg_engine_options_text_widget = seg_opts
+        row += 1
+        ttk.Label(
+            tab_seg,
+            text="선택 엔진별 추가 속성입니다. 빈 값이면 기본 동작을 사용합니다.",
+            foreground="#666",
+        ).grid(row=row, column=0, columnspan=4, sticky="w", padx=4, pady=(2, 0))
 
         row = 0
         self._add_combo(tab_bg, row, "bg_mode", "Background mode", ["chroma", "image", "image_chroma"], "chroma")
@@ -1796,6 +1874,7 @@ class ConfigGui:
         defaults = self._build_video_defaults()
         for key, value in defaults.items():
             self._set_var(key, value)
+        self._set_seg_engine_options_text("")
         self._on_input_device_changed()
         self._on_input_width_changed()
         self._on_output_device_changed()
@@ -1852,6 +1931,14 @@ class ConfigGui:
         self._set_var("seg_blend_feather", seg_cfg.get("blendFeather"))
         self._set_var("seg_selfie_model", selfie_cfg.get("modelSelection"))
         self._set_var("seg_selfie_smoothing", selfie_cfg.get("temporalSmoothing"))
+        seg_backend = str(seg_cfg.get("backend", "")).strip()
+        seg_engine_options = {}
+        all_engine_options = seg_cfg.get("engineOptions") or {}
+        if seg_backend and isinstance(all_engine_options, dict):
+            candidate = all_engine_options.get(seg_backend) or {}
+            if isinstance(candidate, dict):
+                seg_engine_options = candidate
+        self._set_seg_engine_options_text(_dump_engine_options_text(seg_engine_options))
 
         self._set_var("bg_mode", bg_cfg.get("mode"))
         chroma = bg_cfg.get("chromaColor") or []
@@ -2955,6 +3042,7 @@ class ConfigGui:
     def _processing_signature(self, config: dict):
         seg = config["segmentation"]
         selfie = seg.get("selfie") or {}
+        engine_options = (seg.get("engineOptions") or {}).get(seg.get("backend"), {})
         return (
             seg.get("backend"),
             seg.get("threshold"),
@@ -2962,11 +3050,26 @@ class ConfigGui:
             seg.get("blendFeather"),
             selfie.get("modelSelection"),
             selfie.get("temporalSmoothing"),
+            tuple(sorted((engine_options or {}).items())),
             self._background_signature(config["background"]),
             self._crop_signature(config["crop"]),
             int(config["outputCamera"]["width"]),
             int(config["outputCamera"]["height"]),
         )
+
+    def _get_seg_engine_options_text(self) -> str:
+        widget = self._seg_engine_options_text_widget
+        if widget is None:
+            return ""
+        return widget.get("1.0", "end").strip()
+
+    def _set_seg_engine_options_text(self, value: str) -> None:
+        widget = self._seg_engine_options_text_widget
+        if widget is None:
+            return
+        widget.delete("1.0", "end")
+        if value:
+            widget.insert("1.0", value)
 
     def _build_config(self):
         iv = self.vars
@@ -2997,6 +3100,7 @@ class ConfigGui:
         )
         _validate_pulse_runtime_device("input", raw_audio_input)
         _validate_pulse_runtime_device("output", raw_audio_output)
+        seg_engine_options = _parse_engine_options_text(self._get_seg_engine_options_text())
 
         return build_config(
             input_device=iv["input_device"].get(),
@@ -3014,6 +3118,7 @@ class ConfigGui:
             segmentation_blend_feather=float(iv["seg_blend_feather"].get()),
             segmentation_selfie_model_selection=int(round(float(iv["seg_selfie_model"].get()))),
             segmentation_selfie_temporal_smoothing=float(iv["seg_selfie_smoothing"].get()),
+            segmentation_engine_options=seg_engine_options,
             background=background,
             crop_margin=float(iv["crop_margin"].get()),
             crop_pan_smoothing=float(iv["crop_pan_smoothing"].get()),

@@ -19,14 +19,24 @@
     "fps": 30
   },
   "segmentation": {
-    "backend": "selfie",
+    "backend": "selfie_ensemble",
     "threshold": 0.65,
     "selfie": {
       "modelSelection": 1,
       "temporalSmoothing": 0.25
     },
     "edgeSmoothness": 0.5,
-    "blendFeather": 0.35
+    "blendFeather": 0.35,
+    "engineOptions": {
+      "selfie_ensemble": {
+        "modelBlend": 0.6,
+        "temporalAlpha": 0.55,
+        "maskBlur": 5,
+        "morphOpen": 3,
+        "morphClose": 5,
+        "maskGamma": 0.9
+      }
+    }
   },
   "background": {
     "mode": "chroma",

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import platform
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -433,17 +433,26 @@ class SegmentationConfig:
     selfieTemporalSmoothing: float = 0.25
     edgeSmoothness: float = 0.5
     blendFeather: float = 0.35
+    engineOptions: dict[str, object] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, raw: dict) -> "SegmentationConfig":
         selfie = raw.get("selfie") or {}
+        engine_options_all = raw.get("engineOptions") or {}
+        backend = str(raw["backend"])
+        selected_engine_options = {}
+        if isinstance(engine_options_all, dict):
+            raw_selected = engine_options_all.get(backend) or {}
+            if isinstance(raw_selected, dict):
+                selected_engine_options = dict(raw_selected)
         config = cls(
-            backend=str(raw["backend"]),
+            backend=backend,
             threshold=float(raw["threshold"]),
             selfieModelSelection=int(selfie.get("modelSelection", 1)),
             selfieTemporalSmoothing=float(selfie.get("temporalSmoothing", 0.25)),
             edgeSmoothness=float(raw.get("edgeSmoothness", 0.5)),
             blendFeather=float(raw.get("blendFeather", 0.35)),
+            engineOptions=selected_engine_options,
         )
         if not 0.0 <= config.threshold <= 1.0:
             raise ValueError("segmentation.threshold must be between 0.0 and 1.0")
@@ -455,6 +464,13 @@ class SegmentationConfig:
             raise ValueError("segmentation.edgeSmoothness must be between 0.0 and 1.0")
         if not 0.0 <= config.blendFeather <= 1.0:
             raise ValueError("segmentation.blendFeather must be between 0.0 and 1.0")
+        if not isinstance(config.engineOptions, dict):
+            raise ValueError("segmentation.engineOptions.<backend> must be an object")
+        for key, value in config.engineOptions.items():
+            if not isinstance(key, str):
+                raise ValueError("segmentation.engineOptions keys must be strings")
+            if isinstance(value, (dict, list, tuple)):
+                raise ValueError("segmentation.engineOptions values must be scalar types")
         return config
 
 

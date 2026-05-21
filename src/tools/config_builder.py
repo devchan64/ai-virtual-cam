@@ -398,6 +398,7 @@ def build_config(
     segmentation_selfie_temporal_smoothing: float = 0.25,
     segmentation_edge_smoothness: float = 0.5,
     segmentation_blend_feather: float = 0.35,
+    segmentation_engine_options: dict[str, object] | None = None,
     background: dict,
     crop_margin: float,
     crop_pan_smoothing: float,
@@ -450,6 +451,7 @@ def build_config(
     tilt_kp = float(crop_pan_pid_kp if crop_tilt_pid_kp is None else crop_tilt_pid_kp)
     tilt_ki = float(crop_pan_pid_ki if crop_tilt_pid_ki is None else crop_tilt_pid_ki)
     tilt_kd = float(crop_pan_pid_kd if crop_tilt_pid_kd is None else crop_tilt_pid_kd)
+    seg_engine_options = dict(segmentation_engine_options or {})
     return {
         "inputCamera": {
             "devicePath": input_device,
@@ -475,6 +477,7 @@ def build_config(
                 "modelSelection": int(segmentation_selfie_model_selection),
                 "temporalSmoothing": float(segmentation_selfie_temporal_smoothing),
             },
+            "engineOptions": {str(segmentation_backend): seg_engine_options} if seg_engine_options else {},
         },
         "background": background,
         "crop": {

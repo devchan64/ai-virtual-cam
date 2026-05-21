@@ -308,7 +308,7 @@ Linux Docker 정책:
 
 - 배경 모드 선택: 블러, 크로마, 이미지
 - 크로마 컬러피커
-- 세그멘테이션 실시간 조정: threshold, edge/blend, selfie 옵션
+- 세그멘테이션 실시간 조정: threshold, edge/blend, selfie 옵션, 백엔드별 추가 엔진 옵션(YAML/JSON)
 - 프레이밍 실시간 조정: margin, zoom/pan/tilt smoothing, PID, X/Y 오프셋
 - 프리뷰 창에서 처리 결과 확인
 - 카메라 입력 모드 후보 기반(해상도/FPS 세트)
@@ -334,11 +334,21 @@ Linux Docker 정책:
     "fps": 30
   },
   "segmentation": {
-    "backend": "selfie",
+    "backend": "selfie_ensemble",
     "threshold": 0.65,
     "edgeSmoothness": 0.5,
     "blendFeather": 0.35,
-    "selfie": { "modelSelection": 1, "temporalSmoothing": 0.25 }
+    "selfie": { "modelSelection": 1, "temporalSmoothing": 0.25 },
+    "engineOptions": {
+      "selfie_ensemble": {
+        "modelBlend": 0.6,
+        "temporalAlpha": 0.55,
+        "maskBlur": 5,
+        "morphOpen": 3,
+        "morphClose": 5,
+        "maskGamma": 0.9
+      }
+    }
   },
   "background": {
     "mode": "chroma",
