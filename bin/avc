@@ -17,6 +17,7 @@ Commands:
   config           Launch GUI config generator
   serve            Start virtual camera stream service from saved config
   docker           Run Linux Docker workflows for config/serve
+  device           Manage host virtual camera/audio devices
   audio-mixer      Run virtual audio mixer (microphone gate scaffold)
   doctor           Basic runtime checks (python3)
 USAGE
@@ -35,6 +36,7 @@ case "$cmd" in
   config) exec "$ROOT_DIR/scripts/bin/avc-config" "$@" ;;
   serve) exec "$ROOT_DIR/scripts/bin/avc-serve" "$@" ;;
   docker) exec "$ROOT_DIR/scripts/bin/avc-docker" "$@" ;;
+  device) exec "$ROOT_DIR/scripts/bin/avc-device" "$@" ;;
   audio-mixer) exec "$ROOT_DIR/scripts/bin/avc-audio-mixer" "$@" ;;
   doctor) exec "$ROOT_DIR/scripts/bin/avc-doctor" "$@" ;;
   -h|--help) usage ;;

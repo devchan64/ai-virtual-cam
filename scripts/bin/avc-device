@@ -1,0 +1,192 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CAMERA_DEVICE="${AVC_OUTPUT_DEVICE:-/dev/video10}"
+CAMERA_LABEL="${AVC_CAMERA_LABEL:-ai-virtual-cam}"
+AUDIO_SINK_NAME="${AVC_AUDIO_SINK_NAME:-ai-virtual-cam}"
+AUDIO_SINK_DESC="${AVC_AUDIO_SINK_DESC:-ai-virtual-cam}"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  ./bin/avc device <camera|audio> <create|delete|status>
+
+Environment:
+  AVC_OUTPUT_DEVICE      Camera device path (default: /dev/video10)
+  AVC_CAMERA_LABEL       v4l2loopback card label (default: ai-virtual-cam)
+  AVC_AUDIO_SINK_NAME    PulseAudio sink name (default: ai-virtual-cam)
+  AVC_AUDIO_SINK_DESC    PulseAudio sink description (default: ai-virtual-cam)
+EOF
+}
+
+fail() {
+  echo "[avc-device] ERROR: $*" >&2
+  exit 2
+}
+
+require_linux() {
+  [[ "$(uname -s)" == "Linux" ]] || fail "device command is supported only on Linux."
+}
+
+require_cmd() {
+  local name="$1"
+  command -v "$name" >/dev/null 2>&1 || fail "required command not found: $name"
+}
+
+json_ok() {
+  local requested="$1"
+  local action="$2"
+  printf '{"ok":true,"requested":"%s","action":"%s"}\n' "$requested" "$action"
+}
+
+json_err() {
+  local requested="$1"
+  local reason="$2"
+  local action="$3"
+  printf '{"ok":false,"requested":"%s","reason":"%s","action":"%s"}\n' "$requested" "$reason" "$action"
+}
+
+camera_video_no() {
+  local path="$1"
+  [[ "$path" =~ ^/dev/video([0-9]+)$ ]] || fail "invalid AVC_OUTPUT_DEVICE: $path (expected /dev/videoN)"
+  echo "${BASH_REMATCH[1]}"
+}
+
+camera_create() {
+  local requested="camera:create"
+  require_cmd sudo
+  require_cmd modprobe
+  local video_no
+  video_no="$(camera_video_no "$CAMERA_DEVICE")"
+
+  local args=(
+    "devices=1"
+    "video_nr=$video_no"
+    "card_label=$CAMERA_LABEL"
+    "exclusive_caps=1"
+    "max_buffers=2"
+  )
+
+  if ! sudo -n modprobe videodev >/dev/null 2>&1; then
+    json_err "$requested" "videodev module load failed" "run: sudo -v; then retry"
+    exit 2
+  fi
+
+  if ! sudo -n modprobe v4l2loopback "${args[@]}" >/dev/null 2>&1; then
+    json_err "$requested" "v4l2loopback load failed" "check sudo -n permission and module availability"
+    exit 2
+  fi
+
+  if [[ ! -e "$CAMERA_DEVICE" ]]; then
+    json_err "$requested" "device was not created at $CAMERA_DEVICE" "verify kernel module and video_nr"
+    exit 2
+  fi
+
+  json_ok "$requested" "created $CAMERA_DEVICE"
+}
+
+camera_delete() {
+  local requested="camera:delete"
+  require_cmd sudo
+  require_cmd modprobe
+  if ! sudo -n modprobe -r v4l2loopback >/dev/null 2>&1; then
+    json_err "$requested" "v4l2loopback unload failed" "close camera users and run: sudo -v; then retry"
+    exit 2
+  fi
+  json_ok "$requested" "deleted v4l2loopback"
+}
+
+camera_status() {
+  local requested="camera:status"
+  require_cmd lsmod
+  local loaded="false"
+  local exists="false"
+  if lsmod | grep -q '^v4l2loopback'; then
+    loaded="true"
+  fi
+  if [[ -e "$CAMERA_DEVICE" ]]; then
+    exists="true"
+  fi
+  printf '{"ok":true,"requested":"%s","moduleLoaded":%s,"deviceExists":%s,"devicePath":"%s"}\n' \
+    "$requested" "$loaded" "$exists" "$CAMERA_DEVICE"
+}
+
+audio_create() {
+  local requested="audio:create"
+  require_cmd pactl
+  local sinks
+  if ! sinks="$(pactl list short sinks 2>&1)"; then
+    json_err "$requested" "pactl list sinks failed: $sinks" "check PulseAudio/PipeWire runtime and permissions"
+    exit 2
+  fi
+  if printf '%s\n' "$sinks" | awk '{print $2}' | grep -Fxq "$AUDIO_SINK_NAME"; then
+    json_ok "$requested" "already exists: $AUDIO_SINK_NAME"
+    return
+  fi
+  local out
+  if ! out="$(pactl load-module module-null-sink sink_name="$AUDIO_SINK_NAME" sink_properties="device.description=$AUDIO_SINK_DESC" 2>&1)"; then
+    json_err "$requested" "pactl load-module failed: $out" "check PulseAudio/PipeWire runtime and permissions"
+    exit 2
+  fi
+  json_ok "$requested" "created sink=$AUDIO_SINK_NAME module_id=${out//$'\n'/ }"
+}
+
+audio_delete() {
+  local requested="audio:delete"
+  require_cmd pactl
+  local ids
+  local modules
+  if ! modules="$(pactl list short modules 2>&1)"; then
+    json_err "$requested" "pactl list modules failed: $modules" "check PulseAudio/PipeWire runtime and permissions"
+    exit 2
+  fi
+  ids="$(printf '%s\n' "$modules" | awk -v n="$AUDIO_SINK_NAME" '$2=="module-null-sink" && $0 ~ ("sink_name=" n "([[:space:]]|$)") {print $1}')"
+  if [[ -z "$ids" ]]; then
+    json_ok "$requested" "not found: $AUDIO_SINK_NAME"
+    return
+  fi
+  local id
+  while IFS= read -r id; do
+    [[ -z "$id" ]] && continue
+    if ! pactl unload-module "$id" >/dev/null 2>&1; then
+      json_err "$requested" "pactl unload-module failed: id=$id" "close clients using sink and retry"
+      exit 2
+    fi
+  done <<< "$ids"
+  json_ok "$requested" "deleted sink=$AUDIO_SINK_NAME"
+}
+
+audio_status() {
+  local requested="audio:status"
+  require_cmd pactl
+  local exists="false"
+  local sinks
+  if ! sinks="$(pactl list short sinks 2>&1)"; then
+    json_err "$requested" "pactl list sinks failed: $sinks" "check PulseAudio/PipeWire runtime and permissions"
+    exit 2
+  fi
+  if printf '%s\n' "$sinks" | awk '{print $2}' | grep -Fxq "$AUDIO_SINK_NAME"; then
+    exists="true"
+  fi
+  printf '{"ok":true,"requested":"%s","sinkExists":%s,"sinkName":"%s"}\n' \
+    "$requested" "$exists" "$AUDIO_SINK_NAME"
+}
+
+target="${1:-}"
+action="${2:-}"
+if [[ -z "$target" || -z "$action" || "$target" == "-h" || "$target" == "--help" ]]; then
+  usage
+  exit 1
+fi
+
+require_linux
+
+case "$target:$action" in
+  camera:create) camera_create ;;
+  camera:delete) camera_delete ;;
+  camera:status) camera_status ;;
+  audio:create) audio_create ;;
+  audio:delete) audio_delete ;;
+  audio:status) audio_status ;;
+  *) fail "unknown command: $target $action" ;;
+esac

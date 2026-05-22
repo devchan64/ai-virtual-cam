@@ -6,6 +6,7 @@
 - 자동 폴백 금지: 설정값이 유효하지 않거나 장치/포맷 초기화에 실패하면 자동 대체를 시도하지 않는다.
 - 즉시 실패: 실행 불가 상태에서는 즉시 예외를 발생시키고 종료한다.
 - 오류 정보 표준화: 실패 시 설정값, 실패 원인, 권장 조치를 함께 출력한다.
+- 단일 제어 경로: 장치 생성/삭제/검증은 호스트 쉘 명령(`./bin/avc`)으로만 수행한다.
 
 ## 플랫폼 정책
 
@@ -16,7 +17,7 @@
 ## Linux Docker 설계
 
 - 호스트 책임:
-  - `v4l2loopback` 모듈 로드 및 `/dev/videoN` 생성
+  - 카메라/오디오 장치 생성/삭제/검증 실행
   - X11 소켓(`/tmp/.X11-unix`)과 `DISPLAY` 제공
   - PulseAudio/PipeWire 런타임 소켓(`/run/user/<uid>`) 제공
 - 컨테이너 책임:
@@ -29,12 +30,39 @@
   - 장치 경로는 호스트/컨테이너에서 동일한 절대 경로를 유지한다
   - 컨테이너 실행에 필요한 마운트/환경(`AVC_INPUT_DEVICE`, `AVC_OUTPUT_DEVICE`, `~/.avc`)가 누락되면 즉시 실패한다
 
+## 장치 제어 파이프라인
+
+- `host config`와 `docker config`는 동일한 호스트 장치 제어 명령을 호출한다.
+- 컨테이너는 직접 privileged 명령(`sudo modprobe`, `pactl` 등)을 실행하지 않는다.
+- 장치 제어 명령은 다음 인터페이스로 통일한다.
+
+```bash
+./bin/avc device camera create|delete|status
+./bin/avc device audio create|delete|status
+```
+
+- `camera`는 Linux에서 `v4l2loopback` 장치 lifecycle을 담당한다.
+- `audio`는 Linux에서 오디오 가상 장치 lifecycle을 담당한다.
+- macOS는 오디오 생성/삭제 대신 설치/노출 상태 검증(`status`) 중심으로 동작한다.
+
 ## Linux `v4l2loopback` 정책
 
-- 가상 카메라 생성/제거는 호스트 `./bin/avc config` 전용 기능이다.
+- 가상 카메라 생성/제거는 호스트 `./bin/avc device camera ...` 전용 기능이다.
 - 생성 기본 옵션은 `exclusive_caps=1`, `devices=1`, `max_buffers=2`를 사용한다.
 - 옵션/포맷 적용 실패 시 자동 폴백 또는 자동 복구를 시도하지 않고 즉시 종료한다.
 - 재실행 전 사용자는 `config`에서 장치 상태를 재생성/검증해야 한다.
+
+## Linux 오디오 가상장치 정책
+
+- 오디오 장치 생성/제거는 호스트 `./bin/avc device audio ...` 전용 기능이다.
+- 설정값과 불일치하거나 장치를 열 수 없으면 자동 대체 없이 즉시 종료한다.
+- 재실행 전 사용자는 `config`에서 입력/출력 장치를 재선택하고 저장해야 한다.
+
+## 오류 응답 규격
+
+- 장치 제어 명령은 성공/실패를 기계적으로 해석 가능한 형태로 반환한다.
+- 권장 필드: `ok`, `requested`, `reason`, `action`
+- 실패 응답에는 재시도 가능한 조치(예: 권한 확인, 장치 재생성, 설정 재저장)를 포함한다.
 
 ## 실행 진입점
 
