@@ -96,6 +96,30 @@ require_v4l2_output_capable() {
   fi
 }
 
+cleanup_output_holders() {
+  local path="$1"
+  local enabled="${AVC_DOCKER_CLEAN_OUTPUT_HOLDERS:-1}"
+  [[ "$enabled" == "1" ]] || return 0
+  command -v fuser >/dev/null 2>&1 || return 0
+
+  local pids
+  pids="$(fuser "$path" 2>/dev/null || true)"
+  if [[ -z "${pids// }" ]]; then
+    return 0
+  fi
+
+  echo "[avc-docker] cleaning output holders on $path: $pids"
+  kill -TERM $pids 2>/dev/null || true
+  sleep 0.5
+  local remain
+  remain="$(fuser "$path" 2>/dev/null || true)"
+  if [[ -n "${remain// }" ]]; then
+    echo "[avc-docker] force killing remaining holders on $path: $remain"
+    kill -KILL $remain 2>/dev/null || true
+    sleep 0.2
+  fi
+}
+
 timestamp_utc() {
   date -u +"%Y%m%dT%H%M%SZ"
 }
@@ -183,6 +207,7 @@ case "$cmd" in
   serve)
     require_device "${AVC_INPUT_DEVICE:-$DEFAULT_INPUT_DEVICE}" "AVC_INPUT_DEVICE"
     require_device "${AVC_OUTPUT_DEVICE:-$DEFAULT_OUTPUT_DEVICE}" "AVC_OUTPUT_DEVICE"
+    cleanup_output_holders "${AVC_OUTPUT_DEVICE:-$DEFAULT_OUTPUT_DEVICE}"
     require_v4l2_output_capable "${AVC_OUTPUT_DEVICE:-$DEFAULT_OUTPUT_DEVICE}"
     [[ -f "$CONFIG_FILE" ]] || fail "Config file not found: $CONFIG_FILE. Run './bin/avc docker config' first or provide AVC_CONFIG_DIR."
     run_compose avc-serve python3 -m src.app.main --config "$CONTAINER_CONFIG_FILE" "$@"

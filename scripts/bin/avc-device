@@ -3,6 +3,7 @@ set -euo pipefail
 
 CAMERA_DEVICE="${AVC_OUTPUT_DEVICE:-/dev/video10}"
 CAMERA_LABEL="${AVC_CAMERA_LABEL:-ai-virtual-cam}"
+CAMERA_EXCLUSIVE_CAPS="${AVC_CAMERA_EXCLUSIVE_CAPS:-0}"
 AUDIO_SINK_NAME="${AVC_AUDIO_SINK_NAME:-ai-virtual-cam}"
 AUDIO_SINK_DESC="${AVC_AUDIO_SINK_DESC:-ai-virtual-cam}"
 HOST_UID="${AVC_HOST_UID:-}"
@@ -15,13 +16,17 @@ REQUEST_DIR="${AVC_DEVICE_REQUEST_DIR:-}"
 usage() {
   cat <<'EOF'
 Usage:
-  ./bin/avc device <camera|audio> <create|delete|status>
+  ./bin/avc device <camera|audio> <create|delete|status> [options]
 
 Environment:
   AVC_OUTPUT_DEVICE      Camera device path (default: /dev/video10)
   AVC_CAMERA_LABEL       v4l2loopback card label (default: ai-virtual-cam)
+  AVC_CAMERA_EXCLUSIVE_CAPS  v4l2loopback exclusive_caps (default: 0)
   AVC_AUDIO_SINK_NAME    PulseAudio sink name (default: ai-virtual-cam)
   AVC_AUDIO_SINK_DESC    PulseAudio sink description (default: ai-virtual-cam)
+
+Options:
+  --exclusive-caps <0|1>  Override camera create exclusive_caps
 EOF
 }
 
@@ -178,7 +183,7 @@ camera_create() {
     "devices=1"
     "video_nr=$video_no"
     "card_label=$CAMERA_LABEL"
-    "exclusive_caps=1"
+    "exclusive_caps=$CAMERA_EXCLUSIVE_CAPS"
     "max_buffers=2"
   )
 
@@ -293,6 +298,23 @@ if [[ -z "$target" || -z "$action" || "$target" == "-h" || "$target" == "--help"
   usage
   exit 1
 fi
+shift 2 || true
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --exclusive-caps)
+      [[ $# -ge 2 ]] || fail "--exclusive-caps requires value 0 or 1"
+      case "$2" in
+        0|1) CAMERA_EXCLUSIVE_CAPS="$2" ;;
+        *) fail "invalid --exclusive-caps value: $2 (expected 0 or 1)" ;;
+      esac
+      shift 2
+      ;;
+    *)
+      fail "unknown option: $1"
+      ;;
+  esac
+done
 
 require_linux
 
