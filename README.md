@@ -107,7 +107,7 @@ xhost +si:localuser:$USER
 ./bin/avc docker config
 ```
 
-- 환경변수를 지정하지 않으면 입력 카메라는 기본값 `/dev/video0`를 사용합니다.
+- `docker config`는 설정값을 우선 사용합니다. 설정값이 없거나 유효하지 않으면 즉시 실패하며, 자동 대체 장치를 선택하지 않습니다.
 - 설정은 로컬 `~/.avc/setting.json`에 저장됩니다.
 
 스트리밍 실행:
@@ -116,7 +116,7 @@ xhost +si:localuser:$USER
 ./bin/avc docker serve
 ```
 
-- 환경변수를 지정하지 않으면 입력 `/dev/video0`, 출력 `/dev/video10` 기본값으로 실행합니다.
+- `docker serve`는 `setting.json`의 입력/출력 장치 값을 우선 사용합니다. 설정값이 없거나 장치를 열 수 없으면 즉시 실패합니다.
 - `serve`는 항상 로컬 `~/.avc/setting.json` 존재 여부를 먼저 확인하고 없으면 즉시 실패합니다.
 - `./bin/avc docker build` 로그는 `.tmp/docker-build-<UTC_TIMESTAMP>.log`로 저장됩니다.
 
@@ -124,7 +124,7 @@ xhost +si:localuser:$USER
 
 - `config`와 `serve` 모두 `~/.avc/setting.json`을 동일하게 사용
 - 장치 경로는 컨테이너 내부에서도 호스트와 동일한 절대 경로로 마운트
-- 기본 장치 경로는 입력 `/dev/video0`, 출력 `/dev/video10`
+- 초기 설정 예시는 입력 `/dev/video0`, 출력 `/dev/video10`이며, 실제 실행은 저장된 설정값 기준으로 동작
 - 가상 카메라 생성/삭제는 호스트 `config` 전용 기능
 - `config`는 `DISPLAY` 또는 X11 소켓이 없으면 즉시 실패
 
@@ -163,7 +163,7 @@ xhost +si:localuser:$USER
 
 - 영상 품질 개선: 세그멘테이션 + 배경 합성 + 소프트웨어 프레이밍
 - 오디오 제어: 게이트 기반 입력 제어
-- 운영 원칙: 설정값 우선, 자동 폴백 최소화, 실패 시 원인 명확화
+- 운영 원칙: 설정값 우선, 자동 폴백 금지, 실패 시 원인 명확화
 
 핵심 구성:
 
@@ -197,7 +197,7 @@ pluginkit -m -A -D | grep -Ei "obs|virtual.?camera|cameraextension|coremedia"
 - `config`의 `가상 카메라 생성/제거`는 `sudo modprobe` 권한 필요
 - GUI는 `sudo -n`(비대화식)으로 실행되어, 권한 없으면 즉시 실패/안내
 - 기본 생성 옵션: `exclusive_caps=1`, `devices=1`, `max_buffers=2`
-- 실패 시 `exclusive_caps=0` 순차 폴백
+- 옵션 적용 실패 시 자동 폴백 없이 즉시 실패하고 재설정이 필요
 - Docker 실행은 가상 카메라 생성을 대체하지 않음. 장치는 호스트에서 먼저 준비해야 함.
 - Docker `config`에서 가상 카메라 생성/제거를 시도하지 말고, 호스트 `./bin/avc config`에서 먼저 생성/검증 후 Docker `serve`를 실행하세요.
 
@@ -216,12 +216,10 @@ sudo -v
 - 장치/포맷 초기화 실패 시 자동 대체 없이 즉시 종료
 - 에러 로그에는 실패 설정값, 원인, 권장 조치 포함
 
-Linux `v4l2loopback` 복구 정책:
+Linux `v4l2loopback` 실패 처리 정책:
 
-- 시작 시 장치 상태가 stale하면 1회 자동 복구 시도
-- `v4l2loopback-ctl set-caps/set-fps`, `v4l2-ctl set-fmt` 재적용 후 재시도
-- 실패 시 `sudo -n` 기반 모듈 재생성(`modprobe -r/load`) 1회 시도
-- 최종 실패 시 즉시 종료, `config`에서 가상 카메라 재생성 필요
+- 장치 상태가 비정상이거나 포맷 적용에 실패하면 자동 복구를 시도하지 않고 즉시 종료
+- 오류 로그에 실패한 장치/포맷 설정값, 실패 원인, 권장 조치(`config`에서 가상 카메라 재생성 후 재실행)를 함께 출력
 
 문제 발생 시 `config`에서 수정 후 재저장하고 `serve` 재실행하세요.
 
