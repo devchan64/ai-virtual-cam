@@ -9,7 +9,10 @@ services:
     image: ai-virtual-cam-linux:latest
     user: ${AVC_UID:-1000}:${AVC_GID:-1000}
     working_dir: /workspace
+    pid: host
     network_mode: host
+    cap_add:
+      - SYS_ADMIN
     environment:
       DISPLAY: ${DISPLAY:?DISPLAY is required for GUI config}
       XAUTHORITY: /tmp/.docker.xauth
@@ -19,6 +22,8 @@ services:
       MESA_LOADER_DRIVER_OVERRIDE: ${MESA_LOADER_DRIVER_OVERRIDE:-llvmpipe}
       PULSE_SERVER: unix:${AVC_RUNTIME_DIR:-/run/user/1000}/pulse/native
       XDG_RUNTIME_DIR: ${AVC_RUNTIME_DIR:-/run/user/1000}
+      AVC_DEVICE_VIA_HOST: ${AVC_DEVICE_VIA_HOST:-1}
+      AVC_HOST_AVC_PATH: ${AVC_HOST_AVC_PATH:-/workspace/bin/avc}
     devices:
       - ${AVC_INPUT_DEVICE:-/dev/video0}:${AVC_INPUT_DEVICE:-/dev/video0}
     group_add:

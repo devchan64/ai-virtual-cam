@@ -118,6 +118,48 @@ def _run_cmd(cmd: list[str], *, check: bool = False, timeout: float | None = 1.5
         raise RuntimeError(f"command not found: {cmd[0]}") from exc
 
 
+def _run_avc_device(
+    target: str,
+    action: str,
+    *,
+    extra_env: dict[str, str] | None = None,
+    timeout: float | None = 5.0,
+) -> dict:
+    cmd = [str(ROOT_DIR / "bin" / "avc"), "device", target, action]
+    env = dict(os.environ)
+    if extra_env:
+        env.update(extra_env)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=timeout, env=env)
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"device command not found: {cmd[0]}") from exc
+
+    stdout = (proc.stdout or "").strip()
+    stderr = (proc.stderr or "").strip()
+    payload: dict = {}
+    if stdout:
+        try:
+            payload = json.loads(stdout.splitlines()[-1])
+        except json.JSONDecodeError:
+            payload = {}
+
+    if proc.returncode != 0:
+        reason = payload.get("reason") or stderr or stdout or f"exit code={proc.returncode}"
+        action_hint = payload.get("action")
+        if action_hint:
+            raise RuntimeError(f"{reason}\n권장 조치: {action_hint}")
+        raise RuntimeError(reason)
+
+    if payload and payload.get("ok") is False:
+        reason = payload.get("reason") or "device command failed"
+        action_hint = payload.get("action")
+        if action_hint:
+            raise RuntimeError(f"{reason}\n권장 조치: {action_hint}")
+        raise RuntimeError(reason)
+
+    return payload
+
+
 def _run_sudo_cmd_noninteractive(
     args: list[str],
     *,
@@ -1044,7 +1086,6 @@ class ConfigGui:
         )
         row += 1
         if platform.system() == "Linux":
-            in_container = _is_container_runtime()
             create_cam_btn = ttk.Button(tab_io, text="가상 카메라 생성", command=self._create_virtual_camera)
             remove_cam_btn = ttk.Button(tab_io, text="가상 카메라 제거", command=self._remove_virtual_camera)
             create_cam_btn.grid(
@@ -1053,19 +1094,6 @@ class ConfigGui:
             remove_cam_btn.grid(
                 row=row, column=2, columnspan=2, sticky="ew", padx=4, pady=(6, 0)
             )
-            if in_container:
-                create_cam_btn.configure(state="disabled")
-                remove_cam_btn.configure(state="disabled")
-                ttk.Label(
-                    tab_io,
-                    text="Docker config에서는 가상 카메라 생성/제거를 지원하지 않습니다. 호스트 ./bin/avc config를 사용하세요.",
-                    foreground="#a33",
-                ).grid(row=row + 1, column=0, columnspan=4, sticky="w", padx=4, pady=(4, 0))
-                _log(
-                    "docker config에서는 가상 카메라 생성/제거를 지원하지 않습니다. "
-                    "호스트 ./bin/avc config를 사용하세요."
-                )
-                row += 1
             row += 1
         ttk.Button(tab_io, text="입출력 탭 기본값 복원", command=self._reset_io_settings).grid(
             row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0)
@@ -1209,7 +1237,6 @@ class ConfigGui:
         )
         row += 1
         if platform.system() == "Linux":
-            in_container = _is_container_runtime()
             create_mic_btn = ttk.Button(tab_audio, text="가상 마이크 생성", command=self._create_virtual_speaker)
             remove_mic_btn = ttk.Button(tab_audio, text="가상 마이크 제거", command=self._remove_virtual_speaker)
             create_mic_btn.grid(
@@ -1218,19 +1245,6 @@ class ConfigGui:
             remove_mic_btn.grid(
                 row=row, column=2, columnspan=2, sticky="ew", padx=4, pady=(6, 0)
             )
-            if in_container:
-                create_mic_btn.configure(state="disabled")
-                remove_mic_btn.configure(state="disabled")
-                ttk.Label(
-                    tab_audio,
-                    text="Docker config에서는 가상 마이크 생성/제거를 지원하지 않습니다. 호스트 ./bin/avc config를 사용하세요.",
-                    foreground="#a33",
-                ).grid(row=row + 1, column=0, columnspan=4, sticky="w", padx=4, pady=(4, 0))
-                _log(
-                    "docker config에서는 가상 마이크 생성/제거를 지원하지 않습니다. "
-                    "호스트 ./bin/avc config를 사용하세요."
-                )
-                row += 1
             row += 1
         self._add_int(tab_audio, row, "audio_sample_rate", "Sample rate", 48000)
         self._add_int(tab_audio, row, "audio_channels", "Channels", 1, col_offset=2)
@@ -1656,108 +1670,46 @@ class ConfigGui:
             messagebox.showerror("가상 카메라 생성", f"출력 경로가 /dev/videoN 형식이 아닙니다: {device}")
             return
 
-        _log(f"Create virtual camera: video_no={video_no} label={VIRTUAL_CAMERA_LABEL}")
-        # Browser(WebRTC) compatibility is best with exclusive_caps=1.
-        # Keep fallback args for hosts where this mode is unavailable.
-        camera_args = [
-            ["devices=1", f"video_nr={video_no}", f"card_label={VIRTUAL_CAMERA_LABEL}", "exclusive_caps=1", "max_buffers=2"],
-            ["devices=1", f"video_nr={video_no}", f"card_label={VIRTUAL_CAMERA_LABEL}", "exclusive_caps=0", "max_buffers=2"],
-            ["devices=1", f"video_nr={video_no}", f"card_label={VIRTUAL_CAMERA_LABEL}", "max_buffers=2"],
-        ]
-
-        last_error = ""
-        for idx, args in enumerate(camera_args):
-            if idx > 0:
-                _log("Reconfigure virtual camera with fallback args (capture compatibility attempt)")
-                try:
-                    reload_proc = _run_sudo_cmd_noninteractive(
-                        ["modprobe", "-r", "v4l2loopback"],
-                        check=False,
-                        timeout=4.0,
-                    )
-                    if reload_proc.returncode != 0:
-                        _log(f"modprobe -r skipped/failed: {reload_proc.stderr.strip()}")
-                except Exception as exc:
-                    _log(f"modprobe -r 실패(무시): {exc}")
-
-            cmd = ["modprobe", "v4l2loopback", *args]
-            try:
-                _run_sudo_cmd_noninteractive(["modprobe", "videodev"], check=False, timeout=4.0)
-                proc = _run_sudo_cmd_noninteractive(cmd, check=False, timeout=4.0)
-            except Exception as exc:
-                if "sudo 명령이 없어" in str(exc):
-                    _log(f"가상 카메라 생성 실패: {exc}")
-                    messagebox.showerror("가상 카메라 생성", str(exc))
-                    return
-                if "docker config에서는 sudo/modprobe를 사용할 수 없습니다." in str(exc):
-                    _log(f"가상 카메라 생성 실패: {exc}")
-                    messagebox.showerror("가상 카메라 생성", str(exc))
-                    return
-                last_error = f"modprobe 실행 예외: {exc}"
-                _log(last_error)
-                continue
-            if proc.returncode != 0:
-                err = (proc.stderr or proc.stdout or "").strip()
-                if "a password is required" in err.lower() or "sudo" in err.lower():
-                    messagebox.showerror(
-                        "가상 카메라 생성",
-                        "sudo 비밀번호 입력이 필요한 상태입니다.\n"
-                        "GUI에서는 비밀번호 프롬프트를 처리할 수 없어 중단했습니다.\n\n"
-                        "터미널에서 `sudo -v` 실행 후 다시 시도하세요.",
-                    )
-                    return
-                last_error = f"modprobe 로드 실패(code={proc.returncode}): {err}"
-                _log(last_error)
-                continue
-
-            ready, detail = _probe_v4l2_capture(
-                device,
-                retries=10,
-                delay_sec=0.2,
-                require_output=True,
+        _log(f"Create virtual camera via avc-device: {device} label={VIRTUAL_CAMERA_LABEL}")
+        try:
+            _run_avc_device(
+                "camera",
+                "create",
+                extra_env={
+                    "AVC_OUTPUT_DEVICE": device,
+                    "AVC_CAMERA_LABEL": VIRTUAL_CAMERA_LABEL,
+                },
+                timeout=8.0,
             )
-            if ready:
-                _log(f"Virtual camera webcam-capable confirmed on {device}: {detail} (args={args})")
-                messagebox.showinfo("가상 카메라 생성", f"가상 카메라를 생성했습니다: {device}")
-                return
+        except Exception as exc:
+            _log(f"가상 카메라 생성 실패: {exc}")
+            messagebox.showerror("가상 카메라 생성", str(exc))
+            return
 
-            last_error = f"{device} created but not webcam-capable: {detail} (args={args})"
-            _log(last_error)
-
-        messagebox.showerror(
-            "가상 카메라 생성",
-            f"사용 가능한 가상 카메라 장치 생성 실패: {last_error}",
+        ready, detail = _probe_v4l2_capture(
+            device,
+            retries=10,
+            delay_sec=0.2,
+            require_output=True,
         )
-        _log(f"가상 카메라 생성 실패: {last_error}")
+        if not ready:
+            _log(f"가상 카메라 생성 후 상태 확인 실패: {detail}")
+            messagebox.showerror("가상 카메라 생성", f"가상 카메라는 생성되었으나 상태 검증에 실패했습니다.\n{detail}")
+            return
+        _log(f"Virtual camera webcam-capable confirmed on {device}: {detail}")
+        messagebox.showinfo("가상 카메라 생성", f"가상 카메라를 생성했습니다: {device}")
 
     def _remove_virtual_camera(self) -> None:
         if platform.system() != "Linux":
             messagebox.showerror("가상 카메라 제거", "Linux에서만 가상 카메라 제거가 가능합니다.")
             return
 
-        _log("Remove virtual camera: modprobe -r v4l2loopback")
+        _log("Remove virtual camera via avc-device")
         try:
-            proc = _run_sudo_cmd_noninteractive(["modprobe", "-r", "v4l2loopback"], check=False, timeout=4.0)
+            _run_avc_device("camera", "delete", timeout=8.0)
         except Exception as exc:
             _log(f"가상 카메라 제거 실패: {exc}")
-            messagebox.showerror("가상 카메라 제거", f"모듈 제거 실패: {exc}")
-            return
-
-        if proc.returncode != 0:
-            err = (proc.stderr or proc.stdout or "").strip()
-            if "a password is required" in err.lower() or "sudo" in err.lower():
-                _log("가상 카메라 제거 실패: sudo 비밀번호 입력 필요")
-                messagebox.showerror(
-                    "가상 카메라 제거",
-                    "sudo 비밀번호 입력이 필요한 상태입니다.\n"
-                    "터미널에서 `sudo -v` 실행 후 다시 시도하세요.",
-                )
-                return
-            _log(f"가상 카메라 제거 실패(code={proc.returncode}): {err}")
-            messagebox.showerror(
-                "가상 카메라 제거",
-                f"모듈 제거 실패 (code={proc.returncode})\n{proc.stdout or ''}{proc.stderr or ''}".strip(),
-            )
+            messagebox.showerror("가상 카메라 제거", str(exc))
             return
         _log("Virtual camera removed: modprobe -r v4l2loopback")
         messagebox.showinfo("가상 카메라 제거", "가상 카메라 모듈을 언로드했습니다.")
@@ -1789,64 +1741,26 @@ class ConfigGui:
             messagebox.showerror("가상 마이크 생성", "Linux에서만 가상 마이크 생성이 가능합니다.")
             return
 
-        if _audio_sink_exists(AUDIO_VIRTUAL_SINK_NAME):
-            _log(f"Virtual microphone already exists: {AUDIO_VIRTUAL_SINK_NAME}")
-            messagebox.showinfo("가상 마이크 생성", f"이미 가상 마이크가 존재합니다: {AUDIO_VIRTUAL_SINK_NAME}")
-            return
-
-        _log(f"Create virtual microphone sink: {AUDIO_VIRTUAL_SINK_NAME}")
+        _log(f"Create virtual microphone via avc-device: {AUDIO_VIRTUAL_SINK_NAME}")
         try:
-            proc = _run_cmd(
-                [
-                    "pactl",
-                    "load-module",
-                    "module-null-sink",
-                    f"sink_name={AUDIO_VIRTUAL_SINK_NAME}",
-                    f"sink_properties=device.description={AUDIO_VIRTUAL_SINK_NAME}",
-                ],
-                check=False,
-                timeout=2.0,
+            _run_avc_device(
+                "audio",
+                "create",
+                extra_env={
+                    "AVC_AUDIO_SINK_NAME": AUDIO_VIRTUAL_SINK_NAME,
+                    "AVC_AUDIO_SINK_DESC": AUDIO_VIRTUAL_SINK_NAME,
+                },
+                timeout=5.0,
             )
         except Exception as exc:
-            messagebox.showerror("가상 마이크 생성", f"pactl 실행 실패: {exc}")
+            _log(f"가상 마이크 생성 실패: {exc}")
+            messagebox.showerror("가상 마이크 생성", str(exc))
             return
-
-        if proc.returncode != 0:
-            messagebox.showerror(
-                "가상 마이크 생성",
-                f"pactl load-module 실패 (code={proc.returncode})\n{proc.stderr}".strip(),
-            )
-            return
-
-        if not _audio_sink_exists(AUDIO_VIRTUAL_SINK_NAME):
-            messagebox.showerror("가상 마이크 생성", "모듈은 로드되었지만 sink 목록에 반영되지 않았습니다.")
-            return
-
-        source_proc = _run_cmd(
-            [
-                "pactl",
-                "load-module",
-                "module-remap-source",
-                f"master={AUDIO_VIRTUAL_SINK_NAME}.monitor",
-                f"source_name={AUDIO_VIRTUAL_SOURCE_NAME}",
-                f"source_properties=device.description={AUDIO_VIRTUAL_SOURCE_NAME}",
-            ],
-            check=False,
-            timeout=2.0,
-        )
-        if source_proc.returncode != 0:
-            _log(f"Remap source create failed: code={source_proc.returncode} err={source_proc.stderr.strip()}")
-        else:
-            _log(
-                f"Virtual microphone source created: {AUDIO_VIRTUAL_SOURCE_NAME} "
-                f"module_id={source_proc.stdout.strip()}"
-            )
-
-        _log(f"Virtual microphone sink created: {AUDIO_VIRTUAL_SINK_NAME} module_id={proc.stdout.strip()}")
+        _log(f"Virtual microphone sink created: {AUDIO_VIRTUAL_SINK_NAME}")
         messagebox.showinfo(
             "가상 마이크 생성",
-            f"가상 마이크를 생성했습니다: {AUDIO_VIRTUAL_SOURCE_NAME} (source)\n"
-            f"회의 앱 입력으로는 '{AUDIO_VIRTUAL_SOURCE_NAME}' 또는 '{AUDIO_VIRTUAL_SINK_NAME}.monitor'를 선택하세요.",
+            f"가상 마이크 sink를 생성했습니다: {AUDIO_VIRTUAL_SINK_NAME}\n"
+            f"회의 앱 입력으로는 '{AUDIO_VIRTUAL_SINK_NAME}.monitor'를 선택하세요.",
         )
 
     def _remove_virtual_speaker(self) -> None:
@@ -1854,28 +1768,16 @@ class ConfigGui:
             messagebox.showerror("가상 마이크 제거", "Linux에서만 가상 마이크 제거가 가능합니다.")
             return
 
-        source_module_ids = _get_audio_source_module_ids(AUDIO_VIRTUAL_SOURCE_NAME)
-        sink_module_ids = _get_audio_sink_module_ids(AUDIO_VIRTUAL_SINK_NAME)
-        if not source_module_ids and not sink_module_ids:
-            _log(f"Virtual microphone remove skipped: no related modules for {AUDIO_VIRTUAL_SINK_NAME}")
-            messagebox.showinfo(
-                "가상 마이크 제거",
-                f"제거할 {AUDIO_VIRTUAL_SINK_NAME} 모듈이 없습니다.",
+        try:
+            _run_avc_device(
+                "audio",
+                "delete",
+                extra_env={"AVC_AUDIO_SINK_NAME": AUDIO_VIRTUAL_SINK_NAME},
+                timeout=5.0,
             )
-            return
-
-        failed: list[str] = []
-        for mod_id in source_module_ids + sink_module_ids:
-            _log(f"Unload module {mod_id} for virtual microphone {AUDIO_VIRTUAL_SINK_NAME}")
-            try:
-                proc = _run_cmd(["pactl", "unload-module", mod_id], check=False, timeout=2.0)
-            except Exception as exc:
-                failed.append(f"{mod_id}:{exc}")
-                continue
-            if proc.returncode != 0:
-                failed.append(f"{mod_id}:{proc.returncode}:{proc.stderr.strip()}")
-        if failed:
-            messagebox.showerror("가상 마이크 제거", "일부 모듈 제거 실패:\n" + "\n".join(failed))
+        except Exception as exc:
+            _log(f"가상 마이크 제거 실패: {exc}")
+            messagebox.showerror("가상 마이크 제거", str(exc))
             return
         _log(f"Virtual microphone removed: {AUDIO_VIRTUAL_SINK_NAME}")
         messagebox.showinfo("가상 마이크 제거", f"가상 마이크 모듈을 제거했습니다: {AUDIO_VIRTUAL_SINK_NAME}")

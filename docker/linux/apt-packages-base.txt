@@ -13,5 +13,6 @@ portaudio19-dev
 pulseaudio-utils
 python3-tk
 tk
+util-linux
 v4l-utils
 xauth

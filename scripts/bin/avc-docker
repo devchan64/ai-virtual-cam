@@ -121,6 +121,8 @@ run_compose() {
   AVC_OUTPUT_DEVICE="$output_device" \
   AVC_INPUT_GID="$input_gid" \
   AVC_XAUTHORITY_HOST="$xauthority" \
+  AVC_DEVICE_VIA_HOST="${AVC_DEVICE_VIA_HOST:-1}" \
+  AVC_HOST_AVC_PATH="${AVC_HOST_AVC_PATH:-$ROOT_DIR/bin/avc}" \
   docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" run --rm "$service" "$@"
 }
 

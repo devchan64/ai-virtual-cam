@@ -181,6 +181,21 @@ fi
 
 require_linux
 
+if [[ -f "/.dockerenv" && "${AVC_DEVICE_VIA_HOST:-0}" == "1" ]]; then
+  if [[ "${AVC_DEVICE_RELAYED:-0}" != "1" ]]; then
+    command -v nsenter >/dev/null 2>&1 || fail "nsenter is required in container to relay host device command."
+    host_avc="${AVC_HOST_AVC_PATH:-/workspace/bin/avc}"
+    exec env \
+      AVC_DEVICE_RELAYED=1 \
+      AVC_OUTPUT_DEVICE="$CAMERA_DEVICE" \
+      AVC_CAMERA_LABEL="$CAMERA_LABEL" \
+      AVC_AUDIO_SINK_NAME="$AUDIO_SINK_NAME" \
+      AVC_AUDIO_SINK_DESC="$AUDIO_SINK_DESC" \
+      nsenter --target 1 --mount --uts --ipc --net --pid -- \
+      "$host_avc" device "$target" "$action"
+  fi
+fi
+
 case "$target:$action" in
   camera:create) camera_create ;;
   camera:delete) camera_delete ;;
