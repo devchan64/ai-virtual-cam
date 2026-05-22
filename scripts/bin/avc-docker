@@ -10,6 +10,8 @@ LOG_DIR="$ROOT_DIR/.tmp"
 DEFAULT_INPUT_DEVICE="/dev/video0"
 DEFAULT_OUTPUT_DEVICE="/dev/video10"
 CONTAINER_CONFIG_FILE="/home/avc/.avc/setting.json"
+DEVICE_REQUEST_DIR="${AVC_DEVICE_REQUEST_DIR:-$CONFIG_DIR/device-requests}"
+CONTAINER_DEVICE_REQUEST_DIR="/home/avc/.avc/device-requests"
 
 usage() {
   cat <<'EOF'
@@ -52,6 +54,7 @@ require_compose() {
 
 ensure_config_dir() {
   mkdir -p "$CONFIG_DIR"
+  mkdir -p "$DEVICE_REQUEST_DIR/pending" "$DEVICE_REQUEST_DIR/done" "$DEVICE_REQUEST_DIR/error"
 }
 
 default_runtime_dir() {
@@ -115,6 +118,10 @@ run_compose() {
 
   AVC_UID="$uid" \
   AVC_GID="$gid" \
+  AVC_HOST_UID="$uid" \
+  AVC_HOST_GID="$gid" \
+  AVC_HOST_USER="${USER:-}" \
+  AVC_HOST_HOME="${HOME:-}" \
   AVC_CONFIG_DIR="$CONFIG_DIR" \
   AVC_RUNTIME_DIR="$runtime_dir" \
   AVC_INPUT_DEVICE="${AVC_INPUT_DEVICE:-$DEFAULT_INPUT_DEVICE}" \
@@ -122,8 +129,24 @@ run_compose() {
   AVC_INPUT_GID="$input_gid" \
   AVC_XAUTHORITY_HOST="$xauthority" \
   AVC_DEVICE_VIA_HOST="${AVC_DEVICE_VIA_HOST:-1}" \
+  AVC_DEVICE_DEBUG="${AVC_DEVICE_DEBUG:-0}" \
+  AVC_DEVICE_REQUEST_DIR="$CONTAINER_DEVICE_REQUEST_DIR" \
+  AVC_DEVICE_REQUEST_DIR_HOST="$DEVICE_REQUEST_DIR" \
   AVC_HOST_AVC_PATH="${AVC_HOST_AVC_PATH:-$ROOT_DIR/bin/avc}" \
   docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" run --rm "$service" "$@"
+}
+
+start_host_device_executor() {
+  local pid_file="$DEVICE_REQUEST_DIR/executor.pid"
+  if [[ -f "$pid_file" ]]; then
+    local old_pid
+    old_pid="$(cat "$pid_file" 2>/dev/null || true)"
+    if [[ -n "$old_pid" ]] && kill -0 "$old_pid" 2>/dev/null; then
+      return 0
+    fi
+  fi
+  nohup "$ROOT_DIR/scripts/bin/avc-host-device-executor" >/tmp/avc-host-device-executor.log 2>&1 &
+  echo "$!" > "$pid_file"
 }
 
 cmd="${1:-}"
@@ -154,6 +177,7 @@ case "$cmd" in
   config)
     require_x11
     require_device "${AVC_INPUT_DEVICE:-$DEFAULT_INPUT_DEVICE}" "AVC_INPUT_DEVICE"
+    start_host_device_executor
     run_compose avc-config "$@"
     ;;
   serve)

@@ -7,10 +7,11 @@ services:
         UID: ${AVC_UID:-1000}
         GID: ${AVC_GID:-1000}
     image: ai-virtual-cam-linux:latest
-    user: ${AVC_UID:-1000}:${AVC_GID:-1000}
+    user: 0:0
     working_dir: /workspace
     pid: host
     network_mode: host
+    privileged: true
     cap_add:
       - SYS_ADMIN
     environment:
@@ -24,6 +25,7 @@ services:
       XDG_RUNTIME_DIR: ${AVC_RUNTIME_DIR:-/run/user/1000}
       AVC_DEVICE_VIA_HOST: ${AVC_DEVICE_VIA_HOST:-1}
       AVC_HOST_AVC_PATH: ${AVC_HOST_AVC_PATH:-/workspace/bin/avc}
+      AVC_DEVICE_REQUEST_DIR: ${AVC_DEVICE_REQUEST_DIR:-/home/avc/.avc/device-requests}
     devices:
       - ${AVC_INPUT_DEVICE:-/dev/video0}:${AVC_INPUT_DEVICE:-/dev/video0}
     group_add:
@@ -31,6 +33,7 @@ services:
     volumes:
       - ../..:/workspace
       - ${AVC_CONFIG_DIR:-~/.avc}:/home/avc/.avc
+      - ${AVC_DEVICE_REQUEST_DIR_HOST:-~/.avc/device-requests}:${AVC_DEVICE_REQUEST_DIR:-/home/avc/.avc/device-requests}
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ${AVC_XAUTHORITY_HOST:?AVC_XAUTHORITY_HOST is required}:/tmp/.docker.xauth:ro
       - ${AVC_RUNTIME_DIR:-/run/user/1000}:${AVC_RUNTIME_DIR:-/run/user/1000}

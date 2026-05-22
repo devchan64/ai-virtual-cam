@@ -5,6 +5,12 @@ CAMERA_DEVICE="${AVC_OUTPUT_DEVICE:-/dev/video10}"
 CAMERA_LABEL="${AVC_CAMERA_LABEL:-ai-virtual-cam}"
 AUDIO_SINK_NAME="${AVC_AUDIO_SINK_NAME:-ai-virtual-cam}"
 AUDIO_SINK_DESC="${AVC_AUDIO_SINK_DESC:-ai-virtual-cam}"
+HOST_UID="${AVC_HOST_UID:-}"
+HOST_GID="${AVC_HOST_GID:-}"
+HOST_USER="${AVC_HOST_USER:-}"
+HOST_HOME="${AVC_HOST_HOME:-}"
+DEBUG="${AVC_DEVICE_DEBUG:-0}"
+REQUEST_DIR="${AVC_DEVICE_REQUEST_DIR:-}"
 
 usage() {
   cat <<'EOF'
@@ -24,6 +30,42 @@ fail() {
   exit 2
 }
 
+dbg() {
+  [[ "$DEBUG" == "1" ]] || return 0
+  echo "[avc-device][debug] $*" >&2
+}
+
+request_via_host_executor() {
+  local target="$1"
+  local action="$2"
+  if [[ -z "$REQUEST_DIR" ]]; then
+    json_err "$target:$action" "AVC_DEVICE_REQUEST_DIR is not set in container" "set AVC_DEVICE_REQUEST_DIR and mount shared request directory"
+    return 2
+  fi
+  mkdir -p "$REQUEST_DIR/pending" "$REQUEST_DIR/done" "$REQUEST_DIR/error"
+  local req_id req_file out_file
+  req_id="$(date +%s%N)-$$"
+  req_file="$REQUEST_DIR/pending/${req_id}.req"
+  out_file="$REQUEST_DIR/done/${req_id}.json"
+  cat > "$req_file" <<EOF
+TARGET=$target
+ACTION=$action
+AVC_AUDIO_SINK_NAME=$AUDIO_SINK_NAME
+AVC_AUDIO_SINK_DESC=$AUDIO_SINK_DESC
+EOF
+  local i
+  for i in $(seq 1 150); do
+    if [[ -f "$out_file" ]]; then
+      cat "$out_file"
+      rm -f "$out_file"
+      return 0
+    fi
+    sleep 0.1
+  done
+  json_err "$target:$action" "host executor timeout" "check avc-host-device-executor process and logs"
+  return 2
+}
+
 require_linux() {
   [[ "$(uname -s)" == "Linux" ]] || fail "device command is supported only on Linux."
 }
@@ -31,6 +73,18 @@ require_linux() {
 require_cmd() {
   local name="$1"
   command -v "$name" >/dev/null 2>&1 || fail "required command not found: $name"
+}
+
+run_sudo_cmd() {
+  if [[ -t 0 && -t 1 ]]; then
+    sudo "$@"
+    return $?
+  fi
+  if command -v pkexec >/dev/null 2>&1; then
+    pkexec "$@"
+    return $?
+  fi
+  return 1
 }
 
 json_ok() {
@@ -44,6 +98,67 @@ json_err() {
   local reason="$2"
   local action="$3"
   printf '{"ok":false,"requested":"%s","reason":"%s","action":"%s"}\n' "$requested" "$reason" "$action"
+}
+
+run_pactl_cmd() {
+  local runtime_dir="${XDG_RUNTIME_DIR:-}"
+  if [[ -z "$runtime_dir" && -n "$HOST_UID" ]]; then
+    runtime_dir="/run/user/$HOST_UID"
+  fi
+  local pulse_server="${PULSE_SERVER:-}"
+  if [[ -z "$pulse_server" && -n "$runtime_dir" ]]; then
+    pulse_server="unix:${runtime_dir}/pulse/native"
+  fi
+  local dbus_addr="${DBUS_SESSION_BUS_ADDRESS:-}"
+  if [[ -z "$dbus_addr" && -n "$runtime_dir" ]]; then
+    dbus_addr="unix:path=${runtime_dir}/bus"
+  fi
+  local host_home="${HOST_HOME:-${HOME:-}}"
+  if [[ -n "$HOST_UID" ]]; then
+    local uid_home
+    uid_home="$(getent passwd "$HOST_UID" | cut -d: -f6 || true)"
+    if [[ -z "$HOST_HOME" && -n "$uid_home" ]]; then
+      host_home="$uid_home"
+    fi
+  fi
+  local pulse_cookie=""
+  if [[ -n "$runtime_dir" && -f "${runtime_dir}/pulse/cookie" ]]; then
+    pulse_cookie="${runtime_dir}/pulse/cookie"
+  elif [[ -n "$host_home" && -f "${host_home}/.config/pulse/cookie" ]]; then
+    pulse_cookie="${host_home}/.config/pulse/cookie"
+  fi
+  local -a env_args=(
+    "HOME=$host_home"
+    "XDG_RUNTIME_DIR=$runtime_dir"
+    "PULSE_SERVER=$pulse_server"
+    "DBUS_SESSION_BUS_ADDRESS=$dbus_addr"
+  )
+  if [[ -n "$pulse_cookie" ]]; then
+    env_args+=("PULSE_COOKIE=$pulse_cookie")
+  fi
+
+  dbg "pactl context: euid=${EUID} host_user=${HOST_USER:-<empty>} host_uid=${HOST_UID:-<empty>} home=${host_home:-<empty>} runtime=${runtime_dir:-<empty>} pulse=${pulse_server:-<empty>} dbus=${dbus_addr:-<empty>}"
+
+  if [[ "${EUID}" -eq 0 ]]; then
+    if [[ -n "$HOST_USER" ]] && command -v sudo >/dev/null 2>&1; then
+      dbg "pactl via sudo -u $HOST_USER"
+      env "${env_args[@]}" sudo -u "$HOST_USER" -H pactl "$@"
+      return $?
+    fi
+    if [[ -n "$HOST_UID" && -n "$HOST_GID" ]] && command -v setpriv >/dev/null 2>&1; then
+      dbg "pactl via setpriv uid=$HOST_UID gid=$HOST_GID"
+      env "${env_args[@]}" \
+        setpriv --reuid "$HOST_UID" --regid "$HOST_GID" --init-groups pactl "$@"
+      return $?
+    fi
+    if [[ -n "$HOST_USER" ]] && command -v runuser >/dev/null 2>&1; then
+      dbg "pactl via runuser -u $HOST_USER"
+      env "${env_args[@]}" \
+        runuser -u "$HOST_USER" -- pactl "$@"
+      return $?
+    fi
+  fi
+  env "${env_args[@]}" pactl "$@"
 }
 
 camera_video_no() {
@@ -67,13 +182,13 @@ camera_create() {
     "max_buffers=2"
   )
 
-  if ! sudo -n modprobe videodev >/dev/null 2>&1; then
-    json_err "$requested" "videodev module load failed" "run: sudo -v; then retry"
+  if ! run_sudo_cmd modprobe videodev; then
+    json_err "$requested" "videodev module load failed" "use interactive sudo (TTY) or pkexec (GUI auth prompt)"
     exit 2
   fi
 
-  if ! sudo -n modprobe v4l2loopback "${args[@]}" >/dev/null 2>&1; then
-    json_err "$requested" "v4l2loopback load failed" "check sudo -n permission and module availability"
+  if ! run_sudo_cmd modprobe v4l2loopback "${args[@]}"; then
+    json_err "$requested" "v4l2loopback load failed" "use interactive sudo (TTY) or pkexec (GUI auth prompt)"
     exit 2
   fi
 
@@ -89,8 +204,8 @@ camera_delete() {
   local requested="camera:delete"
   require_cmd sudo
   require_cmd modprobe
-  if ! sudo -n modprobe -r v4l2loopback >/dev/null 2>&1; then
-    json_err "$requested" "v4l2loopback unload failed" "close camera users and run: sudo -v; then retry"
+  if ! run_sudo_cmd modprobe -r v4l2loopback; then
+    json_err "$requested" "v4l2loopback unload failed" "close camera users, then retry with interactive sudo (TTY) or pkexec (GUI auth prompt)"
     exit 2
   fi
   json_ok "$requested" "deleted v4l2loopback"
@@ -115,7 +230,7 @@ audio_create() {
   local requested="audio:create"
   require_cmd pactl
   local sinks
-  if ! sinks="$(pactl list short sinks 2>&1)"; then
+  if ! sinks="$(run_pactl_cmd list short sinks 2>&1)"; then
     json_err "$requested" "pactl list sinks failed: $sinks" "check PulseAudio/PipeWire runtime and permissions"
     exit 2
   fi
@@ -124,7 +239,7 @@ audio_create() {
     return
   fi
   local out
-  if ! out="$(pactl load-module module-null-sink sink_name="$AUDIO_SINK_NAME" sink_properties="device.description=$AUDIO_SINK_DESC" 2>&1)"; then
+  if ! out="$(run_pactl_cmd load-module module-null-sink sink_name="$AUDIO_SINK_NAME" sink_properties="device.description=$AUDIO_SINK_DESC" 2>&1)"; then
     json_err "$requested" "pactl load-module failed: $out" "check PulseAudio/PipeWire runtime and permissions"
     exit 2
   fi
@@ -136,7 +251,7 @@ audio_delete() {
   require_cmd pactl
   local ids
   local modules
-  if ! modules="$(pactl list short modules 2>&1)"; then
+  if ! modules="$(run_pactl_cmd list short modules 2>&1)"; then
     json_err "$requested" "pactl list modules failed: $modules" "check PulseAudio/PipeWire runtime and permissions"
     exit 2
   fi
@@ -148,7 +263,7 @@ audio_delete() {
   local id
   while IFS= read -r id; do
     [[ -z "$id" ]] && continue
-    if ! pactl unload-module "$id" >/dev/null 2>&1; then
+    if ! run_pactl_cmd unload-module "$id" >/dev/null 2>&1; then
       json_err "$requested" "pactl unload-module failed: id=$id" "close clients using sink and retry"
       exit 2
     fi
@@ -161,7 +276,7 @@ audio_status() {
   require_cmd pactl
   local exists="false"
   local sinks
-  if ! sinks="$(pactl list short sinks 2>&1)"; then
+  if ! sinks="$(run_pactl_cmd list short sinks 2>&1)"; then
     json_err "$requested" "pactl list sinks failed: $sinks" "check PulseAudio/PipeWire runtime and permissions"
     exit 2
   fi
@@ -183,14 +298,41 @@ require_linux
 
 if [[ -f "/.dockerenv" && "${AVC_DEVICE_VIA_HOST:-0}" == "1" ]]; then
   if [[ "${AVC_DEVICE_RELAYED:-0}" != "1" ]]; then
-    command -v nsenter >/dev/null 2>&1 || fail "nsenter is required in container to relay host device command."
+    if [[ "$target" == "audio" ]]; then
+      request_via_host_executor "$target" "$action"
+      exit $?
+    fi
+    command -v nsenter >/dev/null 2>&1 || fail "nsenter is required in container for host relay."
     host_avc="${AVC_HOST_AVC_PATH:-/workspace/bin/avc}"
+    dbg "relay start: target=$target action=$action host_avc=$host_avc host_user=${HOST_USER:-<empty>} host_uid=${HOST_UID:-<empty>} host_home=${HOST_HOME:-<empty>}"
+    if [[ "$target" == "audio" && -n "$HOST_USER" ]]; then
+      dbg "relay audio via sudo -iu login shell command passthrough: user=$HOST_USER"
+      exec env \
+        AVC_DEVICE_RELAYED=1 \
+        AVC_OUTPUT_DEVICE="$CAMERA_DEVICE" \
+        AVC_CAMERA_LABEL="$CAMERA_LABEL" \
+        AVC_AUDIO_SINK_NAME="$AUDIO_SINK_NAME" \
+        AVC_AUDIO_SINK_DESC="$AUDIO_SINK_DESC" \
+        AVC_HOST_UID="$HOST_UID" \
+        AVC_HOST_GID="$HOST_GID" \
+        AVC_HOST_USER="$HOST_USER" \
+        AVC_HOST_HOME="$HOST_HOME" \
+        AVC_DEVICE_DEBUG="$DEBUG" \
+        nsenter --target 1 --mount --uts --ipc --net --pid -- \
+        sudo -iu "$HOST_USER" /bin/bash -lc \
+        "'$host_avc' device '$target' '$action'"
+    fi
     exec env \
       AVC_DEVICE_RELAYED=1 \
       AVC_OUTPUT_DEVICE="$CAMERA_DEVICE" \
       AVC_CAMERA_LABEL="$CAMERA_LABEL" \
       AVC_AUDIO_SINK_NAME="$AUDIO_SINK_NAME" \
       AVC_AUDIO_SINK_DESC="$AUDIO_SINK_DESC" \
+      AVC_HOST_UID="$HOST_UID" \
+      AVC_HOST_GID="$HOST_GID" \
+      AVC_HOST_USER="$HOST_USER" \
+      AVC_HOST_HOME="$HOST_HOME" \
+      AVC_DEVICE_DEBUG="$DEBUG" \
       nsenter --target 1 --mount --uts --ipc --net --pid -- \
       "$host_avc" device "$target" "$action"
   fi

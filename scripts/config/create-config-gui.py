@@ -146,6 +146,8 @@ def _run_avc_device(
     if proc.returncode != 0:
         reason = payload.get("reason") or stderr or stdout or f"exit code={proc.returncode}"
         action_hint = payload.get("action")
+        if stderr:
+            reason = f"{reason}\n--- stderr ---\n{stderr}"
         if action_hint:
             raise RuntimeError(f"{reason}\n권장 조치: {action_hint}")
         raise RuntimeError(reason)
@@ -153,6 +155,8 @@ def _run_avc_device(
     if payload and payload.get("ok") is False:
         reason = payload.get("reason") or "device command failed"
         action_hint = payload.get("action")
+        if stderr:
+            reason = f"{reason}\n--- stderr ---\n{stderr}"
         if action_hint:
             raise RuntimeError(f"{reason}\n권장 조치: {action_hint}")
         raise RuntimeError(reason)
@@ -1309,7 +1313,7 @@ class ConfigGui:
         action_frame.grid(row=action_row, column=0, sticky="ew", pady=(10, 0))
         action_frame.columnconfigure(0, weight=1)
         action_frame.columnconfigure(1, weight=1)
-        ttk.Button(action_frame, text=self._tr("button.preview", "Preview"), command=self._preview).grid(
+        ttk.Button(action_frame, text=self._tr("button.camera_preview", "Camera Preview"), command=self._preview).grid(
             row=0, column=0, sticky="ew", padx=4
         )
         ttk.Button(action_frame, text=self._tr("button.save", "Save JSON"), command=self._save).grid(
@@ -1750,7 +1754,7 @@ class ConfigGui:
                     "AVC_AUDIO_SINK_NAME": AUDIO_VIRTUAL_SINK_NAME,
                     "AVC_AUDIO_SINK_DESC": AUDIO_VIRTUAL_SINK_NAME,
                 },
-                timeout=5.0,
+                timeout=25.0,
             )
         except Exception as exc:
             _log(f"가상 마이크 생성 실패: {exc}")
@@ -1773,7 +1777,7 @@ class ConfigGui:
                 "audio",
                 "delete",
                 extra_env={"AVC_AUDIO_SINK_NAME": AUDIO_VIRTUAL_SINK_NAME},
-                timeout=5.0,
+                timeout=25.0,
             )
         except Exception as exc:
             _log(f"가상 마이크 제거 실패: {exc}")
@@ -2894,7 +2898,7 @@ class ConfigGui:
             return
         try:
             self._check_preview_runtime_ready()
-            config = self._build_config()
+            config = self._build_config(validate_audio=False)
             self._start_preview(config)
         except Exception as exc:
             self._report_preview_error(str(exc))
@@ -2969,7 +2973,7 @@ class ConfigGui:
 
         try:
             frame = self._preview_capture.read()
-            config = self._build_config()
+            config = self._build_config(validate_audio=False)
             sig = self._processing_signature(config)
             out_w = int(config["outputCamera"]["width"])
             out_h = int(config["outputCamera"]["height"])
@@ -3111,7 +3115,7 @@ class ConfigGui:
             self._set_var(var_key, value)
         self._on_seg_backend_changed()
 
-    def _build_config(self):
+    def _build_config(self, *, validate_audio: bool = True):
         iv = self.vars
         input_w = int(iv["input_width"].get())
         input_h = int(iv["input_height"].get())
@@ -3138,8 +3142,9 @@ class ConfigGui:
             iv["audio_output_device"].get().strip(),
             getattr(self, "_audio_output_display_to_raw", {}),
         )
-        _validate_pulse_runtime_device("input", raw_audio_input)
-        _validate_pulse_runtime_device("output", raw_audio_output)
+        if validate_audio:
+            _validate_pulse_runtime_device("input", raw_audio_input)
+            _validate_pulse_runtime_device("output", raw_audio_output)
         seg_engine_options = self._collect_seg_engine_options_from_form()
 
         return build_config(

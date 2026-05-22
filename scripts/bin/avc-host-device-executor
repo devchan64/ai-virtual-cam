@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+REQUEST_DIR="${AVC_DEVICE_REQUEST_DIR:-$HOME/.avc/device-requests}"
+POLL_SEC="${AVC_DEVICE_EXECUTOR_POLL_SEC:-1}"
+
+mkdir -p "$REQUEST_DIR/pending" "$REQUEST_DIR/done" "$REQUEST_DIR/error"
+
+log() {
+  echo "[avc-host-device-executor] $*" >&2
+}
+
+read_kv() {
+  local key="$1"
+  local file="$2"
+  awk -F= -v k="$key" '$1==k {sub(/^[^=]*=/,""); print; exit}' "$file"
+}
+
+while true; do
+  found=0
+  shopt -s nullglob
+  for req in "$REQUEST_DIR"/pending/*.req; do
+    found=1
+    id="$(basename "$req" .req)"
+    target="$(read_kv TARGET "$req")"
+    action="$(read_kv ACTION "$req")"
+    sink_name="$(read_kv AVC_AUDIO_SINK_NAME "$req")"
+    sink_desc="$(read_kv AVC_AUDIO_SINK_DESC "$req")"
+    out="$REQUEST_DIR/done/${id}.json"
+    err="$REQUEST_DIR/error/${id}.log"
+
+    if [[ -z "$target" || -z "$action" ]]; then
+      echo '{"ok":false,"requested":"unknown","reason":"invalid request file","action":"check request format"}' > "$out"
+      rm -f "$req"
+      continue
+    fi
+
+    log "processing id=$id target=$target action=$action"
+    if AVC_AUDIO_SINK_NAME="$sink_name" AVC_AUDIO_SINK_DESC="$sink_desc" \
+      "$ROOT_DIR/bin/avc" device "$target" "$action" > "$out" 2> "$err"; then
+      :
+    else
+      if [[ ! -s "$out" ]]; then
+        reason="$(tr '\n' ' ' < "$err" | sed 's/"/\\"/g')"
+        echo "{\"ok\":false,\"requested\":\"$target:$action\",\"reason\":\"$reason\",\"action\":\"check host device executor logs\"}" > "$out"
+      fi
+    fi
+    rm -f "$req"
+  done
+  shopt -u nullglob
+
+  if [[ "$found" -eq 0 ]]; then
+    sleep "$POLL_SEC"
+  fi
+done
+
