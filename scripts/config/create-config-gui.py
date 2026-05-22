@@ -835,6 +835,12 @@ def _validate_pulse_runtime_device(kind: str, device_name: str) -> None:
             f"현재값='{device_name}'. config에서 실제 장치 ID를 선택하세요."
         )
     entries = _pactl_short_entries("source" if kind == "input" else "sink")
+    if not entries:
+        _log(
+            f"audio {kind} device runtime validation skipped: "
+            "pactl list short returned no entries"
+        )
+        return
     names = [entry_name for _idx, entry_name, _rest in entries if entry_name.strip()]
     if name not in names:
         raise ValueError(
@@ -2087,6 +2093,7 @@ class ConfigGui:
                 self._tr("msg.saved.body", "Config saved to {path}").format(path=self.output_path),
             )
         except Exception as exc:
+            _log(f"Validation error: {exc}")
             messagebox.showerror(self._tr("msg.validation_error.title", "Validation error"), str(exc))
 
     def _auto_tune_audio_gate(self):
