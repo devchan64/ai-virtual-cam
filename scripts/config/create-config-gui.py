@@ -900,6 +900,7 @@ class ConfigGui:
         self._preview_out_size = (0, 0)
         self._preview_starting = False
         self._preview_last_toggle_at = 0.0
+        self._preview_dark_fallback_warn_count = 0
         self._preview_window_name = self._tr(
             "window.preview_title",
             "ai-virtual-cam preview (press q or esc to close)",
@@ -4259,6 +4260,19 @@ class ConfigGui:
                 self._preview_processing_signature = sig
 
             output_frame = self._preview_processor.process(frame)
+            # Guardrail: if processing output is near-black while input is visible,
+            # show input frame to keep preview usable.
+            src_mean = float(frame.mean())
+            out_mean = float(output_frame.mean())
+            if src_mean > 20.0 and out_mean < 8.0:
+                self._preview_dark_fallback_warn_count += 1
+                if self._preview_dark_fallback_warn_count == 1 or self._preview_dark_fallback_warn_count % 120 == 0:
+                    _log(
+                        "Preview warning: processed frame is near-black "
+                        f"(src_mean={src_mean:.2f}, out_mean={out_mean:.2f}); "
+                        f"using source frame fallback (count={self._preview_dark_fallback_warn_count})"
+                    )
+                output_frame = frame
             preview = cv2.resize(output_frame, (max(1, out_w // 2), max(1, out_h // 2)), interpolation=cv2.INTER_AREA)
             cv2.imshow(self._preview_window_name, preview)
             key = cv2.waitKey(1) & 0xFF
