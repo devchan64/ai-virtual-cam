@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import shutil
+import traceback
 from collections import deque
 import sys
 import signal
@@ -4215,7 +4216,7 @@ class ConfigGui:
         self._preview_processing_signature = self._processing_signature(config)
         self._preview_active = True
         self._sync_action_button_states()
-        self.root.after(1, self._preview_tick)
+        self.root.after(15, self._preview_tick)
 
     def _stop_preview(self) -> None:
         self._preview_active = False
@@ -4264,11 +4265,15 @@ class ConfigGui:
             # show input frame to keep preview usable.
             src_mean = float(frame.mean())
             out_mean = float(output_frame.mean())
-            if src_mean > 20.0 and out_mean < 8.0:
+            # Some configurations produce "dark enough to look black" output
+            # without being mathematically near-zero; use relative + absolute checks.
+            looks_dark = out_mean < 22.0
+            much_darker_than_source = src_mean > 30.0 and out_mean < (src_mean * 0.35)
+            if looks_dark and much_darker_than_source:
                 self._preview_dark_fallback_warn_count += 1
                 if self._preview_dark_fallback_warn_count == 1 or self._preview_dark_fallback_warn_count % 120 == 0:
                     _log(
-                        "Preview warning: processed frame is near-black "
+                        "Preview warning: processed frame is too dark "
                         f"(src_mean={src_mean:.2f}, out_mean={out_mean:.2f}); "
                         f"using source frame fallback (count={self._preview_dark_fallback_warn_count})"
                     )
@@ -4284,10 +4289,11 @@ class ConfigGui:
                 return
         except Exception as exc:
             self._stop_preview()
+            _log(f"Preview exception traceback:\n{traceback.format_exc()}")
             self._report_preview_error(str(exc))
             return
 
-        self.root.after(1, self._preview_tick)
+        self.root.after(15, self._preview_tick)
 
     def _report_preview_error(self, message: str) -> None:
         _log(f"Preview error: {message}")
