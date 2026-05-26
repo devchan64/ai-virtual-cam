@@ -172,6 +172,21 @@ docker pull devchan64/ai-virtual-cam:2026.05.26
 - `audio-mixer`: 마이크 게이트 기반 가상 오디오 믹서 실행 (Linux: 실시간 입력/출력 스트림)
 - `doctor`: 기본 런타임 점검
 
+## 개발 환경(기준)
+
+- OS: Ubuntu 22.04.5 LTS
+- Kernel: Linux 6.8.0-111-generic (x86_64)
+- Python: 3.10.12
+- Docker: 28.0.0
+- Docker Compose: v2.33.0
+- GPU: Intel Iris Xe Graphics (TigerLake-LP GT2)
+- FFmpeg: 4.4.2 (Ubuntu 22.04 패키지)
+
+참고:
+
+- 위 정보는 최근 문서 업데이트 시점의 실제 개발/검증 환경 기준입니다.
+- 환경이 다르면 장치명, 성능, 세그멘테이션/오디오 동작 특성이 달라질 수 있습니다.
+
 ## 프로젝트 개요
 
 핵심 목적:
