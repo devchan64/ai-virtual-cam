@@ -902,6 +902,9 @@ class ConfigGui:
         self._preview_starting = False
         self._preview_last_toggle_at = 0.0
         self._preview_dark_fallback_warn_count = 0
+        self._preview_window: tk.Toplevel | None = None
+        self._preview_label: ttk.Label | None = None
+        self._preview_tk_image = None
         self._preview_window_name = self._tr(
             "window.preview_title",
             "ai-virtual-cam preview (press q or esc to close)",
@@ -4159,7 +4162,6 @@ class ConfigGui:
             return
         try:
             self._preview_starting = True
-            self._check_preview_runtime_ready()
             config = self._build_config(validate_audio=False)
             self._start_preview(config)
         except Exception as exc:
@@ -4214,6 +4216,7 @@ class ConfigGui:
         self._preview_processor = FrameProcessor(seg_cfg, bg_cfg, crop_cfg, face_cfg, output_w, output_h)
         self._preview_out_size = (output_w, output_h)
         self._preview_processing_signature = self._processing_signature(config)
+        self._ensure_preview_window()
         self._preview_active = True
         self._sync_action_button_states()
         self.root.after(15, self._preview_tick)
@@ -4226,17 +4229,45 @@ class ConfigGui:
         self._preview_capture = None
         self._preview_processor = None
         self._preview_processing_signature = None
-        try:
-            cv2.destroyWindow(self._preview_window_name)
-        except cv2.error:
-            pass
+        self._destroy_preview_window()
         self._sync_action_button_states()
 
-    def _is_preview_window_closed(self) -> bool:
+    def _ensure_preview_window(self) -> None:
+        if self._preview_window is not None and self._preview_window.winfo_exists():
+            return
+        window = tk.Toplevel(self.root)
+        window.title(self._preview_window_name)
+        window.geometry("640x400")
+        window.protocol("WM_DELETE_WINDOW", self._stop_preview)
+        label = ttk.Label(window)
+        label.pack(fill="both", expand=True)
+        self._preview_window = window
+        self._preview_label = label
+        self._preview_tk_image = None
+
+    def _destroy_preview_window(self) -> None:
+        window = self._preview_window
+        self._preview_window = None
+        self._preview_label = None
+        self._preview_tk_image = None
+        if window is None:
+            return
         try:
-            return cv2.getWindowProperty(self._preview_window_name, cv2.WND_PROP_VISIBLE) < 1
+            if window.winfo_exists():
+                window.destroy()
         except Exception:
-            return False
+            pass
+
+    def _render_preview_to_tk(self, frame_bgr: np.ndarray) -> None:
+        if self._preview_label is None:
+            return
+        rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        ok, encoded = cv2.imencode(".ppm", rgb)
+        if not ok:
+            raise RuntimeError("Failed to encode preview frame")
+        image = tk.PhotoImage(data=encoded.tobytes(), format="PPM")
+        self._preview_tk_image = image
+        self._preview_label.configure(image=image)
 
     def _preview_tick(self) -> None:
         if not self._preview_active:
@@ -4279,14 +4310,10 @@ class ConfigGui:
                     )
                 output_frame = frame
             preview = cv2.resize(output_frame, (max(1, out_w // 2), max(1, out_h // 2)), interpolation=cv2.INTER_AREA)
-            cv2.imshow(self._preview_window_name, preview)
-            key = cv2.waitKey(1) & 0xFF
-            if key in (27, ord("q")):
+            if self._preview_window is None or not self._preview_window.winfo_exists():
                 self._stop_preview()
                 return
-            if self._is_preview_window_closed():
-                self._stop_preview()
-                return
+            self._render_preview_to_tk(preview)
         except Exception as exc:
             self._stop_preview()
             _log(f"Preview exception traceback:\n{traceback.format_exc()}")
