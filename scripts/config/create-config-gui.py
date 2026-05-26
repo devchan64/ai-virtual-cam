@@ -901,7 +901,6 @@ class ConfigGui:
         self._preview_out_size = (0, 0)
         self._preview_starting = False
         self._preview_last_toggle_at = 0.0
-        self._preview_dark_fallback_warn_count = 0
         self._preview_window: tk.Toplevel | None = None
         self._preview_label: ttk.Label | None = None
         self._preview_tk_image = None
@@ -2228,6 +2227,15 @@ class ConfigGui:
             label_key="label.face_enhance_enabled",
         )
         row += 1
+        self._add_bool_switch(
+            tab_face,
+            row,
+            "face_deidentify_enabled",
+            self._tr("label.face_deidentify_enabled", "Face deidentify (eye mask)"),
+            False,
+            label_key="label.face_deidentify_enabled",
+        )
+        row += 1
         self._add_slider(
             tab_face,
             row,
@@ -2753,6 +2761,7 @@ class ConfigGui:
             "face_enhance_blend": 0.65,
             "face_enhance_min_size_ratio": 0.12,
             "face_enhance_edge_dither": 0.25,
+            "face_deidentify_enabled": False,
         }
 
     def _create_virtual_camera(self) -> None:
@@ -3011,6 +3020,7 @@ class ConfigGui:
             "face_enhance_blend",
             "face_enhance_min_size_ratio",
             "face_enhance_edge_dither",
+            "face_deidentify_enabled",
         ):
             self._set_var(key, defaults.get(key))
 
@@ -3106,6 +3116,7 @@ class ConfigGui:
         self._set_var("face_enhance_blend", face_cfg.get("strength"))
         self._set_var("face_enhance_min_size_ratio", face_cfg.get("minRegionRatio"))
         self._set_var("face_enhance_edge_dither", face_cfg.get("edgeNoise"))
+        self._set_var("face_deidentify_enabled", (face_cfg.get("deidentify") or {}).get("enabled"))
         self._load_audio_settings_from_config(audio_cfg)
         self._on_input_device_changed()
         self._on_input_width_changed()
@@ -4261,13 +4272,30 @@ class ConfigGui:
     def _render_preview_to_tk(self, frame_bgr: np.ndarray) -> None:
         if self._preview_label is None:
             return
-        rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-        ok, encoded = cv2.imencode(".ppm", rgb)
+        display_frame = self._fit_preview_frame(frame_bgr)
+        ok, encoded = cv2.imencode(".ppm", display_frame)
         if not ok:
             raise RuntimeError("Failed to encode preview frame")
         image = tk.PhotoImage(data=encoded.tobytes(), format="PPM")
         self._preview_tk_image = image
         self._preview_label.configure(image=image)
+
+    def _fit_preview_frame(self, frame_bgr: np.ndarray) -> np.ndarray:
+        h, w = frame_bgr.shape[:2]
+        if h <= 0 or w <= 0:
+            return frame_bgr
+        max_w = 960
+        max_h = 540
+        if self._preview_window is not None and self._preview_window.winfo_exists():
+            win_w = max(1, int(self._preview_window.winfo_width()))
+            win_h = max(1, int(self._preview_window.winfo_height()))
+            max_w = max(160, win_w - 24)
+            max_h = max(120, win_h - 56)
+        scale = min(float(max_w) / float(w), float(max_h) / float(h))
+        new_w = max(1, int(round(w * scale)))
+        new_h = max(1, int(round(h * scale)))
+        interpolation = cv2.INTER_LINEAR if scale >= 1.0 else cv2.INTER_AREA
+        return cv2.resize(frame_bgr, (new_w, new_h), interpolation=interpolation)
 
     def _preview_tick(self) -> None:
         if not self._preview_active:
@@ -4292,28 +4320,10 @@ class ConfigGui:
                 self._preview_processing_signature = sig
 
             output_frame = self._preview_processor.process(frame)
-            # Guardrail: if processing output is near-black while input is visible,
-            # show input frame to keep preview usable.
-            src_mean = float(frame.mean())
-            out_mean = float(output_frame.mean())
-            # Some configurations produce "dark enough to look black" output
-            # without being mathematically near-zero; use relative + absolute checks.
-            looks_dark = out_mean < 22.0
-            much_darker_than_source = src_mean > 30.0 and out_mean < (src_mean * 0.35)
-            if looks_dark and much_darker_than_source:
-                self._preview_dark_fallback_warn_count += 1
-                if self._preview_dark_fallback_warn_count == 1 or self._preview_dark_fallback_warn_count % 120 == 0:
-                    _log(
-                        "Preview warning: processed frame is too dark "
-                        f"(src_mean={src_mean:.2f}, out_mean={out_mean:.2f}); "
-                        f"using source frame fallback (count={self._preview_dark_fallback_warn_count})"
-                    )
-                output_frame = frame
-            preview = cv2.resize(output_frame, (max(1, out_w // 2), max(1, out_h // 2)), interpolation=cv2.INTER_AREA)
             if self._preview_window is None or not self._preview_window.winfo_exists():
                 self._stop_preview()
                 return
-            self._render_preview_to_tk(preview)
+            self._render_preview_to_tk(output_frame)
         except Exception as exc:
             self._stop_preview()
             _log(f"Preview exception traceback:\n{traceback.format_exc()}")
@@ -4375,6 +4385,7 @@ class ConfigGui:
             face.get("strength"),
             face.get("minRegionRatio"),
             face.get("edgeNoise"),
+            (face.get("deidentify") or {}).get("enabled"),
             self._background_signature(config["background"]),
             self._crop_signature(config["crop"]),
             int(config["outputCamera"]["width"]),
@@ -4526,6 +4537,7 @@ class ConfigGui:
             face_enhance_blend=float(iv["face_enhance_blend"].get()),
             face_enhance_min_size_ratio=float(iv["face_enhance_min_size_ratio"].get()),
             face_enhance_edge_dither=float(iv["face_enhance_edge_dither"].get()),
+            face_deidentify_enabled=self._parse_bool(iv["face_deidentify_enabled"].get()),
         )
 
 

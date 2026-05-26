@@ -34,7 +34,7 @@ class FrameProcessor:
         self._dark_fallback_warn_count = 0
         self._face_cascade = None
         self._face_warned = False
-        if self._face_enhance.enabled:
+        if self._face_enhance.enabled or self._face_enhance.deidentifyEnabled:
             try:
                 self._face_cascade = cv2.CascadeClassifier(
                     cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
@@ -63,12 +63,13 @@ class FrameProcessor:
                 )
                 self._low_mask_ratio_logged = True
             bounds = self._bounds.update(mask)
-            return crop_and_resize(
+            output = crop_and_resize(
                 frame,
                 self._bounds.as_rect(bounds),
                 self._output_width,
                 self._output_height,
             )
+            return self._apply_face_deidentify(output)
 
         bounds = self._bounds.update(mask)
         background = self._background.frame()
@@ -87,18 +88,20 @@ class FrameProcessor:
                         f"passthrough source frame (count={self._dark_fallback_warn_count}).",
                         flush=True,
                     )
-                return crop_and_resize(
+                output = crop_and_resize(
                     frame,
                     self._bounds.as_rect(bounds),
                     self._output_width,
                     self._output_height,
                 )
-        return crop_and_resize(
+                return self._apply_face_deidentify(output)
+        output = crop_and_resize(
             composed,
             self._bounds.as_rect(bounds),
             self._output_width,
             self._output_height,
         )
+        return self._apply_face_deidentify(output)
 
     def _apply_face_enhance(self, frame: np.ndarray) -> np.ndarray:
         if not self._face_enhance.enabled:
@@ -179,3 +182,31 @@ class FrameProcessor:
             base = np.clip(base + noise * float(edge_dither) * 0.35 * transition, 0.0, 1.0)
         base = cv2.GaussianBlur(base, (0, 0), sigmaX=1.2, sigmaY=1.2)
         return np.clip(base * float(blend), 0.0, 1.0).astype(np.float32)
+
+    def _apply_face_deidentify(self, frame: np.ndarray) -> np.ndarray:
+        if not self._face_enhance.deidentifyEnabled:
+            return frame
+        if self._face_cascade is None:
+            if not self._face_warned:
+                print("[face] warning: face detector unavailable; skip deidentify.", flush=True)
+                self._face_warned = True
+            return frame
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = self._face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+        if len(faces) == 0:
+            return frame
+        out = frame.copy()
+        h, w = out.shape[:2]
+        for x, y, fw, fh in faces:
+            x0 = max(0, x)
+            y0 = max(0, y)
+            x1 = min(w, x + fw)
+            y1 = min(h, y + fh)
+            if x1 <= x0 or y1 <= y0:
+                continue
+            eye_band_y0 = int(round(y0 + fh * 0.28))
+            eye_band_y1 = int(round(y0 + fh * 0.52))
+            eye_band_y0 = max(y0, min(eye_band_y0, y1 - 1))
+            eye_band_y1 = max(eye_band_y0 + 1, min(eye_band_y1, y1))
+            cv2.rectangle(out, (x0, eye_band_y0), (x1, eye_band_y1), (16, 16, 16), thickness=-1)
+        return out

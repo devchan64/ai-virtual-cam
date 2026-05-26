@@ -33,16 +33,33 @@ def _expand_rect_to_target_aspect(
         return Rect(x=x, y=y, width=w, height=h)
 
     if current_aspect < target_aspect:
+        # Need wider frame. Prefer expanding width, but if impossible then shrink height.
         desired_w = int(round(h * target_aspect))
-        desired_w = min(desired_w, frame_w)
-        cx = x + w // 2
-        new_x = cx - desired_w // 2
-        new_x = max(0, min(new_x, frame_w - desired_w))
-        return Rect(x=new_x, y=y, width=desired_w, height=h)
+        if desired_w <= frame_w:
+            cx = x + w // 2
+            new_x = cx - desired_w // 2
+            new_x = max(0, min(new_x, frame_w - desired_w))
+            return Rect(x=new_x, y=y, width=desired_w, height=h)
+        # Width cannot be expanded enough: keep full available width and trim height.
+        fallback_h = max(1, int(round(frame_w / target_aspect)))
+        fallback_h = min(fallback_h, frame_h)
+        cy = y + h // 2
+        new_y = cy - fallback_h // 2
+        new_y = max(0, min(new_y, frame_h - fallback_h))
+        return Rect(x=0, y=new_y, width=frame_w, height=fallback_h)
 
+    # current_aspect > target_aspect: need taller frame. Prefer expanding height,
+    # but if impossible then shrink width so output aspect is still preserved.
     desired_h = int(round(w / target_aspect))
-    desired_h = min(desired_h, frame_h)
-    cy = y + h // 2
-    new_y = cy - desired_h // 2
-    new_y = max(0, min(new_y, frame_h - desired_h))
-    return Rect(x=x, y=new_y, width=w, height=desired_h)
+    if desired_h <= frame_h:
+        cy = y + h // 2
+        new_y = cy - desired_h // 2
+        new_y = max(0, min(new_y, frame_h - desired_h))
+        return Rect(x=x, y=new_y, width=w, height=desired_h)
+    # Height cannot be expanded enough: keep full available height and trim width.
+    fallback_w = max(1, int(round(frame_h * target_aspect)))
+    fallback_w = min(fallback_w, frame_w)
+    cx = x + w // 2
+    new_x = cx - fallback_w // 2
+    new_x = max(0, min(new_x, frame_w - fallback_w))
+    return Rect(x=new_x, y=0, width=fallback_w, height=frame_h)

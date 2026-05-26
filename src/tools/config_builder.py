@@ -441,6 +441,7 @@ def build_config(
     face_enhance_blend: float = 0.65,
     face_enhance_min_size_ratio: float = 0.12,
     face_enhance_edge_dither: float = 0.25,
+    face_deidentify_enabled: bool = False,
 ) -> dict:
     if audio_output_device is None:
         audio_output_device = _default_audio_output_device()
@@ -537,5 +538,8 @@ def build_config(
             "strength": float(face_enhance_blend),
             "minRegionRatio": float(face_enhance_min_size_ratio),
             "edgeNoise": float(face_enhance_edge_dither),
+            "deidentify": {
+                "enabled": bool(face_deidentify_enabled),
+            },
         },
     }

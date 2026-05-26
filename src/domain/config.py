@@ -679,6 +679,7 @@ class FaceEnhanceConfig:
     strength: float
     minRegionRatio: float
     edgeNoise: float
+    deidentifyEnabled: bool
 
     @classmethod
     def from_dict(cls, raw: dict) -> "FaceEnhanceConfig":
@@ -690,6 +691,7 @@ class FaceEnhanceConfig:
             strength=float(raw.get("strength", 0.65)),
             minRegionRatio=float(raw.get("minRegionRatio", 0.12)),
             edgeNoise=float(raw.get("edgeNoise", 0.25)),
+            deidentifyEnabled=bool((raw.get("deidentify") or {}).get("enabled", False)),
         )
         if not 0.5 <= config.gamma <= 1.8:
             raise ValueError("faceEnhance.gamma must be between 0.5 and 1.8")
