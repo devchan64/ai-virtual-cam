@@ -8,6 +8,7 @@ import os
 import shutil
 from collections import deque
 import sys
+import signal
 import time
 import threading
 import subprocess
@@ -947,6 +948,12 @@ class ConfigGui:
         self._audio_tune_result_text: str = ""
         self._audio_tune_progress: str = ""
         self._audio_tune_done: bool = False
+        self._serve_process: subprocess.Popen[str] | None = None
+        self._serve_status_var = tk.StringVar(value=self._tr("status.serve_stopped", "Serve: stopped"))
+        self._serve_start_btn: ttk.Button | None = None
+        self._serve_stop_btn: ttk.Button | None = None
+        self._serve_output_thread: threading.Thread | None = None
+        self._serve_stop_requested = False
         self._language_var = tk.StringVar(value=self._lang)
         self._preview_qt_check_done = False
         self._seg_engine_option_keys = (
@@ -959,6 +966,160 @@ class ConfigGui:
         )
         self._build_form()
         self._load_existing_config()
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _is_serve_running(self) -> bool:
+        process = self._serve_process
+        return process is not None and process.poll() is None
+
+    def _build_serve_command(self, config_path: str) -> list[str]:
+        avc_bin = str(ROOT_DIR / "bin" / "avc")
+        if _is_container_runtime():
+            if os.environ.get("AVC_HOST_AVC_PATH"):
+                raise RuntimeError(
+                    "Docker config 런타임에서는 config 창에서 serve를 직접 실행할 수 없습니다. "
+                    "Host 터미널에서 `./bin/avc docker serve`를 실행하세요."
+                )
+            _log("Detected container runtime for serve control.")
+        return [avc_bin, "serve", "--config", config_path]
+
+    def _set_serve_status(self, message: str, running: bool) -> None:
+        self._serve_status_var.set(message)
+        if self._serve_start_btn is not None:
+            if running:
+                self._serve_start_btn.state(["disabled"])
+            else:
+                self._serve_start_btn.state(["!disabled"])
+        if self._serve_stop_btn is not None:
+            if running:
+                self._serve_stop_btn.state(["!disabled"])
+            else:
+                self._serve_stop_btn.state(["disabled"])
+
+    def _serve_process_finished(self, return_code: int | None) -> None:
+        stopped_by_user = self._serve_stop_requested
+        self._serve_process = None
+        self._serve_stop_requested = False
+        self._serve_output_thread = None
+        if return_code is None or return_code == 0:
+            self._set_serve_status(self._tr("status.serve_stopped", "Serve: stopped"), running=False)
+            return
+        if stopped_by_user or return_code in (
+            -signal.SIGINT,
+            -signal.SIGTERM,
+            -signal.SIGKILL,
+            143,
+        ):
+            self._set_serve_status(self._tr("status.serve_stopped", "Serve: stopped"), running=False)
+            return
+        self._set_serve_status(
+            self._tr("status.serve_error", "Serve exited with error (code={code})").replace(
+                "{code}",
+                str(return_code),
+            ),
+            running=False,
+        )
+
+    def _start_serve(self) -> None:
+        if self._is_serve_running():
+            return
+
+        self._set_serve_status(self._tr("status.serve_starting", "Serve: starting..."), running=True)
+
+        config_path = str(Path(self.output_path).expanduser())
+        try:
+            config = self._build_config()
+            write_config(config_path, config)
+        except Exception as exc:
+            _log(f"Validation error: {exc}")
+            messagebox.showerror(self._tr("msg.validation_error.title", "Validation error"), str(exc))
+            self._set_serve_status(self._tr("status.serve_error", "Serve exited with error (code={code})").replace("{code}", "validation"), running=False)
+            return
+
+        try:
+            cmd = self._build_serve_command(config_path)
+        except Exception as exc:
+            _log(f"Serve start blocked: {exc}")
+            messagebox.showerror("Serve start", str(exc))
+            return
+
+        try:
+            self._serve_process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                env=dict(os.environ),
+            )
+        except Exception as exc:
+            self._serve_process = None
+            _log(f"Failed to start serve process: {exc}")
+            messagebox.showerror("Serve start", str(exc))
+            self._set_serve_status(
+                self._tr("status.serve_error", "Serve exited with error (code={code})").replace(
+                    "{code}",
+                    "start_failed",
+                ),
+                running=False,
+            )
+            return
+
+        self._serve_stop_requested = False
+        self._set_serve_status(self._tr("status.serve_running", "Serve running (pid={pid})").replace("{pid}", str(self._serve_process.pid)), running=True)
+        self._serve_output_thread = threading.Thread(target=self._serve_output_worker, args=(self._serve_process,), daemon=True)
+        self._serve_output_thread.start()
+
+    def _serve_output_worker(self, process: subprocess.Popen[str]) -> None:
+        try:
+            if process.stdout is not None:
+                for line in process.stdout:
+                    print(line.rstrip("\n"), flush=True)
+            return_code = process.wait()
+        except Exception as exc:
+            _log(f"Serve watcher failed: {exc}")
+            return_code = process.returncode
+        if not self.root.winfo_exists():
+            self._serve_process = None
+            self._serve_stop_requested = False
+            self._serve_output_thread = None
+            return
+        self.root.after(0, lambda: self._serve_process_finished(return_code))
+
+    def _stop_serve(self) -> None:
+        process = self._serve_process
+        if process is None or process.poll() is not None:
+            self._serve_process_finished(process.returncode if process else 0)
+            return
+
+        self._serve_stop_requested = True
+        self._set_serve_status(self._tr("status.serve_stopping", "Stopping Serve..."), running=False)
+        try:
+            process.send_signal(signal.SIGINT)
+        except ProcessLookupError:
+            self._serve_process_finished(process.returncode)
+            return
+        except Exception:
+            try:
+                process.terminate()
+            except Exception:
+                self._serve_process_finished(process.returncode)
+                return
+
+        def _force_kill() -> None:
+            if process.poll() is None:
+                try:
+                    process.kill()
+                except Exception:
+                    pass
+        threading.Timer(1.5, _force_kill).start()
+
+    def _on_close(self) -> None:
+        if self._is_serve_running():
+            self._stop_serve()
+        if self._preview_active:
+            self._stop_preview()
+        self.root.destroy()
 
     def _tr(self, key: str, default: str) -> str:
         value = self._i18n.get(key)
@@ -1319,14 +1480,31 @@ class ConfigGui:
         action_frame.grid(row=action_row, column=0, sticky="ew", pady=(10, 0))
         action_frame.columnconfigure(0, weight=1)
         action_frame.columnconfigure(1, weight=1)
+        action_frame.columnconfigure(2, weight=1)
+        action_frame.columnconfigure(3, weight=1)
         ttk.Button(action_frame, text=self._tr("button.camera_preview", "Camera Preview"), command=self._preview).grid(
             row=0, column=0, sticky="ew", padx=4
         )
-        ttk.Button(action_frame, text=self._tr("button.save", "Save JSON"), command=self._save).grid(
-            row=0, column=1, sticky="ew", padx=4
+        self._serve_start_btn = ttk.Button(
+            action_frame,
+            text=self._tr("button.serve_start", "Start Serve"),
+            command=self._start_serve,
+        )
+        self._serve_start_btn.grid(row=0, column=1, sticky="ew", padx=4)
+        self._serve_stop_btn = ttk.Button(
+            action_frame,
+            text=self._tr("button.serve_stop", "Stop Serve"),
+            command=self._stop_serve,
+        )
+        self._serve_stop_btn.grid(row=0, column=2, sticky="ew", padx=4)
+        self._serve_stop_btn.state(["disabled"])
+        save_btn = ttk.Button(action_frame, text=self._tr("button.save", "Save JSON"), command=self._save)
+        save_btn.grid(row=0, column=3, sticky="ew", padx=4)
+        ttk.Label(action_frame, textvariable=self._serve_status_var).grid(
+            row=1, column=0, columnspan=4, sticky="w", padx=4, pady=(8, 0)
         )
         ttk.Label(action_frame, text=self._tr("label.language", "Language")).grid(
-            row=1, column=0, sticky="w", padx=4, pady=(8, 0)
+            row=2, column=0, sticky="w", padx=4, pady=(8, 0)
         )
         lang_combo = ttk.Combobox(
             action_frame,
@@ -1334,7 +1512,8 @@ class ConfigGui:
             state="readonly",
             textvariable=self._language_var,
         )
-        lang_combo.grid(row=1, column=1, sticky="ew", padx=4, pady=(8, 0))
+        lang_combo.grid(row=2, column=1, sticky="ew", padx=4, pady=(8, 0))
+        self._set_serve_status(self._tr("status.serve_stopped", "Serve: stopped"), running=False)
         input_device_widget = self._widgets.get("input_device")
         if input_device_widget is not None:
             input_device_widget.bind("<<ComboboxSelected>>", self._on_input_device_changed)
