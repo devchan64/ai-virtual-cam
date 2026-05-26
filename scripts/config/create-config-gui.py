@@ -1151,10 +1151,24 @@ class ConfigGui:
         self._scroll_canvas.bind_all("<Button-4>", self._on_mouse_wheel_linux)
         self._scroll_canvas.bind_all("<Button-5>", self._on_mouse_wheel_linux)
 
+        language_frame = ttk.Frame(scroll_inner)
+        language_frame.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        language_frame.columnconfigure(0, weight=0)
+        language_frame.columnconfigure(1, weight=1)
+        ttk.Label(language_frame, text=self._tr("label.language", "Language")).grid(row=0, column=0, sticky="w", padx=4)
+        lang_combo = ttk.Combobox(
+            language_frame,
+            values=("ko", "en"),
+            state="readonly",
+            textvariable=self._language_var,
+        )
+        lang_combo.grid(row=0, column=1, sticky="ew", padx=4)
+
         notebook = ttk.Notebook(scroll_inner)
-        notebook.grid(row=0, column=0, sticky="nsew")
+        notebook.grid(row=1, column=0, sticky="nsew")
         scroll_inner.columnconfigure(0, weight=1)
-        scroll_inner.rowconfigure(0, weight=1)
+        scroll_inner.rowconfigure(0, weight=0)
+        scroll_inner.rowconfigure(1, weight=1)
 
         tab_io = ttk.Frame(notebook, padding=8)
         tab_seg = ttk.Frame(notebook, padding=8)
@@ -1475,7 +1489,7 @@ class ConfigGui:
             row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0)
         )
 
-        action_row = 1
+        action_row = 2
         action_frame = ttk.Frame(scroll_inner)
         action_frame.grid(row=action_row, column=0, sticky="ew", pady=(10, 0))
         action_frame.columnconfigure(0, weight=1)
@@ -1503,16 +1517,6 @@ class ConfigGui:
         ttk.Label(action_frame, textvariable=self._serve_status_var).grid(
             row=1, column=0, columnspan=4, sticky="w", padx=4, pady=(8, 0)
         )
-        ttk.Label(action_frame, text=self._tr("label.language", "Language")).grid(
-            row=2, column=0, sticky="w", padx=4, pady=(8, 0)
-        )
-        lang_combo = ttk.Combobox(
-            action_frame,
-            values=("ko", "en"),
-            state="readonly",
-            textvariable=self._language_var,
-        )
-        lang_combo.grid(row=2, column=1, sticky="ew", padx=4, pady=(8, 0))
         self._set_serve_status(self._tr("status.serve_stopped", "Serve: stopped"), running=False)
         input_device_widget = self._widgets.get("input_device")
         if input_device_widget is not None:
