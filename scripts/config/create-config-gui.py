@@ -950,11 +950,22 @@ class ConfigGui:
         self._audio_tune_done: bool = False
         self._serve_process: subprocess.Popen[str] | None = None
         self._serve_status_var = tk.StringVar(value=self._tr("status.serve_stopped", "Serve: stopped"))
+        self._serve_status_key: str | None = "status.serve_stopped"
+        self._serve_status_key_args: dict[str, object] = {}
+        self._serve_status_fallback = self._tr("status.serve_stopped", "Serve: stopped")
         self._serve_start_btn: ttk.Button | None = None
         self._serve_stop_btn: ttk.Button | None = None
         self._serve_output_thread: threading.Thread | None = None
         self._serve_stop_requested = False
         self._language_var = tk.StringVar(value=self._lang)
+        self._language_var.trace_add("write", lambda *_args: self._on_language_changed())
+        self._language_label: ttk.Label | None = None
+        self._notebook: ttk.Notebook | None = None
+        self._tab_meta: list[tuple[ttk.Frame, str, str]] = []
+        self._input_device_label: ttk.Label | None = None
+        self._output_device_label: ttk.Label | None = None
+        self._camera_preview_btn: ttk.Button | None = None
+        self._save_btn: ttk.Button | None = None
         self._preview_qt_check_done = False
         self._seg_engine_option_keys = (
             "seg_opt_model_blend",
@@ -983,7 +994,26 @@ class ConfigGui:
             _log("Detected container runtime for serve control.")
         return [avc_bin, "serve", "--config", config_path]
 
-    def _set_serve_status(self, message: str, running: bool) -> None:
+    def _set_serve_status(
+        self,
+        message: str,
+        running: bool,
+        status_key: str | None = None,
+        status_args: dict[str, object] | None = None,
+    ) -> None:
+        if status_key:
+            self._serve_status_key = status_key
+            self._serve_status_key_args = status_args or {}
+            translated = self._tr(status_key, message)
+            try:
+                message = translated.format(**self._serve_status_key_args)
+            except Exception:
+                message = translated
+            self._serve_status_fallback = message
+        else:
+            self._serve_status_key = None
+            self._serve_status_key_args = status_args or {}
+            self._serve_status_fallback = message
         self._serve_status_var.set(message)
         if self._serve_start_btn is not None:
             if running:
@@ -995,6 +1025,58 @@ class ConfigGui:
                 self._serve_stop_btn.state(["!disabled"])
             else:
                 self._serve_stop_btn.state(["disabled"])
+        self._sync_action_button_states(serve_running_hint=running)
+
+    def _sync_action_button_states(self, serve_running_hint: bool | None = None) -> None:
+        serve_running = self._is_serve_running() if serve_running_hint is None else serve_running_hint
+        if self._camera_preview_btn is not None:
+            if serve_running:
+                self._camera_preview_btn.state(["disabled"])
+            else:
+                self._camera_preview_btn.state(["!disabled"])
+
+        if self._serve_start_btn is not None:
+            if self._preview_active or serve_running:
+                self._serve_start_btn.state(["disabled"])
+            else:
+                self._serve_start_btn.state(["!disabled"])
+
+    def _refresh_localized_texts(self) -> None:
+        self.root.title(self._tr("title.main", "ai-virtual-cam config GUI"))
+        if self._language_label is not None:
+            self._language_label.config(text=self._tr("label.language", "Language"))
+        if self._notebook is not None:
+            for tab, key, default in self._tab_meta:
+                self._notebook.tab(tab, text=self._tr(key, default))
+        if self._input_device_label is not None:
+            self._input_device_label.config(text=self._tr("label.input_device", "Input device"))
+        if self._output_device_label is not None:
+            self._output_device_label.config(text=self._tr("label.output_path", "Output path"))
+        if self._camera_preview_btn is not None:
+            self._camera_preview_btn.config(text=self._tr("button.camera_preview", "Camera Preview"))
+        if self._serve_start_btn is not None:
+            self._serve_start_btn.config(text=self._tr("button.serve_start", "Start Serve"))
+        if self._serve_stop_btn is not None:
+            self._serve_stop_btn.config(text=self._tr("button.serve_stop", "Stop Serve"))
+        if self._save_btn is not None:
+            self._save_btn.config(text=self._tr("button.save", "Save JSON"))
+        if self._serve_status_key:
+            translated = self._tr(self._serve_status_key, self._serve_status_fallback)
+            try:
+                translated = translated.format(**self._serve_status_key_args)
+            except Exception:
+                pass
+            self._serve_status_var.set(translated)
+
+    def _on_language_changed(self) -> None:
+        lang = self._language_var.get().strip().lower()
+        if lang not in {"ko", "en"}:
+            return
+        if lang == self._lang and self._i18n:
+            return
+        self._lang = lang
+        self._i18n = _load_language_pack(lang)
+        self._refresh_localized_texts()
 
     def _serve_process_finished(self, return_code: int | None) -> None:
         stopped_by_user = self._serve_stop_requested
@@ -1002,7 +1084,11 @@ class ConfigGui:
         self._serve_stop_requested = False
         self._serve_output_thread = None
         if return_code is None or return_code == 0:
-            self._set_serve_status(self._tr("status.serve_stopped", "Serve: stopped"), running=False)
+            self._set_serve_status(
+                self._tr("status.serve_stopped", "Serve: stopped"),
+                running=False,
+                status_key="status.serve_stopped",
+            )
             return
         if stopped_by_user or return_code in (
             -signal.SIGINT,
@@ -1010,21 +1096,31 @@ class ConfigGui:
             -signal.SIGKILL,
             143,
         ):
-            self._set_serve_status(self._tr("status.serve_stopped", "Serve: stopped"), running=False)
+            self._set_serve_status(
+                self._tr("status.serve_stopped", "Serve: stopped"),
+                running=False,
+                status_key="status.serve_stopped",
+            )
             return
         self._set_serve_status(
-            self._tr("status.serve_error", "Serve exited with error (code={code})").replace(
-                "{code}",
-                str(return_code),
-            ),
+            self._tr("status.serve_error", "Serve exited with error (code={code})"),
             running=False,
+            status_key="status.serve_error",
+            status_args={"code": str(return_code)},
         )
 
     def _start_serve(self) -> None:
         if self._is_serve_running():
             return
+        if self._preview_active:
+            messagebox.showerror(self._tr("button.serve_start", "Start Serve"), "미리보기 실행 중에는 Serve를 시작할 수 없습니다.")
+            return
 
-        self._set_serve_status(self._tr("status.serve_starting", "Serve: starting..."), running=True)
+        self._set_serve_status(
+            self._tr("status.serve_starting", "Serve: starting..."),
+            running=True,
+            status_key="status.serve_starting",
+        )
 
         config_path = str(Path(self.output_path).expanduser())
         try:
@@ -1033,7 +1129,12 @@ class ConfigGui:
         except Exception as exc:
             _log(f"Validation error: {exc}")
             messagebox.showerror(self._tr("msg.validation_error.title", "Validation error"), str(exc))
-            self._set_serve_status(self._tr("status.serve_error", "Serve exited with error (code={code})").replace("{code}", "validation"), running=False)
+            self._set_serve_status(
+                self._tr("status.serve_error", "Serve exited with error (code={code})"),
+                running=False,
+                status_key="status.serve_error",
+                status_args={"code": "validation"},
+            )
             return
 
         try:
@@ -1057,16 +1158,20 @@ class ConfigGui:
             _log(f"Failed to start serve process: {exc}")
             messagebox.showerror("Serve start", str(exc))
             self._set_serve_status(
-                self._tr("status.serve_error", "Serve exited with error (code={code})").replace(
-                    "{code}",
-                    "start_failed",
-                ),
+                self._tr("status.serve_error", "Serve exited with error (code={code})"),
                 running=False,
+                status_key="status.serve_error",
+                status_args={"code": "start_failed"},
             )
             return
 
         self._serve_stop_requested = False
-        self._set_serve_status(self._tr("status.serve_running", "Serve running (pid={pid})").replace("{pid}", str(self._serve_process.pid)), running=True)
+        self._set_serve_status(
+            self._tr("status.serve_running", "Serve running (pid={pid})"),
+            running=True,
+            status_key="status.serve_running",
+            status_args={"pid": str(self._serve_process.pid)},
+        )
         self._serve_output_thread = threading.Thread(target=self._serve_output_worker, args=(self._serve_process,), daemon=True)
         self._serve_output_thread.start()
 
@@ -1093,7 +1198,11 @@ class ConfigGui:
             return
 
         self._serve_stop_requested = True
-        self._set_serve_status(self._tr("status.serve_stopping", "Stopping Serve..."), running=False)
+        self._set_serve_status(
+            self._tr("status.serve_stopping", "Stopping Serve..."),
+            running=True,
+            status_key="status.serve_stopping",
+        )
         try:
             process.send_signal(signal.SIGINT)
         except ProcessLookupError:
@@ -1156,6 +1265,8 @@ class ConfigGui:
         language_frame.columnconfigure(0, weight=0)
         language_frame.columnconfigure(1, weight=1)
         ttk.Label(language_frame, text=self._tr("label.language", "Language")).grid(row=0, column=0, sticky="w", padx=4)
+        self._language_label = ttk.Label(language_frame, text=self._tr("label.language", "Language"))
+        self._language_label.grid(row=0, column=0, sticky="w", padx=4)
         lang_combo = ttk.Combobox(
             language_frame,
             values=("ko", "en"),
@@ -1164,7 +1275,8 @@ class ConfigGui:
         )
         lang_combo.grid(row=0, column=1, sticky="ew", padx=4)
 
-        notebook = ttk.Notebook(scroll_inner)
+        self._notebook = ttk.Notebook(scroll_inner)
+        notebook = self._notebook
         notebook.grid(row=1, column=0, sticky="nsew")
         scroll_inner.columnconfigure(0, weight=1)
         scroll_inner.rowconfigure(0, weight=0)
@@ -1181,7 +1293,16 @@ class ConfigGui:
         notebook.add(tab_bg, text=self._tr("title.tab.bg", "Background"))
         notebook.add(tab_crop, text=self._tr("title.tab.crop", "Framing"))
         notebook.add(tab_face, text="화질")
-        notebook.add(tab_audio, text=self._tr("title.tab.audio", "Audio"))
+        self._tab_meta = [
+            (tab_io, "title.tab.io", "I/O"),
+            (tab_seg, "title.tab.seg", "Segmentation"),
+            (tab_bg, "title.tab.bg", "Background"),
+            (tab_crop, "title.tab.crop", "Framing"),
+            (tab_face, "title.tab.face", "화질"),
+            (tab_audio, "title.tab.audio", "Audio"),
+        ]
+        for tab, key, default in self._tab_meta:
+            notebook.add(tab, text=self._tr(key, default))
         for tab in (tab_io, tab_seg, tab_bg, tab_crop, tab_audio, tab_face):
             for col in range(4):
                 tab.columnconfigure(col, weight=1 if col in (1, 3) else 0)
@@ -1191,7 +1312,7 @@ class ConfigGui:
         camera_values = [c["devicePath"] for c in cameras] or (["0"] if is_macos else ["/dev/video0"])
 
         row = 0
-        self._add_combo(
+        self._input_device_label = self._add_combo(
             tab_io,
             row,
             "input_device",
@@ -1199,6 +1320,7 @@ class ConfigGui:
             camera_values,
             camera_values[0],
             readonly=True,
+            label_key="label.input_device",
         )
         row += 1
         initial_modes = discover_camera_mode_options(camera_values[0]) if camera_values else [(1280, 720, "30")]
@@ -1241,7 +1363,14 @@ class ConfigGui:
             },
             key=lambda v: int(v),
         )
-        self._add_text(tab_io, row, "output_device", self._tr("label.output_path", "Output path"), default_output_device)
+        self._output_device_label = self._add_text(
+            tab_io,
+            row,
+            "output_device",
+            self._tr("label.output_path", "Output path"),
+            default_output_device,
+            label_key="label.output_path",
+        )
         row += 1
         self._add_combo(
             tab_io,
@@ -1496,7 +1625,10 @@ class ConfigGui:
         action_frame.columnconfigure(1, weight=1)
         action_frame.columnconfigure(2, weight=1)
         action_frame.columnconfigure(3, weight=1)
-        ttk.Button(action_frame, text=self._tr("button.camera_preview", "Camera Preview"), command=self._preview).grid(
+        self._camera_preview_btn = ttk.Button(
+            action_frame, text=self._tr("button.camera_preview", "Camera Preview"), command=self._preview
+        )
+        self._camera_preview_btn.grid(
             row=0, column=0, sticky="ew", padx=4
         )
         self._serve_start_btn = ttk.Button(
@@ -1512,12 +1644,12 @@ class ConfigGui:
         )
         self._serve_stop_btn.grid(row=0, column=2, sticky="ew", padx=4)
         self._serve_stop_btn.state(["disabled"])
-        save_btn = ttk.Button(action_frame, text=self._tr("button.save", "Save JSON"), command=self._save)
-        save_btn.grid(row=0, column=3, sticky="ew", padx=4)
+        self._save_btn = ttk.Button(action_frame, text=self._tr("button.save", "Save JSON"), command=self._save)
+        self._save_btn.grid(row=0, column=3, sticky="ew", padx=4)
         ttk.Label(action_frame, textvariable=self._serve_status_var).grid(
             row=1, column=0, columnspan=4, sticky="w", padx=4, pady=(8, 0)
         )
-        self._set_serve_status(self._tr("status.serve_stopped", "Serve: stopped"), running=False)
+        self._set_serve_status(self._tr("status.serve_stopped", "Serve: stopped"), running=False, status_key="status.serve_stopped")
         input_device_widget = self._widgets.get("input_device")
         if input_device_widget is not None:
             input_device_widget.bind("<<ComboboxSelected>>", self._on_input_device_changed)
@@ -1541,6 +1673,7 @@ class ConfigGui:
         if seg_backend_widget is not None:
             seg_backend_widget.bind("<<ComboboxSelected>>", self._on_seg_backend_changed)
         self._on_seg_backend_changed()
+        self._refresh_localized_texts()
 
     def _on_scroll_canvas_configure(self, event) -> None:
         self._scroll_canvas.itemconfigure(self._scroll_window, width=event.width)
@@ -1559,22 +1692,24 @@ class ConfigGui:
         elif event.num == 5:
             self._scroll_canvas.yview_scroll(1, "units")
 
-    def _add_text(self, parent, row, key, label, default, col_offset=0, readonly=False):
-        ttk.Label(parent, text=label).grid(row=row, column=col_offset, sticky="w")
+    def _add_text(self, parent, row, key, label, default, col_offset=0, readonly=False, label_key: str | None = None):
+        label_widget = ttk.Label(parent, text=label)
+        label_widget.grid(row=row, column=col_offset, sticky="w")
         var = tk.StringVar(value=default)
         self.vars[key] = var
         entry = ttk.Entry(parent, textvariable=var)
         if readonly:
             entry.state(["disabled"])
         entry.grid(row=row, column=col_offset + 1, sticky="ew", padx=4)
+        return label_widget
 
-    def _add_int(self, parent, row, key, label, default, col_offset=0, readonly=False):
-        self._add_text(parent, row, key, label, str(default), col_offset, readonly=readonly)
+    def _add_int(self, parent, row, key, label, default, col_offset=0, readonly=False, label_key: str | None = None):
+        return self._add_text(parent, row, key, label, str(default), col_offset, readonly=readonly, label_key=label_key)
 
-    def _add_float(self, parent, row, key, label, default, col_offset=0):
-        self._add_text(parent, row, key, label, str(default), col_offset)
+    def _add_float(self, parent, row, key, label, default, col_offset=0, label_key: str | None = None):
+        return self._add_text(parent, row, key, label, str(default), col_offset, label_key=label_key)
 
-    def _add_slider(self, parent, row, key, label, default, min_value, max_value, resolution=0.01):
+    def _add_slider(self, parent, row, key, label, default, min_value, max_value, resolution=0.01, label_key: str | None = None):
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w")
         var = tk.DoubleVar(value=float(default))
         self.vars[key] = var
@@ -1609,8 +1744,9 @@ class ConfigGui:
         self._slider_formatters[key] = format_value
         self._widgets[key] = scale
 
-    def _add_combo(self, parent, row, key, label, values, default, readonly=False, col_offset=0):
-        ttk.Label(parent, text=label).grid(row=row, column=col_offset, sticky="w")
+    def _add_combo(self, parent, row, key, label, values, default, readonly=False, col_offset=0, label_key: str | None = None):
+        label_widget = ttk.Label(parent, text=label)
+        label_widget.grid(row=row, column=col_offset, sticky="w")
         var = tk.StringVar(value=default)
         self.vars[key] = var
         state = "disabled" if readonly else "readonly"
@@ -1618,8 +1754,9 @@ class ConfigGui:
         span = 3 if col_offset == 0 else 1
         combo.grid(row=row, column=col_offset + 1, columnspan=span, sticky="ew", padx=4)
         self._widgets[key] = combo
+        return label_widget
 
-    def _add_bool_switch(self, parent, row, key, label, default=False):
+    def _add_bool_switch(self, parent, row, key, label, default=False, label_key: str | None = None):
         var = tk.BooleanVar(value=bool(default))
         self.vars[key] = var
         check_btn = ttk.Checkbutton(parent, text=label, variable=var)
@@ -3086,6 +3223,9 @@ class ConfigGui:
         if self._preview_active:
             self._stop_preview()
             return
+        if self._is_serve_running():
+            self._report_preview_error("Serve 실행 중에는 카메라 미리보기를 시작할 수 없습니다.")
+            return
         try:
             self._check_preview_runtime_ready()
             config = self._build_config(validate_audio=False)
@@ -3141,6 +3281,7 @@ class ConfigGui:
         self._preview_out_size = (output_w, output_h)
         self._preview_processing_signature = self._processing_signature(config)
         self._preview_active = True
+        self._sync_action_button_states()
         self.root.after(1, self._preview_tick)
 
     def _stop_preview(self) -> None:
@@ -3154,6 +3295,7 @@ class ConfigGui:
             cv2.destroyWindow(self._preview_window_name)
         except cv2.error:
             pass
+        self._sync_action_button_states()
 
     def _preview_tick(self) -> None:
         if not self._preview_active:
