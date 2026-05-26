@@ -41,6 +41,13 @@ Python 의존성만 재동기화:
 - 오디오: `audio.enabled`, 입/출력 장치, 게이트/노이즈캔슬
 - 선택한 언어는 `setting.json`의 `meta.language`에 저장됩니다.
 
+설정 GUI 샘플:
+
+- 샘플 파일: [`docs/images/config-preview-sample-anon.png`](docs/images/config-preview-sample-anon.png)
+- 설명: `화질` 탭에서 `비식별 처리(눈가림)` 옵션을 활성화한 상태의 미리보기 예시입니다.
+
+![config gui sample](docs/images/config-preview-sample-anon.png)
+
 macOS 오디오 권장:
 
 - `inputDevice`: 실제 마이크 장치명
@@ -335,27 +342,30 @@ Linux Docker 정책:
 
 ```json
 {
+  "meta": {
+    "language": "ko"
+  },
   "inputCamera": {
-    "devicePath": "0",
+    "devicePath": "/dev/video0",
     "width": 1280,
     "height": 720,
     "fps": 30,
     "crop": { "x": 0, "y": 0, "width": 1280, "height": 720 },
-    "softwareZoom": 1.2
+    "softwareZoom": 1.0
   },
   "outputCamera": {
-    "devicePath": "virtual-cam",
-    "backend": "pyvirtualcam",
-    "width": 1280,
-    "height": 720,
+    "devicePath": "/dev/video10",
+    "backend": "v4l2loopback",
+    "width": 640,
+    "height": 480,
     "fps": 30
   },
   "segmentation": {
     "backend": "selfie_ensemble",
-    "threshold": 0.65,
+    "threshold": 0.6,
     "edgeSmoothness": 0.5,
     "blendFeather": 0.35,
-    "selfie": { "modelSelection": 1, "temporalSmoothing": 0.25 },
+    "selfie": { "modelSelection": 0, "temporalSmoothing": 0.25 },
     "engineOptions": {
       "selfie_ensemble": {
         "modelBlend": 0.6,
@@ -392,11 +402,38 @@ Linux Docker 정책:
   "faceEnhance": {
     "enabled": true,
     "gamma": 1.1,
-    "offset": 8.0,
+    "offset": 10.0,
     "saturation": 1.1,
     "strength": 0.55,
     "minRegionRatio": 0.12,
-    "edgeNoise": 0.25
+    "edgeNoise": 0.25,
+    "deidentify": {
+      "enabled": true
+    }
+  },
+  "audio": {
+    "enabled": true,
+    "inputDevice": "alsa_input.pci-0000_00_1f.3-platform-skl_hda_dsp_generic.HiFi__hw_sofhdadsp_6__source",
+    "outputDevice": "ai-virtual-cam",
+    "sampleRate": 48000,
+    "channels": 1,
+    "frameMs": 20,
+    "denoise": {
+      "enabled": true,
+      "backend": "none",
+      "strength": 0.5
+    },
+    "gate": {
+      "enabled": true,
+      "thresholdDb": -40.0,
+      "hysteresisDb": 4.0,
+      "attackMs": 30,
+      "holdMs": 160,
+      "releaseMs": 2000,
+      "openGain": 1.0,
+      "closedGain": 0.0,
+      "minVoiceBandRatio": 0.5
+    }
   }
 }
 ```
@@ -408,9 +445,12 @@ Linux 출력 예시:
   "outputCamera": {
     "devicePath": "/dev/video10",
     "backend": "v4l2loopback",
-    "width": 1280,
-    "height": 720,
+    "width": 640,
+    "height": 480,
     "fps": 30
   }
 }
 ```
+
+- `/dev/video10`은 반드시 `Video Output` capability가 있는 `v4l2loopback` 장치여야 합니다.
+- 장치 상태 확인: `v4l2-ctl -D -d /dev/video10`
