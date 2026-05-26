@@ -898,6 +898,8 @@ class ConfigGui:
         self._preview_processor = None
         self._preview_processing_signature = None
         self._preview_out_size = (0, 0)
+        self._preview_starting = False
+        self._preview_last_toggle_at = 0.0
         self._preview_window_name = self._tr(
             "window.preview_title",
             "ai-virtual-cam preview (press q or esc to close)",
@@ -4140,6 +4142,13 @@ class ConfigGui:
         return float(max(0.0, min(1.0, voice_power / total_power)))
 
     def _preview(self):
+        now = time.monotonic()
+        # Prevent duplicate callbacks (double-click / key repeat) from reopening preview repeatedly.
+        if now - self._preview_last_toggle_at < 0.6:
+            return
+        self._preview_last_toggle_at = now
+        if self._preview_starting:
+            return
         if self._preview_active:
             self._stop_preview()
             return
@@ -4147,11 +4156,14 @@ class ConfigGui:
             self._report_preview_error(self._tr("msg.preview_serve_running", "Cannot start camera preview while Serve is running."))
             return
         try:
+            self._preview_starting = True
             self._check_preview_runtime_ready()
             config = self._build_config(validate_audio=False)
             self._start_preview(config)
         except Exception as exc:
             self._report_preview_error(str(exc))
+        finally:
+            self._preview_starting = False
 
     def _check_preview_runtime_ready(self) -> None:
         if self._preview_qt_check_done:
@@ -4206,6 +4218,7 @@ class ConfigGui:
 
     def _stop_preview(self) -> None:
         self._preview_active = False
+        self._preview_last_toggle_at = time.monotonic()
         if self._preview_capture is not None:
             self._preview_capture.release()
         self._preview_capture = None
