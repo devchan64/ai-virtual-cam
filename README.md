@@ -124,6 +124,13 @@ xhost +si:localuser:$USER
 ./bin/avc docker serve
 ```
 
+Docker Hub 이미지 사용:
+
+```bash
+docker pull devchan64/ai-virtual-cam:latest
+docker pull devchan64/ai-virtual-cam:2026.05.26
+```
+
 - `docker serve`는 `setting.json`의 입력/출력 장치 값을 우선 사용합니다. 설정값이 없거나 장치를 열 수 없으면 즉시 실패합니다.
 - `serve`는 항상 로컬 `~/.avc/setting.json` 존재 여부를 먼저 확인하고 없으면 즉시 실패합니다.
 - `./bin/avc docker build` 로그는 `.tmp/docker-build-<UTC_TIMESTAMP>.log`로 저장됩니다.
