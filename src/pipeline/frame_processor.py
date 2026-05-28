@@ -37,7 +37,10 @@ class FrameProcessor:
         self._last_output_mask = np.zeros((output_height, output_width), dtype=np.uint8)
         self._last_face_alpha_input = np.zeros((1, 1), dtype=np.float32)
         self._last_face_enhance_mask = np.zeros((output_height, output_width), dtype=np.uint8)
-        if self._face_enhance.enabled or self._face_enhance.deidentifyEnabled:
+        self._last_face_edge_mask_input = np.zeros((1, 1), dtype=np.uint8)
+        self._last_face_enhance_edge_mask = np.zeros((output_height, output_width), dtype=np.uint8)
+        self._last_deidentify_mask = np.zeros((output_height, output_width), dtype=np.uint8)
+        if self._face_enhance.deidentifyEnabled:
             try:
                 self._face_cascade = cv2.CascadeClassifier(
                     cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
@@ -48,7 +51,6 @@ class FrameProcessor:
                 self._face_cascade = None
 
     def process(self, frame: np.ndarray) -> np.ndarray:
-        frame = self._apply_face_enhance(frame)
         raw_mask = self._segmenter.segment(frame)
         mask = refine_mask(
             raw_mask,
@@ -56,6 +58,7 @@ class FrameProcessor:
             edge_smoothness=self._seg_cfg.edgeSmoothness,
             blend_feather=self._seg_cfg.blendFeather,
         )
+        frame = self._apply_face_enhance(frame, mask)
         foreground_ratio = float((mask > 0).mean())
         if foreground_ratio < 0.05:
             if not self._low_mask_ratio_logged:
@@ -79,6 +82,7 @@ class FrameProcessor:
                 self._output_height,
             )
             self._last_face_enhance_mask = self._crop_face_alpha_to_output(self._bounds.as_rect(bounds))
+            self._last_face_enhance_edge_mask = self._crop_face_edge_to_output(self._bounds.as_rect(bounds))
             return self._apply_face_deidentify(output)
 
         bounds = self._bounds.update(mask)
@@ -118,6 +122,7 @@ class FrameProcessor:
             self._output_height,
         )
         self._last_face_enhance_mask = self._crop_face_alpha_to_output(self._bounds.as_rect(bounds))
+        self._last_face_enhance_edge_mask = self._crop_face_edge_to_output(self._bounds.as_rect(bounds))
         return self._apply_face_deidentify(output)
 
     def last_output_mask(self) -> np.ndarray:
@@ -126,55 +131,48 @@ class FrameProcessor:
     def last_face_enhance_mask(self) -> np.ndarray:
         return self._last_face_enhance_mask.copy()
 
-    def _apply_face_enhance(self, frame: np.ndarray) -> np.ndarray:
+    def last_face_enhance_edge_mask(self) -> np.ndarray:
+        return self._last_face_enhance_edge_mask.copy()
+
+    def last_deidentify_mask(self) -> np.ndarray:
+        return self._last_deidentify_mask.copy()
+
+    def _apply_face_enhance(self, frame: np.ndarray, segmentation_mask: np.ndarray) -> np.ndarray:
         if not self._face_enhance.enabled:
             self._last_face_alpha_input = np.zeros(frame.shape[:2], dtype=np.float32)
+            self._last_face_edge_mask_input = np.zeros(frame.shape[:2], dtype=np.uint8)
             return frame
-        if self._face_cascade is None:
-            if not self._face_warned:
-                print("[face] warning: face detector unavailable; skip face enhancement.", flush=True)
-                self._face_warned = True
-            self._last_face_alpha_input = np.zeros(frame.shape[:2], dtype=np.float32)
-            return frame
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = self._face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
-        if len(faces) == 0:
-            self._last_face_alpha_input = np.zeros(frame.shape[:2], dtype=np.float32)
-            return frame
-        h, w = frame.shape[:2]
-        min_size = int(min(h, w) * float(self._face_enhance.minRegionRatio))
-        tuned_frame = frame.copy()
-        face_alpha_map = np.zeros((h, w), dtype=np.float32)
-        for x, y, fw, fh in faces:
-            if fw < min_size or fh < min_size:
-                continue
-            x0 = max(0, x)
-            y0 = max(0, y)
-            x1 = min(w, x + fw)
-            y1 = min(h, y + fh)
-            if x1 <= x0 or y1 <= y0:
-                continue
-            roi = frame[y0:y1, x0:x1]
-            tuned = self._tune_roi(roi)
-            blend = float(self._face_enhance.strength)
-            alpha = self._build_face_region_alpha_mask(
-                roi,
-                blend=blend,
-                edge_dither=float(self._face_enhance.edgeNoise),
-                seed=(x0 * 73856093) ^ (y0 * 19349663) ^ (fw * 83492791) ^ (fh * 2971215073),
+        if segmentation_mask.shape[:2] != frame.shape[:2]:
+            segmentation_mask = cv2.resize(
+                segmentation_mask,
+                (frame.shape[1], frame.shape[0]),
+                interpolation=cv2.INTER_LINEAR,
             )
-            if alpha is None:
-                continue
-            tuned_frame[y0:y1, x0:x1] = tuned
-            local = face_alpha_map[y0:y1, x0:x1]
-            face_alpha_map[y0:y1, x0:x1] = np.maximum(local, alpha)
-        if float(face_alpha_map.max()) <= 0.0:
-            self._last_face_alpha_input = face_alpha_map
+        edge_band, edge_alpha = self._build_segmentation_enhance_alpha(segmentation_mask)
+        self._last_face_edge_mask_input = edge_band
+        self._last_face_alpha_input = edge_alpha
+        if float(edge_alpha.max()) <= 0.0:
             return frame
-        self._last_face_alpha_input = face_alpha_map
-        alpha_3 = face_alpha_map[:, :, None].astype(np.float32)
-        blended = tuned_frame.astype(np.float32) * alpha_3 + frame.astype(np.float32) * (1.0 - alpha_3)
+        tuned = self._tune_roi(frame)
+        alpha_3 = edge_alpha[:, :, None].astype(np.float32)
+        blended = tuned.astype(np.float32) * alpha_3 + frame.astype(np.float32) * (1.0 - alpha_3)
         return np.clip(blended, 0.0, 255.0).astype(np.uint8)
+
+    def _build_segmentation_enhance_alpha(self, mask: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        binary = (mask >= 127).astype(np.uint8) * 255
+        k = np.ones((3, 3), dtype=np.uint8)
+        dilated = cv2.dilate(binary, k, iterations=2)
+        eroded = cv2.erode(binary, k, iterations=2)
+        edge_band = cv2.subtract(dilated, eroded)
+        edge_soft = cv2.GaussianBlur(edge_band, (0, 0), sigmaX=1.2, sigmaY=1.2).astype(np.float32) / 255.0
+
+        # Keep segmentation-edge-centric behavior, but blend some interior foreground weight
+        # so gamma/brightness/saturation changes are visible in preview.
+        fg_soft = cv2.GaussianBlur(binary, (0, 0), sigmaX=2.2, sigmaY=2.2).astype(np.float32) / 255.0
+        base_alpha = np.clip(edge_soft * 0.70 + fg_soft * 0.30, 0.0, 1.0)
+        strength = float(np.clip(self._face_enhance.strength, 0.0, 1.0))
+        edge_alpha = np.clip(base_alpha * strength, 0.0, 1.0)
+        return edge_band, edge_alpha
 
     def _crop_face_alpha_to_output(self, rect) -> np.ndarray:
         if self._last_face_alpha_input.size == 0:
@@ -182,65 +180,10 @@ class FrameProcessor:
         alpha_u8 = np.clip(self._last_face_alpha_input * 255.0, 0.0, 255.0).astype(np.uint8)
         return crop_and_resize(alpha_u8, rect, self._output_width, self._output_height)
 
-    def _build_face_region_alpha_mask(
-        self,
-        roi: np.ndarray,
-        *,
-        blend: float,
-        edge_dither: float,
-        seed: int,
-    ) -> np.ndarray | None:
-        h, w = roi.shape[:2]
-        if h < 8 or w < 8:
-            return None
-        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-        smooth = cv2.GaussianBlur(gray, (5, 5), 0)
-        edges = cv2.Canny(smooth, 60, 150)
-        edges = cv2.dilate(edges, np.ones((2, 2), dtype=np.uint8), iterations=1)
-
-        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not contours:
-            return None
-
-        # Choose the most face-like contour: large area and center proximity.
-        cx = (w - 1) * 0.5
-        cy = (h - 1) * 0.5
-        best = None
-        best_score = -1.0
-        min_area = max(20.0, float(h * w) * 0.05)
-        for contour in contours:
-            area = float(cv2.contourArea(contour))
-            if area < min_area:
-                continue
-            moments = cv2.moments(contour)
-            if moments["m00"] <= 1e-6:
-                continue
-            mx = moments["m10"] / moments["m00"]
-            my = moments["m01"] / moments["m00"]
-            dist = float(np.hypot(mx - cx, my - cy))
-            center_weight = max(0.0, 1.0 - dist / max(1.0, np.hypot(cx, cy)))
-            score = area * (0.5 + 0.5 * center_weight)
-            if score > best_score:
-                best_score = score
-                best = contour
-        if best is None:
-            return None
-
-        mask = np.zeros((h, w), dtype=np.uint8)
-        cv2.drawContours(mask, [best], -1, 255, thickness=-1)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), dtype=np.uint8))
-        mask = cv2.GaussianBlur(mask, (0, 0), sigmaX=2.0, sigmaY=2.0)
-        alpha = (mask.astype(np.float32) / 255.0)
-        if alpha.max() < 0.1:
-            return None
-
-        if edge_dither > 0.0:
-            rng = np.random.default_rng(seed & 0xFFFFFFFF)
-            noise = rng.random((h, w), dtype=np.float32) - 0.5
-            transition = ((alpha > 0.05) & (alpha < 0.95)).astype(np.float32)
-            alpha = np.clip(alpha + noise * float(edge_dither) * 0.2 * transition, 0.0, 1.0)
-
-        return np.clip(alpha * float(blend), 0.0, 1.0).astype(np.float32)
+    def _crop_face_edge_to_output(self, rect) -> np.ndarray:
+        if self._last_face_edge_mask_input.size == 0:
+            return np.zeros((self._output_height, self._output_width), dtype=np.uint8)
+        return crop_and_resize(self._last_face_edge_mask_input, rect, self._output_width, self._output_height)
 
     def _tune_roi(self, roi: np.ndarray) -> np.ndarray:
         f32 = roi.astype(np.float32) / 255.0
@@ -260,18 +203,25 @@ class FrameProcessor:
 
     def _apply_face_deidentify(self, frame: np.ndarray) -> np.ndarray:
         if not self._face_enhance.deidentifyEnabled:
+            self._last_deidentify_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
             return frame
         if self._face_cascade is None:
             if not self._face_warned:
-                print("[face] warning: face detector unavailable; skip deidentify.", flush=True)
+                print(
+                    "[face] warning: deidentify enabled but face detector unavailable; skip deidentify.",
+                    flush=True,
+                )
                 self._face_warned = True
+            self._last_deidentify_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
             return frame
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         faces = self._face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
         if len(faces) == 0:
+            self._last_deidentify_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
             return frame
         out = frame.copy()
         h, w = out.shape[:2]
+        mask = np.zeros((h, w), dtype=np.uint8)
         for x, y, fw, fh in faces:
             x0 = max(0, x)
             y0 = max(0, y)
@@ -284,4 +234,6 @@ class FrameProcessor:
             eye_band_y0 = max(y0, min(eye_band_y0, y1 - 1))
             eye_band_y1 = max(eye_band_y0 + 1, min(eye_band_y1, y1))
             cv2.rectangle(out, (x0, eye_band_y0), (x1, eye_band_y1), (16, 16, 16), thickness=-1)
+            cv2.rectangle(mask, (x0, eye_band_y0), (x1, eye_band_y1), 255, thickness=-1)
+        self._last_deidentify_mask = mask
         return out

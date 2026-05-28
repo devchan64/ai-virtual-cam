@@ -908,6 +908,7 @@ class ConfigGui:
         self._preview_face_cascade = None
         self._preview_face_edge_trace_enabled = True
         self._preview_segment_trace_enabled = True
+        self._preview_deidentify_trace_enabled = True
         self._preview_window_name = self._tr(
             "window.preview_title",
             "ai-virtual-cam preview (press q or esc to close)",
@@ -4282,6 +4283,7 @@ class ConfigGui:
         # Draw diagnostic traces at the final display resolution for crisp visibility.
         display_frame = self._apply_segment_trace_overlay(display_frame)
         display_frame = self._apply_face_edge_trace_overlay(display_frame)
+        display_frame = self._apply_deidentify_trace_overlay(display_frame)
         ok, encoded = cv2.imencode(".ppm", display_frame)
         if not ok:
             raise RuntimeError("Failed to encode preview frame")
@@ -4355,7 +4357,7 @@ class ConfigGui:
     def _apply_face_edge_trace_overlay(self, frame_bgr: np.ndarray) -> np.ndarray:
         if not self._preview_face_edge_trace_enabled or self._preview_processor is None:
             return frame_bgr
-        getter = getattr(self._preview_processor, "last_face_enhance_mask", None)
+        getter = getattr(self._preview_processor, "last_face_enhance_edge_mask", None)
         if getter is None:
             return frame_bgr
         mask = getter()
@@ -4363,7 +4365,7 @@ class ConfigGui:
             return frame_bgr
         if mask.shape[:2] != frame_bgr.shape[:2]:
             mask = cv2.resize(mask, (frame_bgr.shape[1], frame_bgr.shape[0]), interpolation=cv2.INTER_LINEAR)
-        binary = (mask >= 25).astype(np.uint8) * 255
+        binary = (mask >= 127).astype(np.uint8) * 255
         contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
             return frame_bgr
@@ -4388,6 +4390,25 @@ class ConfigGui:
             return frame_bgr
         overlay = frame_bgr.copy()
         cv2.drawContours(overlay, contours, -1, (255, 180, 32), 2)
+        return overlay
+
+    def _apply_deidentify_trace_overlay(self, frame_bgr: np.ndarray) -> np.ndarray:
+        if not self._preview_deidentify_trace_enabled or self._preview_processor is None:
+            return frame_bgr
+        getter = getattr(self._preview_processor, "last_deidentify_mask", None)
+        if getter is None:
+            return frame_bgr
+        mask = getter()
+        if not isinstance(mask, np.ndarray) or mask.size == 0:
+            return frame_bgr
+        if mask.shape[:2] != frame_bgr.shape[:2]:
+            mask = cv2.resize(mask, (frame_bgr.shape[1], frame_bgr.shape[0]), interpolation=cv2.INTER_LINEAR)
+        binary = (mask >= 127).astype(np.uint8) * 255
+        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return frame_bgr
+        overlay = frame_bgr.copy()
+        cv2.drawContours(overlay, contours, -1, (255, 64, 220), 2)
         return overlay
 
     def _report_preview_error(self, message: str) -> None:
