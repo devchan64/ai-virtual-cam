@@ -902,8 +902,12 @@ class ConfigGui:
         self._preview_starting = False
         self._preview_last_toggle_at = 0.0
         self._preview_window: tk.Toplevel | None = None
-        self._preview_label: ttk.Label | None = None
+        self._preview_canvas: tk.Canvas | None = None
+        self._preview_canvas_image_id: int | None = None
         self._preview_tk_image = None
+        self._preview_face_cascade = None
+        self._preview_face_edge_trace_enabled = True
+        self._preview_segment_trace_enabled = True
         self._preview_window_name = self._tr(
             "window.preview_title",
             "ai-virtual-cam preview (press q or esc to close)",
@@ -4250,16 +4254,18 @@ class ConfigGui:
         window.title(self._preview_window_name)
         window.geometry("640x400")
         window.protocol("WM_DELETE_WINDOW", self._stop_preview)
-        label = ttk.Label(window)
-        label.pack(fill="both", expand=True)
+        canvas = tk.Canvas(window, bg="#111111", highlightthickness=0)
+        canvas.pack(fill="both", expand=True)
         self._preview_window = window
-        self._preview_label = label
+        self._preview_canvas = canvas
+        self._preview_canvas_image_id = None
         self._preview_tk_image = None
 
     def _destroy_preview_window(self) -> None:
         window = self._preview_window
         self._preview_window = None
-        self._preview_label = None
+        self._preview_canvas = None
+        self._preview_canvas_image_id = None
         self._preview_tk_image = None
         if window is None:
             return
@@ -4270,7 +4276,7 @@ class ConfigGui:
             pass
 
     def _render_preview_to_tk(self, frame_bgr: np.ndarray) -> None:
-        if self._preview_label is None:
+        if self._preview_canvas is None:
             return
         display_frame = self._fit_preview_frame(frame_bgr)
         ok, encoded = cv2.imencode(".ppm", display_frame)
@@ -4278,7 +4284,18 @@ class ConfigGui:
             raise RuntimeError("Failed to encode preview frame")
         image = tk.PhotoImage(data=encoded.tobytes(), format="PPM")
         self._preview_tk_image = image
-        self._preview_label.configure(image=image)
+        canvas_w = max(1, int(self._preview_canvas.winfo_width()))
+        canvas_h = max(1, int(self._preview_canvas.winfo_height()))
+        img_h, img_w = display_frame.shape[:2]
+        x = max(0, (canvas_w - img_w) // 2)
+        y = max(0, (canvas_h - img_h) // 2)
+        if self._preview_canvas_image_id is None:
+            self._preview_canvas_image_id = self._preview_canvas.create_image(
+                x, y, image=image, anchor="nw"
+            )
+        else:
+            self._preview_canvas.coords(self._preview_canvas_image_id, x, y)
+            self._preview_canvas.itemconfigure(self._preview_canvas_image_id, image=image)
 
     def _fit_preview_frame(self, frame_bgr: np.ndarray) -> np.ndarray:
         h, w = frame_bgr.shape[:2]
@@ -4320,6 +4337,8 @@ class ConfigGui:
                 self._preview_processing_signature = sig
 
             output_frame = self._preview_processor.process(frame)
+            output_frame = self._apply_segment_trace_overlay(output_frame)
+            output_frame = self._apply_face_edge_trace_overlay(output_frame)
             if self._preview_window is None or not self._preview_window.winfo_exists():
                 self._stop_preview()
                 return
@@ -4331,6 +4350,65 @@ class ConfigGui:
             return
 
         self.root.after(15, self._preview_tick)
+
+    def _face_cascade(self):
+        if self._preview_face_cascade is not None:
+            return self._preview_face_cascade
+        cascade_path = Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml"
+        if not cascade_path.exists():
+            self._preview_face_cascade = False
+            return None
+        cascade = cv2.CascadeClassifier(str(cascade_path))
+        if cascade.empty():
+            self._preview_face_cascade = False
+            return None
+        self._preview_face_cascade = cascade
+        return cascade
+
+    def _apply_face_edge_trace_overlay(self, frame_bgr: np.ndarray) -> np.ndarray:
+        if not self._preview_face_edge_trace_enabled:
+            return frame_bgr
+        cascade = self._face_cascade()
+        if cascade is None:
+            return frame_bgr
+        gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+        faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(48, 48))
+        if len(faces) == 0:
+            return frame_bgr
+
+        overlay = frame_bgr.copy()
+        for x, y, w, h in faces:
+            roi = gray[y : y + h, x : x + w]
+            if roi.size == 0:
+                continue
+            edges = cv2.Canny(cv2.GaussianBlur(roi, (3, 3), 0), 70, 140)
+            edges = cv2.dilate(edges, np.ones((2, 2), dtype=np.uint8), iterations=1)
+            contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+            for contour in contours:
+                if contour.shape[0] < 8:
+                    continue
+                shifted = contour + np.array([[[x, y]]], dtype=np.int32)
+                cv2.polylines(overlay, [shifted], isClosed=False, color=(64, 255, 128), thickness=1)
+        return overlay
+
+    def _apply_segment_trace_overlay(self, frame_bgr: np.ndarray) -> np.ndarray:
+        if not self._preview_segment_trace_enabled or self._preview_processor is None:
+            return frame_bgr
+        getter = getattr(self._preview_processor, "last_output_mask", None)
+        if getter is None:
+            return frame_bgr
+        mask = getter()
+        if not isinstance(mask, np.ndarray) or mask.size == 0:
+            return frame_bgr
+        if mask.shape[:2] != frame_bgr.shape[:2]:
+            mask = cv2.resize(mask, (frame_bgr.shape[1], frame_bgr.shape[0]), interpolation=cv2.INTER_LINEAR)
+        binary = (mask >= 127).astype(np.uint8) * 255
+        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return frame_bgr
+        overlay = frame_bgr.copy()
+        cv2.drawContours(overlay, contours, -1, (255, 180, 32), 2)
+        return overlay
 
     def _report_preview_error(self, message: str) -> None:
         _log(f"Preview error: {message}")

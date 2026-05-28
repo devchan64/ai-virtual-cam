@@ -34,6 +34,7 @@ class FrameProcessor:
         self._dark_fallback_warn_count = 0
         self._face_cascade = None
         self._face_warned = False
+        self._last_output_mask = np.zeros((output_height, output_width), dtype=np.uint8)
         if self._face_enhance.enabled or self._face_enhance.deidentifyEnabled:
             try:
                 self._face_cascade = cv2.CascadeClassifier(
@@ -65,6 +66,12 @@ class FrameProcessor:
             bounds = self._bounds.update(mask)
             output = crop_and_resize(
                 frame,
+                self._bounds.as_rect(bounds),
+                self._output_width,
+                self._output_height,
+            )
+            self._last_output_mask = crop_and_resize(
+                mask,
                 self._bounds.as_rect(bounds),
                 self._output_width,
                 self._output_height,
@@ -101,7 +108,16 @@ class FrameProcessor:
             self._output_width,
             self._output_height,
         )
+        self._last_output_mask = crop_and_resize(
+            mask,
+            self._bounds.as_rect(bounds),
+            self._output_width,
+            self._output_height,
+        )
         return self._apply_face_deidentify(output)
+
+    def last_output_mask(self) -> np.ndarray:
+        return self._last_output_mask.copy()
 
     def _apply_face_enhance(self, frame: np.ndarray) -> np.ndarray:
         if not self._face_enhance.enabled:
@@ -130,18 +146,109 @@ class FrameProcessor:
             roi = out[y0:y1, x0:x1]
             tuned = self._tune_roi(roi)
             blend = float(self._face_enhance.strength)
-            alpha = self._build_face_alpha_mask(
-                roi.shape[0],
-                roi.shape[1],
-                blend,
-                float(self._face_enhance.edgeNoise),
+            alpha = self._build_face_region_alpha_mask(
+                roi,
+                blend=blend,
+                edge_dither=float(self._face_enhance.edgeNoise),
                 seed=(x0 * 73856093) ^ (y0 * 19349663) ^ (fw * 83492791) ^ (fh * 2971215073),
             )
+            if alpha is None:
+                alpha = self._build_face_alpha_mask(
+                    roi.shape[0],
+                    roi.shape[1],
+                    blend,
+                    float(self._face_enhance.edgeNoise),
+                    seed=(x0 * 73856093) ^ (y0 * 19349663) ^ (fw * 83492791) ^ (fh * 2971215073),
+                )
             alpha_3 = alpha[:, :, None].astype(np.float32)
             blended = tuned.astype(np.float32) * alpha_3 + roi.astype(np.float32) * (1.0 - alpha_3)
             out[y0:y1, x0:x1] = np.clip(blended, 0.0, 255.0).astype(np.uint8)
         return out
 
+    def _build_face_region_alpha_mask(
+        self,
+        roi: np.ndarray,
+        *,
+        blend: float,
+        edge_dither: float,
+        seed: int,
+    ) -> np.ndarray | None:
+        h, w = roi.shape[:2]
+        if h < 8 or w < 8:
+            return None
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        smooth = cv2.GaussianBlur(gray, (5, 5), 0)
+        edges = cv2.Canny(smooth, 60, 150)
+        edges = cv2.dilate(edges, np.ones((2, 2), dtype=np.uint8), iterations=1)
+
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return None
+
+        # Choose the most face-like contour: large area and center proximity.
+        cx = (w - 1) * 0.5
+        cy = (h - 1) * 0.5
+        best = None
+        best_score = -1.0
+        min_area = max(20.0, float(h * w) * 0.05)
+        for contour in contours:
+            area = float(cv2.contourArea(contour))
+            if area < min_area:
+                continue
+            moments = cv2.moments(contour)
+            if moments["m00"] <= 1e-6:
+                continue
+            mx = moments["m10"] / moments["m00"]
+            my = moments["m01"] / moments["m00"]
+            dist = float(np.hypot(mx - cx, my - cy))
+            center_weight = max(0.0, 1.0 - dist / max(1.0, np.hypot(cx, cy)))
+            score = area * (0.5 + 0.5 * center_weight)
+            if score > best_score:
+                best_score = score
+                best = contour
+        if best is None:
+            return None
+
+        mask = np.zeros((h, w), dtype=np.uint8)
+        cv2.drawContours(mask, [best], -1, 255, thickness=-1)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), dtype=np.uint8))
+        mask = cv2.GaussianBlur(mask, (0, 0), sigmaX=2.0, sigmaY=2.0)
+        alpha = (mask.astype(np.float32) / 255.0)
+        if alpha.max() < 0.1:
+            return None
+
+        if edge_dither > 0.0:
+            rng = np.random.default_rng(seed & 0xFFFFFFFF)
+            noise = rng.random((h, w), dtype=np.float32) - 0.5
+            transition = ((alpha > 0.05) & (alpha < 0.95)).astype(np.float32)
+            alpha = np.clip(alpha + noise * float(edge_dither) * 0.2 * transition, 0.0, 1.0)
+
+        return np.clip(alpha * float(blend), 0.0, 1.0).astype(np.float32)
+
+    def _build_face_alpha_mask(
+        self,
+        h: int,
+        w: int,
+        blend: float,
+        edge_dither: float,
+        seed: int,
+    ) -> np.ndarray:
+        yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+        cx = (w - 1) * 0.5
+        cy = (h - 1) * 0.5
+        rx = max(1.0, w * 0.55)
+        ry = max(1.0, h * 0.60)
+        dist = np.sqrt(((xx - cx) / rx) ** 2 + ((yy - cy) / ry) ** 2)
+        inner = 0.72
+        outer = 1.0
+        base = np.clip((outer - dist) / max(1e-6, (outer - inner)), 0.0, 1.0)
+        transition = ((dist > inner) & (dist < outer)).astype(np.float32)
+        if edge_dither > 0.0:
+            rng = np.random.default_rng(seed & 0xFFFFFFFF)
+            noise = rng.random((h, w), dtype=np.float32) - 0.5
+            base = np.clip(base + noise * float(edge_dither) * 0.35 * transition, 0.0, 1.0)
+        base = cv2.GaussianBlur(base, (0, 0), sigmaX=1.2, sigmaY=1.2)
+        return np.clip(base * float(blend), 0.0, 1.0).astype(np.float32)
     def _tune_roi(self, roi: np.ndarray) -> np.ndarray:
         f32 = roi.astype(np.float32) / 255.0
         gamma = max(0.5, min(1.8, float(self._face_enhance.gamma)))
