@@ -3,7 +3,7 @@ set -euo pipefail
 
 CAMERA_DEVICE="${AVC_OUTPUT_DEVICE:-/dev/video10}"
 CAMERA_LABEL="${AVC_CAMERA_LABEL:-ai-virtual-cam}"
-CAMERA_EXCLUSIVE_CAPS="${AVC_CAMERA_EXCLUSIVE_CAPS:-0}"
+CAMERA_EXCLUSIVE_CAPS="${AVC_CAMERA_EXCLUSIVE_CAPS:-1}"
 AUDIO_SINK_NAME="${AVC_AUDIO_SINK_NAME:-ai-virtual-cam}"
 AUDIO_SINK_DESC="${AVC_AUDIO_SINK_DESC:-ai-virtual-cam}"
 HOST_UID="${AVC_HOST_UID:-}"
@@ -21,7 +21,7 @@ Usage:
 Environment:
   AVC_OUTPUT_DEVICE      Camera device path (default: /dev/video10)
   AVC_CAMERA_LABEL       v4l2loopback card label (default: ai-virtual-cam)
-  AVC_CAMERA_EXCLUSIVE_CAPS  v4l2loopback exclusive_caps (default: 0)
+  AVC_CAMERA_EXCLUSIVE_CAPS  v4l2loopback exclusive_caps (default: 1)
   AVC_AUDIO_SINK_NAME    PulseAudio sink name (default: ai-virtual-cam)
   AVC_AUDIO_SINK_DESC    PulseAudio sink description (default: ai-virtual-cam)
 
