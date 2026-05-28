@@ -889,6 +889,7 @@ class ConfigGui:
             self._lang = "ko"
         self._i18n = _load_language_pack(self._lang)
         self._localized_widgets: list[tuple[object, str, str]] = []
+        self._bool_switch_meta: list[tuple[ttk.Checkbutton, tk.BooleanVar, str, str]] = []
         self.root.title(self._tr("title.main", "ai-virtual-cam config GUI"))
         self.root.geometry("640x640")
         self.root.minsize(640, 480)
@@ -1062,6 +1063,8 @@ class ConfigGui:
                     widget.config(text=self._tr(key, default))
                 except Exception:
                     pass
+        for check_btn, var, label_key, default_label in self._bool_switch_meta:
+            self._update_bool_switch_text(check_btn, var, label_key, default_label)
         if self._notebook is not None:
             for tab, key, default in self._tab_meta:
                 self._notebook.tab(tab, text=self._tr(key, default))
@@ -1141,7 +1144,7 @@ class ConfigGui:
         if self._is_serve_running():
             return
         if self._preview_active:
-            messagebox.showerror(
+            self._show_error(
                 self._tr("msg.serve_start_blocked_title", "Cannot Start Serve"),
                 self._tr(
                     "msg.serve_start_blocked",
@@ -1162,7 +1165,7 @@ class ConfigGui:
             write_config(config_path, config)
         except Exception as exc:
             _log(f"Validation error: {exc}")
-            messagebox.showerror(self._tr("msg.validation_error.title", "Validation error"), str(exc))
+            self._show_error(self._tr("msg.validation_error.title", "Validation error"), str(exc))
             self._set_serve_status(
                 self._tr("status.serve_error", "Serve exited with error (code={code})"),
                 running=False,
@@ -1175,7 +1178,7 @@ class ConfigGui:
             cmd = self._build_serve_command(config_path)
         except Exception as exc:
             _log(f"Serve start blocked: {exc}")
-            messagebox.showerror(
+            self._show_error(
                 self._tr("msg.serve_start_title", "Serve start failed"),
                 str(exc),
             )
@@ -1193,7 +1196,7 @@ class ConfigGui:
         except Exception as exc:
             self._serve_process = None
             _log(f"Failed to start serve process: {exc}")
-            messagebox.showerror(
+            self._show_error(
                 self._tr("msg.serve_start_title", "Serve start failed"),
                 str(exc),
             )
@@ -1275,6 +1278,13 @@ class ConfigGui:
         if value is None:
             return default
         return value
+
+    def _show_error(self, title: str, message: str) -> None:
+        _log(f"ERROR [{title}] {message}")
+        try:
+            messagebox.showerror(title, message)
+        except Exception:
+            pass
 
     def _build_form(self) -> None:
         frame = ttk.Frame(self.root, padding=12)
@@ -2538,12 +2548,31 @@ class ConfigGui:
     def _add_bool_switch(self, parent, row, key, label, default=False, label_key: str | None = None):
         var = tk.BooleanVar(value=bool(default))
         self.vars[key] = var
-        label_text = self._tr(label_key or label, label)
-        check_btn = ttk.Checkbutton(parent, text=label_text, variable=var)
+        effective_label_key = label_key or label
+        check_btn = ttk.Checkbutton(parent, variable=var)
         if label_key is not None:
             self._register_localized_widget(check_btn, label_key, label)
+        self._bool_switch_meta.append((check_btn, var, effective_label_key, label))
+        self._update_bool_switch_text(check_btn, var, effective_label_key, label)
+        var.trace_add(
+            "write",
+            lambda *_args, cb=check_btn, v=var, lk=effective_label_key, dl=label: self._update_bool_switch_text(cb, v, lk, dl),
+        )
         check_btn.grid(row=row, column=0, columnspan=4, sticky="w", padx=4, pady=(2, 2))
         self._widgets[key] = check_btn
+
+    def _update_bool_switch_text(
+        self,
+        check_btn: ttk.Checkbutton,
+        var: tk.BooleanVar,
+        label_key: str,
+        default_label: str,
+    ) -> None:
+        base = self._tr(label_key, default_label)
+        state_on = self._tr("label.toggle_on", "ON")
+        state_off = self._tr("label.toggle_off", "OFF")
+        suffix = state_on if bool(var.get()) else state_off
+        check_btn.config(text=f"{base} ({suffix})")
 
     def _parse_bool(self, value) -> bool:
         if isinstance(value, bool):
@@ -2771,7 +2800,7 @@ class ConfigGui:
 
     def _create_virtual_camera(self) -> None:
         if platform.system() != "Linux":
-            messagebox.showerror(
+            self._show_error(
                 self._tr("title.virtual_camera", "Virtual camera"),
                 self._tr(
                     "msg.virtual_camera_only_linux",
@@ -2782,7 +2811,7 @@ class ConfigGui:
 
         backend = self.vars.get("output_backend").get() if self.vars.get("output_backend") else ""
         if backend != "v4l2loopback":
-            messagebox.showerror(
+            self._show_error(
                 self._tr("title.virtual_camera", "Virtual camera"),
                 self._tr(
                     "msg.virtual_camera_backend_required",
@@ -2794,7 +2823,7 @@ class ConfigGui:
         device = (self.vars.get("output_device").get() if self.vars.get("output_device") else "").strip()
         video_no = _parse_video_device_number(device)
         if not video_no:
-            messagebox.showerror(
+            self._show_error(
                 self._tr("title.virtual_camera", "Virtual camera"),
                 self._tr("msg.virtual_camera_invalid_output", "Output path is invalid: {device}").format(device=device),
             )
@@ -2813,7 +2842,7 @@ class ConfigGui:
             )
         except Exception as exc:
             _log(f"가상 카메라 생성 실패: {exc}")
-            messagebox.showerror(self._tr("title.virtual_camera", "Virtual camera"), str(exc))
+            self._show_error(self._tr("title.virtual_camera", "Virtual camera"), str(exc))
             return
 
         ready, detail = _probe_v4l2_capture(
@@ -2824,7 +2853,7 @@ class ConfigGui:
         )
         if not ready:
             _log(f"가상 카메라 생성 후 상태 확인 실패: {detail}")
-            messagebox.showerror(
+            self._show_error(
                 self._tr("title.virtual_camera", "Virtual camera"),
                 self._tr(
                     "msg.virtual_camera_verify_failed",
@@ -2840,7 +2869,7 @@ class ConfigGui:
 
     def _remove_virtual_camera(self) -> None:
         if platform.system() != "Linux":
-            messagebox.showerror(
+            self._show_error(
                 self._tr("title.virtual_camera", "Virtual camera"),
                 self._tr(
                     "msg.virtual_camera_remove_only_linux",
@@ -2854,7 +2883,7 @@ class ConfigGui:
             _run_avc_device("camera", "delete", timeout=8.0)
         except Exception as exc:
             _log(f"가상 카메라 제거 실패: {exc}")
-            messagebox.showerror(self._tr("title.virtual_camera", "Virtual camera"), str(exc))
+            self._show_error(self._tr("title.virtual_camera", "Virtual camera"), str(exc))
             return
         _log("Virtual camera removed: modprobe -r v4l2loopback")
         messagebox.showinfo(
@@ -2886,7 +2915,7 @@ class ConfigGui:
 
     def _create_virtual_speaker(self) -> None:
         if platform.system() != "Linux":
-            messagebox.showerror(
+            self._show_error(
                 self._tr("title.virtual_mic", "Virtual microphone"),
                 self._tr(
                     "msg.virtual_mic_only_linux",
@@ -2908,7 +2937,7 @@ class ConfigGui:
             )
         except Exception as exc:
             _log(f"가상 마이크 생성 실패: {exc}")
-            messagebox.showerror(self._tr("title.virtual_mic", "Virtual microphone"), str(exc))
+            self._show_error(self._tr("title.virtual_mic", "Virtual microphone"), str(exc))
             return
         _log(f"Virtual microphone sink created: {AUDIO_VIRTUAL_SINK_NAME}")
         messagebox.showinfo(
@@ -2921,7 +2950,7 @@ class ConfigGui:
 
     def _remove_virtual_speaker(self) -> None:
         if platform.system() != "Linux":
-            messagebox.showerror(
+            self._show_error(
                 self._tr("title.virtual_mic", "Virtual microphone"),
                 self._tr(
                     "msg.virtual_mic_remove_only_linux",
@@ -2939,7 +2968,7 @@ class ConfigGui:
             )
         except Exception as exc:
             _log(f"가상 마이크 제거 실패: {exc}")
-            messagebox.showerror(self._tr("title.virtual_mic", "Virtual microphone"), str(exc))
+            self._show_error(self._tr("title.virtual_mic", "Virtual microphone"), str(exc))
             return
         _log(f"Virtual microphone removed: {AUDIO_VIRTUAL_SINK_NAME}")
         messagebox.showinfo(
@@ -3253,11 +3282,11 @@ class ConfigGui:
             )
         except Exception as exc:
             _log(f"Validation error: {exc}")
-            messagebox.showerror(self._tr("msg.validation_error.title", "Validation error"), str(exc))
+            self._show_error(self._tr("msg.validation_error.title", "Validation error"), str(exc))
 
     def _auto_tune_audio_gate(self):
         if sd is None:
-            messagebox.showerror(
+            self._show_error(
                 self._tr("title.audio_tune_error", "Audio tuning error"),
                 self._tr("msg.audio_tune_sounddevice_missing", "sounddevice module is missing. Run ./bin/avc setup and try again."),
             )
@@ -3268,7 +3297,7 @@ class ConfigGui:
             sample_rate = int(self.vars["audio_sample_rate"].get())
             channels = int(self.vars["audio_channels"].get())
         except Exception:
-            messagebox.showerror(
+            self._show_error(
                 self._tr("title.audio_tune_error", "Audio tuning error"),
                 self._tr("msg.audio_tune_invalid_rate_channels", "audio sample rate/channels is invalid."),
             )
@@ -3629,7 +3658,7 @@ class ConfigGui:
         try:
             config = self._build_config()
         except Exception as exc:
-            messagebox.showerror(self._tr("title.audio_gate_test_error", "Audio gate test error"), str(exc))
+            _log(f"audio gate test error: {exc}")
             return
 
         audio_cfg = config.get("audio") or {}
@@ -3647,9 +3676,9 @@ class ConfigGui:
         try:
             gate_config = AudioGateConfig.from_dict(audio_cfg.get("gate") or {})
         except Exception as exc:
-            messagebox.showerror(
-                self._tr("title.audio_gate_test_error", "Audio gate test error"),
-                self._tr("msg.audio_gate_test_invalid_config", "Invalid gate config: {error}").format(error=exc),
+            _log(
+                "audio gate test error: "
+                + self._tr("msg.audio_gate_test_invalid_config", "Invalid gate config: {error}").format(error=exc)
             )
             return
 
@@ -3668,12 +3697,12 @@ class ConfigGui:
         gate = NoiseGate(gate_config, frame_ms=frame_ms)
 
         if sd is None:
-            messagebox.showerror(
-                self._tr("title.audio_gate_test_error", "Audio gate test error"),
-                self._tr(
+            _log(
+                "audio gate test error: "
+                + self._tr(
                     "msg.audio_gate_test_sounddevice_missing",
                     "sounddevice module is missing. Run ./bin/avc setup and try again.",
-                ),
+                )
             )
             return
 
@@ -3795,9 +3824,9 @@ class ConfigGui:
         except Exception as exc:
             self._stop_audio_gate_test()
             window.destroy()
-            messagebox.showerror(
-                self._tr("title.audio_gate_test_error", "Audio gate test error"),
-                self._tr("msg.audio_gate_test_open_stream_failed", "Failed to open input stream: {error}").format(error=exc),
+            _log(
+                "audio gate test error: "
+                + self._tr("msg.audio_gate_test_open_stream_failed", "Failed to open input stream: {error}").format(error=exc)
             )
             return
 
@@ -3926,7 +3955,7 @@ class ConfigGui:
         try:
             config = self._build_config()
         except Exception as exc:
-            messagebox.showerror(self._tr("title.audio_input_meter_error", "Input dB meter error"), str(exc))
+            self._show_error(self._tr("title.audio_input_meter_error", "Input dB meter error"), str(exc))
             return
 
         audio_cfg = config.get("audio") or {}
@@ -3940,7 +3969,7 @@ class ConfigGui:
         input_device = _coerce_audio_input_device_for_sounddevice(input_device_requested)
 
         if sd is None:
-            messagebox.showerror(
+            self._show_error(
                 self._tr("title.audio_input_meter_error", "Input dB meter error"),
                 self._tr(
                     "msg.audio_input_meter_sounddevice_missing",
@@ -4035,7 +4064,7 @@ class ConfigGui:
                 available = []
             self._stop_audio_input_meter()
             window.destroy()
-            messagebox.showerror(
+            self._show_error(
                 self._tr("title.audio_input_meter_error", "Input dB meter error"),
                 self._tr(
                     "msg.audio_input_meter_open_stream_failed",
@@ -4128,14 +4157,14 @@ class ConfigGui:
             sd.wait()
         except Exception as exc:
             if show_error:
-                messagebox.showerror(
+                self._show_error(
                     self._tr("title.audio_tune_error", "Audio tuning error"),
                     self._tr("msg.audio_tune_capture_failed", "Microphone capture failed:\n{error}").format(error=exc),
                 )
             return None
         if data is None or len(data) == 0:
             if show_error:
-                messagebox.showerror(
+                self._show_error(
                     self._tr("title.audio_tune_error", "Audio tuning error"),
                     self._tr("msg.audio_tune_capture_empty", "No audio data was captured."),
                 )
@@ -4413,7 +4442,7 @@ class ConfigGui:
 
     def _report_preview_error(self, message: str) -> None:
         _log(f"Preview error: {message}")
-        messagebox.showerror(self._tr("title.preview_error", "Preview error"), message)
+        self._show_error(self._tr("title.preview_error", "Preview error"), message)
 
     def _background_signature(self, background: dict):
         return (
