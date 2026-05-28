@@ -233,6 +233,12 @@ pluginkit -m -A -D | grep -Ei "obs|virtual.?camera|cameraextension|coremedia"
 - Docker 실행은 가상 카메라 생성을 대체하지 않음. 장치는 호스트에서 먼저 준비해야 함.
 - Docker `config`에서 가상 카메라 생성/제거를 시도하지 말고, 호스트 `./bin/avc config`에서 먼저 생성/검증 후 Docker `serve`를 실행하세요.
 
+수동 생성 명령(호스트):
+
+```bash
+sudo modprobe v4l2loopback devices=1 video_nr=10 card_label="ai-virtual-cam" exclusive_caps=1
+```
+
 권한 준비 후 실행:
 
 ```bash
