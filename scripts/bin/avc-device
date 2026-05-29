@@ -6,6 +6,8 @@ CAMERA_LABEL="${AVC_CAMERA_LABEL:-ai-virtual-cam}"
 CAMERA_EXCLUSIVE_CAPS="${AVC_CAMERA_EXCLUSIVE_CAPS:-1}"
 AUDIO_SINK_NAME="${AVC_AUDIO_SINK_NAME:-ai-virtual-cam}"
 AUDIO_SINK_DESC="${AVC_AUDIO_SINK_DESC:-ai-virtual-cam}"
+AUDIO_SOURCE_NAME="${AVC_AUDIO_SOURCE_NAME:-ai-virtual-cam-mic}"
+AUDIO_SOURCE_DESC="${AVC_AUDIO_SOURCE_DESC:-ai-virtual-cam-mic}"
 HOST_UID="${AVC_HOST_UID:-}"
 HOST_GID="${AVC_HOST_GID:-}"
 HOST_USER="${AVC_HOST_USER:-}"
@@ -24,6 +26,8 @@ Environment:
   AVC_CAMERA_EXCLUSIVE_CAPS  v4l2loopback exclusive_caps (default: 1)
   AVC_AUDIO_SINK_NAME    PulseAudio sink name (default: ai-virtual-cam)
   AVC_AUDIO_SINK_DESC    PulseAudio sink description (default: ai-virtual-cam)
+  AVC_AUDIO_SOURCE_NAME  PulseAudio source name (default: ai-virtual-cam-mic)
+  AVC_AUDIO_SOURCE_DESC  PulseAudio source description (default: ai-virtual-cam-mic)
 
 Options:
   --exclusive-caps <0|1>  Override camera create exclusive_caps
@@ -57,6 +61,8 @@ TARGET=$target
 ACTION=$action
 AVC_AUDIO_SINK_NAME=$AUDIO_SINK_NAME
 AVC_AUDIO_SINK_DESC=$AUDIO_SINK_DESC
+AVC_AUDIO_SOURCE_NAME=$AUDIO_SOURCE_NAME
+AVC_AUDIO_SOURCE_DESC=$AUDIO_SOURCE_DESC
 EOF
   local i
   for i in $(seq 1 150); do
@@ -239,57 +245,93 @@ audio_create() {
     json_err "$requested" "pactl list sinks failed: $sinks" "check PulseAudio/PipeWire runtime and permissions"
     exit 2
   fi
+  local sink_exists="false"
+  local source_exists="false"
   if printf '%s\n' "$sinks" | awk '{print $2}' | grep -Fxq "$AUDIO_SINK_NAME"; then
-    json_ok "$requested" "already exists: $AUDIO_SINK_NAME"
-    return
+    sink_exists="true"
   fi
-  local out
-  if ! out="$(run_pactl_cmd load-module module-null-sink sink_name="$AUDIO_SINK_NAME" sink_properties="device.description=$AUDIO_SINK_DESC" 2>&1)"; then
-    json_err "$requested" "pactl load-module failed: $out" "check PulseAudio/PipeWire runtime and permissions"
+  local sources
+  if ! sources="$(run_pactl_cmd list short sources 2>&1)"; then
+    json_err "$requested" "pactl list sources failed: $sources" "check PulseAudio/PipeWire runtime and permissions"
     exit 2
   fi
-  json_ok "$requested" "created sink=$AUDIO_SINK_NAME module_id=${out//$'\n'/ }"
+  if printf '%s\n' "$sources" | awk '{print $2}' | grep -Fxq "$AUDIO_SOURCE_NAME"; then
+    source_exists="true"
+  fi
+  local out_sink=""
+  local out_source=""
+  if [[ "$sink_exists" != "true" ]]; then
+    if ! out_sink="$(run_pactl_cmd load-module module-null-sink sink_name="$AUDIO_SINK_NAME" sink_properties="device.description=$AUDIO_SINK_DESC" 2>&1)"; then
+      json_err "$requested" "pactl load-module module-null-sink failed: $out_sink" "check PulseAudio/PipeWire runtime and permissions"
+      exit 2
+    fi
+  fi
+  if [[ "$source_exists" != "true" ]]; then
+    if ! out_source="$(run_pactl_cmd load-module module-remap-source source_name="$AUDIO_SOURCE_NAME" master="$AUDIO_SINK_NAME.monitor" source_properties="device.description=$AUDIO_SOURCE_DESC" 2>&1)"; then
+      json_err "$requested" "pactl load-module module-remap-source failed: $out_source" "check PulseAudio/PipeWire runtime and permissions"
+      exit 2
+    fi
+  fi
+  if [[ "$sink_exists" == "true" && "$source_exists" == "true" ]]; then
+    json_ok "$requested" "already exists: sink=$AUDIO_SINK_NAME source=$AUDIO_SOURCE_NAME"
+    return
+  fi
+  json_ok "$requested" "created sink=$AUDIO_SINK_NAME source=$AUDIO_SOURCE_NAME sink_module=${out_sink//$'\n'/ } source_module=${out_source//$'\n'/ }"
 }
 
 audio_delete() {
   local requested="audio:delete"
   require_cmd pactl
-  local ids
+  local sink_ids
+  local source_ids
   local modules
   if ! modules="$(run_pactl_cmd list short modules 2>&1)"; then
     json_err "$requested" "pactl list modules failed: $modules" "check PulseAudio/PipeWire runtime and permissions"
     exit 2
   fi
-  ids="$(printf '%s\n' "$modules" | awk -v n="$AUDIO_SINK_NAME" '$2=="module-null-sink" && $0 ~ ("sink_name=" n "([[:space:]]|$)") {print $1}')"
-  if [[ -z "$ids" ]]; then
-    json_ok "$requested" "not found: $AUDIO_SINK_NAME"
-    return
-  fi
+  source_ids="$(printf '%s\n' "$modules" | awk -v n="$AUDIO_SOURCE_NAME" '$2=="module-remap-source" && $0 ~ ("source_name=" n "([[:space:]]|$)") {print $1}')"
+  sink_ids="$(printf '%s\n' "$modules" | awk -v n="$AUDIO_SINK_NAME" '$2=="module-null-sink" && $0 ~ ("sink_name=" n "([[:space:]]|$)") {print $1}')"
   local id
   while IFS= read -r id; do
     [[ -z "$id" ]] && continue
     if ! run_pactl_cmd unload-module "$id" >/dev/null 2>&1; then
-      json_err "$requested" "pactl unload-module failed: id=$id" "close clients using sink and retry"
+      json_err "$requested" "pactl unload-module failed: remap-source id=$id" "close clients using source and retry"
       exit 2
     fi
-  done <<< "$ids"
-  json_ok "$requested" "deleted sink=$AUDIO_SINK_NAME"
+  done <<< "$source_ids"
+  while IFS= read -r id; do
+    [[ -z "$id" ]] && continue
+    if ! run_pactl_cmd unload-module "$id" >/dev/null 2>&1; then
+      json_err "$requested" "pactl unload-module failed: null-sink id=$id" "close clients using sink and retry"
+      exit 2
+    fi
+  done <<< "$sink_ids"
+  json_ok "$requested" "deleted sink=$AUDIO_SINK_NAME source=$AUDIO_SOURCE_NAME"
 }
 
 audio_status() {
   local requested="audio:status"
   require_cmd pactl
-  local exists="false"
+  local sink_exists="false"
+  local source_exists="false"
   local sinks
   if ! sinks="$(run_pactl_cmd list short sinks 2>&1)"; then
     json_err "$requested" "pactl list sinks failed: $sinks" "check PulseAudio/PipeWire runtime and permissions"
     exit 2
   fi
   if printf '%s\n' "$sinks" | awk '{print $2}' | grep -Fxq "$AUDIO_SINK_NAME"; then
-    exists="true"
+    sink_exists="true"
   fi
-  printf '{"ok":true,"requested":"%s","sinkExists":%s,"sinkName":"%s"}\n' \
-    "$requested" "$exists" "$AUDIO_SINK_NAME"
+  local sources
+  if ! sources="$(run_pactl_cmd list short sources 2>&1)"; then
+    json_err "$requested" "pactl list sources failed: $sources" "check PulseAudio/PipeWire runtime and permissions"
+    exit 2
+  fi
+  if printf '%s\n' "$sources" | awk '{print $2}' | grep -Fxq "$AUDIO_SOURCE_NAME"; then
+    source_exists="true"
+  fi
+  printf '{"ok":true,"requested":"%s","sinkExists":%s,"sinkName":"%s","sourceExists":%s,"sourceName":"%s"}\n' \
+    "$requested" "$sink_exists" "$AUDIO_SINK_NAME" "$source_exists" "$AUDIO_SOURCE_NAME"
 }
 
 target="${1:-}"
@@ -337,6 +379,8 @@ if [[ -f "/.dockerenv" && "${AVC_DEVICE_VIA_HOST:-0}" == "1" ]]; then
         AVC_CAMERA_LABEL="$CAMERA_LABEL" \
         AVC_AUDIO_SINK_NAME="$AUDIO_SINK_NAME" \
         AVC_AUDIO_SINK_DESC="$AUDIO_SINK_DESC" \
+        AVC_AUDIO_SOURCE_NAME="$AUDIO_SOURCE_NAME" \
+        AVC_AUDIO_SOURCE_DESC="$AUDIO_SOURCE_DESC" \
         AVC_HOST_UID="$HOST_UID" \
         AVC_HOST_GID="$HOST_GID" \
         AVC_HOST_USER="$HOST_USER" \
@@ -352,6 +396,8 @@ if [[ -f "/.dockerenv" && "${AVC_DEVICE_VIA_HOST:-0}" == "1" ]]; then
       AVC_CAMERA_LABEL="$CAMERA_LABEL" \
       AVC_AUDIO_SINK_NAME="$AUDIO_SINK_NAME" \
       AVC_AUDIO_SINK_DESC="$AUDIO_SINK_DESC" \
+      AVC_AUDIO_SOURCE_NAME="$AUDIO_SOURCE_NAME" \
+      AVC_AUDIO_SOURCE_DESC="$AUDIO_SOURCE_DESC" \
       AVC_HOST_UID="$HOST_UID" \
       AVC_HOST_GID="$HOST_GID" \
       AVC_HOST_USER="$HOST_USER" \
