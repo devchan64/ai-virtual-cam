@@ -33,6 +33,7 @@ services:
     volumes:
       - ../..:/workspace
       - ${AVC_CONFIG_DIR:-~/.avc}:/home/avc/.avc
+      - ${AVC_BG_IMAGE_DIR_HOST:-/tmp}:${AVC_BG_IMAGE_DIR_HOST:-/tmp}:ro
       - ${AVC_DEVICE_REQUEST_DIR_HOST:-~/.avc/device-requests}:${AVC_DEVICE_REQUEST_DIR:-/home/avc/.avc/device-requests}
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ${AVC_XAUTHORITY_HOST:?AVC_XAUTHORITY_HOST is required}:/tmp/.docker.xauth:ro
@@ -70,6 +71,7 @@ services:
     volumes:
       - ../..:/workspace
       - ${AVC_CONFIG_DIR:-~/.avc}:/home/avc/.avc
+      - ${AVC_BG_IMAGE_DIR_HOST:-/tmp}:${AVC_BG_IMAGE_DIR_HOST:-/tmp}:ro
       - ${AVC_RUNTIME_DIR:-/run/user/1000}:${AVC_RUNTIME_DIR:-/run/user/1000}
     command:
       - ./bin/avc

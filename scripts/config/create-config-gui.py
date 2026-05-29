@@ -320,6 +320,9 @@ def _default_virtual_output_device(cameras: list[dict[str, str]]) -> str:
 def _audio_default_output_device() -> str:
     if platform.system() != "Linux":
         return "default"
+    if _is_container_runtime():
+        pactl_default = _pactl_default_audio_device("sink")
+        return pactl_default if pactl_default != "default" else "pulse"
     if sd is None:
         pactl_default = _pactl_default_audio_device("sink")
         return pactl_default if pactl_default != "default" else "pulse"
@@ -582,6 +585,9 @@ def _pactl_default_audio_device(kind: str) -> str:
 def _audio_default_input_device() -> str:
     if platform.system() != "Linux":
         return "default"
+    if _is_container_runtime():
+        pactl_default = _pactl_default_audio_device("source")
+        return pactl_default if pactl_default != "default" else "default"
 
     def _preferred_monitor_source() -> str | None:
         try:
@@ -657,7 +663,7 @@ def _audio_device_candidates(kind: str) -> list[str]:
         f"[avc] 오디오 {kind} 디바이스 채널키={channel_key}",
         flush=True,
     )
-    if sd is not None:
+    if sd is not None and not _is_container_runtime():
         try:
             for device in sd.query_devices():
                 name = str(device.get("name", "")).strip()

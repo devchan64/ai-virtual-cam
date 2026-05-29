@@ -91,9 +91,18 @@ require_v4l2_output_capable() {
   if [[ -z "$info" ]]; then
     fail "Failed to inspect V4L2 device: $path"
   fi
-  if ! printf '%s' "$info" | grep -qi "Video Output"; then
-    fail "Configured output device is not V4L2 video output capable: $path. Recreate v4l2loopback device and retry."
+  # v4l2loopback with exclusive_caps can present capability text differently.
+  if printf '%s' "$info" | grep -qi "v4l2 loopback"; then
+    return 0
   fi
+  if printf '%s' "$info" | grep -qi "Video Output"; then
+    return 0
+  fi
+  if printf '%s' "$info" | grep -qi "Video Capture"; then
+    echo "[avc-docker] warning: '$path' reports capture capability only; continuing for loopback compatibility." >&2
+    return 0
+  fi
+  fail "Configured output device is not V4L2 loopback/output capable: $path. Recreate v4l2loopback device and retry."
 }
 
 cleanup_output_holders() {
@@ -139,6 +148,32 @@ run_compose() {
   input_gid="${AVC_INPUT_GID:-$(device_gid "${AVC_INPUT_DEVICE:-$DEFAULT_INPUT_DEVICE}")}"
   local output_device
   output_device="${AVC_OUTPUT_DEVICE:-$DEFAULT_OUTPUT_DEVICE}"
+  local bg_image_dir
+  bg_image_dir="${AVC_BG_IMAGE_DIR_HOST:-}"
+  if [[ -z "$bg_image_dir" && -f "$CONFIG_FILE" ]]; then
+    bg_image_dir="$(python3 - <<'PY' "$CONFIG_FILE"
+import json, os, sys
+cfg = sys.argv[1]
+try:
+    raw = json.load(open(cfg, encoding='utf-8'))
+except Exception:
+    print("")
+    raise SystemExit(0)
+bg = raw.get('background') or {}
+path = str(bg.get('imagePath') or '').strip()
+if not path:
+    print("")
+    raise SystemExit(0)
+if os.path.isabs(path):
+    print(os.path.dirname(path))
+else:
+    print("")
+PY
+)"
+  fi
+  if [[ -n "$bg_image_dir" && ! -d "$bg_image_dir" ]]; then
+    fail "Configured background image directory not found: $bg_image_dir"
+  fi
 
   AVC_UID="$uid" \
   AVC_GID="$gid" \
@@ -153,6 +188,7 @@ run_compose() {
   AVC_INPUT_GID="$input_gid" \
   AVC_XAUTHORITY_HOST="$xauthority" \
   AVC_DEVICE_VIA_HOST="${AVC_DEVICE_VIA_HOST:-1}" \
+  AVC_BG_IMAGE_DIR_HOST="$bg_image_dir" \
   AVC_DEVICE_DEBUG="${AVC_DEVICE_DEBUG:-0}" \
   AVC_DEVICE_REQUEST_DIR="$CONTAINER_DEVICE_REQUEST_DIR" \
   AVC_DEVICE_REQUEST_DIR_HOST="$DEVICE_REQUEST_DIR" \
