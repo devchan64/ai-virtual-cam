@@ -14,6 +14,7 @@ Single Entrypoint:
 Commands:
   setup            Install host dependencies for current OS
   env              Manage Python environment (.venv)
+  test             Run project spec tests
   config           Launch GUI config generator
   serve            Start virtual camera stream service from saved config
   docker           Run Linux Docker workflows for config/serve
@@ -33,6 +34,7 @@ shift || true
 case "$cmd" in
   setup) exec "$ROOT_DIR/scripts/bin/avc-setup" "$@" ;;
   env) exec "$ROOT_DIR/scripts/bin/avc-env" "$@" ;;
+  test) exec "$ROOT_DIR/scripts/bin/avc-test" "$@" ;;
   config) exec "$ROOT_DIR/scripts/bin/avc-config" "$@" ;;
   serve) exec "$ROOT_DIR/scripts/bin/avc-serve" "$@" ;;
   docker) exec "$ROOT_DIR/scripts/bin/avc-docker" "$@" ;;

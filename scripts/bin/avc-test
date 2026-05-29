@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+VENV_PY="$ROOT_DIR/.venv/bin/python3"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  ./bin/avc test
+EOF
+}
+
+cmd="${1:-all}"
+if [[ "$cmd" == "-h" || "$cmd" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ "$cmd" != "spec" && "$cmd" != "all" ]]; then
+  echo "[avc-test] unknown command: $cmd" >&2
+  usage >&2
+  exit 2
+fi
+
+if [[ ! -x "$VENV_PY" ]]; then
+  VENV_PY="python3"
+fi
+
+exec "$VENV_PY" -m unittest -v tests.spec.test_virtual_devices_spec
