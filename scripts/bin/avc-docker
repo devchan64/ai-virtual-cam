@@ -166,7 +166,11 @@ start_host_device_executor() {
     local old_pid
     old_pid="$(cat "$pid_file" 2>/dev/null || true)"
     if [[ -n "$old_pid" ]] && kill -0 "$old_pid" 2>/dev/null; then
-      return 0
+      local cmdline=""
+      cmdline="$(tr '\0' ' ' < "/proc/$old_pid/cmdline" 2>/dev/null || true)"
+      if [[ "$cmdline" == *"avc-host-device-executor"* ]]; then
+        return 0
+      fi
     fi
   fi
   nohup "$ROOT_DIR/scripts/bin/avc-host-device-executor" >/tmp/avc-host-device-executor.log 2>&1 &

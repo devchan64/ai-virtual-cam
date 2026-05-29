@@ -321,8 +321,10 @@ require_linux
 if [[ -f "/.dockerenv" && "${AVC_DEVICE_VIA_HOST:-0}" == "1" ]]; then
   if [[ "${AVC_DEVICE_RELAYED:-0}" != "1" ]]; then
     if [[ "$target" == "audio" ]]; then
-      request_via_host_executor "$target" "$action"
-      exit $?
+      if request_via_host_executor "$target" "$action"; then
+        exit 0
+      fi
+      dbg "host executor relay failed for audio, falling back to nsenter relay"
     fi
     command -v nsenter >/dev/null 2>&1 || fail "nsenter is required in container for host relay."
     host_avc="${AVC_HOST_AVC_PATH:-/workspace/bin/avc}"
