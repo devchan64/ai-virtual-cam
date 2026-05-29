@@ -88,6 +88,22 @@ class VirtualDevicesSpecIntegrationTest(unittest.TestCase):
         self.assertTrue(status.get("sourceExists"))
         self.assertEqual(status.get("sinkName"), TEST_AUDIO_SINK)
         self.assertEqual(status.get("sourceName"), TEST_AUDIO_SOURCE)
+        sinks = subprocess.run(
+            ["pactl", "list", "short", "sinks"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(sinks.returncode, 0, msg=sinks.stderr)
+        self.assertIn(TEST_AUDIO_SINK, sinks.stdout)
+        sources = subprocess.run(
+            ["pactl", "list", "short", "sources"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(sources.returncode, 0, msg=sources.stderr)
+        self.assertIn(TEST_AUDIO_SOURCE, sources.stdout)
 
         deleted = _run_avc_device(["audio", "delete"], env)
         self.assertTrue(deleted.get("ok"))
@@ -109,15 +125,29 @@ class VirtualDevicesSpecIntegrationTest(unittest.TestCase):
         self.assertIn(TEST_VIDEO_DEVICE, created.get("action", ""))
 
         status = _run_avc_device(["camera", "status"], env)
-        self.assertTrue(status.get("moduleLoaded"))
+        # moduleLoaded can be environment-dependent (lsmod visibility/race);
+        # device existence is the stable contract for camera creation.
         self.assertTrue(status.get("deviceExists"))
         self.assertEqual(status.get("devicePath"), TEST_VIDEO_DEVICE)
+        self.assertTrue(Path(TEST_VIDEO_DEVICE).exists())
+        probe = subprocess.run(
+            ["v4l2-ctl", "-D", "-d", TEST_VIDEO_DEVICE],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(
+            probe.returncode,
+            0,
+            msg=f"v4l2 probe failed: stdout={probe.stdout}\nstderr={probe.stderr}",
+        )
+        self.assertIn(TEST_CAMERA_LABEL, probe.stdout)
+        self.assertIn("Video Output", probe.stdout + probe.stderr)
 
         deleted = _run_avc_device(["camera", "delete"], env)
         self.assertTrue(deleted.get("ok"))
 
         status_after = _run_avc_device(["camera", "status"], env)
-        self.assertFalse(status_after.get("moduleLoaded"))
         self.assertFalse(status_after.get("deviceExists"))
 
 

@@ -172,6 +172,17 @@ docker pull devchan64/ai-virtual-cam:2026.05.26
 - `audio-mixer`: 마이크 게이트 기반 가상 오디오 믹서 실행 (Linux: 실시간 입력/출력 스트림)
 - `doctor`: 기본 런타임 점검
 
+가상장치 스펙 테스트:
+
+```bash
+./bin/avc test
+AVC_RUN_DEVICE_INTEGRATION_TEST=1 ./bin/avc test
+```
+
+- 기본 `./bin/avc test`는 안전 가드로 통합 테스트를 skip 합니다.
+- 실제 통합 테스트는 `AVC_RUN_DEVICE_INTEGRATION_TEST=1`일 때만 실행됩니다.
+- 통합 테스트는 테스트 전용 가상장치(`/dev/video42`, `ai-virtual-cam-test`, `ai-virtual-cam-test-mic`)를 생성/검증/삭제합니다.
+
 ## 개발 환경(기준)
 
 - OS: Ubuntu 22.04.5 LTS
