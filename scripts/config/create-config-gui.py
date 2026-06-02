@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import traceback
 from collections import deque
@@ -469,6 +470,55 @@ def _coerce_audio_output_device_for_sounddevice(device_name: str) -> str:
     return name
 
 
+def _normalize_audio_device_token(value: str) -> str:
+    lowered = str(value).lower()
+    return re.sub(r"[^a-z0-9]+", "", lowered)
+
+
+def _audio_device_match_tokens(value: str) -> set[str]:
+    tokens = re.findall(r"[a-z0-9]+", str(value).lower())
+    return {token for token in tokens if len(token) >= 3 and token not in {"alsa", "input", "output", "analog", "stereo"}}
+
+
+def _resolve_pulse_device_for_sounddevice(device_name: str, *, kind: str, devices: list[str]) -> str | None:
+    if platform.system() != "Linux":
+        return None
+    lowered = str(device_name).strip().lower()
+    if not (lowered.startswith("alsa_input.") or lowered.startswith("alsa_output.") or lowered == AUDIO_VIRTUAL_SOURCE_NAME):
+        return None
+
+    desc_map = _audio_device_description_map(kind)
+    candidates = [device_name, desc_map.get(device_name, "")]
+    compact_candidates = [_normalize_audio_device_token(candidate) for candidate in candidates if candidate]
+    compact_candidates = [candidate for candidate in compact_candidates if candidate]
+    source_tokens: set[str] = set()
+    for candidate in candidates:
+        source_tokens.update(_audio_device_match_tokens(candidate))
+    if not compact_candidates and not source_tokens:
+        return None
+
+    best_device = None
+    best_score = 0
+    for device in devices:
+        compact_device = _normalize_audio_device_token(device)
+        if not compact_device:
+            continue
+        score = 0
+        for compact_candidate in compact_candidates:
+            if compact_candidate and compact_candidate in compact_device:
+                score = max(score, len(compact_candidate))
+            elif compact_device and compact_device in compact_candidate:
+                score = max(score, len(compact_device))
+        device_tokens = _audio_device_match_tokens(device)
+        common_tokens = source_tokens.intersection(device_tokens)
+        if common_tokens:
+            score = max(score, sum(len(token) for token in common_tokens))
+        if score > best_score:
+            best_score = score
+            best_device = device
+    return best_device if best_score >= 6 else None
+
+
 def _coerce_audio_input_device_for_sounddevice(device_name: str) -> str:
     if sd is None:
         return str(device_name).strip()
@@ -509,7 +559,7 @@ def _coerce_audio_input_device_for_sounddevice(device_name: str) -> str:
         return name
 
     # 2) resolve hw token to a concrete sounddevice name
-    hw_match = __import__("re").search(r"\b(hw:[0-9]+,[0-9]+)\b", name)
+    hw_match = re.search(r"\b(hw:[0-9]+,[0-9]+)\b", name)
     if hw_match is not None:
         hw_token = hw_match.group(1).lower()
         for candidate in devices:
@@ -521,18 +571,31 @@ def _coerce_audio_input_device_for_sounddevice(device_name: str) -> str:
         # Examples:
         # - alsa_input....__hw_sofhdadsp_6__source -> hw:0,6
         # - alsa_input....__hw_sofhdadsp__source   -> hw:0,0
-        m_hw = __import__("re").search(r"__hw_[^_]+_([0-9]+)__source$", lowered)
+        m_hw = re.search(r"__hw_[^_]+_([0-9]+)__source$", lowered)
         if m_hw is not None:
             hw_token = f"hw:0,{m_hw.group(1)}"
         else:
-            m_hw = __import__("re").search(r"__hw_[^_]+__source$", lowered)
+            m_hw = re.search(r"__hw_[^_]+__source$", lowered)
             hw_token = "hw:0,0" if m_hw is not None else None
         if hw_token is not None:
             for candidate in devices:
                 if hw_token in candidate.lower():
                     return candidate
 
-    # 3) no implicit fallback to pulse/default here: keep configured value
+    # 2-2) map Pulse source ID/description to the PortAudio device name.
+    pulse_match = _resolve_pulse_device_for_sounddevice(name, kind="input", devices=devices)
+    if pulse_match:
+        return pulse_match
+
+    # 2-3) PortAudio may expose Pulse/PipeWire as a single runtime endpoint
+    # instead of listing every Pulse source. Use that endpoint for GUI tests.
+    if lowered.startswith("alsa_input.") or lowered.endswith(".monitor") or lowered == AUDIO_VIRTUAL_SOURCE_NAME:
+        for runtime_name in ("pipewire", "pulse"):
+            for candidate in devices:
+                if candidate.lower() == runtime_name:
+                    return candidate
+
+    # 3) no implicit fallback to arbitrary hardware here: keep configured value
     return name
 
 
