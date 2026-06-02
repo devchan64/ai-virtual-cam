@@ -62,12 +62,27 @@ EOF
 }
 
 require_privileges() {
-  if [[ "$OS_KIND" == "linux" && "${EUID}" -ne 0 ]]; then
-    fail "Run this script as root or via sudo on Linux."
-  fi
   if [[ "$OS_KIND" == "macos" && "${EUID}" -eq 0 ]]; then
     fail "Do not run with sudo on macOS. Run as normal user."
   fi
+}
+
+elevate_linux_with_sudo() {
+  if [[ "$OS_KIND" != "linux" || "${EUID}" -eq 0 ]]; then
+    return 0
+  fi
+
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    warn "Linux setup dry-run is running without sudo; privileged commands will be printed only."
+    return 0
+  fi
+
+  if ! command -v sudo >/dev/null 2>&1; then
+    fail "Linux setup requires root privileges, but sudo is not available. Retry as root or install sudo."
+  fi
+
+  log "Linux setup requires administrator privileges; requesting sudo authentication."
+  exec sudo bash "$0" "$@"
 }
 
 detect_os() {
@@ -251,6 +266,7 @@ parse_args() {
 main() {
   parse_args "$@"
   detect_os
+  elevate_linux_with_sudo "$@"
   detect_invoking_user
   require_privileges
   if [[ "$OS_KIND" == "linux" ]]; then
