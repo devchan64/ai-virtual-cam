@@ -24,7 +24,7 @@ Python 의존성만 재동기화:
 ./bin/avc env sync
 ```
 
-- `.venv`를 생성/재사용하고 `requirements.lock` 기준으로 정확히 설치합니다.
+- `.venv`를 생성/재사용하고 `requirements.txt` 기준으로 정확히 설치합니다.
 - Linux의 `deepfilternet`는 기본 미설치입니다. 필요하면 `AVC_INSTALL_DEEPFILTERNET=1 ./bin/avc env sync`로 별도 시도하세요.
 
 ### 2) 설정

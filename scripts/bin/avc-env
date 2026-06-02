@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VENV_DIR="$ROOT_DIR/.venv"
 VENV_PY="$VENV_DIR/bin/python3"
-LOCK_FILE="$ROOT_DIR/requirements.lock"
+REQUIREMENTS_FILE="$ROOT_DIR/requirements.txt"
 INSTALL_DEEPFILTERNET="${AVC_INSTALL_DEEPFILTERNET:-0}"
 
 usage() {
@@ -26,8 +26,8 @@ if [[ "$cmd" != "sync" ]]; then
   exit 2
 fi
 
-if [[ ! -f "$LOCK_FILE" ]]; then
-  echo "[avc-env] lock file not found: $LOCK_FILE" >&2
+if [[ ! -f "$REQUIREMENTS_FILE" ]]; then
+  echo "[avc-env] requirements file not found: $REQUIREMENTS_FILE" >&2
   exit 2
 fi
 
@@ -39,7 +39,7 @@ if [[ ! -x "$VENV_PY" ]]; then
   fi
 fi
 
-"$VENV_PY" -m pip install -r "$LOCK_FILE"
+"$VENV_PY" -m pip install -r "$REQUIREMENTS_FILE"
 
 if [[ "$(uname -s)" == "Linux" ]]; then
   if [[ "$INSTALL_DEEPFILTERNET" == "1" ]]; then
@@ -51,4 +51,4 @@ if [[ "$(uname -s)" == "Linux" ]]; then
   fi
 fi
 
-echo "[avc-env] sync completed (.venv + requirements.lock)"
+echo "[avc-env] sync completed (.venv + requirements.txt)"

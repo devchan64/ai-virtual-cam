@@ -1,6 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-echo "[avc] NOTICE: CLI config(create-config.py)는 폐기되었습니다. GUI 설정기(config)로 전환합니다." >&2
+VENV_PY="$ROOT_DIR/.venv/bin/python3"
 
-exec "$ROOT_DIR/scripts/bin/avc-config-gui" "$@"
+if [[ -x "$VENV_PY" ]] && "$VENV_PY" -c "import tkinter, cv2" >/dev/null 2>&1; then
+  exec "$VENV_PY" "$ROOT_DIR/scripts/config/create-config-gui.py" "$@"
+fi
+
+if python3 -c "import tkinter, cv2" >/dev/null 2>&1; then
+  exec python3 "$ROOT_DIR/scripts/config/create-config-gui.py" "$@"
+fi
+
+if [[ -x "/opt/homebrew/bin/python3.12" ]] && /opt/homebrew/bin/python3.12 -c "import tkinter, cv2" >/dev/null 2>&1; then
+  exec /opt/homebrew/bin/python3.12 "$ROOT_DIR/scripts/config/create-config-gui.py" "$@"
+fi
+
+echo "No suitable Python found for config GUI (needs tkinter and cv2)." >&2
+echo "Run './bin/avc setup' to normalize .venv runtime, then retry." >&2
+echo "If GUI is unavailable, edit ~/.avc/setting.json directly." >&2
+exit 2

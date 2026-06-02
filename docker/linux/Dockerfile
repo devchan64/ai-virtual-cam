@@ -26,9 +26,9 @@ RUN set -eux; \
 
 WORKDIR /workspace
 
-COPY requirements.lock requirements.txt ./
+COPY requirements.txt ./
 RUN python3 -m pip install --upgrade pip setuptools wheel \
-    && python3 -m pip install -r requirements.lock \
+    && python3 -m pip install -r requirements.txt \
     && python3 -m pip install --no-deps deepfilternet || true
 
 COPY . /workspace

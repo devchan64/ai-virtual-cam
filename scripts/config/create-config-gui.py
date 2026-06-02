@@ -2919,6 +2919,70 @@ class ConfigGui:
             "audio_gate_closed_gain": 0.0,
         }
 
+    def _refresh_audio_device_choices(
+        self,
+        *,
+        select_input: str | None = None,
+        select_output: str | None = None,
+    ) -> None:
+        self._refresh_audio_device_choice(
+            "input",
+            "audio_input_device",
+            "_audio_input_display_to_raw",
+            _audio_input_device_candidates,
+            _audio_default_input_device,
+            select_input,
+        )
+        self._refresh_audio_device_choice(
+            "output",
+            "audio_output_device",
+            "_audio_output_display_to_raw",
+            _audio_output_device_candidates,
+            _audio_default_output_device,
+            select_output,
+        )
+
+    def _refresh_audio_device_choice(
+        self,
+        kind: str,
+        var_key: str,
+        mapping_attr: str,
+        candidates_fn: Callable[[], list[str]],
+        default_fn: Callable[[], str],
+        select_raw: str | None,
+    ) -> None:
+        widget = self._widgets.get(var_key)
+        if not isinstance(widget, ttk.Combobox):
+            return
+
+        old_mapping = getattr(self, mapping_attr, {})
+        current_display = self.vars[var_key].get().strip()
+        current_raw = _audio_device_raw_from_display(current_display, old_mapping) if current_display else ""
+        candidates = candidates_fn()
+        default_raw = default_fn()
+        available_raw = set(candidates)
+
+        target_raw = (select_raw or current_raw or default_raw).strip()
+        if not select_raw and target_raw not in available_raw:
+            target_raw = default_raw
+
+        for value in (default_raw, target_raw):
+            if value and value not in candidates:
+                candidates.append(value)
+
+        display_values, display_to_raw = _audio_device_display_values(kind, candidates)
+        target_display = next(
+            (display for display, raw in display_to_raw.items() if raw == target_raw),
+            target_raw,
+        )
+        if target_display and target_display not in display_values:
+            display_values.append(target_display)
+            display_to_raw[target_display] = target_raw
+
+        setattr(self, mapping_attr, display_to_raw)
+        widget["values"] = tuple(display_values)
+        self.vars[var_key].set(target_display)
+
     def _create_virtual_speaker(self) -> None:
         if platform.system() != "Linux":
             self._show_error(
@@ -2946,6 +3010,10 @@ class ConfigGui:
             self._show_error(self._tr("title.virtual_mic", "Virtual microphone"), str(exc))
             return
         _log(f"Virtual microphone sink created: {AUDIO_VIRTUAL_SINK_NAME}")
+        self._refresh_audio_device_choices(
+            select_input=AUDIO_VIRTUAL_SOURCE_NAME,
+            select_output=AUDIO_VIRTUAL_SINK_NAME,
+        )
         messagebox.showinfo(
             self._tr("title.virtual_mic", "Virtual microphone"),
             self._tr(
@@ -2977,6 +3045,7 @@ class ConfigGui:
             self._show_error(self._tr("title.virtual_mic", "Virtual microphone"), str(exc))
             return
         _log(f"Virtual microphone removed: {AUDIO_VIRTUAL_SINK_NAME}")
+        self._refresh_audio_device_choices()
         messagebox.showinfo(
             self._tr("title.virtual_mic", "Virtual microphone"),
             self._tr("msg.virtual_mic_removed", "Virtual microphone module removed: {name}").format(

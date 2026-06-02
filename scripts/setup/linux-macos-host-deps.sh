@@ -158,7 +158,7 @@ install_linux_docker_packages() {
 install_base_packages() {
   log "Installing base packages"
   run apt-get update
-  apt_install ca-certificates curl gnupg gnupg2 lsb-release software-properties-common python3 python3-venv python3-pip libportaudio2 portaudio19-dev ffmpeg pulseaudio-utils \
+  apt_install ca-certificates curl gnupg gnupg2 lsb-release software-properties-common python3 python3-venv python3-pip python3-tk libportaudio2 portaudio19-dev ffmpeg pulseaudio-utils \
     gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \
     xauth x11-xserver-utils
   install_linux_docker_packages
@@ -223,7 +223,7 @@ install_macos_packages() {
 }
 
 install_python_runtime_packages() {
-  log "Syncing Python runtime dependencies from requirements.lock"
+  log "Syncing Python runtime dependencies from requirements.txt"
   run_as_invoking_user "$(pwd)/scripts/bin/avc-env" sync
 }
 
