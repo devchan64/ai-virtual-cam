@@ -1,4 +1,6 @@
+import contextlib
 import importlib
+import io
 import importlib.util
 import sys
 import types
@@ -84,6 +86,50 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         self.assertEqual(config["meta"]["windowGeometry"], "900x700+120+80")
         self.assertEqual(config["meta"]["whisperWindowGeometry"], "780x420+50+119")
         self.assertEqual(config["meta"]["whisperTranslationWindowGeometry"], "780x420+2479+1078")
+        for key in self.module.DEFAULT_WINDOW_GEOMETRY_META:
+            self.assertIn(key, config["meta"])
+
+
+    def test_restore_window_geometry_uses_default_when_saved_value_missing(self) -> None:
+        applied = []
+        root = types.SimpleNamespace(
+            winfo_vrootwidth=lambda: 1920,
+            winfo_vrootheight=lambda: 1080,
+            winfo_screenwidth=lambda: 1920,
+            winfo_screenheight=lambda: 1080,
+            geometry=lambda value: applied.append(value),
+        )
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        gui.root = root
+        gui._window_geometry_meta_cache = {}
+
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            self.module.ConfigGui._restore_window_geometry(gui, {})
+
+        self.assertEqual(applied, [self.module.DEFAULT_WINDOW_GEOMETRY_META["windowGeometry"]])
+        self.assertIn("WARN [Window geometry restore]", stdout.getvalue())
+        self.assertEqual(gui._window_geometry_meta_cache["windowGeometry"], self.module.DEFAULT_WINDOW_GEOMETRY_META["windowGeometry"])
+
+    def test_apply_window_geometry_meta_fills_defaults_when_main_geometry_capture_fails(self) -> None:
+        root = types.SimpleNamespace(
+            update_idletasks=lambda: None,
+            winfo_geometry=lambda: "invalid",
+            winfo_vrootwidth=lambda: 1920,
+            winfo_vrootheight=lambda: 1080,
+            winfo_screenwidth=lambda: 1920,
+            winfo_screenheight=lambda: 1080,
+        )
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        gui.root = root
+        gui._window_geometry_meta_cache = {}
+        gui._read_geometry_meta = lambda: {}
+        config = {"meta": {"language": "ko"}}
+
+        self.module.ConfigGui._apply_window_geometry_meta(gui, config)
+
+        for key, value in self.module.DEFAULT_WINDOW_GEOMETRY_META.items():
+            self.assertEqual(config["meta"][key], value)
 
     def test_external_window_geometry_log_updates_memory_cache(self) -> None:
         gui = self.module.ConfigGui.__new__(self.module.ConfigGui)

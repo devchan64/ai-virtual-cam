@@ -111,7 +111,16 @@ def _audio_denoise_backend_options():
 
 VIRTUAL_CAMERA_LABEL = "ai-virtual-cam"
 LANG_PACK_DIR = ROOT_DIR / "config" / "i18n"
-DEFAULT_WINDOW_GEOMETRY = "640x640"
+DEFAULT_WINDOW_GEOMETRY = "780x900"
+DEFAULT_WINDOW_GEOMETRY_META = {
+    "windowGeometry": "780x900+50+50",
+    "previewWindowGeometry": "640x480+80+80",
+    "audioTuneWindowGeometry": "640x480+100+100",
+    "audioGateTestWindowGeometry": "640x480+120+120",
+    "inputMeterWindowGeometry": "640x480+140+140",
+    "whisperWindowGeometry": "780x420+50+119",
+    "whisperTranslationWindowGeometry": "780x420+860+119",
+}
 MIN_WINDOW_WIDTH = 640
 MIN_WINDOW_HEIGHT = 480
 _WINDOW_GEOMETRY_RE = re.compile(
@@ -197,12 +206,15 @@ def _merge_window_geometry_meta(config: dict, existing_meta: dict | None, cached
     if not isinstance(meta, dict):
         meta = {}
         config["meta"] = meta
+    for key, value in DEFAULT_WINDOW_GEOMETRY_META.items():
+        meta.setdefault(key, value)
     if isinstance(existing_meta, dict):
         for key, value in existing_meta.items():
             if str(key).endswith("Geometry") and isinstance(value, str):
-                meta.setdefault(str(key), value)
+                meta[str(key)] = value
     for key, value in cached_meta.items():
-        meta[key] = value
+        if str(key).endswith("Geometry") and isinstance(value, str):
+            meta[key] = value
 
 
 def _parse_window_geometry_cache_log(line: str) -> tuple[str, str] | None:
@@ -897,13 +909,20 @@ class ConfigGui:
         self._window_geometry_save_after_id = self.root.after(600, self._capture_all_window_geometry_meta)
 
     def _restore_window_geometry(self, meta_cfg: dict) -> None:
+        saved = meta_cfg.get("windowGeometry")
         geometry = _sanitize_window_geometry(
-            meta_cfg.get("windowGeometry"),
+            saved,
             *_window_restore_extent(self.root),
         )
         if geometry is None:
-            return
+            geometry = DEFAULT_WINDOW_GEOMETRY_META["windowGeometry"]
+            _log(
+                "WARN [Window geometry restore] "
+                f"setting.json has no valid meta.windowGeometry. saved={saved!r}; using default={geometry}"
+            )
         self.root.geometry(geometry)
+        self._geometry_meta_cache()["windowGeometry"] = geometry
+        _log(f"Window geometry restored: key=windowGeometry geometry={geometry}")
 
     def _restore_preview_window_geometry(self, window: tk.Toplevel, meta_cfg: dict) -> None:
         self._restore_named_window_geometry(window, "previewWindowGeometry", meta_cfg)
@@ -911,13 +930,23 @@ class ConfigGui:
     def _restore_named_window_geometry(self, window: tk.Toplevel, key: str, meta_cfg: dict | None = None) -> None:
         if meta_cfg is None:
             meta_cfg = self._read_geometry_meta()
+        saved = meta_cfg.get(key)
         geometry = _sanitize_window_geometry(
-            meta_cfg.get(key),
+            saved,
             *_window_restore_extent(window),
         )
         if geometry is None:
-            return
+            geometry = DEFAULT_WINDOW_GEOMETRY_META.get(key)
+            if geometry is None:
+                _log(f"WARN [Window geometry restore] no default geometry: key={key} saved={saved!r}")
+                return
+            _log(
+                f"WARN [Window geometry restore] key={key} has no valid saved geometry. "
+                f"saved={saved!r}; using default={geometry}"
+            )
         window.geometry(geometry)
+        self._geometry_meta_cache()[key] = geometry
+        _log(f"Window geometry restored: key={key} geometry={geometry}")
 
     def _read_geometry_meta(self) -> dict:
         config_path = Path(self.output_path).expanduser()
@@ -968,8 +997,16 @@ class ConfigGui:
         self._window_geometry_save_after_id = None
         cache = self._geometry_meta_cache()
         try:
-            cache["windowGeometry"] = self._current_window_geometry()
-            _log(f"Window geometry cached: key=windowGeometry geometry={cache['windowGeometry']}")
+            raw_geometry = self._current_window_geometry()
+            geometry = _sanitize_window_geometry(
+                raw_geometry,
+                *_window_restore_extent(self.root),
+            )
+            if geometry is None:
+                _log(f"ERROR [Window geometry capture] invalid main window geometry: {raw_geometry!r}")
+            else:
+                cache["windowGeometry"] = geometry
+                _log(f"Window geometry cached: key=windowGeometry geometry={geometry}")
             preview_geometry = self._current_preview_window_geometry()
             if preview_geometry:
                 cache["previewWindowGeometry"] = preview_geometry
@@ -978,12 +1015,16 @@ class ConfigGui:
             self._remember_named_window_geometry("audioGateTestWindowGeometry", getattr(self, "_audio_gate_test_window", None))
             self._remember_named_window_geometry("inputMeterWindowGeometry", getattr(self, "_audio_input_meter_window", None))
         except Exception as exc:
-            _log(f"Window geometry capture failed: {exc}")
+            _log(f"ERROR [Window geometry capture] {exc}")
 
     def _apply_window_geometry_meta(self, config: dict) -> None:
         self._capture_all_window_geometry_meta()
         _merge_window_geometry_meta(config, self._read_geometry_meta(), self._geometry_meta_cache())
-        keys = sorted(key for key in config.get("meta", {}) if str(key).endswith("Geometry"))
+        meta = config.get("meta") if isinstance(config.get("meta"), dict) else {}
+        keys = sorted(key for key in meta if str(key).endswith("Geometry"))
+        missing = sorted(key for key in DEFAULT_WINDOW_GEOMETRY_META if key not in meta)
+        if missing:
+            raise ValueError(f"Window geometry save failed: missing geometry keys={','.join(missing)}")
         _log(f"Window geometry saved to setting.json on JSON save: keys={','.join(keys)}")
 
     def _tr(self, key: str, default: str) -> str:
