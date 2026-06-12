@@ -109,8 +109,7 @@ class NllbTransformersTranslator(LocalTextTranslator):
                 generated = self._model.generate(
                     **encoded,
                     forced_bos_token_id=forced_bos_token_id,
-                    max_new_tokens=self._max_new_tokens,
-                    num_beams=self._beam_size,
+                    **_nllb_generation_kwargs(self._beam_size, self._max_new_tokens),
                 )
             return self._tokenizer.batch_decode(generated, skip_special_tokens=True)[0].strip()
         except Exception as exc:
@@ -124,6 +123,16 @@ class NllbTransformersTranslator(LocalTextTranslator):
                 target_language=request.target_language,
             )
             raise RuntimeError(detail) from exc
+
+
+def _nllb_generation_kwargs(beam_size: int, max_new_tokens: int) -> dict:
+    return {
+        "max_new_tokens": int(max_new_tokens),
+        "num_beams": int(beam_size),
+        "no_repeat_ngram_size": 3,
+        "repetition_penalty": 1.15,
+        "early_stopping": True,
+    }
 
 
 def _validate_generation_int(name: str, value: int, minimum: int, maximum: int) -> int:

@@ -736,6 +736,9 @@ class WhisperConfig:
 
     @classmethod
     def from_dict(cls, raw: dict) -> "WhisperConfig":
+        legacy_translate_task = raw.get("task") == "translate"
+        translation_backend_default = "whisper" if legacy_translate_task else whisper_default("translationBackend")
+        translation_target_default = "en" if legacy_translate_task else whisper_default("translationTargetLanguage")
         config = cls(
             enabled=bool(raw.get("enabled", whisper_default("enabled"))),
             inputDevice=str(raw.get("inputDevice", _default_audio_input_device())).strip(),
@@ -744,8 +747,8 @@ class WhisperConfig:
             language=str(raw.get("language", whisper_default("language"))).strip(),
             task=str(raw.get("task", whisper_default("task"))).strip(),
             translationEnabled=bool(raw.get("translationEnabled", raw.get("task") == "translate")),
-            translationTargetLanguage=str(raw.get("translationTargetLanguage", whisper_default("translationTargetLanguage"))).strip(),
-            translationBackend=str(raw.get("translationBackend", whisper_default("translationBackend"))).strip(),
+            translationTargetLanguage=str(raw.get("translationTargetLanguage", translation_target_default)).strip(),
+            translationBackend=str(raw.get("translationBackend", translation_backend_default)).strip(),
             translationModel=str(raw.get("translationModel", whisper_default("translationModel"))).strip(),
             translationDevice=str(raw.get("translationDevice", whisper_default("translationDevice"))).strip(),
             translationComputeType=str(raw.get("translationComputeType", whisper_default("translationComputeType"))).strip(),

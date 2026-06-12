@@ -3,6 +3,7 @@ import unittest
 from src.app.translation_model import (
     MockTextTranslator,
     TranslationRequest,
+    _nllb_generation_kwargs,
     _nllb_language_code,
     _torch_cuda_is_usable_for_current_gpu,
     _translation_failure_detail,
@@ -87,6 +88,15 @@ class TranslationModelTest(unittest.TestCase):
         self.assertIn("translationDevice=cuda", detail)
         self.assertIn("translationComputeType=float16", detail)
         self.assertIn("현재 GPU를 지원하는 torch/CUDA 빌드", detail)
+
+    def test_nllb_generation_kwargs_reduce_repetition(self) -> None:
+        kwargs = _nllb_generation_kwargs(1, 128)
+
+        self.assertEqual(kwargs["num_beams"], 1)
+        self.assertEqual(kwargs["max_new_tokens"], 128)
+        self.assertEqual(kwargs["no_repeat_ngram_size"], 3)
+        self.assertGreater(kwargs["repetition_penalty"], 1.0)
+        self.assertTrue(kwargs["early_stopping"])
 
     def test_translation_generation_options_are_validated(self) -> None:
         self.assertEqual(_validate_generation_int("test.option", 1, 1, 8), 1)
