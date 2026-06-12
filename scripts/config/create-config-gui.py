@@ -47,6 +47,8 @@ if str(ROOT_DIR) not in sys.path:
 from src.tools.config_builder import build_config
 from src.tools.config_io import discover_camera_mode_options, discover_cameras, write_config
 from src.audio.gate import AudioGateConfig, NoiseGate
+from scripts.config.background_tab import build_background_tab
+from scripts.config.face_tab import build_face_tab
 from scripts.config.whisper_tab import build_whisper_tab
 from scripts.config.whisper_options import (
     whisper_language_display_from_raw as _whisper_language_display_from_raw,
@@ -1926,88 +1928,7 @@ class ConfigGui:
             row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0)
         )
 
-        row = 0
-        self._add_combo(
-            tab_bg,
-            row,
-            "bg_mode",
-            self._tr("label.bg_mode", "Background mode"),
-            ["chroma", "image", "image_chroma"],
-            "chroma",
-            label_key="label.bg_mode",
-        )
-        row += 1
-        self._add_text(
-            tab_bg,
-            row,
-            "bg_image",
-            self._tr("label.bg_image", "Background image"),
-            "",
-            label_key="label.bg_image",
-        )
-        browse_bg_image_btn = ttk.Button(
-            tab_bg,
-            text=self._tr("button.browse", "Browse"),
-            command=self._pick_bg_image,
-        )
-        self._register_localized_widget(browse_bg_image_btn, "button.browse", "Browse")
-        browse_bg_image_btn.grid(row=row, column=2, sticky="ew", padx=4)
-        row += 1
-        self._add_int(
-            tab_bg,
-            row,
-            "bg_r",
-            self._tr("label.bg_chroma_r", "Chroma R"),
-            0,
-            label_key="label.bg_chroma_r",
-        )
-        self._add_int(
-            tab_bg,
-            row,
-            "bg_g",
-            self._tr("label.bg_chroma_g", "Chroma G"),
-            0,
-            col_offset=2,
-            label_key="label.bg_chroma_g",
-        )
-        row += 1
-        self._add_int(
-            tab_bg,
-            row,
-            "bg_b",
-            self._tr("label.bg_chroma_b", "Chroma B"),
-            0,
-            label_key="label.bg_chroma_b",
-        )
-        pick_color_btn = ttk.Button(
-            tab_bg,
-            text=self._tr("button.pick_color", "Pick Color"),
-            command=self._pick_chroma_color,
-        )
-        self._register_localized_widget(pick_color_btn, "button.pick_color", "Pick Color")
-        pick_color_btn.grid(row=row, column=2, sticky="ew", padx=4)
-        row += 1
-        self._add_slider(
-            tab_bg,
-            row,
-            "bg_blend_alpha",
-            self._tr("label.bg_blend_alpha", "Color blend alpha"),
-            0.35,
-            0.0,
-            1.0,
-            resolution=0.01,
-            label_key="label.bg_blend_alpha",
-        )
-        row += 1
-        reset_bg_btn = ttk.Button(
-            tab_bg,
-            text=self._tr("button.reset_background_settings", "Restore background defaults"),
-            command=self._reset_bg_settings,
-        )
-        self._register_localized_widget(reset_bg_btn, "button.reset_background_settings", "Restore background defaults")
-        reset_bg_btn.grid(
-            row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0)
-        )
+        build_background_tab(self, tab_bg, ttk)
 
         row = 0
         self._add_slider(
@@ -2466,106 +2387,7 @@ class ConfigGui:
             row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0)
         )
 
-        row = 0
-        self._add_bool_switch(
-            tab_face,
-            row,
-            "face_enhance_enabled",
-            self._tr("label.face_enhance_enabled", "Face quality enhancement"),
-            False,
-            label_key="label.face_enhance_enabled",
-        )
-        row += 1
-        self._add_bool_switch(
-            tab_face,
-            row,
-            "face_deidentify_enabled",
-            self._tr("label.face_deidentify_enabled", "Face deidentify (eye mask)"),
-            False,
-            label_key="label.face_deidentify_enabled",
-        )
-        row += 1
-        self._add_slider(
-            tab_face,
-            row,
-            "face_enhance_gamma",
-            self._tr("label.face_enhance_gamma", "Face gamma"),
-            1.0,
-            0.5,
-            1.8,
-            resolution=0.01,
-            label_key="label.face_enhance_gamma",
-        )
-        row += 1
-        self._add_slider(
-            tab_face,
-            row,
-            "face_enhance_brightness",
-            self._tr("label.face_enhance_brightness", "Face brightness"),
-            0.0,
-            -80.0,
-            80.0,
-            resolution=1,
-            label_key="label.face_enhance_brightness",
-        )
-        row += 1
-        self._add_slider(
-            tab_face,
-            row,
-            "face_enhance_saturation",
-            self._tr("label.face_enhance_saturation", "Face saturation"),
-            1.0,
-            0.5,
-            1.8,
-            resolution=0.01,
-            label_key="label.face_enhance_saturation",
-        )
-        row += 1
-        self._add_slider(
-            tab_face,
-            row,
-            "face_enhance_blend",
-            self._tr("label.face_enhance_blend", "Face enhancement strength"),
-            0.65,
-            0.0,
-            1.0,
-            resolution=0.01,
-            label_key="label.face_enhance_blend",
-        )
-        row += 1
-        self._add_slider(
-            tab_face,
-            row,
-            "face_enhance_min_size_ratio",
-            self._tr("label.face_enhance_min_size_ratio", "Minimum face size ratio"),
-            0.12,
-            0.05,
-            0.50,
-            resolution=0.01,
-            label_key="label.face_enhance_min_size_ratio",
-        )
-        row += 1
-        self._add_slider(
-            tab_face,
-            row,
-            "face_enhance_edge_dither",
-            self._tr("label.face_enhance_edge_dither", "Face edge dither"),
-            0.25,
-            0.0,
-            1.0,
-            resolution=0.01,
-            label_key="label.face_enhance_edge_dither",
-        )
-        row += 1
-        reset_face_btn = ttk.Button(
-            tab_face,
-            text=self._tr("button.reset_face_settings", "Restore face quality defaults"),
-            command=self._reset_face_settings,
-        )
-        self._register_localized_widget(reset_face_btn, "button.reset_face_settings", "Restore face quality defaults")
-        reset_face_btn.grid(
-            row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0)
-        )
+        build_face_tab(self, tab_face, ttk)
 
         build_whisper_tab(
             self,
@@ -3047,7 +2869,11 @@ class ConfigGui:
             "whisper_language": _whisper_language_display_from_raw("ko"),
             "whisper_task": "transcribe",
             "whisper_translation_enabled": False,
+            "whisper_translation_backend": "whisper",
             "whisper_translation_target_language": _whisper_translation_target_display_from_raw("en"),
+            "whisper_translation_model": "facebook/nllb-200-distilled-600M",
+            "whisper_translation_device": "auto",
+            "whisper_translation_compute_type": "auto",
             "whisper_device": "cuda",
             "whisper_compute_type": "float16",
             "whisper_vad_filter": True,
@@ -3399,7 +3225,11 @@ class ConfigGui:
             "whisper_model",
             "whisper_language",
             "whisper_translation_enabled",
+            "whisper_translation_backend",
             "whisper_translation_target_language",
+            "whisper_translation_model",
+            "whisper_translation_device",
+            "whisper_translation_compute_type",
             "whisper_device",
             "whisper_compute_type",
             "whisper_vad_filter",
@@ -3595,6 +3425,7 @@ class ConfigGui:
             "whisper_translation_enabled",
             whisper_cfg.get("translationEnabled", legacy_translation_enabled or defaults["whisper_translation_enabled"]),
         )
+        self._set_var("whisper_translation_backend", whisper_cfg.get("translationBackend", defaults["whisper_translation_backend"]))
         self._set_var(
             "whisper_translation_target_language",
             _whisper_translation_target_display_from_raw(
@@ -3604,6 +3435,9 @@ class ConfigGui:
                 )
             ),
         )
+        self._set_var("whisper_translation_model", whisper_cfg.get("translationModel", defaults["whisper_translation_model"]))
+        self._set_var("whisper_translation_device", whisper_cfg.get("translationDevice", defaults["whisper_translation_device"]))
+        self._set_var("whisper_translation_compute_type", whisper_cfg.get("translationComputeType", defaults["whisper_translation_compute_type"]))
         self._set_var("whisper_device", whisper_cfg.get("device", defaults["whisper_device"]))
         self._set_var("whisper_compute_type", whisper_cfg.get("computeType", defaults["whisper_compute_type"]))
         self._set_var("whisper_vad_filter", whisper_cfg.get("vadFilter", defaults["whisper_vad_filter"]))
@@ -5239,9 +5073,13 @@ class ConfigGui:
             whisper_language=_whisper_language_raw_from_display(iv["whisper_language"].get()),
             whisper_task="transcribe",
             whisper_translation_enabled=self._parse_bool(iv["whisper_translation_enabled"].get()),
+            whisper_translation_backend=iv["whisper_translation_backend"].get().strip(),
             whisper_translation_target_language=_whisper_translation_target_raw_from_display(
                 iv["whisper_translation_target_language"].get()
             ),
+            whisper_translation_model=iv["whisper_translation_model"].get().strip(),
+            whisper_translation_device=iv["whisper_translation_device"].get().strip(),
+            whisper_translation_compute_type=iv["whisper_translation_compute_type"].get().strip(),
             whisper_device=iv["whisper_device"].get().strip(),
             whisper_compute_type=iv["whisper_compute_type"].get().strip(),
             whisper_vad_filter=self._parse_bool(iv["whisper_vad_filter"].get()),

@@ -280,6 +280,9 @@ verify_whisper_runtime_contract() {
   if ! run_as_invoking_user "$venv_py" -c "import faster_whisper" >/dev/null 2>&1; then
     fail "faster-whisper is not importable in .venv. Run ./bin/avc setup again."
   fi
+  if ! run_as_invoking_user "$venv_py" -c "import transformers, sentencepiece, torch" >/dev/null 2>&1; then
+    fail "Whisper translation dependencies are not importable in .venv. Run ./bin/avc setup again to install transformers, sentencepiece, and torch."
+  fi
 
   if [[ "$OS_KIND" == "linux" ]]; then
     if ! command -v parec >/dev/null 2>&1 && ! command -v parecord >/dev/null 2>&1; then

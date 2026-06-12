@@ -718,6 +718,10 @@ class WhisperConfig:
     task: str
     translationEnabled: bool
     translationTargetLanguage: str
+    translationBackend: str
+    translationModel: str
+    translationDevice: str
+    translationComputeType: str
     device: str
     computeType: str
     vadFilter: bool
@@ -735,6 +739,10 @@ class WhisperConfig:
             task=str(raw.get("task", "transcribe")).strip(),
             translationEnabled=bool(raw.get("translationEnabled", raw.get("task") == "translate")),
             translationTargetLanguage=str(raw.get("translationTargetLanguage", "en")).strip(),
+            translationBackend=str(raw.get("translationBackend", "whisper")).strip(),
+            translationModel=str(raw.get("translationModel", "facebook/nllb-200-distilled-600M")).strip(),
+            translationDevice=str(raw.get("translationDevice", "auto")).strip(),
+            translationComputeType=str(raw.get("translationComputeType", "auto")).strip(),
             device=str(raw.get("device", "cuda")).strip(),
             computeType=str(raw.get("computeType", "float16")).strip(),
             vadFilter=bool(raw.get("vadFilter", True)),
@@ -752,8 +760,18 @@ class WhisperConfig:
             raise ValueError("whisper.language must be one of: auto, ko, en, zh")
         if config.task not in {"transcribe", "translate"}:
             raise ValueError("whisper.task must be one of: transcribe, translate")
-        if config.translationEnabled and config.translationTargetLanguage != "en":
-            raise ValueError("whisper.translationTargetLanguage must be en for the local Whisper translation window")
+        if config.translationTargetLanguage not in {"en", "ko", "zh"}:
+            raise ValueError("whisper.translationTargetLanguage must be one of: en, ko, zh")
+        if config.translationBackend not in {"whisper", "nllb-transformers", "mock"}:
+            raise ValueError("whisper.translationBackend must be one of: whisper, nllb-transformers, mock")
+        if config.translationEnabled and config.translationBackend == "whisper" and config.translationTargetLanguage != "en":
+            raise ValueError("whisper.translationTargetLanguage must be en when whisper.translationBackend=whisper")
+        if config.translationEnabled and config.translationBackend == "nllb-transformers" and not config.translationModel:
+            raise ValueError("whisper.translationModel is required when whisper.translationBackend=nllb-transformers")
+        if config.translationDevice not in {"auto", "cpu", "cuda"}:
+            raise ValueError("whisper.translationDevice must be one of: auto, cpu, cuda")
+        if config.translationComputeType not in {"auto", "float16", "float32"}:
+            raise ValueError("whisper.translationComputeType must be one of: auto, float16, float32")
         if not config.device:
             raise ValueError("whisper.device is required")
         if not config.computeType:

@@ -4,3 +4,6 @@ mediapipe==0.10.14
 pyvirtualcam==0.14.0
 sounddevice==0.5.1
 faster-whisper==1.2.1
+transformers==4.52.4
+sentencepiece==0.2.0
+torch==2.7.1

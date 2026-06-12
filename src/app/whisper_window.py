@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+from src.app.translation_model import TranslationRequest, build_text_translator
 from src.domain.config import AppConfig, WhisperConfig
 
 
@@ -146,6 +147,10 @@ def _is_exact_pulse_source(configured: str) -> bool:
     return value.startswith("alsa_input.") or value.endswith(".monitor") or value == "ai-virtual-cam"
 
 
+def _is_modal_output_event(event: TranscriptEvent) -> bool:
+    return event.display and event.kind in {"transcript", "translation"}
+
+
 class WhisperTranscriptWorker:
     def __init__(self, config: WhisperConfig, events: queue.Queue[TranscriptEvent]) -> None:
         self._cfg = config
@@ -223,18 +228,27 @@ class WhisperTranscriptWorker:
                     f"원인: {exc}"
                 ) from exc
             self._emit("status", "Whisper 모델 로딩 완료")
+            text_translator = None
             if self._cfg.translationEnabled:
                 self._emit(
                     "status",
-                    f"Whisper 번역 창 사용: target_language={self._cfg.translationTargetLanguage}. "
-                    "로컬 Whisper 번역은 영어 출력만 지원합니다.",
+                    "Whisper 번역 창 사용: "
+                    f"backend={self._cfg.translationBackend} target_language={self._cfg.translationTargetLanguage} "
+                    f"model={self._cfg.translationModel} device={self._cfg.translationDevice} "
+                    f"compute={self._cfg.translationComputeType}",
+                )
+                text_translator = build_text_translator(
+                    self._cfg.translationBackend,
+                    self._cfg.translationModel,
+                    self._cfg.translationDevice,
+                    self._cfg.translationComputeType,
                 )
             self._emit("status", f"입력 장치 열기: {self._cfg.inputDevice}")
 
             if _is_exact_pulse_source(self._cfg.inputDevice):
                 self._start_pulse_capture(np)
                 self._emit("status", f"Pulse source 직접 캡처 시작: {self._cfg.inputDevice}")
-                self._transcribe_loop(model, np)
+                self._transcribe_loop(model, np, text_translator)
                 return
 
             assert sd is not None
@@ -260,7 +274,7 @@ class WhisperTranscriptWorker:
                 callback=callback,
             ):
                 self._emit("status", "Whisper 전사 시작")
-                self._transcribe_loop(model, np)
+                self._transcribe_loop(model, np, text_translator)
         except Exception as exc:
             self._emit("error", str(exc))
 
@@ -312,7 +326,7 @@ class WhisperTranscriptWorker:
         self._capture_thread = threading.Thread(target=read_loop, daemon=True)
         self._capture_thread.start()
 
-    def _transcribe_loop(self, model, np) -> None:
+    def _transcribe_loop(self, model, np, text_translator=None) -> None:
         samples: list[object] = []
         chunk_seconds = float(self._cfg.chunkSeconds or DEFAULT_CHUNK_SECONDS)
         target_samples = int(SAMPLE_RATE * chunk_seconds)
@@ -323,6 +337,7 @@ class WhisperTranscriptWorker:
             "status",
             f"Whisper 전사 루프 시작: chunk_seconds={chunk_seconds} language={self._cfg.language} "
             f"translation_enabled={self._cfg.translationEnabled} "
+            f"translation_backend={self._cfg.translationBackend} "
             f"translation_target={self._cfg.translationTargetLanguage} beam_size={self._cfg.beamSize}",
         )
         while not self._stop.is_set():
@@ -357,19 +372,36 @@ class WhisperTranscriptWorker:
                     self._emit("status", f"Whisper 전사 결과 없음: chunk={chunks}", display=False)
                 if self._cfg.translationEnabled:
                     self._emit("status", f"Whisper 번역 요청: chunk={chunks}", display=False)
-                    translated_segments, _translated_info = model.transcribe(
-                        audio,
-                        language=language,
-                        task="translate",
-                        vad_filter=self._cfg.vadFilter,
-                        beam_size=self._cfg.beamSize,
-                        condition_on_previous_text=False,
-                    )
-                    translated_text = " ".join(
-                        segment.text.strip() for segment in translated_segments if segment.text.strip()
-                    ).strip()
+                    translated_text = ""
+                    target_language = self._cfg.translationTargetLanguage
+                    if text_translator is None:
+                        translated_segments, _translated_info = model.transcribe(
+                            audio,
+                            language=language,
+                            task="translate",
+                            vad_filter=self._cfg.vadFilter,
+                            beam_size=self._cfg.beamSize,
+                            condition_on_previous_text=False,
+                        )
+                        translated_text = " ".join(
+                            segment.text.strip() for segment in translated_segments if segment.text.strip()
+                        ).strip()
+                        target_language = "en"
+                    elif text:
+                        source_language = detected if detected in {"ko", "en", "zh"} else self._cfg.language
+                        translated_text = text_translator.translate(
+                            TranslationRequest(
+                                text=text,
+                                source_language=source_language,
+                                target_language=target_language,
+                            )
+                        )
                     if translated_text:
-                        self._emit("translation", translated_text, log_text=f"[{detected}->en] {translated_text}")
+                        self._emit(
+                            "translation",
+                            translated_text,
+                            log_text=f"[{detected}->{target_language}] {translated_text}",
+                        )
                     else:
                         self._emit("status", f"Whisper 번역 결과 없음: chunk={chunks}", display=False)
             except Exception as exc:
@@ -381,7 +413,7 @@ class WhisperTranscriptWorker:
         while not self._stop.is_set():
             self._emit("transcript", f"[mock] sample transcript {index}")
             if self._cfg.translationEnabled:
-                self._emit("translation", f"[mock] translated sample {index}")
+                self._emit("translation", f"translated mock sample {index}", log_text=f"[mock->{self._cfg.translationTargetLanguage}] translated mock sample {index}")
             index += 1
             self._stop.wait(2.0)
 
@@ -513,13 +545,12 @@ class WhisperTranscriptWindow:
                 event = self._events.get_nowait()
             except queue.Empty:
                 break
-            if not event.display:
+            if not _is_modal_output_event(event):
                 continue
-            prefix = "ERROR: " if event.kind == "error" else ""
             if event.kind == "translation" and self._translation_text is not None:
-                self._append(prefix + event.text, self._translation_text)
-            elif event.kind != "translation":
-                self._append(prefix + event.text, self._text)
+                self._append(event.text, self._translation_text)
+            elif event.kind == "transcript":
+                self._append(event.text, self._text)
         self._root.after(100, self._poll_events)
 
     def _on_configure(self, event) -> None:

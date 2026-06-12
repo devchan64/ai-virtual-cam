@@ -321,6 +321,7 @@ Whisper 활성화:
 
 - `Whisper` 탭에서 `Whisper STT`를 켜고 입력 장치를 선택합니다.
 - `Whisper 입력 dB 미터`로 선택한 장치에 실제 신호가 들어오는지 확인합니다.
+- `번역 창`을 켠 뒤 `번역 백엔드`를 선택합니다. `whisper`는 영어 번역만 지원하고, `nllb-transformers`는 `facebook/nllb-200-distilled-600M` 로컬 모델로 한국어/영어/중국어 대상 번역을 지원합니다.
 - Linux PulseAudio/PipeWire 장치는 `alsa_input...`, `*.monitor`, `ai-virtual-cam` 같은 원본 ID를 설정값으로 저장합니다.
 
 실행 동작:
@@ -544,6 +545,10 @@ Whisper 활성화:
     "task": "transcribe",
     "translationEnabled": true,
     "translationTargetLanguage": "en",
+    "translationBackend": "whisper",
+    "translationModel": "facebook/nllb-200-distilled-600M",
+    "translationDevice": "auto",
+    "translationComputeType": "auto",
     "device": "cuda",
     "computeType": "float16",
     "vadFilter": true,

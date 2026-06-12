@@ -5,6 +5,8 @@ from scripts.config.whisper_options import (
     whisper_language_display_from_raw,
     whisper_language_options,
     whisper_model_options,
+    whisper_translation_backend_options,
+    whisper_translation_model_options,
     whisper_translation_target_display_from_raw,
     whisper_translation_target_options,
 )
@@ -123,11 +125,51 @@ def build_whisper_tab(
     gui._add_combo(
         tab_whisper,
         row,
+        "whisper_translation_backend",
+        gui._tr("label.whisper_translation_backend", "Translation backend"),
+        whisper_translation_backend_options(),
+        "whisper",
+        label_key="label.whisper_translation_backend",
+    )
+    row += 1
+    gui._add_combo(
+        tab_whisper,
+        row,
         "whisper_translation_target_language",
         gui._tr("label.whisper_translation_target_language", "Translation target language"),
         whisper_translation_target_options(),
         whisper_translation_target_display_from_raw("en"),
         label_key="label.whisper_translation_target_language",
+    )
+    row += 1
+    gui._add_combo(
+        tab_whisper,
+        row,
+        "whisper_translation_model",
+        gui._tr("label.whisper_translation_model", "Translation model"),
+        whisper_translation_model_options(),
+        whisper_translation_model_options()[0],
+        label_key="label.whisper_translation_model",
+    )
+    row += 1
+    gui._add_combo(
+        tab_whisper,
+        row,
+        "whisper_translation_device",
+        gui._tr("label.whisper_translation_device", "Translation device"),
+        ["auto", "cpu", "cuda"],
+        "auto",
+        label_key="label.whisper_translation_device",
+    )
+    row += 1
+    gui._add_combo(
+        tab_whisper,
+        row,
+        "whisper_translation_compute_type",
+        gui._tr("label.whisper_translation_compute_type", "Translation compute type"),
+        ["auto", "float16", "float32"],
+        "auto",
+        label_key="label.whisper_translation_compute_type",
     )
     row += 1
     row = _add_hint(
@@ -136,7 +178,7 @@ def build_whisper_tab(
         tab_whisper,
         row,
         "hint.whisper_translation_target_language",
-        "Whisper translate currently outputs English only. Use transcribe for original-language text.",
+        "Whisper backend translates to English only. Use nllb-transformers for Korean, English, and Chinese targets.",
     )
 
     gui._add_combo(

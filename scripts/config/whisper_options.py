@@ -39,6 +39,8 @@ def whisper_language_display_from_raw(value: object) -> str:
 
 WHISPER_TRANSLATION_TARGET_DISPLAY_TO_RAW = {
     "English (en)": "en",
+    "한국어 (ko)": "ko",
+    "中文 (zh)": "zh",
 }
 WHISPER_TRANSLATION_TARGET_RAW_TO_DISPLAY = {
     value: label for label, value in WHISPER_TRANSLATION_TARGET_DISPLAY_TO_RAW.items()
@@ -62,3 +64,11 @@ def whisper_translation_target_raw_from_display(value: str) -> str:
 def whisper_translation_target_display_from_raw(value: object) -> str:
     raw = str(value).strip().lower()
     return WHISPER_TRANSLATION_TARGET_RAW_TO_DISPLAY.get(raw, WHISPER_TRANSLATION_TARGET_RAW_TO_DISPLAY["en"])
+
+
+def whisper_translation_backend_options() -> list[str]:
+    return ["whisper", "nllb-transformers", "mock"]
+
+
+def whisper_translation_model_options() -> list[str]:
+    return ["facebook/nllb-200-distilled-600M"]

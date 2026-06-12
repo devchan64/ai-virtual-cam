@@ -6,6 +6,8 @@ import unittest
 from pathlib import Path
 
 from src.app.whisper_window import (
+    TranscriptEvent,
+    _is_modal_output_event,
     _sanitize_window_geometry,
     _save_window_geometry,
 )
@@ -36,6 +38,13 @@ class WhisperWindowGeometryTest(unittest.TestCase):
             raw = json.loads(path.read_text(encoding="utf-8"))
 
         self.assertEqual(raw["meta"]["whisperWindowGeometry"], "820x460+120+80")
+
+    def test_modal_output_only_allows_transcript_and_translation(self) -> None:
+        self.assertTrue(_is_modal_output_event(TranscriptEvent("transcript", "hello")))
+        self.assertTrue(_is_modal_output_event(TranscriptEvent("translation", "안녕")))
+        self.assertFalse(_is_modal_output_event(TranscriptEvent("status", "loading")))
+        self.assertFalse(_is_modal_output_event(TranscriptEvent("error", "failed")))
+        self.assertFalse(_is_modal_output_event(TranscriptEvent("transcript", "hidden", display=False)))
 
     def test_sanitizes_geometry_before_restore(self) -> None:
         self.assertEqual(
