@@ -44,6 +44,13 @@
 - Whisper/NLLB 실시간 경로는 CUDA/float16 중심의 Fail-Fast 정책을 따른다. NLLB 선택 시 Whisper는 `task=transcribe`만 수행하고 번역은 NLLB 경로만 사용한다.
 - Whisper/설정 GUI 창 위치와 UI 언어는 `setting.json`의 `meta`에 저장한다. README Whisper 문서는 `docs/images/whisper-config-runtime-sample.png` 기준으로 유지한다.
 
+## 문서 배치 정책
+
+- `README.md`는 사용자가 프로젝트를 이해하고 시작하는 엔트리 문서로 유지한다.
+- `AGENTS.md`는 AI 에이전트가 따라야 할 작업 규칙, 정책, 프로젝트 문맥을 기록한다.
+- 설계안, 디자인 자료, 검토 기록, 운영 실험 기록은 `docs/` 아래에 날짜나 주제가 드러나는 Markdown 문서로 작성한다.
+- README에는 상세 설계를 직접 길게 넣지 않고, 필요한 경우 `docs/` 문서를 링크한다.
+
 ## 테스트 정책
 
 - 가상 비디오/오디오 장치 동작 계약(생성/상태/삭제)을 변경하는 패치에는 반드시 스펙 테스트를 포함한다.

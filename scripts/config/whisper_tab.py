@@ -155,13 +155,37 @@ def build_whisper_tab(
     gui._add_slider(
         tab_whisper,
         row,
-        "whisper_chunk_seconds",
-        gui._tr("label.whisper_chunk_seconds", "Chunk seconds"),
-        whisper_default("chunkSeconds"),
-        1.0,
-        10.0,
+        "whisper_step_seconds",
+        gui._tr("label.whisper_step_seconds", "Update interval seconds"),
+        whisper_default("stepSeconds"),
+        0.5,
+        5.0,
         resolution=0.5,
-        label_key="label.whisper_chunk_seconds",
+        label_key="label.whisper_step_seconds",
+    )
+    row += 1
+    gui._add_slider(
+        tab_whisper,
+        row,
+        "whisper_window_seconds",
+        gui._tr("label.whisper_window_seconds", "Context window seconds"),
+        whisper_default("windowSeconds"),
+        1.0,
+        15.0,
+        resolution=0.5,
+        label_key="label.whisper_window_seconds",
+    )
+    row += 1
+    gui._add_slider(
+        tab_whisper,
+        row,
+        "whisper_commit_lag_seconds",
+        gui._tr("label.whisper_commit_lag_seconds", "Commit lag seconds"),
+        whisper_default("commitLagSeconds"),
+        0.0,
+        5.0,
+        resolution=0.5,
+        label_key="label.whisper_commit_lag_seconds",
     )
     row += 1
     gui._add_slider(
@@ -206,7 +230,7 @@ def build_whisper_tab(
         tab_whisper,
         row,
         "hint.whisper_speed",
-        "Lower STT chunk seconds and beam size improve response speed, but may reduce accuracy or sentence continuity.",
+        "A shorter update interval improves responsiveness. A longer context window and commit lag usually improve STT accuracy and sentence continuity.",
     )
 
     gui._add_bool_switch(

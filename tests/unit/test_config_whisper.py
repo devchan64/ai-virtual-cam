@@ -44,7 +44,9 @@ class WhisperConfigTest(unittest.TestCase):
             whisper_device="cpu",
             whisper_compute_type="int8",
             whisper_vad_filter=False,
-            whisper_chunk_seconds=2.5,
+            whisper_step_seconds=1.0,
+            whisper_window_seconds=4.0,
+            whisper_commit_lag_seconds=1.0,
             whisper_beam_size=1,
             whisper_max_new_tokens=128,
             whisper_temperature=0.2,
@@ -70,12 +72,41 @@ class WhisperConfigTest(unittest.TestCase):
                 "device": "cpu",
                 "computeType": "int8",
                 "vadFilter": False,
-                "chunkSeconds": 2.5,
+                "chunkSeconds": 4.0,
+                "stepSeconds": 1.0,
+                "windowSeconds": 4.0,
+                "commitLagSeconds": 1.0,
                 "beamSize": 1,
                 "maxNewTokens": 128,
                 "temperature": 0.2,
             },
         )
+
+
+    def test_build_config_uses_chunk_seconds_as_legacy_window_seconds(self) -> None:
+        config = build_config(
+            input_device="0",
+            input_width=1280,
+            input_height=720,
+            input_fps=30,
+            output_device="output.mp4",
+            output_width=1280,
+            output_height=720,
+            output_fps=30,
+            output_backend="opencv",
+            segmentation_backend="mock",
+            segmentation_threshold=0.5,
+            background={"mode": "chroma", "chromaColor": [0, 0, 0]},
+            crop_margin=0.25,
+            crop_pan_smoothing=0.85,
+            audio_input_device="default",
+            audio_output_device="default",
+            whisper_backend="mock",
+            whisper_chunk_seconds=2.5,
+        )
+
+        self.assertEqual(config["whisper"]["chunkSeconds"], 2.5)
+        self.assertEqual(config["whisper"]["windowSeconds"], 2.5)
 
     def test_app_config_loads_whisper_settings(self) -> None:
         config = build_config(
@@ -119,6 +150,9 @@ class WhisperConfigTest(unittest.TestCase):
         self.assertEqual(loaded.whisper.translationBeamSize, whisper_default("translationBeamSize"))
         self.assertEqual(loaded.whisper.translationMaxNewTokens, whisper_default("translationMaxNewTokens"))
         self.assertEqual(loaded.whisper.chunkSeconds, whisper_default("chunkSeconds"))
+        self.assertEqual(loaded.whisper.stepSeconds, whisper_default("stepSeconds"))
+        self.assertEqual(loaded.whisper.windowSeconds, whisper_default("windowSeconds"))
+        self.assertEqual(loaded.whisper.commitLagSeconds, whisper_default("commitLagSeconds"))
         self.assertEqual(loaded.whisper.beamSize, whisper_default("beamSize"))
         self.assertEqual(loaded.whisper.maxNewTokens, whisper_default("maxNewTokens"))
         self.assertEqual(loaded.whisper.temperature, whisper_default("temperature"))
@@ -188,9 +222,24 @@ class WhisperConfigTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "whisper.translationComputeType"):
             WhisperConfig.from_dict({"translationComputeType": "int8"})
 
+
+    def test_whisper_uses_chunk_seconds_as_legacy_window_seconds(self) -> None:
+        loaded = WhisperConfig.from_dict({"chunkSeconds": 3.5})
+
+        self.assertEqual(loaded.chunkSeconds, 3.5)
+        self.assertEqual(loaded.windowSeconds, 3.5)
+
     def test_whisper_rejects_invalid_speed_parameters(self) -> None:
         with self.assertRaisesRegex(ValueError, "whisper.chunkSeconds"):
             WhisperConfig.from_dict({"chunkSeconds": 0.5})
+        with self.assertRaisesRegex(ValueError, "whisper.stepSeconds"):
+            WhisperConfig.from_dict({"stepSeconds": 0.25})
+        with self.assertRaisesRegex(ValueError, "whisper.windowSeconds"):
+            WhisperConfig.from_dict({"windowSeconds": 0.5})
+        with self.assertRaisesRegex(ValueError, "whisper.stepSeconds"):
+            WhisperConfig.from_dict({"stepSeconds": 5.0, "windowSeconds": 4.0})
+        with self.assertRaisesRegex(ValueError, "whisper.commitLagSeconds"):
+            WhisperConfig.from_dict({"commitLagSeconds": 4.0, "windowSeconds": 4.0})
         with self.assertRaisesRegex(ValueError, "whisper.beamSize"):
             WhisperConfig.from_dict({"beamSize": 0})
         with self.assertRaisesRegex(ValueError, "whisper.maxNewTokens"):

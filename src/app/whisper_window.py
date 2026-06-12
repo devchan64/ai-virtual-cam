@@ -187,6 +187,66 @@ def _is_modal_output_event(event: TranscriptEvent) -> bool:
     return event.display and event.kind in {"transcript", "translation"}
 
 
+def _normalized_text(text: str) -> str:
+    return " ".join(str(text).split())
+
+
+def _text_units(text: str) -> tuple[list[str], str]:
+    normalized = _normalized_text(text)
+    if not normalized:
+        return [], " "
+    if " " in normalized:
+        return normalized.split(), " "
+    return list(normalized), ""
+
+
+def _join_text_units(units: list[str], separator: str) -> str:
+    return separator.join(units).strip()
+
+
+def _stable_window_text(text: str, commit_lag_seconds: float, window_seconds: float) -> str:
+    normalized = _normalized_text(text)
+    if not normalized or commit_lag_seconds <= 0.0:
+        return normalized
+    units, separator = _text_units(normalized)
+    if len(units) <= 1:
+        return ""
+    ratio = min(max(commit_lag_seconds / max(window_seconds, 0.001), 0.0), 0.95)
+    hold_count = max(1, int(len(units) * ratio + 0.999))
+    stable_units = units[: max(0, len(units) - hold_count)]
+    return _join_text_units(stable_units, separator)
+
+
+def _new_text_delta(committed_text: str, stable_text: str) -> str:
+    committed = _normalized_text(committed_text)
+    stable = _normalized_text(stable_text)
+    if not stable:
+        return ""
+    if not committed:
+        return stable
+    if committed.endswith(stable):
+        return ""
+    committed_units, committed_separator = _text_units(committed)
+    stable_units, stable_separator = _text_units(stable)
+    if committed_separator != stable_separator:
+        committed_units, stable_units = list(committed), list(stable)
+        stable_separator = ""
+    max_overlap = min(len(committed_units), len(stable_units))
+    for overlap in range(max_overlap, 0, -1):
+        if committed_units[-overlap:] == stable_units[:overlap]:
+            return _join_text_units(stable_units[overlap:], stable_separator)
+    if stable in committed:
+        return ""
+    return stable
+
+
+def _append_committed_text(committed_text: str, new_text: str) -> str:
+    combined = _normalized_text(f"{committed_text} {new_text}")
+    if len(combined) <= 4000:
+        return combined
+    return combined[-4000:]
+
+
 class WhisperTranscriptWorker:
     def __init__(self, config: WhisperConfig, events: queue.Queue[TranscriptEvent]) -> None:
         self._cfg = config
@@ -402,16 +462,23 @@ class WhisperTranscriptWorker:
         self._capture_thread.start()
 
     def _transcribe_loop(self, model, np, text_translator=None) -> None:
-        samples: list[object] = []
-        chunk_seconds = float(self._cfg.chunkSeconds or DEFAULT_CHUNK_SECONDS)
-        target_samples = int(SAMPLE_RATE * chunk_seconds)
+        audio_blocks: deque[object] = deque()
         buffered = 0
+        pending_step = 0
+        step_seconds = float(self._cfg.stepSeconds)
+        window_seconds = float(self._cfg.windowSeconds)
+        commit_lag_seconds = float(self._cfg.commitLagSeconds)
+        step_samples = int(SAMPLE_RATE * step_seconds)
+        window_samples = int(SAMPLE_RATE * window_seconds)
         language = None if self._cfg.language == "auto" else self._cfg.language
         chunks = 0
         translation_failed = False
+        committed_text = ""
+        committed_translation_text = ""
         self._emit(
             "status",
-            f"Whisper 전사 루프 시작: chunk_seconds={chunk_seconds} language={self._cfg.language} "
+            f"Whisper 전사 루프 시작: step_seconds={step_seconds} window_seconds={window_seconds} "
+            f"commit_lag_seconds={commit_lag_seconds} language={self._cfg.language} "
             f"translation_enabled={self._cfg.translationEnabled} "
             f"translation_backend={self._cfg.translationBackend} "
             f"translation_target={self._cfg.translationTargetLanguage} beam_size={self._cfg.beamSize} "
@@ -419,25 +486,43 @@ class WhisperTranscriptWorker:
             f"without_timestamps=True translation_beam_size={self._cfg.translationBeamSize} "
             f"translation_max_new_tokens={self._cfg.translationMaxNewTokens}",
         )
+
+        def trim_audio_window() -> None:
+            nonlocal buffered
+            while buffered > window_samples and audio_blocks:
+                excess = buffered - window_samples
+                oldest = audio_blocks[0]
+                oldest_len = int(oldest.shape[0])
+                if oldest_len <= excess:
+                    audio_blocks.popleft()
+                    buffered -= oldest_len
+                    continue
+                audio_blocks[0] = oldest[excess:]
+                buffered -= excess
+                break
+
         while not self._stop.is_set():
             try:
                 block = self._audio_queue.get(timeout=0.2)
             except queue.Empty:
                 continue
-            samples.append(block)
-            buffered += int(block.shape[0])
-            if buffered < target_samples:
+            audio_blocks.append(block)
+            block_len = int(block.shape[0])
+            buffered += block_len
+            pending_step += block_len
+            trim_audio_window()
+            if buffered < window_samples or pending_step < step_samples:
                 continue
+            pending_step = 0
 
             chunks += 1
             self._emit("status", f"Whisper 전사 요청: chunk={chunks} samples={buffered}", display=False)
-            audio = np.concatenate(samples).astype(np.float32, copy=False)
-            samples.clear()
-            buffered = 0
+            audio = np.concatenate(list(audio_blocks)).astype(np.float32, copy=False)
             chunk_audio_seconds = float(audio.shape[0]) / float(SAMPLE_RATE)
             chunk_started_at = time.perf_counter()
             translation_elapsed = 0.0
             translation_attempted = False
+            text = ""
             try:
                 stt_started_at = time.perf_counter()
                 segments, info = model.transcribe(
@@ -453,7 +538,9 @@ class WhisperTranscriptWorker:
                 )
                 segment_list = list(segments)
                 accepted_texts, rejected_reasons = self._accepted_segment_texts(segment_list)
-                text = " ".join(accepted_texts).strip()
+                window_text = " ".join(accepted_texts).strip()
+                stable_text = _stable_window_text(window_text, commit_lag_seconds, window_seconds)
+                text = _new_text_delta(committed_text, stable_text)
                 stt_elapsed = time.perf_counter() - stt_started_at
                 detected = getattr(info, "language", self._cfg.language)
                 if rejected_reasons:
@@ -466,10 +553,16 @@ class WhisperTranscriptWorker:
                     self._emit("status", f"Whisper 반복 전사 무시: chunk={chunks} text={text!r}", display=False)
                     text = ""
                 if text:
+                    committed_text = _append_committed_text(committed_text, text)
                     self._remember_transcript(text)
                     self._emit("transcript", text, log_text=f"[{detected}] {text}")
                 else:
-                    self._emit("status", f"Whisper 전사 결과 없음: chunk={chunks}", display=False)
+                    preview_chars = max(0, len(_normalized_text(window_text)) - len(_normalized_text(stable_text)))
+                    self._emit(
+                        "status",
+                        f"Whisper 전사 결과 없음: chunk={chunks} preview_chars={preview_chars}",
+                        display=False,
+                    )
                 if self._cfg.translationEnabled and not translation_failed and text:
                     try:
                         translation_attempted = True
@@ -490,9 +583,15 @@ class WhisperTranscriptWorker:
                                 without_timestamps=True,
                                 condition_on_previous_text=False,
                             )
-                            translated_text = " ".join(
+                            translated_window_text = " ".join(
                                 segment.text.strip() for segment in translated_segments if segment.text.strip()
                             ).strip()
+                            translated_stable_text = _stable_window_text(
+                                translated_window_text,
+                                commit_lag_seconds,
+                                window_seconds,
+                            )
+                            translated_text = _new_text_delta(committed_translation_text, translated_stable_text)
                             target_language = "en"
                         elif text:
                             source_language = detected if detected in {"ko", "en", "zh"} else self._cfg.language
@@ -505,6 +604,7 @@ class WhisperTranscriptWorker:
                             )
                         translation_elapsed = time.perf_counter() - translation_started_at
                         if translated_text:
+                            committed_translation_text = _append_committed_text(committed_translation_text, translated_text)
                             self._emit(
                                 "translation",
                                 translated_text,
@@ -524,7 +624,8 @@ class WhisperTranscriptWorker:
                 self._emit(
                     "status",
                     "Whisper 성능: "
-                    f"chunk={chunks} audio={chunk_audio_seconds:.2f}s "
+                    f"chunk={chunks} step={step_seconds:.2f}s window={window_seconds:.2f}s "
+                    f"commit_lag={commit_lag_seconds:.2f}s audio={chunk_audio_seconds:.2f}s "
                     f"stt={stt_elapsed:.2f}s stt_rtf={stt_elapsed / max(chunk_audio_seconds, 0.001):.2f} "
                     f"translation={translation_elapsed:.2f}s translation_enabled={self._cfg.translationEnabled and not translation_failed} "
                     f"total={total_elapsed:.2f}s total_rtf={total_elapsed / max(chunk_audio_seconds, 0.001):.2f} "

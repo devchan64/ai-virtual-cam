@@ -730,6 +730,9 @@ class WhisperConfig:
     computeType: str
     vadFilter: bool
     chunkSeconds: float
+    stepSeconds: float
+    windowSeconds: float
+    commitLagSeconds: float
     beamSize: int
     maxNewTokens: int
     temperature: float
@@ -758,6 +761,9 @@ class WhisperConfig:
             computeType=str(raw.get("computeType", whisper_default("computeType"))).strip(),
             vadFilter=bool(raw.get("vadFilter", whisper_default("vadFilter"))),
             chunkSeconds=float(raw.get("chunkSeconds", whisper_default("chunkSeconds"))),
+            stepSeconds=float(raw.get("stepSeconds", whisper_default("stepSeconds"))),
+            windowSeconds=float(raw.get("windowSeconds", raw.get("chunkSeconds", whisper_default("windowSeconds")))),
+            commitLagSeconds=float(raw.get("commitLagSeconds", whisper_default("commitLagSeconds"))),
             beamSize=int(raw.get("beamSize", whisper_default("beamSize"))),
             maxNewTokens=int(raw.get("maxNewTokens", whisper_default("maxNewTokens"))),
             temperature=float(raw.get("temperature", whisper_default("temperature"))),
@@ -799,6 +805,14 @@ class WhisperConfig:
             raise ValueError("whisper.computeType is required")
         if not 1.0 <= config.chunkSeconds <= 15.0:
             raise ValueError("whisper.chunkSeconds must be between 1.0 and 15.0")
+        if not 0.5 <= config.stepSeconds <= 5.0:
+            raise ValueError("whisper.stepSeconds must be between 0.5 and 5.0")
+        if not 1.0 <= config.windowSeconds <= 15.0:
+            raise ValueError("whisper.windowSeconds must be between 1.0 and 15.0")
+        if config.stepSeconds > config.windowSeconds:
+            raise ValueError("whisper.stepSeconds must be less than or equal to whisper.windowSeconds")
+        if not 0.0 <= config.commitLagSeconds < config.windowSeconds:
+            raise ValueError("whisper.commitLagSeconds must be between 0.0 and less than whisper.windowSeconds")
         if not 1 <= config.beamSize <= 8:
             raise ValueError("whisper.beamSize must be between 1 and 8")
         if not 16 <= config.maxNewTokens <= 512:

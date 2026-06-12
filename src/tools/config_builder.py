@@ -462,6 +462,9 @@ def build_config(
     whisper_compute_type: str = whisper_default("computeType"),
     whisper_vad_filter: bool = whisper_default("vadFilter"),
     whisper_chunk_seconds: float = whisper_default("chunkSeconds"),
+    whisper_step_seconds: float = whisper_default("stepSeconds"),
+    whisper_window_seconds: float | None = None,
+    whisper_commit_lag_seconds: float = whisper_default("commitLagSeconds"),
     whisper_beam_size: int = whisper_default("beamSize"),
     whisper_max_new_tokens: int = whisper_default("maxNewTokens"),
     whisper_temperature: float = whisper_default("temperature"),
@@ -482,6 +485,9 @@ def build_config(
         whisper_input_device = audio_input_device
     else:
         whisper_input_device = str(whisper_input_device).strip()
+
+    if whisper_window_seconds is None:
+        whisper_window_seconds = whisper_chunk_seconds
 
     tilt_smoothing = float(crop_pan_smoothing if crop_tilt_smoothing is None else crop_tilt_smoothing)
     tilt_kp = float(crop_pan_pid_kp if crop_tilt_pid_kp is None else crop_tilt_pid_kp)
@@ -588,7 +594,10 @@ def build_config(
             "device": str(whisper_device),
             "computeType": str(whisper_compute_type),
             "vadFilter": bool(whisper_vad_filter),
-            "chunkSeconds": float(whisper_chunk_seconds),
+            "chunkSeconds": float(whisper_window_seconds),
+            "stepSeconds": float(whisper_step_seconds),
+            "windowSeconds": float(whisper_window_seconds),
+            "commitLagSeconds": float(whisper_commit_lag_seconds),
             "beamSize": int(whisper_beam_size),
             "maxNewTokens": int(whisper_max_new_tokens),
             "temperature": float(whisper_temperature),

@@ -1446,6 +1446,9 @@ class ConfigGui:
             "whisper_compute_type": whisper["computeType"],
             "whisper_vad_filter": whisper["vadFilter"],
             "whisper_chunk_seconds": whisper["chunkSeconds"],
+            "whisper_step_seconds": whisper["stepSeconds"],
+            "whisper_window_seconds": whisper["windowSeconds"],
+            "whisper_commit_lag_seconds": whisper["commitLagSeconds"],
             "whisper_beam_size": whisper["beamSize"],
             "whisper_max_new_tokens": whisper["maxNewTokens"],
             "whisper_temperature": whisper["temperature"],
@@ -1806,6 +1809,9 @@ class ConfigGui:
             "whisper_compute_type",
             "whisper_vad_filter",
             "whisper_chunk_seconds",
+            "whisper_step_seconds",
+            "whisper_window_seconds",
+            "whisper_commit_lag_seconds",
             "whisper_beam_size",
             "whisper_max_new_tokens",
             "whisper_temperature",
@@ -2018,7 +2024,11 @@ class ConfigGui:
         self._set_var("whisper_device", whisper_cfg.get("device", defaults["whisper_device"]))
         self._set_var("whisper_compute_type", whisper_cfg.get("computeType", defaults["whisper_compute_type"]))
         self._set_var("whisper_vad_filter", whisper_cfg.get("vadFilter", defaults["whisper_vad_filter"]))
-        self._set_var("whisper_chunk_seconds", whisper_cfg.get("chunkSeconds", defaults["whisper_chunk_seconds"]))
+        window_seconds = whisper_cfg.get("windowSeconds", whisper_cfg.get("chunkSeconds", defaults["whisper_window_seconds"]))
+        self._set_var("whisper_chunk_seconds", window_seconds)
+        self._set_var("whisper_step_seconds", whisper_cfg.get("stepSeconds", defaults["whisper_step_seconds"]))
+        self._set_var("whisper_window_seconds", window_seconds)
+        self._set_var("whisper_commit_lag_seconds", whisper_cfg.get("commitLagSeconds", defaults["whisper_commit_lag_seconds"]))
         self._set_var("whisper_beam_size", whisper_cfg.get("beamSize", defaults["whisper_beam_size"]))
         self._set_var("whisper_max_new_tokens", whisper_cfg.get("maxNewTokens", defaults["whisper_max_new_tokens"]))
         self._set_var("whisper_temperature", whisper_cfg.get("temperature", defaults["whisper_temperature"]))
@@ -3695,7 +3705,10 @@ class ConfigGui:
             whisper_device=iv["whisper_device"].get().strip(),
             whisper_compute_type=iv["whisper_compute_type"].get().strip(),
             whisper_vad_filter=self._parse_bool(iv["whisper_vad_filter"].get()),
-            whisper_chunk_seconds=float(iv["whisper_chunk_seconds"].get()),
+            whisper_chunk_seconds=float(iv["whisper_window_seconds"].get()),
+            whisper_step_seconds=float(iv["whisper_step_seconds"].get()),
+            whisper_window_seconds=float(iv["whisper_window_seconds"].get()),
+            whisper_commit_lag_seconds=float(iv["whisper_commit_lag_seconds"].get()),
             whisper_beam_size=int(round(float(iv["whisper_beam_size"].get()))),
             whisper_max_new_tokens=int(round(float(iv["whisper_max_new_tokens"].get()))),
             whisper_temperature=float(iv["whisper_temperature"].get()),
