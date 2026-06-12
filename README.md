@@ -328,15 +328,17 @@ Whisper 활성화:
 - config GUI의 `Serve 시작`으로 실행하면 별도 Whisper 전사 창이 열립니다.
 - CLI `./bin/avc serve`는 기본적으로 Whisper 창을 열지 않습니다.
 - 전사 창은 텍스트 선택, `Ctrl+C`, `Ctrl+A`, 우클릭 `Copy`/`Copy All`을 지원합니다.
-- 전사 창에는 복사용 텍스트만 표시합니다. 시간, `[ko]` 같은 언어 태그, `전사 결과 없음` 같은 추적 로그는 표시하지 않습니다.
+- `번역 창`을 켜면 원문 전사 창과 별도로 `ai-virtual-cam Whisper Translation` 창이 열립니다.
+- 전사/번역 창에는 복사용 텍스트만 표시합니다. 시간, `[ko]` 같은 언어 태그, `전사 결과 없음` 같은 추적 로그는 표시하지 않습니다.
 - stdout/stderr 로그에는 시간 prefix와 함께 모델 로딩, 입력 장치, chunk 처리, 오류 상태가 출력됩니다.
-- 전사 창의 위치와 크기는 `setting.json`의 `meta.whisperWindowGeometry`에 저장되고 다음 실행 때 재사용됩니다.
+- 전사 창의 위치와 크기는 `setting.json`의 `meta.whisperWindowGeometry`, 번역 창의 위치와 크기는 `meta.whisperTranslationWindowGeometry`에 저장되고 다음 실행 때 재사용됩니다.
 
 모델/언어 설정:
 
 - 기본 모델은 `large-v3`, CUDA 환경 기본 연산은 `float16`입니다.
 - `./bin/avc setup`은 Linux에서 `faster-whisper`와 CUDA 런타임 의존성을 설치합니다.
 - 인식 언어는 단일 선택입니다. 한국어/영어/중국어가 섞이면 `자동 감지 (auto)`를 사용하고, 한 언어가 주로 나오면 `한국어 (ko)`, `English (en)`, `中文 (zh)` 중 하나로 고정합니다.
+- 현재 내장 번역 창은 Whisper의 `translate` 경로를 사용하므로 영어 번역만 지원합니다. 원문 언어 그대로 출력하려면 `번역 창`을 끕니다.
 
 응답속도 조정:
 
@@ -540,6 +542,8 @@ Whisper 활성화:
     "model": "large-v3",
     "language": "ko",
     "task": "transcribe",
+    "translationEnabled": true,
+    "translationTargetLanguage": "en",
     "device": "cuda",
     "computeType": "float16",
     "vadFilter": true,

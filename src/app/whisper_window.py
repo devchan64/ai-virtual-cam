@@ -108,15 +108,25 @@ def _load_window_geometry(config_path: Path, key: str, root) -> str | None:
         return None
 
 
-def _save_window_geometry(config_path: Path, key: str, geometry: str) -> None:
+def _save_window_geometry(
+    config_path: Path,
+    key: str,
+    geometry: str,
+    screen_width: int = 0,
+    screen_height: int = 0,
+) -> None:
     try:
+        sanitized = _sanitize_window_geometry(geometry, screen_width, screen_height)
+        if sanitized is None:
+            _log_line(f"[avc] whisper status: window geometry save skipped: invalid geometry={geometry}")
+            return
         raw = json.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
         if not isinstance(raw, dict):
             return
-        raw.setdefault("meta", {})[key] = geometry
+        raw.setdefault("meta", {})[key] = sanitized
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(json.dumps(raw, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        _log_line(f"[avc] whisper status: window geometry saved: {geometry}")
+        _log_line(f"[avc] whisper status: window geometry saved: {sanitized}")
     except Exception as exc:
         _log_line(f"[avc] whisper status: window geometry save failed: {exc}")
 
@@ -197,12 +207,28 @@ class WhisperTranscriptWorker:
                 f"device={self._cfg.device} compute={self._cfg.computeType}. "
                 "최초 실행이면 모델 다운로드 때문에 시간이 걸릴 수 있습니다.",
             )
-            model = WhisperModel(
-                self._cfg.model,
-                device=self._cfg.device,
-                compute_type=self._cfg.computeType,
-            )
+            try:
+                model = WhisperModel(
+                    self._cfg.model,
+                    device=self._cfg.device,
+                    compute_type=self._cfg.computeType,
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    "Whisper 모델 로딩 실패: "
+                    f"backend={self._cfg.backend} model={self._cfg.model} "
+                    f"device={self._cfg.device} computeType={self._cfg.computeType}. "
+                    "float16 오류가 발생하면 config의 Whisper 장치를 cuda로 명시하고 CUDA 런타임을 확인하거나, "
+                    "CPU 실행 시 computeType을 int8 또는 float32로 변경하세요. "
+                    f"원인: {exc}"
+                ) from exc
             self._emit("status", "Whisper 모델 로딩 완료")
+            if self._cfg.translationEnabled:
+                self._emit(
+                    "status",
+                    f"Whisper 번역 창 사용: target_language={self._cfg.translationTargetLanguage}. "
+                    "로컬 Whisper 번역은 영어 출력만 지원합니다.",
+                )
             self._emit("status", f"입력 장치 열기: {self._cfg.inputDevice}")
 
             if _is_exact_pulse_source(self._cfg.inputDevice):
@@ -295,7 +321,9 @@ class WhisperTranscriptWorker:
         chunks = 0
         self._emit(
             "status",
-            f"Whisper 전사 루프 시작: chunk_seconds={chunk_seconds} language={self._cfg.language} beam_size={self._cfg.beamSize}",
+            f"Whisper 전사 루프 시작: chunk_seconds={chunk_seconds} language={self._cfg.language} "
+            f"translation_enabled={self._cfg.translationEnabled} "
+            f"translation_target={self._cfg.translationTargetLanguage} beam_size={self._cfg.beamSize}",
         )
         while not self._stop.is_set():
             try:
@@ -316,17 +344,34 @@ class WhisperTranscriptWorker:
                 segments, info = model.transcribe(
                     audio,
                     language=language,
-                    task=self._cfg.task,
+                    task="transcribe",
                     vad_filter=self._cfg.vadFilter,
                     beam_size=self._cfg.beamSize,
                     condition_on_previous_text=False,
                 )
                 text = " ".join(segment.text.strip() for segment in segments if segment.text.strip()).strip()
+                detected = getattr(info, "language", self._cfg.language)
                 if text:
-                    detected = getattr(info, "language", self._cfg.language)
                     self._emit("transcript", text, log_text=f"[{detected}] {text}")
                 else:
                     self._emit("status", f"Whisper 전사 결과 없음: chunk={chunks}", display=False)
+                if self._cfg.translationEnabled:
+                    self._emit("status", f"Whisper 번역 요청: chunk={chunks}", display=False)
+                    translated_segments, _translated_info = model.transcribe(
+                        audio,
+                        language=language,
+                        task="translate",
+                        vad_filter=self._cfg.vadFilter,
+                        beam_size=self._cfg.beamSize,
+                        condition_on_previous_text=False,
+                    )
+                    translated_text = " ".join(
+                        segment.text.strip() for segment in translated_segments if segment.text.strip()
+                    ).strip()
+                    if translated_text:
+                        self._emit("translation", translated_text, log_text=f"[{detected}->en] {translated_text}")
+                    else:
+                        self._emit("status", f"Whisper 번역 결과 없음: chunk={chunks}", display=False)
             except Exception as exc:
                 self._emit("error", f"Whisper 전사 실패: {exc}")
 
@@ -335,6 +380,8 @@ class WhisperTranscriptWorker:
         index = 1
         while not self._stop.is_set():
             self._emit("transcript", f"[mock] sample transcript {index}")
+            if self._cfg.translationEnabled:
+                self._emit("translation", f"[mock] translated sample {index}")
             index += 1
             self._stop.wait(2.0)
 
@@ -352,12 +399,17 @@ class WhisperTranscriptWindow:
         self._tk = tk
         self._ttk = ttk
         self._config_path = config_path
+        self._whisper_config = app_config.whisper
         self._geometry_save_after_id: str | None = None
+        self._translation_geometry_save_after_id: str | None = None
+        self._translation_root = None
+        self._translation_text = None
+        self._context_text = None
         self._events: queue.Queue[TranscriptEvent] = queue.Queue()
         self._worker = WhisperTranscriptWorker(app_config.whisper, self._events)
         self._thread = threading.Thread(target=self._worker.run, daemon=True)
         self._root = tk.Tk()
-        self._root.title("ai-virtual-cam Whisper")
+        self._root.title("ai-virtual-cam Whisper Transcript")
         restored_geometry = _load_window_geometry(self._config_path, "whisperWindowGeometry", self._root)
         self._root.geometry(restored_geometry or DEFAULT_WINDOW_GEOMETRY)
         self._root.minsize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
@@ -386,13 +438,55 @@ class WhisperTranscriptWindow:
         actions = ttk.Frame(frame)
         actions.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         actions.columnconfigure(0, weight=1)
-        copy_btn = ttk.Button(actions, text="Copy All", command=self._copy_all)
+        copy_btn = ttk.Button(actions, text="Copy All", command=lambda: self._copy_all(self._text))
         copy_btn.grid(row=0, column=1, sticky="e", padx=(0, 6))
-        clear_btn = ttk.Button(actions, text="Clear", command=self._clear)
+        clear_btn = ttk.Button(actions, text="Clear", command=lambda: self._clear(self._text))
         clear_btn.grid(row=0, column=2, sticky="e")
+
+        if self._whisper_config.translationEnabled:
+            self._create_translation_window()
 
         self._root.bind("<Configure>", self._on_configure)
         self._root.protocol("WM_DELETE_WINDOW", self._close)
+
+
+    def _create_translation_window(self) -> None:
+        tk = self._tk
+        ttk = self._ttk
+        self._translation_root = tk.Toplevel(self._root)
+        self._translation_root.title("ai-virtual-cam Whisper Translation")
+        restored_geometry = _load_window_geometry(
+            self._config_path, "whisperTranslationWindowGeometry", self._translation_root
+        )
+        self._translation_root.geometry(restored_geometry or DEFAULT_WINDOW_GEOMETRY)
+        self._translation_root.minsize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
+        self._translation_root.columnconfigure(0, weight=1)
+        self._translation_root.rowconfigure(0, weight=1)
+
+        frame = ttk.Frame(self._translation_root, padding=10)
+        frame.grid(row=0, column=0, sticky="nsew")
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(0, weight=1)
+
+        self._translation_text = tk.Text(frame, wrap="word", undo=False)
+        self._translation_text.grid(row=0, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self._translation_text.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self._translation_text.configure(yscrollcommand=scrollbar.set)
+        self._translation_text.bind("<Key>", self._on_text_key)
+        self._translation_text.bind("<Button-3>", self._show_context_menu)
+        self._translation_text.bind("<Control-Button-1>", self._show_context_menu)
+
+        actions = ttk.Frame(frame)
+        actions.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        actions.columnconfigure(0, weight=1)
+        copy_btn = ttk.Button(actions, text="Copy All", command=lambda: self._copy_all(self._translation_text))
+        copy_btn.grid(row=0, column=1, sticky="e", padx=(0, 6))
+        clear_btn = ttk.Button(actions, text="Clear", command=lambda: self._clear(self._translation_text))
+        clear_btn.grid(row=0, column=2, sticky="e")
+
+        self._translation_root.bind("<Configure>", self._on_translation_configure)
+        self._translation_root.protocol("WM_DELETE_WINDOW", self._hide_translation_window)
 
     def run(self) -> int:
         self._thread.start()
@@ -403,14 +497,15 @@ class WhisperTranscriptWindow:
     def _on_text_key(self, event) -> str | None:
         if (event.state & 0x4) and event.keysym.lower() in {"c", "a"}:
             if event.keysym.lower() == "a":
-                self._text.tag_add("sel", "1.0", "end-1c")
+                event.widget.tag_add("sel", "1.0", "end-1c")
                 return "break"
             return None
         return "break"
 
-    def _append(self, line: str) -> None:
-        self._text.insert("end", f"{line}\n")
-        self._text.see("end")
+    def _append(self, line: str, text_widget=None) -> None:
+        target = text_widget if text_widget is not None else self._text
+        target.insert("end", f"{line}\n")
+        target.see("end")
 
     def _poll_events(self) -> None:
         while True:
@@ -421,7 +516,10 @@ class WhisperTranscriptWindow:
             if not event.display:
                 continue
             prefix = "ERROR: " if event.kind == "error" else ""
-            self._append(prefix + event.text)
+            if event.kind == "translation" and self._translation_text is not None:
+                self._append(prefix + event.text, self._translation_text)
+            elif event.kind != "translation":
+                self._append(prefix + event.text, self._text)
         self._root.after(100, self._poll_events)
 
     def _on_configure(self, event) -> None:
@@ -434,6 +532,16 @@ class WhisperTranscriptWindow:
                 pass
         self._geometry_save_after_id = self._root.after(600, self._save_geometry)
 
+    def _on_translation_configure(self, event) -> None:
+        if self._translation_root is None or event.widget != self._translation_root:
+            return
+        if self._translation_geometry_save_after_id is not None:
+            try:
+                self._translation_root.after_cancel(self._translation_geometry_save_after_id)
+            except Exception:
+                pass
+        self._translation_geometry_save_after_id = self._translation_root.after(600, self._save_translation_geometry)
+
     def _current_geometry(self) -> str:
         try:
             self._root.update_idletasks()
@@ -443,11 +551,30 @@ class WhisperTranscriptWindow:
 
     def _save_geometry(self) -> None:
         self._geometry_save_after_id = None
-        _save_window_geometry(self._config_path, "whisperWindowGeometry", self._current_geometry())
+        _save_window_geometry(
+            self._config_path,
+            "whisperWindowGeometry",
+            self._current_geometry(),
+            self._root.winfo_screenwidth(),
+            self._root.winfo_screenheight(),
+        )
+
+    def _save_translation_geometry(self) -> None:
+        self._translation_geometry_save_after_id = None
+        if self._translation_root is None:
+            return
+        _save_window_geometry(
+            self._config_path,
+            "whisperTranslationWindowGeometry",
+            self._translation_root.winfo_geometry(),
+            self._translation_root.winfo_screenwidth(),
+            self._translation_root.winfo_screenheight(),
+        )
 
     def _show_context_menu(self, event) -> str:
+        self._context_text = event.widget
         try:
-            has_selection = bool(self._text.tag_ranges("sel"))
+            has_selection = bool(event.widget.tag_ranges("sel"))
             self._context_menu.entryconfigure("Copy", state="normal" if has_selection else "disabled")
             self._context_menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -455,20 +582,28 @@ class WhisperTranscriptWindow:
         return "break"
 
     def _copy_selection(self) -> None:
+        target = self._context_text if self._context_text is not None else self._text
         try:
-            text = self._text.get("sel.first", "sel.last")
+            text = target.get("sel.first", "sel.last")
         except Exception:
             return
         self._root.clipboard_clear()
         self._root.clipboard_append(text)
 
-    def _copy_all(self) -> None:
-        text = self._text.get("1.0", "end-1c")
+    def _copy_all(self, text_widget=None) -> None:
+        target = text_widget if text_widget is not None else (self._context_text or self._text)
+        text = target.get("1.0", "end-1c")
         self._root.clipboard_clear()
         self._root.clipboard_append(text)
 
-    def _clear(self) -> None:
-        self._text.delete("1.0", "end")
+    def _clear(self, text_widget=None) -> None:
+        target = text_widget if text_widget is not None else (self._context_text or self._text)
+        target.delete("1.0", "end")
+
+    def _hide_translation_window(self) -> None:
+        if self._translation_root is not None:
+            self._save_translation_geometry()
+            self._translation_root.withdraw()
 
     def _close(self) -> None:
         if self._geometry_save_after_id is not None:
@@ -477,8 +612,20 @@ class WhisperTranscriptWindow:
             except Exception:
                 pass
             self._geometry_save_after_id = None
+        if self._translation_geometry_save_after_id is not None and self._translation_root is not None:
+            try:
+                self._translation_root.after_cancel(self._translation_geometry_save_after_id)
+            except Exception:
+                pass
+            self._translation_geometry_save_after_id = None
         self._save_geometry()
+        self._save_translation_geometry()
         self._worker.stop()
+        if self._translation_root is not None:
+            try:
+                self._translation_root.destroy()
+            except Exception:
+                pass
         self._root.after(100, self._root.destroy)
 
 

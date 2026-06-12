@@ -112,6 +112,59 @@ def _whisper_language_display_from_raw(value: object) -> str:
     return WHISPER_LANGUAGE_RAW_TO_DISPLAY.get(raw, WHISPER_LANGUAGE_RAW_TO_DISPLAY["ko"])
 
 
+WHISPER_TASK_DISPLAY_TO_RAW = {
+    "원문 전사 (transcribe)": "transcribe",
+    "영어 번역 (translate)": "translate",
+}
+WHISPER_TASK_RAW_TO_DISPLAY = {value: label for label, value in WHISPER_TASK_DISPLAY_TO_RAW.items()}
+
+
+def _whisper_task_options():
+    return list(WHISPER_TASK_DISPLAY_TO_RAW.keys())
+
+
+def _whisper_task_raw_from_display(value: str) -> str:
+    raw = WHISPER_TASK_DISPLAY_TO_RAW.get(str(value).strip())
+    if raw is not None:
+        return raw
+    normalized = str(value).strip().lower()
+    if normalized in WHISPER_TASK_RAW_TO_DISPLAY:
+        return normalized
+    return normalized
+
+
+def _whisper_task_display_from_raw(value: object) -> str:
+    raw = str(value).strip().lower()
+    return WHISPER_TASK_RAW_TO_DISPLAY.get(raw, WHISPER_TASK_RAW_TO_DISPLAY["transcribe"])
+
+
+WHISPER_TRANSLATION_TARGET_DISPLAY_TO_RAW = {
+    "English (en)": "en",
+}
+WHISPER_TRANSLATION_TARGET_RAW_TO_DISPLAY = {
+    value: label for label, value in WHISPER_TRANSLATION_TARGET_DISPLAY_TO_RAW.items()
+}
+
+
+def _whisper_translation_target_options():
+    return list(WHISPER_TRANSLATION_TARGET_DISPLAY_TO_RAW.keys())
+
+
+def _whisper_translation_target_raw_from_display(value: str) -> str:
+    raw = WHISPER_TRANSLATION_TARGET_DISPLAY_TO_RAW.get(str(value).strip())
+    if raw is not None:
+        return raw
+    normalized = str(value).strip().lower()
+    if normalized in WHISPER_TRANSLATION_TARGET_RAW_TO_DISPLAY:
+        return normalized
+    return normalized
+
+
+def _whisper_translation_target_display_from_raw(value: object) -> str:
+    raw = str(value).strip().lower()
+    return WHISPER_TRANSLATION_TARGET_RAW_TO_DISPLAY.get(raw, WHISPER_TRANSLATION_TARGET_RAW_TO_DISPLAY["en"])
+
+
 AUDIO_VIRTUAL_SINK_NAME = "ai-virtual-cam"
 VIRTUAL_CAMERA_LABEL = "ai-virtual-cam"
 AUDIO_VIRTUAL_SOURCE_NAME = "ai-virtual-cam"
@@ -2683,14 +2736,39 @@ class ConfigGui:
             "Whisper accepts one recognition language. Use auto detection when Korean, English, and Chinese are mixed.",
         )
         row += 1
+        self._add_bool_switch(
+            tab_whisper,
+            row,
+            "whisper_translation_enabled",
+            self._tr("label.whisper_translation_enabled", "Translation window"),
+            False,
+            label_key="label.whisper_translation_enabled",
+        )
+        row += 1
         self._add_combo(
             tab_whisper,
             row,
-            "whisper_task",
-            self._tr("label.whisper_task", "Task"),
-            ["transcribe", "translate"],
-            "transcribe",
-            label_key="label.whisper_task",
+            "whisper_translation_target_language",
+            self._tr("label.whisper_translation_target_language", "Translation target language"),
+            _whisper_translation_target_options(),
+            _whisper_translation_target_display_from_raw("en"),
+            label_key="label.whisper_translation_target_language",
+        )
+        row += 1
+        whisper_translation_hint = ttk.Label(
+            tab_whisper,
+            text=self._tr(
+                "hint.whisper_translation_target_language",
+                "Whisper translate currently outputs English only. Use transcribe for original-language text.",
+            ),
+            foreground="#666",
+            wraplength=520,
+        )
+        whisper_translation_hint.grid(row=row, column=0, columnspan=4, sticky="w", padx=4, pady=(2, 6))
+        self._register_localized_widget(
+            whisper_translation_hint,
+            "hint.whisper_translation_target_language",
+            "Whisper translate currently outputs English only. Use transcribe for original-language text.",
         )
         row += 1
         self._add_combo(
@@ -2699,7 +2777,7 @@ class ConfigGui:
             "whisper_device",
             self._tr("label.whisper_device", "Device"),
             ["auto", "cpu", "cuda", "mps"],
-            "auto",
+            "cuda",
             label_key="label.whisper_device",
         )
         row += 1
@@ -3241,7 +3319,9 @@ class ConfigGui:
             "whisper_backend": "faster-whisper",
             "whisper_model": "large-v3",
             "whisper_language": _whisper_language_display_from_raw("ko"),
-            "whisper_task": "transcribe",
+            "whisper_task": _whisper_task_display_from_raw("transcribe"),
+            "whisper_translation_enabled": False,
+            "whisper_translation_target_language": _whisper_translation_target_display_from_raw("en"),
             "whisper_device": "cuda",
             "whisper_compute_type": "float16",
             "whisper_vad_filter": True,
@@ -3781,7 +3861,20 @@ class ConfigGui:
             "whisper_language",
             _whisper_language_display_from_raw(whisper_cfg.get("language", _whisper_language_raw_from_display(defaults["whisper_language"]))),
         )
-        self._set_var("whisper_task", whisper_cfg.get("task", defaults["whisper_task"]))
+        legacy_translation_enabled = whisper_cfg.get("task") == "translate"
+        self._set_var(
+            "whisper_translation_enabled",
+            whisper_cfg.get("translationEnabled", legacy_translation_enabled or defaults["whisper_translation_enabled"]),
+        )
+        self._set_var(
+            "whisper_translation_target_language",
+            _whisper_translation_target_display_from_raw(
+                whisper_cfg.get(
+                    "translationTargetLanguage",
+                    _whisper_translation_target_raw_from_display(defaults["whisper_translation_target_language"]),
+                )
+            ),
+        )
         self._set_var("whisper_device", whisper_cfg.get("device", defaults["whisper_device"]))
         self._set_var("whisper_compute_type", whisper_cfg.get("computeType", defaults["whisper_compute_type"]))
         self._set_var("whisper_vad_filter", whisper_cfg.get("vadFilter", defaults["whisper_vad_filter"]))
@@ -5415,7 +5508,11 @@ class ConfigGui:
             whisper_backend=iv["whisper_backend"].get().strip(),
             whisper_model=iv["whisper_model"].get().strip(),
             whisper_language=_whisper_language_raw_from_display(iv["whisper_language"].get()),
-            whisper_task=iv["whisper_task"].get().strip(),
+            whisper_task="transcribe",
+            whisper_translation_enabled=self._parse_bool(iv["whisper_translation_enabled"].get()),
+            whisper_translation_target_language=_whisper_translation_target_raw_from_display(
+                iv["whisper_translation_target_language"].get()
+            ),
             whisper_device=iv["whisper_device"].get().strip(),
             whisper_compute_type=iv["whisper_compute_type"].get().strip(),
             whisper_vad_filter=self._parse_bool(iv["whisper_vad_filter"].get()),

@@ -716,6 +716,8 @@ class WhisperConfig:
     model: str
     language: str
     task: str
+    translationEnabled: bool
+    translationTargetLanguage: str
     device: str
     computeType: str
     vadFilter: bool
@@ -731,6 +733,8 @@ class WhisperConfig:
             model=str(raw.get("model", "large-v3")).strip(),
             language=str(raw.get("language", "ko")).strip(),
             task=str(raw.get("task", "transcribe")).strip(),
+            translationEnabled=bool(raw.get("translationEnabled", raw.get("task") == "translate")),
+            translationTargetLanguage=str(raw.get("translationTargetLanguage", "en")).strip(),
             device=str(raw.get("device", "cuda")).strip(),
             computeType=str(raw.get("computeType", "float16")).strip(),
             vadFilter=bool(raw.get("vadFilter", True)),
@@ -748,6 +752,8 @@ class WhisperConfig:
             raise ValueError("whisper.language must be one of: auto, ko, en, zh")
         if config.task not in {"transcribe", "translate"}:
             raise ValueError("whisper.task must be one of: transcribe, translate")
+        if config.translationEnabled and config.translationTargetLanguage != "en":
+            raise ValueError("whisper.translationTargetLanguage must be en for the local Whisper translation window")
         if not config.device:
             raise ValueError("whisper.device is required")
         if not config.computeType:

@@ -31,7 +31,9 @@ class WhisperConfigTest(unittest.TestCase):
             whisper_backend="mock",
             whisper_model="tiny",
             whisper_language="en",
-            whisper_task="translate",
+            whisper_task="transcribe",
+            whisper_translation_enabled=True,
+            whisper_translation_target_language="en",
             whisper_device="cpu",
             whisper_compute_type="int8",
             whisper_vad_filter=False,
@@ -47,7 +49,9 @@ class WhisperConfigTest(unittest.TestCase):
                 "backend": "mock",
                 "model": "tiny",
                 "language": "en",
-                "task": "translate",
+                "task": "transcribe",
+                "translationEnabled": True,
+                "translationTargetLanguage": "en",
                 "device": "cpu",
                 "computeType": "int8",
                 "vadFilter": False,
@@ -89,6 +93,8 @@ class WhisperConfigTest(unittest.TestCase):
         self.assertEqual(loaded.whisper.inputDevice, "pulse")
         self.assertEqual(loaded.whisper.backend, "mock")
         self.assertEqual(loaded.whisper.model, "base")
+        self.assertFalse(loaded.whisper.translationEnabled)
+        self.assertEqual(loaded.whisper.translationTargetLanguage, "en")
         self.assertEqual(loaded.whisper.chunkSeconds, 5.0)
         self.assertEqual(loaded.whisper.beamSize, 5)
 
@@ -99,6 +105,22 @@ class WhisperConfigTest(unittest.TestCase):
     def test_whisper_rejects_invalid_language(self) -> None:
         with self.assertRaisesRegex(ValueError, "whisper.language"):
             WhisperConfig.from_dict({"language": "ja"})
+
+    def test_whisper_treats_legacy_translate_task_as_translation_enabled(self) -> None:
+        loaded = WhisperConfig.from_dict({"task": "translate"})
+
+        self.assertTrue(loaded.translationEnabled)
+        self.assertEqual(loaded.task, "translate")
+
+    def test_whisper_rejects_invalid_translation_target_language_when_translation_enabled(self) -> None:
+        with self.assertRaisesRegex(ValueError, "whisper.translationTargetLanguage"):
+            WhisperConfig.from_dict({"translationEnabled": True, "translationTargetLanguage": "ko"})
+
+    def test_whisper_allows_non_english_translation_target_when_translation_disabled(self) -> None:
+        loaded = WhisperConfig.from_dict({"translationEnabled": False, "translationTargetLanguage": "ko"})
+
+        self.assertFalse(loaded.translationEnabled)
+        self.assertEqual(loaded.translationTargetLanguage, "ko")
 
     def test_whisper_rejects_invalid_speed_parameters(self) -> None:
         with self.assertRaisesRegex(ValueError, "whisper.chunkSeconds"):

@@ -25,6 +25,18 @@ class WhisperWindowGeometryTest(unittest.TestCase):
         self.assertEqual(raw["meta"]["language"], "ko")
         self.assertEqual(raw["meta"]["whisperWindowGeometry"], "820x460+120+80")
 
+    def test_skips_invalid_geometry_on_save(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "setting.json"
+            path.write_text(json.dumps({"meta": {"whisperWindowGeometry": "820x460+120+80"}}), encoding="utf-8")
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                _save_window_geometry(path, "whisperWindowGeometry", "820x460+5000+80", 1920, 1080)
+
+            raw = json.loads(path.read_text(encoding="utf-8"))
+
+        self.assertEqual(raw["meta"]["whisperWindowGeometry"], "820x460+120+80")
+
     def test_sanitizes_geometry_before_restore(self) -> None:
         self.assertEqual(
             _sanitize_window_geometry("820x460+120+80", 1920, 1080),
