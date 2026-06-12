@@ -451,6 +451,8 @@ def build_config(
     whisper_device: str = "cuda",
     whisper_compute_type: str = "float16",
     whisper_vad_filter: bool = True,
+    whisper_chunk_seconds: float = 5.0,
+    whisper_beam_size: int = 5,
 ) -> dict:
     if audio_output_device is None:
         audio_output_device = _default_audio_output_device()
@@ -566,5 +568,7 @@ def build_config(
             "device": str(whisper_device),
             "computeType": str(whisper_compute_type),
             "vadFilter": bool(whisper_vad_filter),
+            "chunkSeconds": float(whisper_chunk_seconds),
+            "beamSize": int(whisper_beam_size),
         },
     }

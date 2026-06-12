@@ -7,6 +7,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 import threading
 from pathlib import Path
 
@@ -17,6 +18,8 @@ from src.domain.config import AppConfig
 from src.pipeline.runner import PipelineRunner
 
 
+def _log(message: str) -> None:
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}", flush=True)
 
 
 def _nvidia_library_paths() -> list[str]:
@@ -44,9 +47,9 @@ def _child_env_with_nvidia_libraries() -> dict[str, str]:
     if paths:
         existing = env.get("LD_LIBRARY_PATH", "")
         env["LD_LIBRARY_PATH"] = ":".join(paths + ([existing] if existing else []))
-        print(f"[avc] whisper CUDA library path: {':'.join(paths)}", flush=True)
+        _log(f"[avc] whisper CUDA library path: {':'.join(paths)}")
     else:
-        print("[avc] whisper CUDA library path not found in Python environment", flush=True)
+        _log("[avc] whisper CUDA library path not found in Python environment")
     return env
 
 def parse_args() -> argparse.Namespace:
@@ -73,25 +76,23 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     config_path = Path(args.config).expanduser()
-    print(f"[avc] loading config: {config_path}", flush=True)
+    _log(f"[avc] loading config: {config_path}")
     config = AppConfig.load(config_path)
-    print(
+    _log(
         "[avc] config loaded: "
         f"input={config.inputCamera.devicePath} "
         f"output_backend={config.outputCamera.backend} "
-        f"output={config.outputCamera.width}x{config.outputCamera.height}@{config.outputCamera.fps}",
-        flush=True,
+        f"output={config.outputCamera.width}x{config.outputCamera.height}@{config.outputCamera.fps}"
     )
 
-    print("[avc] opening input capture...", flush=True)
+    _log("[avc] opening input capture...")
     capture = OpenCVCapture(config.inputCamera)
-    print("[avc] creating output sink...", flush=True)
+    _log("[avc] creating output sink...")
     output = build_output(config.outputCamera)
-    print("[avc] pipeline starting", flush=True)
+    _log("[avc] pipeline starting")
     if config.outputCamera.backend == "pyvirtualcam":
-        print(
-            "[avc] macOS OBS 경로 안내: serve 실행 중 Chrome/Meet가 이미 열려 있었다면 브라우저를 완전히 재시작하세요.",
-            flush=True,
+        _log(
+            "[avc] macOS OBS 경로 안내: serve 실행 중 Chrome/Meet가 이미 열려 있었다면 브라우저를 완전히 재시작하세요."
         )
 
     runner = PipelineRunner(
@@ -104,7 +105,7 @@ def main() -> int:
         whisper_cmd = [sys.executable, "-m", "src.app.whisper_window", "--config", str(config_path)]
         try:
             whisper_process = subprocess.Popen(whisper_cmd, env=_child_env_with_nvidia_libraries())
-            print(f"[avc] whisper transcript window started (pid={whisper_process.pid})", flush=True)
+            _log(f"[avc] whisper transcript window started (pid={whisper_process.pid})")
         except Exception as exc:
             raise RuntimeError(
                 "Whisper 출력 창을 시작하지 못했습니다. "
@@ -112,31 +113,28 @@ def main() -> int:
                 "DISPLAY/Tkinter/CUDA/faster-whisper 설치 상태를 확인하세요."
             ) from exc
     elif args.with_whisper_window:
-        print("[avc] whisper transcript window disabled by config (whisper.enabled=false)", flush=True)
+        _log("[avc] whisper transcript window disabled by config (whisper.enabled=false)")
     else:
-        print("[avc] whisper transcript window disabled for CLI serve (use config GUI Serve to open it)", flush=True)
+        _log("[avc] whisper transcript window disabled for CLI serve (use config GUI Serve to open it)")
 
     audio_mixer: VirtualAudioMixer | None = None
     audio_thread: threading.Thread | None = None
 
     def _audio_stream_state(opened: bool, gate_state: str, step: int) -> None:
         action = "열림" if opened else "닫힘"
-        print(
-            f"[avc] 오디오 게이트 스트림 {action}: step={step} gate_state={gate_state}",
-            flush=True,
-        )
+        _log(f"[avc] 오디오 게이트 스트림 {action}: step={step} gate_state={gate_state}")
 
     want_audio = config.audio is not None and config.audio.enabled
     if want_audio:
         audio_mixer = VirtualAudioMixer(config.audio, on_stream_state=_audio_stream_state)
         audio_thread = threading.Thread(target=audio_mixer.run, kwargs={"max_steps": 0}, daemon=True)
         audio_thread.start()
-        print("[avc] audio mixer enabled by config (audio.enabled=true)", flush=True)
+        _log("[avc] audio mixer enabled by config (audio.enabled=true)")
     else:
-        print("[avc] audio mixer disabled by config (audio.enabled=false)", flush=True)
+        _log("[avc] audio mixer disabled by config (audio.enabled=false)")
 
     def _request_shutdown(signum: int, frame_obj) -> None:
-        print(f"[avc] received signal {signum}, stopping pipeline...", flush=True)
+        _log(f"[avc] received signal {signum}, stopping pipeline...")
         runner.stop()
         if audio_mixer is not None:
             audio_mixer.stop()

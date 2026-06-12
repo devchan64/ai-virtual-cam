@@ -50,6 +50,7 @@ AVC_TENSORRT_ENGINE_URL="https://example.com/person-segmentation.engine" ./bin/a
 - 영상: 입력 카메라, 출력 해상도/FPS, 세그멘테이션, 배경, 프레이밍
 - 화질/비식별: 세그멘테이션 경계 기반 화질 보정, `비식별 처리(눈가림)` 옵션
 - 오디오: `audio.enabled`, 입/출력 장치, 게이트/노이즈캔슬
+- Whisper STT: 입력 장치, 로컬 모델, 인식 언어, 응답속도 파라미터
 - 선택한 언어는 `setting.json`의 `meta.language`에 저장됩니다.
 
 설정 GUI 샘플:
@@ -58,6 +59,13 @@ AVC_TENSORRT_ENGINE_URL="https://example.com/person-segmentation.engine" ./bin/a
 - 설명: `화질` 탭에서 `비식별 처리(눈가림)` 옵션을 활성화한 상태의 미리보기 예시입니다.
 
 ![config gui sample](docs/images/config-preview-sample-anon.png)
+
+Whisper 설정 GUI 샘플:
+
+- 샘플 파일: [`docs/images/whisper-config-sample.png`](docs/images/whisper-config-sample.png)
+- 설명: `Whisper` 탭에서 STT 입력 장치, 모델, 인식 언어, 청크 길이/Beam 크기를 설정하는 예시입니다.
+
+![whisper config sample](docs/images/whisper-config-sample.png)
 
 macOS 오디오 권장:
 
@@ -303,6 +311,39 @@ Linux Docker 정책:
 - 누락 시 자동 탐색/대체 없이 즉시 종료
 - X11, Pulse/PipeWire 소켓도 누락 시 즉시 종료 또는 기능 실패로 반환
 
+## Whisper STT 운영 가이드
+
+Whisper 활성화:
+
+```bash
+./bin/avc config
+```
+
+- `Whisper` 탭에서 `Whisper STT`를 켜고 입력 장치를 선택합니다.
+- `Whisper 입력 dB 미터`로 선택한 장치에 실제 신호가 들어오는지 확인합니다.
+- Linux PulseAudio/PipeWire 장치는 `alsa_input...`, `*.monitor`, `ai-virtual-cam` 같은 원본 ID를 설정값으로 저장합니다.
+
+실행 동작:
+
+- config GUI의 `Serve 시작`으로 실행하면 별도 Whisper 전사 창이 열립니다.
+- CLI `./bin/avc serve`는 기본적으로 Whisper 창을 열지 않습니다.
+- 전사 창은 텍스트 선택, `Ctrl+C`, `Ctrl+A`, 우클릭 `Copy`/`Copy All`을 지원합니다.
+- 전사 창에는 복사용 텍스트만 표시합니다. 시간, `[ko]` 같은 언어 태그, `전사 결과 없음` 같은 추적 로그는 표시하지 않습니다.
+- stdout/stderr 로그에는 시간 prefix와 함께 모델 로딩, 입력 장치, chunk 처리, 오류 상태가 출력됩니다.
+- 전사 창의 위치와 크기는 `setting.json`의 `meta.whisperWindowGeometry`에 저장되고 다음 실행 때 재사용됩니다.
+
+모델/언어 설정:
+
+- 기본 모델은 `large-v3`, CUDA 환경 기본 연산은 `float16`입니다.
+- `./bin/avc setup`은 Linux에서 `faster-whisper`와 CUDA 런타임 의존성을 설치합니다.
+- 인식 언어는 단일 선택입니다. 한국어/영어/중국어가 섞이면 `자동 감지 (auto)`를 사용하고, 한 언어가 주로 나오면 `한국어 (ko)`, `English (en)`, `中文 (zh)` 중 하나로 고정합니다.
+
+응답속도 조정:
+
+- `청크 길이(초)`: 짧을수록 응답이 빨라지지만 문장 단위가 짧아질 수 있습니다.
+- `Beam 크기`: 낮을수록 디코딩이 빨라지지만 정확도가 낮아질 수 있습니다.
+- large-v3에서 지연이 크면 우선 `chunkSeconds=2.0`, `beamSize=1` 조합을 시도하세요.
+
 ## 오디오 운영 가이드
 
 오디오 활성화:
@@ -386,7 +427,8 @@ Linux Docker 정책:
 - 카메라 입력 모드 후보 기반(해상도/FPS 세트)
 - 화질 탭: 감마/오프셋/채도/강도 보정(세그멘테이션 경계 기준 적용)
 - `오디오 게이트 테스트`, 각 탭별 기본값 복원 버튼
-- 탭 순서: `입출력 -> 세그멘테이션 -> 배경 -> 프레이밍 -> 화질 -> 오디오`
+- `Whisper` 탭: STT 입력 장치, dB 미터, 모델/언어, 응답속도 조정
+- 탭 순서: `입출력 -> 세그멘테이션 -> 배경 -> 프레이밍 -> 화질 -> 오디오 -> Whisper`
 - `faceEnhance` 구키(`brightness`, `blend`, `minSizeRatio`, `edgeDither`) 하위호환은 지원하지 않음
 
 ## 설정 예시
@@ -490,6 +532,19 @@ Linux Docker 정책:
       "closedGain": 0.0,
       "minVoiceBandRatio": 0.5
     }
+  },
+  "whisper": {
+    "enabled": true,
+    "inputDevice": "alsa_input.pci-0000_00_1f.3-platform-skl_hda_dsp_generic.HiFi__hw_sofhdadsp_6__source",
+    "backend": "faster-whisper",
+    "model": "large-v3",
+    "language": "ko",
+    "task": "transcribe",
+    "device": "cuda",
+    "computeType": "float16",
+    "vadFilter": true,
+    "chunkSeconds": 2.0,
+    "beamSize": 1
   }
 }
 ```

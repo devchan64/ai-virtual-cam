@@ -20,7 +20,7 @@ from src.domain.config import AppConfig, WhisperConfig
 
 
 SAMPLE_RATE = 16000
-CHUNK_SECONDS = 5.0
+DEFAULT_CHUNK_SECONDS = 5.0
 DEFAULT_WINDOW_GEOMETRY = "780x420"
 MIN_WINDOW_WIDTH = 520
 MIN_WINDOW_HEIGHT = 280
@@ -33,6 +33,8 @@ _WINDOW_GEOMETRY_RE = re.compile(
 class TranscriptEvent:
     kind: str
     text: str
+    display: bool = True
+    log_text: str | None = None
 
 
 def parse_args() -> argparse.Namespace:
@@ -41,6 +43,9 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _log_line(message: str, *, file=None) -> None:
+    target = sys.stdout if file is None else file
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}", file=target, flush=True)
 
 
 def _parse_window_geometry(geometry: object) -> dict[str, int] | None:
@@ -99,7 +104,7 @@ def _load_window_geometry(config_path: Path, key: str, root) -> str | None:
             return None
         return _sanitize_window_geometry(meta.get(key), root.winfo_screenwidth(), root.winfo_screenheight())
     except Exception as exc:
-        print(f"[avc] whisper status: window geometry load failed: {exc}", flush=True)
+        _log_line(f"[avc] whisper status: window geometry load failed: {exc}")
         return None
 
 
@@ -111,9 +116,9 @@ def _save_window_geometry(config_path: Path, key: str, geometry: str) -> None:
         raw.setdefault("meta", {})[key] = geometry
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(json.dumps(raw, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        print(f"[avc] whisper status: window geometry saved: {geometry}", flush=True)
+        _log_line(f"[avc] whisper status: window geometry saved: {geometry}")
     except Exception as exc:
-        print(f"[avc] whisper status: window geometry save failed: {exc}", flush=True)
+        _log_line(f"[avc] whisper status: window geometry save failed: {exc}")
 
 def _sounddevice_device_name(configured: str) -> str | None:
     value = str(configured).strip()
@@ -140,9 +145,9 @@ class WhisperTranscriptWorker:
         self._capture_process: subprocess.Popen[bytes] | None = None
         self._capture_thread: threading.Thread | None = None
 
-    def _emit(self, kind: str, text: str) -> None:
-        print(f"[avc] whisper {kind}: {text}", flush=True)
-        self._events.put(TranscriptEvent(kind, text))
+    def _emit(self, kind: str, text: str, *, display: bool = True, log_text: str | None = None) -> None:
+        _log_line(f"[avc] whisper {kind}: {log_text if log_text is not None else text}")
+        self._events.put(TranscriptEvent(kind, text, display, log_text))
 
     def stop(self) -> None:
         self._stop.set()
@@ -283,11 +288,15 @@ class WhisperTranscriptWorker:
 
     def _transcribe_loop(self, model, np) -> None:
         samples: list[object] = []
-        target_samples = int(SAMPLE_RATE * CHUNK_SECONDS)
+        chunk_seconds = float(self._cfg.chunkSeconds or DEFAULT_CHUNK_SECONDS)
+        target_samples = int(SAMPLE_RATE * chunk_seconds)
         buffered = 0
         language = None if self._cfg.language == "auto" else self._cfg.language
         chunks = 0
-        self._emit("status", f"Whisper 전사 루프 시작: chunk_seconds={CHUNK_SECONDS} language={self._cfg.language}")
+        self._emit(
+            "status",
+            f"Whisper 전사 루프 시작: chunk_seconds={chunk_seconds} language={self._cfg.language} beam_size={self._cfg.beamSize}",
+        )
         while not self._stop.is_set():
             try:
                 block = self._audio_queue.get(timeout=0.2)
@@ -299,7 +308,7 @@ class WhisperTranscriptWorker:
                 continue
 
             chunks += 1
-            self._emit("status", f"Whisper 전사 요청: chunk={chunks} samples={buffered}")
+            self._emit("status", f"Whisper 전사 요청: chunk={chunks} samples={buffered}", display=False)
             audio = np.concatenate(samples).astype(np.float32, copy=False)
             samples.clear()
             buffered = 0
@@ -309,15 +318,15 @@ class WhisperTranscriptWorker:
                     language=language,
                     task=self._cfg.task,
                     vad_filter=self._cfg.vadFilter,
-                    beam_size=5,
+                    beam_size=self._cfg.beamSize,
                     condition_on_previous_text=False,
                 )
                 text = " ".join(segment.text.strip() for segment in segments if segment.text.strip()).strip()
                 if text:
                     detected = getattr(info, "language", self._cfg.language)
-                    self._emit("transcript", f"[{detected}] {text}")
+                    self._emit("transcript", text, log_text=f"[{detected}] {text}")
                 else:
-                    self._emit("status", f"Whisper 전사 결과 없음: chunk={chunks}")
+                    self._emit("status", f"Whisper 전사 결과 없음: chunk={chunks}", display=False)
             except Exception as exc:
                 self._emit("error", f"Whisper 전사 실패: {exc}")
 
@@ -366,6 +375,13 @@ class WhisperTranscriptWindow:
         scrollbar.grid(row=0, column=1, sticky="ns")
         self._text.configure(yscrollcommand=scrollbar.set)
         self._text.bind("<Key>", self._on_text_key)
+        self._text.bind("<Button-3>", self._show_context_menu)
+        self._text.bind("<Control-Button-1>", self._show_context_menu)
+        self._context_menu = tk.Menu(self._root, tearoff=False)
+        self._context_menu.add_command(label="Copy", command=self._copy_selection)
+        self._context_menu.add_command(label="Copy All", command=self._copy_all)
+        self._context_menu.add_separator()
+        self._context_menu.add_command(label="Clear", command=self._clear)
 
         actions = ttk.Frame(frame)
         actions.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 0))
@@ -393,8 +409,7 @@ class WhisperTranscriptWindow:
         return "break"
 
     def _append(self, line: str) -> None:
-        timestamp = time.strftime("%H:%M:%S")
-        self._text.insert("end", f"[{timestamp}] {line}\n")
+        self._text.insert("end", f"{line}\n")
         self._text.see("end")
 
     def _poll_events(self) -> None:
@@ -403,6 +418,8 @@ class WhisperTranscriptWindow:
                 event = self._events.get_nowait()
             except queue.Empty:
                 break
+            if not event.display:
+                continue
             prefix = "ERROR: " if event.kind == "error" else ""
             self._append(prefix + event.text)
         self._root.after(100, self._poll_events)
@@ -427,6 +444,23 @@ class WhisperTranscriptWindow:
     def _save_geometry(self) -> None:
         self._geometry_save_after_id = None
         _save_window_geometry(self._config_path, "whisperWindowGeometry", self._current_geometry())
+
+    def _show_context_menu(self, event) -> str:
+        try:
+            has_selection = bool(self._text.tag_ranges("sel"))
+            self._context_menu.entryconfigure("Copy", state="normal" if has_selection else "disabled")
+            self._context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self._context_menu.grab_release()
+        return "break"
+
+    def _copy_selection(self) -> None:
+        try:
+            text = self._text.get("sel.first", "sel.last")
+        except Exception:
+            return
+        self._root.clipboard_clear()
+        self._root.clipboard_append(text)
 
     def _copy_all(self) -> None:
         text = self._text.get("1.0", "end-1c")
@@ -460,5 +494,5 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except Exception as exc:
-        print(f"[avc] whisper window failed: {exc}", file=sys.stderr, flush=True)
+        _log_line(f"[avc] whisper window failed: {exc}", file=sys.stderr)
         raise SystemExit(2)

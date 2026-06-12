@@ -84,8 +84,32 @@ def _whisper_model_options():
     return ["large-v3", "medium", "small", "base", "tiny"]
 
 
+WHISPER_LANGUAGE_DISPLAY_TO_RAW = {
+    "자동 감지 (auto)": "auto",
+    "한국어 (ko)": "ko",
+    "English (en)": "en",
+    "中文 (zh)": "zh",
+}
+WHISPER_LANGUAGE_RAW_TO_DISPLAY = {value: label for label, value in WHISPER_LANGUAGE_DISPLAY_TO_RAW.items()}
+
+
 def _whisper_language_options():
-    return ["ko", "en", "zh", "auto"]
+    return list(WHISPER_LANGUAGE_DISPLAY_TO_RAW.keys())
+
+
+def _whisper_language_raw_from_display(value: str) -> str:
+    raw = WHISPER_LANGUAGE_DISPLAY_TO_RAW.get(str(value).strip())
+    if raw is not None:
+        return raw
+    normalized = str(value).strip().lower()
+    if normalized in WHISPER_LANGUAGE_RAW_TO_DISPLAY:
+        return normalized
+    return normalized
+
+
+def _whisper_language_display_from_raw(value: object) -> str:
+    raw = str(value).strip().lower()
+    return WHISPER_LANGUAGE_RAW_TO_DISPLAY.get(raw, WHISPER_LANGUAGE_RAW_TO_DISPLAY["ko"])
 
 
 AUDIO_VIRTUAL_SINK_NAME = "ai-virtual-cam"
@@ -2637,10 +2661,26 @@ class ConfigGui:
             tab_whisper,
             row,
             "whisper_language",
-            self._tr("label.whisper_language", "Language"),
+            self._tr("label.whisper_language", "Recognition language (single choice)"),
             _whisper_language_options(),
-            "ko",
+            _whisper_language_display_from_raw("ko"),
             label_key="label.whisper_language",
+        )
+        row += 1
+        whisper_language_hint = ttk.Label(
+            tab_whisper,
+            text=self._tr(
+                "hint.whisper_language",
+                "Whisper accepts one recognition language. Use auto detection when Korean, English, and Chinese are mixed.",
+            ),
+            foreground="#666",
+            wraplength=520,
+        )
+        whisper_language_hint.grid(row=row, column=0, columnspan=4, sticky="w", padx=4, pady=(2, 6))
+        self._register_localized_widget(
+            whisper_language_hint,
+            "hint.whisper_language",
+            "Whisper accepts one recognition language. Use auto detection when Korean, English, and Chinese are mixed.",
         )
         row += 1
         self._add_combo(
@@ -2680,6 +2720,46 @@ class ConfigGui:
             self._tr("label.whisper_vad_filter", "VAD filter"),
             True,
             label_key="label.whisper_vad_filter",
+        )
+        row += 1
+        self._add_slider(
+            tab_whisper,
+            row,
+            "whisper_chunk_seconds",
+            self._tr("label.whisper_chunk_seconds", "Chunk seconds"),
+            5.0,
+            1.0,
+            10.0,
+            resolution=0.5,
+            label_key="label.whisper_chunk_seconds",
+        )
+        row += 1
+        self._add_slider(
+            tab_whisper,
+            row,
+            "whisper_beam_size",
+            self._tr("label.whisper_beam_size", "Beam size"),
+            5,
+            1,
+            8,
+            resolution=1,
+            label_key="label.whisper_beam_size",
+        )
+        row += 1
+        whisper_speed_hint = ttk.Label(
+            tab_whisper,
+            text=self._tr(
+                "hint.whisper_speed",
+                "Lower chunk seconds and beam size improve response speed, but may reduce accuracy or sentence continuity.",
+            ),
+            foreground="#666",
+            wraplength=520,
+        )
+        whisper_speed_hint.grid(row=row, column=0, columnspan=4, sticky="w", padx=4, pady=(2, 6))
+        self._register_localized_widget(
+            whisper_speed_hint,
+            "hint.whisper_speed",
+            "Lower chunk seconds and beam size improve response speed, but may reduce accuracy or sentence continuity.",
         )
         row += 1
         reset_whisper_btn = ttk.Button(
@@ -3160,11 +3240,13 @@ class ConfigGui:
             "whisper_input_device": _audio_default_input_device(),
             "whisper_backend": "faster-whisper",
             "whisper_model": "large-v3",
-            "whisper_language": "ko",
+            "whisper_language": _whisper_language_display_from_raw("ko"),
             "whisper_task": "transcribe",
             "whisper_device": "cuda",
             "whisper_compute_type": "float16",
             "whisper_vad_filter": True,
+            "whisper_chunk_seconds": 5.0,
+            "whisper_beam_size": 5,
         }
 
     def _create_virtual_camera(self) -> None:
@@ -3695,11 +3777,16 @@ class ConfigGui:
             self.vars["whisper_input_device"].set(input_display)
         self._set_var("whisper_backend", whisper_cfg.get("backend", defaults["whisper_backend"]))
         self._set_var("whisper_model", whisper_cfg.get("model", defaults["whisper_model"]))
-        self._set_var("whisper_language", whisper_cfg.get("language", defaults["whisper_language"]))
+        self._set_var(
+            "whisper_language",
+            _whisper_language_display_from_raw(whisper_cfg.get("language", _whisper_language_raw_from_display(defaults["whisper_language"]))),
+        )
         self._set_var("whisper_task", whisper_cfg.get("task", defaults["whisper_task"]))
         self._set_var("whisper_device", whisper_cfg.get("device", defaults["whisper_device"]))
         self._set_var("whisper_compute_type", whisper_cfg.get("computeType", defaults["whisper_compute_type"]))
         self._set_var("whisper_vad_filter", whisper_cfg.get("vadFilter", defaults["whisper_vad_filter"]))
+        self._set_var("whisper_chunk_seconds", whisper_cfg.get("chunkSeconds", defaults["whisper_chunk_seconds"]))
+        self._set_var("whisper_beam_size", whisper_cfg.get("beamSize", defaults["whisper_beam_size"]))
 
     def _set_var(self, key: str, value):
         if value is None:
@@ -5327,11 +5414,13 @@ class ConfigGui:
             ),
             whisper_backend=iv["whisper_backend"].get().strip(),
             whisper_model=iv["whisper_model"].get().strip(),
-            whisper_language=iv["whisper_language"].get().strip(),
+            whisper_language=_whisper_language_raw_from_display(iv["whisper_language"].get()),
             whisper_task=iv["whisper_task"].get().strip(),
             whisper_device=iv["whisper_device"].get().strip(),
             whisper_compute_type=iv["whisper_compute_type"].get().strip(),
             whisper_vad_filter=self._parse_bool(iv["whisper_vad_filter"].get()),
+            whisper_chunk_seconds=float(iv["whisper_chunk_seconds"].get()),
+            whisper_beam_size=int(round(float(iv["whisper_beam_size"].get()))),
         )
 
 

@@ -719,6 +719,8 @@ class WhisperConfig:
     device: str
     computeType: str
     vadFilter: bool
+    chunkSeconds: float
+    beamSize: int
 
     @classmethod
     def from_dict(cls, raw: dict) -> "WhisperConfig":
@@ -732,6 +734,8 @@ class WhisperConfig:
             device=str(raw.get("device", "cuda")).strip(),
             computeType=str(raw.get("computeType", "float16")).strip(),
             vadFilter=bool(raw.get("vadFilter", True)),
+            chunkSeconds=float(raw.get("chunkSeconds", 5.0)),
+            beamSize=int(raw.get("beamSize", 5)),
         )
         allowed_backends = {"faster-whisper", "openai-whisper", "whisper.cpp", "mock"}
         if config.backend not in allowed_backends:
@@ -740,14 +744,18 @@ class WhisperConfig:
             raise ValueError("whisper.inputDevice is required")
         if not config.model:
             raise ValueError("whisper.model is required")
-        if not config.language:
-            raise ValueError("whisper.language is required")
+        if config.language not in {"auto", "ko", "en", "zh"}:
+            raise ValueError("whisper.language must be one of: auto, ko, en, zh")
         if config.task not in {"transcribe", "translate"}:
             raise ValueError("whisper.task must be one of: transcribe, translate")
         if not config.device:
             raise ValueError("whisper.device is required")
         if not config.computeType:
             raise ValueError("whisper.computeType is required")
+        if not 1.0 <= config.chunkSeconds <= 15.0:
+            raise ValueError("whisper.chunkSeconds must be between 1.0 and 15.0")
+        if not 1 <= config.beamSize <= 8:
+            raise ValueError("whisper.beamSize must be between 1 and 8")
         return config
 
 

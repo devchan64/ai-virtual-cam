@@ -35,6 +35,8 @@ class WhisperConfigTest(unittest.TestCase):
             whisper_device="cpu",
             whisper_compute_type="int8",
             whisper_vad_filter=False,
+            whisper_chunk_seconds=2.5,
+            whisper_beam_size=1,
         )
 
         self.assertEqual(
@@ -49,6 +51,8 @@ class WhisperConfigTest(unittest.TestCase):
                 "device": "cpu",
                 "computeType": "int8",
                 "vadFilter": False,
+                "chunkSeconds": 2.5,
+                "beamSize": 1,
             },
         )
 
@@ -85,10 +89,22 @@ class WhisperConfigTest(unittest.TestCase):
         self.assertEqual(loaded.whisper.inputDevice, "pulse")
         self.assertEqual(loaded.whisper.backend, "mock")
         self.assertEqual(loaded.whisper.model, "base")
+        self.assertEqual(loaded.whisper.chunkSeconds, 5.0)
+        self.assertEqual(loaded.whisper.beamSize, 5)
 
     def test_whisper_rejects_invalid_backend(self) -> None:
         with self.assertRaisesRegex(ValueError, "whisper.backend"):
             WhisperConfig.from_dict({"backend": "invalid"})
+
+    def test_whisper_rejects_invalid_language(self) -> None:
+        with self.assertRaisesRegex(ValueError, "whisper.language"):
+            WhisperConfig.from_dict({"language": "ja"})
+
+    def test_whisper_rejects_invalid_speed_parameters(self) -> None:
+        with self.assertRaisesRegex(ValueError, "whisper.chunkSeconds"):
+            WhisperConfig.from_dict({"chunkSeconds": 0.5})
+        with self.assertRaisesRegex(ValueError, "whisper.beamSize"):
+            WhisperConfig.from_dict({"beamSize": 0})
 
 
 if __name__ == "__main__":
