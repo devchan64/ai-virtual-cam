@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import signal
 import subprocess
 import sys
@@ -15,6 +16,38 @@ from src.audio.mixer import VirtualAudioMixer
 from src.domain.config import AppConfig
 from src.pipeline.runner import PipelineRunner
 
+
+
+
+def _nvidia_library_paths() -> list[str]:
+    paths: list[str] = []
+    for mod_name in ("nvidia.cublas.lib", "nvidia.cudnn.lib"):
+        try:
+            mod = __import__(mod_name, fromlist=["*"])
+            for item in getattr(mod, "__path__", []):
+                value = os.fspath(item)
+                if value and value not in paths:
+                    paths.append(value)
+            filename = getattr(mod, "__file__", None)
+            if filename:
+                value = os.path.dirname(os.fspath(filename))
+                if value and value not in paths:
+                    paths.append(value)
+        except Exception:
+            continue
+    return paths
+
+
+def _child_env_with_nvidia_libraries() -> dict[str, str]:
+    env = dict(os.environ)
+    paths = _nvidia_library_paths()
+    if paths:
+        existing = env.get("LD_LIBRARY_PATH", "")
+        env["LD_LIBRARY_PATH"] = ":".join(paths + ([existing] if existing else []))
+        print(f"[avc] whisper CUDA library path: {':'.join(paths)}", flush=True)
+    else:
+        print("[avc] whisper CUDA library path not found in Python environment", flush=True)
+    return env
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the ai-virtual-cam pipeline.")
@@ -70,7 +103,7 @@ def main() -> int:
     if args.with_whisper_window and config.whisper.enabled:
         whisper_cmd = [sys.executable, "-m", "src.app.whisper_window", "--config", str(config_path)]
         try:
-            whisper_process = subprocess.Popen(whisper_cmd)
+            whisper_process = subprocess.Popen(whisper_cmd, env=_child_env_with_nvidia_libraries())
             print(f"[avc] whisper transcript window started (pid={whisper_process.pid})", flush=True)
         except Exception as exc:
             raise RuntimeError(

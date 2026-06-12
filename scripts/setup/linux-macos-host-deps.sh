@@ -12,6 +12,7 @@ TENSORRT_ENGINE_URL="${AVC_TENSORRT_ENGINE_URL:-}"
 TENSORRT_ENGINE_SHA256="${AVC_TENSORRT_ENGINE_SHA256:-}"
 TENSORRT_ENGINE_FORCE="${AVC_TENSORRT_ENGINE_FORCE:-0}"
 TENSORRT_ENGINE_PATH="${AVC_TENSORRT_ENGINE_PATH:-}"
+INSTALL_WHISPER_CUDA="${AVC_INSTALL_WHISPER_CUDA:-1}"
 
 log() {
   printf '[ai-virtual-cam] %s\n' "$*"
@@ -67,6 +68,7 @@ Environment:
   AVC_TENSORRT_ENGINE_PATH     Engine output path (default: ~/.avc/models/person-segmentation.engine)
   AVC_TENSORRT_ENGINE_SHA256   Optional sha256 checksum for downloaded engine
   AVC_TENSORRT_ENGINE_FORCE    Set 1 to re-download when output path already exists
+  AVC_INSTALL_WHISPER_CUDA     Linux only: install CUDA runtime libs for faster-whisper (default: 1)
   -h, --help               Show this help
 EOF
 }
@@ -97,6 +99,7 @@ elevate_linux_with_sudo() {
     AVC_TENSORRT_ENGINE_PATH="$TENSORRT_ENGINE_PATH" \
     AVC_TENSORRT_ENGINE_SHA256="$TENSORRT_ENGINE_SHA256" \
     AVC_TENSORRT_ENGINE_FORCE="$TENSORRT_ENGINE_FORCE" \
+    AVC_INSTALL_WHISPER_CUDA="$INSTALL_WHISPER_CUDA" \
     bash "$0" "$@"
 }
 
@@ -242,6 +245,60 @@ install_python_runtime_packages() {
   run_as_invoking_user "$(pwd)/scripts/bin/avc-env" sync
 }
 
+install_whisper_cuda_runtime_packages() {
+  if [[ "$OS_KIND" != "linux" ]]; then
+    log "Whisper CUDA runtime package install skipped (non-Linux host)"
+    return 0
+  fi
+  if [[ "$INSTALL_WHISPER_CUDA" != "1" ]]; then
+    log "Whisper CUDA runtime package install skipped (AVC_INSTALL_WHISPER_CUDA=$INSTALL_WHISPER_CUDA)"
+    return 0
+  fi
+
+  local venv_py
+  venv_py="$(pwd)/.venv/bin/python3"
+  if [[ ! -x "$venv_py" ]]; then
+    fail ".venv python not found after runtime sync: $venv_py"
+  fi
+
+  log "Installing Whisper CUDA runtime libraries for faster-whisper (cuBLAS/cuDNN via pip)"
+  run_as_invoking_user "$venv_py" -m pip install nvidia-cublas-cu12 "nvidia-cudnn-cu12==9.*"
+}
+
+verify_whisper_runtime_contract() {
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    log "Dry-run mode: skipping Whisper runtime checks"
+    return 0
+  fi
+
+  local venv_py
+  venv_py="$(pwd)/.venv/bin/python3"
+  if [[ ! -x "$venv_py" ]]; then
+    fail ".venv python not found for Whisper runtime check: $venv_py"
+  fi
+
+  if ! run_as_invoking_user "$venv_py" -c "import faster_whisper" >/dev/null 2>&1; then
+    fail "faster-whisper is not importable in .venv. Run ./bin/avc setup again."
+  fi
+
+  if [[ "$OS_KIND" == "linux" ]]; then
+    if ! command -v parec >/dev/null 2>&1 && ! command -v parecord >/dev/null 2>&1; then
+      fail "parec/parecord is not available. Whisper input meter requires pulseaudio-utils."
+    fi
+    if [[ "$INSTALL_WHISPER_CUDA" == "1" ]]; then
+      if ! run_as_invoking_user "$venv_py" -c "import nvidia.cublas.lib, nvidia.cudnn.lib" >/dev/null 2>&1; then
+        fail "NVIDIA cuBLAS/cuDNN Python packages are not importable. Retry ./bin/avc setup or set AVC_INSTALL_WHISPER_CUDA=0 for CPU-only testing."
+      fi
+      log "Whisper CUDA Python packages verified (nvidia-cublas-cu12, nvidia-cudnn-cu12)"
+    fi
+    if command -v nvidia-smi >/dev/null 2>&1; then
+      log "NVIDIA GPU detected: $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n 1)"
+    else
+      warn "nvidia-smi not found. faster-whisper CUDA may fail unless NVIDIA driver/runtime is installed."
+    fi
+  fi
+}
+
 invoking_home_dir() {
   if [[ "$OS_KIND" == "linux" && -n "$INVOKING_USER" ]]; then
     getent passwd "$INVOKING_USER" | cut -d: -f6
@@ -352,8 +409,10 @@ main() {
   log "Setup now installs dependencies only; create virtual devices in config."
   repair_workspace_permissions
   install_python_runtime_packages
+  install_whisper_cuda_runtime_packages
   download_tensorrt_engine
   verify_host_contract
+  verify_whisper_runtime_contract
   log "Host dependency setup completed"
   if [[ "$OS_KIND" == "linux" ]]; then
     log "Linux Docker host deps installed: docker, docker compose, xauth, xhost"

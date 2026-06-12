@@ -16,8 +16,37 @@ EOF
   exit 0
 fi
 
+configure_nvidia_library_path() {
+  local py="$1"
+  local lib_path
+  lib_path="$($py -c 'import os
+paths=[]
+for mod_name in ("nvidia.cublas.lib", "nvidia.cudnn.lib"):
+ try:
+  mod = __import__(mod_name, fromlist=["*"])
+  for p in getattr(mod, "__path__", []):
+   if p:
+    paths.append(os.fspath(p))
+  f = getattr(mod, "__file__", None)
+  if f:
+   paths.append(os.path.dirname(f))
+ except Exception:
+  pass
+seen=[]
+for p in paths:
+ if p not in seen:
+  seen.append(p)
+print(":".join(seen))' 2>/dev/null || true)"
+  if [[ -n "$lib_path" ]]; then
+    export LD_LIBRARY_PATH="$lib_path${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    echo "[avc] NVIDIA library path configured: $lib_path" >&2
+  fi
+}
+
 if [[ -x "$VENV_PY" ]]; then
+  configure_nvidia_library_path "$VENV_PY"
   exec "$VENV_PY" -m src.app.main "$@"
 fi
 
+configure_nvidia_library_path python3
 exec python3 -m src.app.main "$@"

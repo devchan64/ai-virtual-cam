@@ -935,6 +935,42 @@ def _audio_device_raw_from_display(value: str, mapping: dict[str, str]) -> str:
     return key
 
 
+def _can_capture_exact_pulse_source(device_name: str) -> bool:
+    if platform.system() != "Linux":
+        return False
+    name = str(device_name).strip()
+    if not name or name.lower() == "default":
+        return False
+    lowered = name.lower()
+    return lowered.startswith("alsa_input.") or lowered.endswith(".monitor") or lowered == AUDIO_VIRTUAL_SOURCE_NAME
+
+
+def _available_input_meter_devices() -> list[str]:
+    values: list[str] = []
+    if sd is not None:
+        try:
+            values.extend(
+                str(d.get("name", "")).strip()
+                for d in sd.query_devices()
+                if int(d.get("max_input_channels", 0)) > 0 and str(d.get("name", "")).strip()
+            )
+        except Exception:
+            pass
+    if platform.system() == "Linux":
+        try:
+            values.extend(name for _idx, name, _rest in _pactl_short_entries("source") if name)
+        except Exception:
+            pass
+    seen: set[str] = set()
+    unique: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        unique.append(value)
+    return unique
+
+
 def _parse_video_device_number(device_path: str) -> str | None:
     value = device_path.strip()
     if not value.startswith("/dev/video"):
@@ -1097,6 +1133,8 @@ class ConfigGui:
         self._audio_input_meter_running = False
         self._audio_input_meter_after_id: str | None = None
         self._audio_input_meter_stream = None
+        self._audio_input_meter_process: subprocess.Popen[bytes] | None = None
+        self._audio_input_meter_reader_thread: threading.Thread | None = None
         self._audio_input_meter_queue: deque[float] = deque(maxlen=120)
         self._audio_input_meter_lock: Lock = Lock()
         self._audio_input_meter_window: tk.Toplevel | None = None
@@ -4275,6 +4313,14 @@ class ConfigGui:
             )
             return
 
+        if opened_sample_rate != int(sample_rate):
+            summary_var.set(
+                self._tr(
+                    "audio_input_meter.sample_rate_adjusted",
+                    "Opened with supported sample rate: {sample_rate}Hz",
+                ).format(sample_rate=opened_sample_rate)
+            )
+
         def refresh() -> None:
             if not self._audio_gate_test_running or not self._audio_gate_test_window:
                 return
@@ -4435,9 +4481,11 @@ class ConfigGui:
             error_title_key="title.whisper_input_meter_error",
             error_title_default="Whisper input meter error",
             input_device_requested=input_device_requested,
-            sample_rate=16000,
+            sample_rate=48000,
             frame_ms=20,
             channels=1,
+            sample_rate_candidates=(48000, 44100, 16000),
+            prefer_exact_pulse_source=True,
         )
 
     def _run_input_meter(
@@ -4451,11 +4499,27 @@ class ConfigGui:
         sample_rate: int,
         frame_ms: int,
         channels: int,
+        sample_rate_candidates: tuple[int, ...] | None = None,
+        prefer_exact_pulse_source: bool = False,
     ):
-        frame_samples = max(1, int(sample_rate * frame_ms / 1000))
-        input_device = _coerce_audio_input_device_for_sounddevice(input_device_requested)
+        input_device = str(input_device_requested).strip()
+        use_exact_pulse_source = prefer_exact_pulse_source and _can_capture_exact_pulse_source(input_device)
+        if not use_exact_pulse_source:
+            input_device = _coerce_audio_input_device_for_sounddevice(input_device_requested)
+        candidate_rates = tuple(sample_rate_candidates or (sample_rate,))
+        capture_backend = "pulse-recorder" if use_exact_pulse_source else "sounddevice"
+        _log(
+            "input meter requested: "
+            f"title={title_default!r} configured='{input_device_requested}' runtime='{input_device}' "
+            f"backend={capture_backend} sample_rates={candidate_rates} frame_ms={frame_ms} channels={channels}"
+        )
 
-        if sd is None:
+        if sd is None and not use_exact_pulse_source:
+            _log(
+                "input meter failed all attempts: "
+                f"configured='{input_device_requested}' runtime='{input_device}' backend={capture_backend} "
+                f"sample_rates={candidate_rates} error={exc}"
+            )
             self._show_error(
                 self._tr(error_title_key, error_title_default),
                 self._tr(
@@ -4528,27 +4592,71 @@ class ConfigGui:
         stop_btn.configure(command=close_window)
         window.protocol("WM_DELETE_WINDOW", close_window)
 
-        try:
-            stream = sd.InputStream(
-                device=input_device,
-                channels=channels,
-                samplerate=sample_rate,
-                blocksize=frame_samples,
-                dtype="float32",
-                callback=self._audio_input_meter_callback,
-            )
-            self._audio_input_meter_stream = stream
-            stream.start()
-        except Exception as exc:
-            available = []
-            try:
-                available = [
-                    str(d.get("name", "")).strip()
-                    for d in sd.query_devices()
-                    if int(d.get("max_input_channels", 0)) > 0 and str(d.get("name", "")).strip()
-                ]
-            except Exception:
-                available = []
+        stream = None
+        stream_error: Exception | None = None
+        opened_sample_rate = int(sample_rate)
+        if use_exact_pulse_source:
+            for candidate_rate in candidate_rates:
+                try:
+                    opened_sample_rate = int(candidate_rate)
+                    _log(
+                        "input meter open attempt: "
+                        f"backend=pulse-recorder source='{input_device}' sample_rate={opened_sample_rate}"
+                    )
+                    self._start_pulse_input_meter_process(
+                        input_device,
+                        sample_rate=opened_sample_rate,
+                        frame_ms=frame_ms,
+                        channels=channels,
+                    )
+                    stream = self._audio_input_meter_process
+                    _log(
+                        "input meter open success: "
+                        f"backend=pulse-recorder source='{input_device}' sample_rate={opened_sample_rate}"
+                    )
+                    break
+                except Exception as exc:
+                    _log(
+                        "input meter open failed: "
+                        f"backend=pulse-recorder source='{input_device}' sample_rate={candidate_rate} error={exc}"
+                    )
+                    stream_error = exc
+                    self._audio_input_meter_process = None
+        else:
+            for candidate_rate in candidate_rates:
+                try:
+                    opened_sample_rate = int(candidate_rate)
+                    frame_samples = max(1, int(opened_sample_rate * frame_ms / 1000))
+                    _log(
+                        "input meter open attempt: "
+                        f"backend=sounddevice device='{input_device}' sample_rate={opened_sample_rate}"
+                    )
+                    stream = sd.InputStream(
+                        device=input_device,
+                        channels=channels,
+                        samplerate=opened_sample_rate,
+                        blocksize=frame_samples,
+                        dtype="float32",
+                        callback=self._audio_input_meter_callback,
+                    )
+                    self._audio_input_meter_stream = stream
+                    stream.start()
+                    _log(
+                        "input meter open success: "
+                        f"backend=sounddevice device='{input_device}' sample_rate={opened_sample_rate}"
+                    )
+                    break
+                except Exception as exc:
+                    _log(
+                        "input meter open failed: "
+                        f"backend=sounddevice device='{input_device}' sample_rate={candidate_rate} error={exc}"
+                    )
+                    stream_error = exc
+                    stream = None
+                    self._audio_input_meter_stream = None
+        if stream is None:
+            exc = stream_error or RuntimeError("failed to open input stream")
+            available = _available_input_meter_devices()
             self._stop_audio_input_meter()
             window.destroy()
             self._show_error(
@@ -4594,6 +4702,61 @@ class ConfigGui:
 
         self._audio_input_meter_after_id = self.root.after(80, refresh)
 
+    def _start_pulse_input_meter_process(self, source_name: str, *, sample_rate: int, frame_ms: int, channels: int) -> None:
+        recorder = shutil.which("parec") or shutil.which("parecord")
+        if recorder is None:
+            raise RuntimeError("parec/parecord command not found. Install pulseaudio-utils or pipewire-pulse tools.")
+        frame_samples = max(1, int(sample_rate * frame_ms / 1000))
+        bytes_per_frame = frame_samples * max(1, int(channels)) * 2
+        cmd = [
+            recorder,
+            "--device",
+            source_name,
+            "--format=s16le",
+            "--rate",
+            str(sample_rate),
+            "--channels",
+            str(channels),
+            "--raw",
+        ]
+        _log("input meter pulse recorder spawn: " + " ".join(cmd))
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self._audio_input_meter_process = process
+
+        def read_loop() -> None:
+            _log(f"input meter pulse recorder reader started: pid={process.pid} source='{source_name}'")
+            assert process.stdout is not None
+            while self._audio_input_meter_running and process.poll() is None:
+                data = process.stdout.read(bytes_per_frame)
+                if not data:
+                    break
+                try:
+                    samples = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+                    if channels > 1:
+                        samples = samples.reshape(-1, channels).mean(axis=1)
+                    level_db = self._rms_dbfs(samples)
+                    with self._audio_input_meter_lock:
+                        self._audio_input_meter_queue.append(level_db)
+                except Exception as exc:
+                    self._audio_input_meter_error = str(exc)
+                    break
+            if process.poll() not in (None, 0) and self._audio_input_meter_running:
+                stderr = ""
+                try:
+                    stderr = (process.stderr.read() if process.stderr is not None else b"").decode(errors="replace").strip()
+                except Exception:
+                    stderr = ""
+                self._audio_input_meter_error = stderr or f"recorder exited with code {process.returncode}"
+                _log(
+                    "input meter pulse recorder reader failed: "
+                    f"pid={process.pid} code={process.returncode} error={self._audio_input_meter_error}"
+                )
+            else:
+                _log(f"input meter pulse recorder reader stopped: pid={process.pid} code={process.poll()}")
+
+        self._audio_input_meter_reader_thread = threading.Thread(target=read_loop, daemon=True)
+        self._audio_input_meter_reader_thread.start()
+
     def _audio_input_meter_callback(self, indata, frames, time_info, status):
         if not self._audio_input_meter_running:
             return
@@ -4606,6 +4769,7 @@ class ConfigGui:
             self._audio_input_meter_error = str(exc)
 
     def _stop_audio_input_meter(self) -> None:
+        _log("input meter stopping")
         self._audio_input_meter_running = False
         after_id = self._audio_input_meter_after_id
         if after_id is not None:
@@ -4625,7 +4789,19 @@ class ConfigGui:
                 stream.close()
             except Exception:
                 pass
+        process = self._audio_input_meter_process
+        if process is not None and process.poll() is None:
+            try:
+                process.terminate()
+                process.wait(timeout=1.0)
+            except Exception:
+                try:
+                    process.kill()
+                except Exception:
+                    pass
         self._audio_input_meter_stream = None
+        self._audio_input_meter_process = None
+        self._audio_input_meter_reader_thread = None
         self._audio_input_meter_window = None
 
     def _build_test_waveform(self, kind: str, sample_rate: int, seconds: float):

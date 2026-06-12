@@ -165,6 +165,7 @@ audio_input_meter.info: "입력: {input_device} / 샘플 레이트: {sample_rate
 audio_input_meter.label_input_level: "입력 레벨"
 audio_input_meter.measuring: "입력 신호 측정 중"
 audio_input_meter.status_ready: "시작 준비됨."
+audio_input_meter.sample_rate_adjusted: "지원 샘플 레이트로 열었습니다: {sample_rate}Hz"
 audio_tune.status_hint_start: "시작하려면 1단계를 클릭하세요."
 audio_tune.status_hint: "계속하려면 1단계를 클릭하세요."
 audio_tune.progress_done: "완료"

@@ -164,6 +164,7 @@ audio_input_meter.info: "Input: {input_device} / Sample rate: {sample_rate}Hz / 
 audio_input_meter.label_input_level: "Input level"
 audio_input_meter.measuring: "Measuring input signal"
 audio_input_meter.status_ready: "Ready to start."
+audio_input_meter.sample_rate_adjusted: "Opened with supported sample rate: {sample_rate}Hz"
 audio_tune.status_hint_start: "Click step 1 to start."
 audio_tune.status_hint: "Click step 1 to continue."
 audio_tune.progress_done: "Done"
