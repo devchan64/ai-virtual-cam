@@ -388,34 +388,54 @@ Whisper 성능: step=1.0s window=4.0s audio=4.00s stt=0.62s stt_rtf=0.16 committ
 - 확정 delta만 출력해 모달 중복을 줄인다.
 - 확정 delta만 번역해 NLLB 반복 생성 가능성을 낮춘다.
 
-## 참고 자료
+## 논문 근거와 설계 원칙
+
+### 근거 자료
 
 - [Turning Whisper into Real-Time Transcription System](https://arxiv.org/abs/2307.14743): Whisper-Streaming 논문. Whisper가 기본적으로 실시간용이 아니며, local agreement policy와 self-adaptive latency로 안정 prefix를 확정하는 접근을 제안한다.
-- [ufal/whisper_streaming](https://github.com/ufal/whisper_streaming): Whisper-Streaming 구현체. `faster-whisper` GPU 백엔드, `min-chunk-size`, `buffer_trimming` 옵션, segment/sentence trimming 전략을 참고했다.
-- [Whisper-Streaming README - buffer trimming and sentence segmenter](https://github.com/ufal/whisper_streaming#installation): 기본 `segment` trimming이 품질/지연 측면에서 더 낫다는 설명과 wtpsplit 등 문장 segmenter 선택지를 참고했다.
-- [SimulEval: An Evaluation Toolkit for Simultaneous Translation](https://arxiv.org/abs/2007.16193): 실시간 번역은 품질과 지연을 함께 평가해야 하며, read/write 정책이 핵심이라는 점을 참고했다.
-- [Wait-info Policy: Balancing Source and Target at Information Level for Simultaneous Machine Translation](https://arxiv.org/abs/2210.11220): source 정보가 충분하지 않을 때 output을 기다리는 정책이 번역 품질과 지연 균형에 중요하다는 점을 참고했다.
-- [End-to-End Simultaneous Speech Translation with Differentiable Segmentation](https://arxiv.org/abs/2305.16093): 고정 길이 분할이나 외부 경계 모델이 번역에 불리한 시점에서 speech를 자를 수 있다는 문제의식을 참고했다.
+- [Learning When to Translate for Streaming Speech](https://arxiv.org/abs/2109.07368): 고정 시간 대기 후 번역하는 방식은 음성의 acoustic unit 경계를 깨기 쉽고, 긴 입력에서 정보를 누적하면서 적절한 speech unit boundary를 찾아야 한다고 설명한다.
+- [Segmentation-Free Streaming Machine Translation](https://arxiv.org/abs/2309.14823): ASR+MT cascade에서 중간 sentence-like segmentation은 MT에 제약을 만들고 오류원이 될 수 있다고 지적한다.
+- [Streaming Simultaneous Speech Translation with Augmented Memory Transformer](https://arxiv.org/abs/2011.00033): streaming 시스템은 partial input을 처리하면서도 매우 길거나 연속적인 입력을 다룰 수 있어야 하며, segment/context/memory size가 품질과 지연에 영향을 준다.
+- [End-to-End Simultaneous Speech Translation with Differentiable Segmentation](https://arxiv.org/abs/2305.16093): 고정 길이 분할이나 외부 경계 모델이 번역에 불리한 시점에서 speech를 자를 수 있다는 문제의식을 제시한다.
+- [SimulEval: An Evaluation Toolkit for Simultaneous Translation](https://arxiv.org/abs/2007.16193): 실시간 번역은 품질과 지연을 함께 평가해야 하며, read/write 정책이 핵심이라는 점을 제시한다.
+- [ufal/whisper_streaming](https://github.com/ufal/whisper_streaming): `faster-whisper` GPU 백엔드, `min-chunk-size`, `buffer_trimming`, segment/sentence trimming 전략을 참고한다.
+
+### 설계 원칙
+
+- STT window 결과는 final text가 아니라 수정 가능한 partial hypothesis로 취급한다.
+- 고정 길이 청크나 hard sentence segmentation 직후 버퍼를 제거하지 않는다.
+- `pending -> staged -> final commit -> pending consume` 순서로만 문장 상태를 이동한다.
+- final commit 전에는 다음 STT window가 같은 문장을 확장하거나 수정할 기회를 유지한다.
+- 번역 입력은 기본적으로 final sentence delta만 사용한다.
+- 진단 로그는 `pending`, `staged`, `committed`가 함께 유지되는지 확인할 수 있어야 한다.
 
 ## 2026-06-12 리비전 라이프사이클 보강
 
 운영 로그에서 관측된 문장 손실은 STT 윈도우마다 생성되는 부분 가설을 즉시 delta로 자르고, 문장 후보를 만들면서 `pending` 버퍼를 너무 빨리 비우는 구조에서 발생했다. 슬라이딩 윈도우 STT는 같은 오디오 구간을 매번 다시 해석하므로, 이전 window의 결과는 최종 문장이 아니라 수정 가능한 partial hypothesis로 보아야 한다.
 
-이번 패치의 규칙:
+현재 구현 규칙:
 
 - `pending_chunks`, `pending_chars`, `slow_pending`으로 만들어진 강제 후보는 final commit 전까지 `pending`에서 제거하지 않는다.
 - 강제 후보는 `staged`로 올려 순차 검증을 받지만, 다음 STT window가 같은 문장을 확장하거나 수정할 기회를 유지한다.
-- `pending`은 final commit이 실제로 발생한 뒤 `_consume_committed_prefix()`로 해당 prefix만 소비한다.
+- `pending`은 final commit이 실제로 발생한 뒤 `consume_committed_prefix()`로 해당 prefix만 소비한다.
 - 진단 로그에 `revision_context_chars`와 `forced_candidate_pending`을 추가해 committed/staged/pending이 함께 유지되는지 추적한다.
 - 이 구조는 임시 후보를 바로 삭제하지 않고 `pending -> staged -> final commit -> pending consume` 순서로 이동시키는 최소 라이프사이클이다.
 
 이 패치는 아직 완전한 revision graph는 아니다. 다만 문장 경계가 늦게 잡히는 빠른 발화에서 pending 버퍼가 먼저 사라져 다음 window의 수정 기회를 잃는 문제를 줄이는 첫 단계다.
 
-### 논문 근거
+### 코드 구조
 
-- [Learning When to Translate for Streaming Speech](https://arxiv.org/abs/2109.07368): 고정 시간 대기 후 번역하는 방식은 음성의 acoustic unit 경계를 깨기 쉽고, 긴 입력에서 정보를 누적하면서 적절한 speech unit boundary를 찾아야 한다고 설명한다. 현재 패치의 `pending` 보존과 staged 검증은 고정 길이 청크를 즉시 문장으로 확정하지 않는 방향이다.
-- [Segmentation-Free Streaming Machine Translation](https://arxiv.org/abs/2309.14823): ASR+MT cascade에서 중간 sentence-like segmentation은 MT에 제약을 만들고 오류원이 될 수 있다고 지적한다. 따라서 hard segmentation 직후 삭제하지 않고, final commit 전까지 revision 가능한 버퍼를 유지하는 정책이 필요하다.
-- [Streaming Simultaneous Speech Translation with Augmented Memory Transformer](https://arxiv.org/abs/2011.00033): streaming 시스템은 partial input을 처리하면서도 매우 길거나 연속적인 입력을 다룰 수 있어야 하며, segment/context/memory size가 품질과 지연에 영향을 준다. 현재 구현의 `revision_context_chars` 로그는 context/memory 생애주기를 관측하기 위한 지표다.
+리비전 라이프사이클 헬퍼는 Whisper 창/모달 구현과 분리한다.
+
+```text
+src/app/transcript_revision.py
+```
+
+역할:
+
+- committed/staged/pending을 하나의 revision context로 결합한다.
+- final commit 이후 pending prefix만 소비한다.
+- 문장 lifecycle 테스트가 UI 구현에 의존하지 않도록 한다.
 
 ### 다음 단계
 

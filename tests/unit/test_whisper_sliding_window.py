@@ -1,7 +1,7 @@
 import unittest
 
 from src.app.sentence_boundary import RegexSentenceBoundaryDetector
-from src.app.whisper_window import _collapse_adjacent_repeated_phrase_details, _collapse_adjacent_repeated_phrases, _consume_committed_prefix, _revision_lifecycle_context, _diagnostic_tail, _forced_sentence_reason, _new_text_delta, _pending_new_text_combined, _sentence_max_age_chunks, _sentence_output_delta, _sentence_required_confirmations, _sentences_are_revisions, _should_age_staged_sentence, _should_translate_staged_sentence, _prefer_sentence_revision, _sentence_end_count, _split_completed_sentences, _stable_window_text
+from src.app.whisper_window import _collapse_adjacent_repeated_phrase_details, _collapse_adjacent_repeated_phrases, _diagnostic_tail, _forced_sentence_reason, _new_text_delta, _pending_new_text_combined, _sentence_max_age_chunks, _sentence_output_delta, _sentence_required_confirmations, _sentences_are_revisions, _should_age_staged_sentence, _should_translate_staged_sentence, _prefer_sentence_revision, _sentence_end_count, _split_completed_sentences, _stable_window_text
 
 
 class WhisperSlidingWindowTextTest(unittest.TestCase):
@@ -441,6 +441,13 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
 
         self.assertEqual(_sentence_output_delta(committed, sentence), "you want to go has no name or address or you re not sure if you could find it on the map")
 
+    def test_sentence_output_delta_suppresses_numeric_fragment_echo_from_log(self) -> None:
+        # Regression from avc-whisper.log: "saying dry weight ... are 6,800 pounds." to "are 6,800 pounds."
+        committed = "saying dry weight is around 5,800 pounds and it has a GBWR of 6,800"
+        sentence = "are 6,800 pounds."
+
+        self.assertEqual(_sentence_output_delta(committed, sentence), "")
+
     def test_sentence_output_delta_trims_short_actually_driving_prefix_from_log(self) -> None:
         # Regression from avc-whisper.log chunks 629 and 632.
         committed = "actually driving"
@@ -678,24 +685,6 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
         stable = "52 second. Oh my goodness. Is it true?"
 
         self.assertEqual(_new_text_delta(committed, stable), "")
-
-
-    def test_forced_candidate_consumes_pending_only_after_final_commit(self) -> None:
-        pending = "So we have to go somewhere else to go to the bathroom which takes even more time i have had to take it off"
-        self.assertEqual(
-            _consume_committed_prefix(pending, "So we have to go somewhere else to go to the bathroom"),
-            "which takes even more time i have had to take it off",
-        )
-        self.assertEqual(_consume_committed_prefix(pending, pending), "")
-
-    def test_revision_lifecycle_context_keeps_staged_and_pending_visible(self) -> None:
-        context = _revision_lifecycle_context(
-            "already committed",
-            "forced staged candidate",
-            "pending revision tail",
-        )
-
-        self.assertEqual(context, "already committed forced staged candidate pending revision tail")
 
 
     def test_sentence_output_delta_suppresses_suffix_duplicate_from_unplug_log(self) -> None:

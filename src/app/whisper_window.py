@@ -20,6 +20,7 @@ from pathlib import Path
 from src.app.rotating_log import install_rotating_stdout_log
 from src.app.sentence_boundary import RegexSentenceBoundaryDetector, sentence_end_count as _boundary_sentence_end_count, split_completed_sentences as _boundary_split_completed_sentences
 from src.app.translation_model import TranslationRequest, build_text_translator
+from src.app.transcript_revision import append_context as _append_committed_text, consume_committed_prefix as _consume_committed_prefix, revision_lifecycle_context as _revision_lifecycle_context
 from src.domain.whisper_defaults import whisper_default
 from src.domain.config import AppConfig, WhisperConfig
 
@@ -564,6 +565,76 @@ def _trim_leading_boundary_noise(text: str) -> str:
     return text.strip()
 
 
+_NUMERIC_FRAGMENT_PREFIXES = {"are", "is", "it", "its", "there"}
+_NUMERIC_FRAGMENT_UNITS = {
+    "pounds",
+    "pound",
+    "dollar",
+    "dollars",
+    "percent",
+    "kg",
+    "lbs",
+    "kilometers",
+    "miles",
+    "mile",
+    "hours",
+    "minutes",
+    "seconds",
+    "degrees",
+}
+_NUMBER_TOKEN_RE = re.compile(r"\d+(?:\.\d+)?$")
+
+
+def _number_runs(words: list[str]) -> list[tuple[str, int, int]]:
+    runs: list[tuple[str, int, int]] = []
+    i = 0
+    while i < len(words):
+        if _NUMBER_TOKEN_RE.fullmatch(words[i]):
+            start = i
+            value = words[i]
+            i += 1
+            while i < len(words) and _NUMBER_TOKEN_RE.fullmatch(words[i]):
+                value += words[i]
+                i += 1
+            runs.append((value, start, i))
+        else:
+            i += 1
+    return runs
+
+
+def _extract_numeric_tokens(words: list[str]) -> set[str]:
+    return {value for value, _start, _end in _number_runs(words)}
+
+
+def _extract_of_numeric_tokens(words: list[str]) -> set[str]:
+    values: set[str] = set()
+    for value, start, _end in _number_runs(words):
+        if start > 0 and words[start - 1] == "of":
+            values.add(value)
+    return values
+
+
+def _is_numeric_fragment_echo(candidate_words: list[str], committed_words: list[str]) -> bool:
+    if len(candidate_words) > 4 or not candidate_words:
+        return False
+    if candidate_words[0] not in _NUMERIC_FRAGMENT_PREFIXES:
+        return False
+    if len(candidate_words) < 3:
+        return False
+
+    numeric_words = _extract_numeric_tokens(candidate_words)
+    if len(numeric_words) != 1:
+        return False
+    number = next(iter(numeric_words))
+
+    committed_numbers = _extract_of_numeric_tokens(committed_words)
+    if number not in committed_numbers:
+        return False
+
+    if candidate_words[-1] not in _NUMERIC_FRAGMENT_UNITS:
+        return False
+    return True
+
 def _sentence_delta_from_words(words: list[str]) -> str:
     return _trim_leading_boundary_noise(" ".join(words).strip())
 
@@ -576,6 +647,8 @@ def _sentence_output_delta(committed_text: str, sentence: str) -> str:
     sentence_words = _word_units(normalized)
     if not committed_words or not sentence_words:
         return normalized
+    if _is_numeric_fragment_echo(sentence_words, committed_words):
+        return ""
     if sentence_words == ["hi"] and committed_words[-1:] == ["high"]:
         return ""
     if len(sentence_words) <= len(committed_words):
@@ -754,42 +827,6 @@ def _prefer_sentence_revision(left: str, right: str) -> str:
         return _normalized_text(right)
     return _normalized_text(left)
 
-
-def _append_committed_text(committed_text: str, new_text: str) -> str:
-    combined = _normalized_text(f"{committed_text} {new_text}")
-    if len(combined) <= 4000:
-        return combined
-    return combined[-4000:]
-
-
-def _consume_committed_prefix(pending_text: str, committed_sentence: str) -> str:
-    pending = _normalized_text(pending_text)
-    committed = _normalized_text(committed_sentence)
-    if not pending or not committed:
-        return pending
-    pending_words = _word_units(pending)
-    committed_words = _word_units(committed)
-    if not pending_words or not committed_words:
-        return pending
-    if len(committed_words) >= len(pending_words) and _is_subsequence_at(committed_words, pending_words, 0):
-        return ""
-    if len(pending_words) >= len(committed_words) and _is_subsequence_at(pending_words, committed_words, 0):
-        remaining = pending_words[len(committed_words) :]
-        return _sentence_delta_from_words(remaining)
-    max_overlap = min(len(pending_words), len(committed_words))
-    for overlap in range(max_overlap, 0, -1):
-        if pending_words[:overlap] == committed_words[-overlap:]:
-            return _sentence_delta_from_words(pending_words[overlap:])
-    return pending
-
-
-def _revision_lifecycle_context(committed_text: str, staged_sentence: str, pending_text: str) -> str:
-    context = committed_text
-    if staged_sentence:
-        context = _append_committed_text(context, staged_sentence)
-    if pending_text:
-        context = _append_committed_text(context, pending_text)
-    return context
 
 
 def _pending_new_text_combined(pending_text: str, new_text: str) -> str:
