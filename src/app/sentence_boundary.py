@@ -12,6 +12,20 @@ SOFT_BOUNDARY_RE = re.compile(
 )
 MIN_SOFT_BOUNDARY_PREFIX_CHARS = 80
 MIN_SOFT_BOUNDARY_SUFFIX_CHARS = 24
+SOFT_BOUNDARY_INCOMPLETE_TAIL_WORDS = {
+    "a",
+    "an",
+    "and",
+    "because",
+    "but",
+    "if",
+    "or",
+    "that",
+    "the",
+    "to",
+    "which",
+    "with",
+}
 
 
 @dataclass(frozen=True)
@@ -49,6 +63,17 @@ def text_units(text: str) -> tuple[list[str], str]:
 
 def join_text_units(units: list[str], separator: str) -> str:
     return separator.join(units).strip()
+
+
+def strip_incomplete_tail(text: str) -> str:
+    normalized = normalized_text(text)
+    units, separator = text_units(normalized)
+    if separator != " " or not units:
+        return normalized
+    words = word_units(units[-1])
+    if words and words[-1] in SOFT_BOUNDARY_INCOMPLETE_TAIL_WORDS:
+        return join_text_units(units[:-1], separator)
+    return normalized
 
 
 def pending_new_text_combined(pending_text: str, new_text: str) -> str:
@@ -135,6 +160,9 @@ class RegexSentenceBoundaryDetector(SentenceBoundaryDetector):
             if len(left) < min_prefix_chars or len(right) < MIN_SOFT_BOUNDARY_SUFFIX_CHARS:
                 continue
             if sentence_end_count(left) > 0:
+                continue
+            left = strip_incomplete_tail(left)
+            if len(left) < min_prefix_chars:
                 continue
             candidates.append((index, left, right))
         if not candidates:

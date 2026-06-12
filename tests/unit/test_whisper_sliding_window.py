@@ -57,16 +57,23 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
         self.assertFalse(_sentences_are_revisions("Tesla app.", "It was going a little fast."))
 
 
-    def test_short_staged_sentence_waits_before_translation(self) -> None:
+    def test_staged_sentence_is_not_translated_before_final_by_default(self) -> None:
         self.assertFalse(_should_translate_staged_sentence("Again awesome.", 1))
-        self.assertTrue(_should_translate_staged_sentence("Again awesome the location tab shows", 1))
-        self.assertTrue(_should_translate_staged_sentence("Again awesome.", 2))
+        self.assertFalse(_should_translate_staged_sentence("Again awesome the location tab shows", 1))
+        self.assertFalse(_should_translate_staged_sentence("Again awesome.", 2))
 
 
     def test_staged_sentence_waits_when_pending_extends_it_from_log(self) -> None:
         # Regression from avc-whisper.log chunks 642-648.
         staged = "It just resets the screen in case like i said it freezes or gets a little slow."
         pending = "just resets the screen in case like I said it freezes or gets a little slow and lastly the fourth advanced feature I want to talk about the software updates As you may or"
+
+        self.assertFalse(_should_age_staged_sentence(staged, pending))
+
+    def test_staged_sentence_waits_when_fast_boundary_reuses_blind_spot_tail_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 226-230.
+        staged = "If I want to quickly change over to the left lane without looking at my blind spot, in my blind spot I could turn on certain I can turn on certain turn signal and when that setting is enabled it automatically shows a visual of my blind spot camera and now I can easily see that nobody's in my blind spot and I"
+        pending = "And now I can easily see that nobody's in my blind spot and I can easily change lanes while"
 
         self.assertFalse(_should_age_staged_sentence(staged, pending))
 
@@ -388,6 +395,50 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
             ),
             "like let's say i just want to go right here I'll hold it on the map",
         )
+
+    def test_collapse_repeated_tap_close_phrase_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 100-102.
+        text = "Just tap on that lightning bolt icon and it will automatically open your charge port and you can tap on it again to close You can tap on it again to close it."
+
+        self.assertEqual(
+            _collapse_adjacent_repeated_phrases(text),
+            "Just tap on that lightning bolt icon and it will automatically open your charge port and you can tap on it again to close it.",
+        )
+
+    def test_sentence_output_delta_collapses_repeated_tap_close_phrase_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 100-102.
+        text = "Just tap on that lightning bolt icon and it will automatically open your charge port and you can tap on it again to close You can tap on it again to close it."
+
+        self.assertEqual(
+            _sentence_output_delta("", text),
+            "Just tap on that lightning bolt icon and it will automatically open your charge port and you can tap on it again to close it.",
+        )
+
+    def test_sentence_output_delta_trims_fast_boundary_turn_signal_overlap_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 246-256.
+        committed = "halfway and another great new feature that came with a recent software update is the automatic turn signal"
+        sentence = "turn signal if you when you enable that it'll automatically turn your turn signal off and normally with that before that setting came, when you half-press a turn signal it would go on three blinks and then if you fully press the turn signal it stays"
+
+        self.assertEqual(
+            _sentence_output_delta(committed, sentence),
+            "when you enable that it ll automatically turn your turn signal off and normally with that before that setting came when you half press a turn signal it would go on three blinks and then if you fully press the turn signal it stays",
+        )
+
+    def test_sentence_boundary_soft_split_trims_incomplete_if_tail_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 242-246.
+        detector = RegexSentenceBoundaryDetector()
+        result = detector.split(
+            "",
+            "halfway and another great new feature that came with a recent software update is the automatic turn signal if When you enable that, it'll automatically turn your turn signal off",
+            "en",
+        )
+
+        self.assertEqual(
+            result.completed,
+            ["halfway and another great new feature that came with a recent software update is the automatic turn signal"],
+        )
+        self.assertEqual(result.pending, "When you enable that, it'll automatically turn your turn signal off")
+        self.assertEqual(result.soft_boundary_count, 1)
 
     def test_sentence_boundary_soft_splits_once_you_are_navigated_from_log(self) -> None:
         detector = RegexSentenceBoundaryDetector()

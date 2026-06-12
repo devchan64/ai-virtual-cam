@@ -142,6 +142,72 @@ class WhisperWindowGeometryTest(unittest.TestCase):
         self.assertFalse(window._transcript_partial_active)
 
 
+    def test_line_numbers_update_separate_from_transcript_text(self) -> None:
+        class FakeContentText:
+            def get(self, start: str, end: str) -> str:
+                return "첫 줄\n둘째 줄"
+
+            def yview(self):
+                return (0.0, 1.0)
+
+        class FakeLineNumberText:
+            def __init__(self) -> None:
+                self.configures = []
+                self.deletes = []
+                self.inserts = []
+                self.moves = []
+
+            def configure(self, **kwargs) -> None:
+                self.configures.append(kwargs)
+
+            def delete(self, start: str, end: str) -> None:
+                self.deletes.append((start, end))
+
+            def insert(self, index: str, text: str) -> None:
+                self.inserts.append((index, text))
+
+            def yview_moveto(self, fraction: float) -> None:
+                self.moves.append(fraction)
+
+        content = FakeContentText()
+        line_numbers = FakeLineNumberText()
+        window = WhisperTranscriptWindow.__new__(WhisperTranscriptWindow)
+        window._line_number_widgets = {content: line_numbers}
+
+        window._update_line_numbers(content)
+
+        self.assertEqual(line_numbers.deletes, [("1.0", "end")])
+        self.assertEqual(line_numbers.inserts, [("1.0", "1\n2")])
+        self.assertIn({"state": "normal"}, line_numbers.configures)
+        self.assertIn({"state": "disabled"}, line_numbers.configures)
+
+    def test_copy_all_uses_transcript_text_without_line_numbers(self) -> None:
+        class FakeRoot:
+            def __init__(self) -> None:
+                self.clipboard = ""
+
+            def clipboard_clear(self) -> None:
+                self.clipboard = ""
+
+            def clipboard_append(self, text: str) -> None:
+                self.clipboard += text
+
+        class FakeContentText:
+            def get(self, start: str, end: str) -> str:
+                return "전사 첫 줄\n전사 둘째 줄"
+
+        root = FakeRoot()
+        content = FakeContentText()
+        window = WhisperTranscriptWindow.__new__(WhisperTranscriptWindow)
+        window._root = root
+        window._text = content
+        window._context_text = None
+
+        window._copy_all(content)
+
+        self.assertEqual(root.clipboard, "전사 첫 줄\n전사 둘째 줄")
+
+
     def test_load_window_geometry_uses_default_when_saved_value_missing(self) -> None:
         class Root:
             def winfo_vrootwidth(self) -> int:

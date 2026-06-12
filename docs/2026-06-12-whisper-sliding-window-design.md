@@ -215,7 +215,8 @@ stable_text
 - `pending_chunks`는 확정 트리거가 아니라 진단 지표로 낮춘다.
 - 확정 전 문장은 녹색 partial 라인으로 계속 업데이트한다.
 - 확정 문장은 검은색 final 라인으로 고정하고, 번역 final 입력은 이 확정 문장만 사용한다.
-- partial 번역은 허용할 수 있으나, final 번역 라인은 확정 문장 갱신과 동기화한다.
+- 기본 번역 정책은 final-only이다. partial/staged 번역은 중복 번역과 premature translation을 만들기 쉬우므로 기본값에서 비활성화한다.
+- partial 번역을 다시 허용하는 경우에도 source revision id 기반으로 같은 라인을 갱신해야 하며, append-only 번역 라인으로 처리하지 않는다.
 
 ### 로그 지표
 
@@ -252,18 +253,34 @@ boundary_pending_chars=42
 
 ## 번역 정책
 
-번역은 전체 윈도우 결과가 아니라 확정된 새 텍스트만 대상으로 한다.
+번역은 전체 윈도우 결과가 아니라 확정된 새 텍스트만 대상으로 한다. 현재 기본 정책은 final-only translation이다.
 
 ```text
 잘못된 방식: current_window_text 전체 번역
-권장 방식: new_committed_text만 번역
+위험한 방식: staged/partial 문장을 append-only 번역
+권장 방식: final sentence delta만 번역
 ```
 
 이유:
 
 - 슬라이딩 윈도우는 같은 문맥을 여러 번 포함한다.
-- 전체 결과를 매번 번역하면 중복 번역이 생긴다.
+- Whisper partial hypothesis는 뒤 청크에서 자주 수정되므로, partial을 바로 번역하면 같은 의미가 여러 줄로 중복 출력된다.
 - NLLB 번역 모델은 긴 반복 입력에서 반복 생성이 발생할 수 있다.
+- 실시간 번역 연구는 지연을 줄이는 것보다 충분한 source 정보를 읽은 뒤 output을 내는 read/write policy를 중요하게 다룬다. 따라서 source 문장 안정성이 낮을 때는 번역을 기다리는 편이 낫다.
+
+현재 구현 정책:
+
+- STT 출력은 `partial -> staged -> final` 단계를 가진다.
+- 전사 창은 partial/staged를 갱신할 수 있지만, 번역 입력은 final 문장만 사용한다.
+- `PROVISIONAL_TRANSLATION_ENABLED` 기본값은 `False`다.
+- staged 번역을 다시 켜려면 source revision id를 부여하고, 번역 창에서 같은 id 라인을 갱신해야 한다. 이 조건 없이 staged 번역을 append하면 중복 번역이 재발한다.
+
+향후 검토할 선택지:
+
+- Local agreement: 여러 STT 윈도우에서 공통으로 반복 확인된 stable prefix만 final 후보로 승격한다.
+- Adaptive latency: 리비전/교체가 많으면 confirm threshold 또는 commit lag를 늘리고, 안정적이면 줄인다.
+- Segment trimming 우선: sentence segmenter에만 의존하지 않고 Whisper segment 또는 안정 prefix 기준으로 버퍼를 자른다.
+- Sentence segmenter 보강: regex backend 이후 wtpsplit 같은 다국어 문장 경계 모델을 실험하되, GPU/CUDA 요구 시 Fail-Fast를 유지한다.
 
 ## 설정 스키마
 
@@ -339,9 +356,10 @@ Whisper 성능: step=1.0s window=4.0s audio=4.00s stt=0.62s stt_rtf=0.16 committ
 5. `_transcribe_loop`를 ring buffer 기반으로 변경
 6. 문자열 overlap 기반 delta 계산 함수 추가
 7. 번역 입력을 `new_committed_text`로 제한
-8. 성능 로그 확장
-9. 단위 테스트 추가
-10. README에 운영 가이드 업데이트
+8. staged 번역 기본 비활성화와 final-only 번역 정책 적용
+9. 성능 로그 확장
+10. 단위 테스트 추가
+11. README에 운영 가이드 업데이트
 
 ## 테스트 계획
 
@@ -369,3 +387,12 @@ Whisper 성능: step=1.0s window=4.0s audio=4.00s stt=0.62s stt_rtf=0.16 committ
 - 4초 문맥 입력으로 짧은 청크보다 STT 정확도를 높인다.
 - 확정 delta만 출력해 모달 중복을 줄인다.
 - 확정 delta만 번역해 NLLB 반복 생성 가능성을 낮춘다.
+
+## 참고 자료
+
+- [Turning Whisper into Real-Time Transcription System](https://arxiv.org/abs/2307.14743): Whisper-Streaming 논문. Whisper가 기본적으로 실시간용이 아니며, local agreement policy와 self-adaptive latency로 안정 prefix를 확정하는 접근을 제안한다.
+- [ufal/whisper_streaming](https://github.com/ufal/whisper_streaming): Whisper-Streaming 구현체. `faster-whisper` GPU 백엔드, `min-chunk-size`, `buffer_trimming` 옵션, segment/sentence trimming 전략을 참고했다.
+- [Whisper-Streaming README - buffer trimming and sentence segmenter](https://github.com/ufal/whisper_streaming#installation): 기본 `segment` trimming이 품질/지연 측면에서 더 낫다는 설명과 wtpsplit 등 문장 segmenter 선택지를 참고했다.
+- [SimulEval: An Evaluation Toolkit for Simultaneous Translation](https://arxiv.org/abs/2007.16193): 실시간 번역은 품질과 지연을 함께 평가해야 하며, read/write 정책이 핵심이라는 점을 참고했다.
+- [Wait-info Policy: Balancing Source and Target at Information Level for Simultaneous Machine Translation](https://arxiv.org/abs/2210.11220): source 정보가 충분하지 않을 때 output을 기다리는 정책이 번역 품질과 지연 균형에 중요하다는 점을 참고했다.
+- [End-to-End Simultaneous Speech Translation with Differentiable Segmentation](https://arxiv.org/abs/2305.16093): 고정 길이 분할이나 외부 경계 모델이 번역에 불리한 시점에서 speech를 자를 수 있다는 문제의식을 참고했다.

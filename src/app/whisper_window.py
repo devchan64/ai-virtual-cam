@@ -49,6 +49,7 @@ SLOW_PENDING_MAX_CHARS_PER_CHUNK = 18.0
 SENTENCE_CONFIRM_CHUNKS = 2
 SENTENCE_CONFIRM_MAX_AGE_CHUNKS = 2
 MIN_PROVISIONAL_TRANSLATION_WORDS = 6
+PROVISIONAL_TRANSLATION_ENABLED = False
 _SENTENCE_END_PATTERN = r"(?:(?<!\d)\.(?!\d)|[!?。！？…]+)"
 _SENTENCE_END_RE = re.compile(rf"(.+?{_SENTENCE_END_PATTERN})(?=\s+|$)")
 _SENTENCE_END_MARK_RE = re.compile(_SENTENCE_END_PATTERN)
@@ -479,8 +480,21 @@ def _longest_prefix_revision_run(left_words: list[str], right_words: list[str]) 
     return length
 
 
+def _trim_leading_boundary_noise(text: str) -> str:
+    words = _word_units(text)
+    if len(words) >= 4 and words[:4] == ["if", "you", "when", "you"]:
+        return " ".join(words[2:]).strip()
+    if len(words) >= 3 and words[:3] == ["you", "when", "you"]:
+        return " ".join(words[1:]).strip()
+    return text.strip()
+
+
+def _sentence_delta_from_words(words: list[str]) -> str:
+    return _trim_leading_boundary_noise(" ".join(words).strip())
+
+
 def _sentence_output_delta(committed_text: str, sentence: str) -> str:
-    normalized = _normalized_text(sentence)
+    normalized = _collapse_adjacent_repeated_phrases(_normalized_text(sentence))
     if not normalized:
         return ""
     committed_words = _word_units(committed_text)
@@ -497,7 +511,7 @@ def _sentence_output_delta(committed_text: str, sentence: str) -> str:
             if _is_subsequence_at(sentence_words, committed_words, start):
                 suffix_words = sentence_words[start + len(committed_words) :]
                 if len(suffix_words) >= 3:
-                    return " ".join(suffix_words).strip()
+                    return _sentence_delta_from_words(suffix_words)
 
     committed_key_words = _duplicate_key_words(committed_words)
     sentence_key_words = _duplicate_key_words(sentence_words)
@@ -521,9 +535,9 @@ def _sentence_output_delta(committed_text: str, sentence: str) -> str:
             return ""
         middle_words = sentence_words[start:end]
         if prefix_len >= 5 and len(committed_words) <= 10:
-            return " ".join(middle_words).strip()
+            return _sentence_delta_from_words(middle_words)
         if len(middle_words) <= max(2, len(sentence_words) // 2):
-            return " ".join(middle_words).strip()
+            return _sentence_delta_from_words(middle_words)
 
     best_i = 0
     best_j = 0
@@ -547,16 +561,17 @@ def _sentence_output_delta(committed_text: str, sentence: str) -> str:
     if best_j == 0 and best_len >= 4:
         suffix_words = sentence_words[best_len:]
         if len(suffix_words) >= 3:
-            return " ".join(suffix_words)
+            return _sentence_delta_from_words(suffix_words)
         return ""
     if best_i + best_len == len(committed_words) and best_j == 1 and best_len >= 4:
         suffix_words = sentence_words[best_j + best_len :]
         if len(suffix_words) >= 3:
-            return " ".join(suffix_words).strip()
+            return _sentence_delta_from_words(suffix_words)
         return ""
-    if best_i + best_len == len(committed_words) and best_j == 0 and best_len >= 3:
+    if best_i + best_len == len(committed_words) and best_j == 0 and best_len >= 2:
         suffix_words = sentence_words[best_len:]
-        return " ".join(suffix_words).strip()
+        if best_len >= 3 or len(suffix_words) >= 5:
+            return _sentence_delta_from_words(suffix_words)
     return normalized
 
 
@@ -587,6 +602,8 @@ def _sentences_are_revisions(left: str, right: str) -> bool:
 
 
 def _should_translate_staged_sentence(staged_sentence: str, staged_confirmations: int) -> bool:
+    if not PROVISIONAL_TRANSLATION_ENABLED:
+        return False
     if staged_confirmations >= SENTENCE_CONFIRM_CHUNKS:
         return True
     return len(_word_units(staged_sentence)) >= MIN_PROVISIONAL_TRANSLATION_WORDS
@@ -1275,6 +1292,7 @@ class WhisperTranscriptWindow:
         self._translation_geometry_save_after_id: str | None = None
         self._translation_root = None
         self._translation_text = None
+        self._line_number_widgets = {}
         self._context_text = None
         self._transcript_partial_active = False
         self._translation_partial_active = False
@@ -1291,18 +1309,10 @@ class WhisperTranscriptWindow:
 
         frame = ttk.Frame(self._root, padding=10)
         frame.grid(row=0, column=0, sticky="nsew")
-        frame.columnconfigure(0, weight=1)
+        frame.columnconfigure(1, weight=1)
         frame.rowconfigure(0, weight=1)
 
-        self._text = tk.Text(frame, wrap="word", undo=False)
-        self._configure_transcript_text_tags(self._text)
-        self._text.grid(row=0, column=0, sticky="nsew")
-        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self._text.yview)
-        scrollbar.grid(row=0, column=1, sticky="ns")
-        self._text.configure(yscrollcommand=scrollbar.set)
-        self._text.bind("<Key>", self._on_text_key)
-        self._text.bind("<Button-3>", self._show_context_menu)
-        self._text.bind("<Control-Button-1>", self._show_context_menu)
+        self._text = self._create_numbered_text(frame, 0)
         self._context_menu = tk.Menu(self._root, tearoff=False)
         self._context_menu.add_command(label="Copy", command=self._copy_selection)
         self._context_menu.add_command(label="Copy All", command=self._copy_all)
@@ -1310,7 +1320,7 @@ class WhisperTranscriptWindow:
         self._context_menu.add_command(label="Clear", command=self._clear)
 
         actions = ttk.Frame(frame)
-        actions.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        actions.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(8, 0))
         actions.columnconfigure(0, weight=1)
         copy_btn = ttk.Button(actions, text="Copy All", command=lambda: self._copy_all(self._text))
         copy_btn.grid(row=0, column=1, sticky="e", padx=(0, 6))
@@ -1339,21 +1349,13 @@ class WhisperTranscriptWindow:
 
         frame = ttk.Frame(self._translation_root, padding=10)
         frame.grid(row=0, column=0, sticky="nsew")
-        frame.columnconfigure(0, weight=1)
+        frame.columnconfigure(1, weight=1)
         frame.rowconfigure(0, weight=1)
 
-        self._translation_text = tk.Text(frame, wrap="word", undo=False)
-        self._configure_transcript_text_tags(self._translation_text)
-        self._translation_text.grid(row=0, column=0, sticky="nsew")
-        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self._translation_text.yview)
-        scrollbar.grid(row=0, column=1, sticky="ns")
-        self._translation_text.configure(yscrollcommand=scrollbar.set)
-        self._translation_text.bind("<Key>", self._on_text_key)
-        self._translation_text.bind("<Button-3>", self._show_context_menu)
-        self._translation_text.bind("<Control-Button-1>", self._show_context_menu)
+        self._translation_text = self._create_numbered_text(frame, 0)
 
         actions = ttk.Frame(frame)
-        actions.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        actions.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(8, 0))
         actions.columnconfigure(0, weight=1)
         copy_btn = ttk.Button(actions, text="Copy All", command=lambda: self._copy_all(self._translation_text))
         copy_btn.grid(row=0, column=1, sticky="e", padx=(0, 6))
@@ -1362,6 +1364,57 @@ class WhisperTranscriptWindow:
 
         self._translation_root.bind("<Configure>", self._on_translation_configure)
         self._translation_root.protocol("WM_DELETE_WINDOW", self._hide_translation_window)
+
+    def _create_numbered_text(self, parent, row: int):
+        tk = self._tk
+        ttk = self._ttk
+        line_numbers = tk.Text(parent, width=4, padx=4, takefocus=False, wrap="none", undo=False)
+        line_numbers.grid(row=row, column=0, sticky="ns")
+        line_numbers.configure(state="disabled")
+        text_widget = tk.Text(parent, wrap="word", undo=False)
+        self._configure_transcript_text_tags(text_widget)
+        text_widget.grid(row=row, column=1, sticky="nsew")
+        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=text_widget.yview)
+        scrollbar.grid(row=row, column=2, sticky="ns")
+
+        def yscroll(first: str, last: str) -> None:
+            scrollbar.set(first, last)
+            try:
+                line_numbers.yview_moveto(float(first))
+            except Exception:
+                pass
+
+        text_widget.configure(yscrollcommand=yscroll)
+        text_widget.bind("<Key>", self._on_text_key)
+        text_widget.bind("<Button-3>", self._show_context_menu)
+        text_widget.bind("<Control-Button-1>", self._show_context_menu)
+        self._configure_line_number_text(line_numbers)
+        self._line_number_widgets[text_widget] = line_numbers
+        return text_widget
+
+    def _configure_line_number_text(self, line_numbers) -> None:
+        line_numbers.configure(foreground="#777777", background="#f0f0f0", relief="flat")
+
+    def _update_line_numbers(self, text_widget) -> None:
+        line_numbers = getattr(self, "_line_number_widgets", {}).get(text_widget)
+        if line_numbers is None:
+            return
+        content = text_widget.get("1.0", "end-1c")
+        if not content:
+            numbers = ""
+        else:
+            line_count = content.count("\n") + 1
+            numbers = "\n".join(str(index) for index in range(1, line_count + 1))
+        line_numbers.configure(state="normal")
+        line_numbers.delete("1.0", "end")
+        if numbers:
+            line_numbers.insert("1.0", numbers)
+        line_numbers.configure(state="disabled")
+        try:
+            first, _last = text_widget.yview()
+            line_numbers.yview_moveto(first)
+        except Exception:
+            pass
 
     def run(self) -> int:
         self._thread.start()
@@ -1398,6 +1451,7 @@ class WhisperTranscriptWindow:
             target.insert("end", line, PARTIAL_TEXT_TAG)
             if partial_attr is not None:
                 setattr(self, partial_attr, True)
+        self._update_line_numbers(target)
         target.see("end")
 
     def _poll_events(self) -> None:
@@ -1489,6 +1543,7 @@ class WhisperTranscriptWindow:
     def _clear(self, text_widget=None) -> None:
         target = text_widget if text_widget is not None else (self._context_text or self._text)
         target.delete("1.0", "end")
+        self._update_line_numbers(target)
         if target is self._text:
             self._transcript_partial_active = False
         elif target is self._translation_text:
