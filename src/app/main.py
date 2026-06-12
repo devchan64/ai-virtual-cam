@@ -15,6 +15,7 @@ from src.adapter.capture.opencv_capture import OpenCVCapture
 from src.adapter.output.factory import build_output
 from src.audio.mixer import VirtualAudioMixer
 from src.domain.config import AppConfig
+from src.app.rotating_log import install_rotating_stdout_log
 from src.pipeline.runner import PipelineRunner
 
 
@@ -74,6 +75,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    log_path = install_rotating_stdout_log("avc-serve")
+    _log(f"[avc] rotating log file: {log_path}")
     args = parse_args()
     config_path = Path(args.config).expanduser()
     _log(f"[avc] loading config: {config_path}")

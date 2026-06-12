@@ -1,6 +1,6 @@
 import unittest
 
-from src.app.whisper_window import _new_text_delta, _stable_window_text
+from src.app.whisper_window import _new_text_delta, _split_completed_sentences, _stable_window_text
 
 
 class WhisperSlidingWindowTextTest(unittest.TestCase):
@@ -9,6 +9,25 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
             _stable_window_text("Folks I was one of the first people", 1.0, 4.0),
             "Folks I was one of the",
         )
+
+
+    def test_sentence_split_keeps_incomplete_tail_pending(self) -> None:
+        completed, pending = _split_completed_sentences("", "Hello there. This is still")
+
+        self.assertEqual(completed, ["Hello there."])
+        self.assertEqual(pending, "This is still")
+
+    def test_sentence_split_joins_pending_with_new_text(self) -> None:
+        completed, pending = _split_completed_sentences("This is", "done! Next")
+
+        self.assertEqual(completed, ["This is done!"])
+        self.assertEqual(pending, "Next")
+
+    def test_sentence_split_supports_cjk_sentence_marks(self) -> None:
+        completed, pending = _split_completed_sentences("", "안녕하세요. 다음 문장")
+
+        self.assertEqual(completed, ["안녕하세요."])
+        self.assertEqual(pending, "다음 문장")
 
     def test_delta_outputs_only_new_overlap_suffix(self) -> None:
         committed = "Folks I was one of the first people"

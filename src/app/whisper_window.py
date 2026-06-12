@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+from src.app.rotating_log import install_rotating_stdout_log
 from src.app.translation_model import TranslationRequest, build_text_translator
 from src.domain.whisper_defaults import whisper_default
 from src.domain.config import AppConfig, WhisperConfig
@@ -31,6 +32,7 @@ MIN_SEGMENT_AVG_LOGPROB = -1.0
 MAX_SEGMENT_NO_SPEECH_PROB = 0.75
 RECENT_TRANSCRIPT_WINDOW = 8
 MAX_RECENT_SHORT_TEXT_REPEATS = 2
+_SENTENCE_END_RE = re.compile(r"(.+?[.!?。！？…]+)(?=\s+|$)")
 _WINDOW_TITLES = {
     "en": {
         "transcript": "ai-virtual-cam Whisper Transcript",
@@ -52,6 +54,7 @@ class TranscriptEvent:
     text: str
     display: bool = True
     log_text: str | None = None
+    final: bool = True
 
 
 def parse_args() -> argparse.Namespace:
@@ -247,6 +250,22 @@ def _append_committed_text(committed_text: str, new_text: str) -> str:
     return combined[-4000:]
 
 
+def _split_completed_sentences(pending_text: str, new_text: str) -> tuple[list[str], str]:
+    combined = _normalized_text(f"{pending_text} {new_text}")
+    if not combined:
+        return [], ""
+    completed: list[str] = []
+    consumed_end = 0
+    for match in _SENTENCE_END_RE.finditer(combined):
+        sentence = match.group(1).strip()
+        if sentence:
+            completed.append(sentence)
+        consumed_end = match.end(1)
+    if consumed_end <= 0:
+        return [], combined
+    return completed, combined[consumed_end:].strip()
+
+
 class WhisperTranscriptWorker:
     def __init__(self, config: WhisperConfig, events: queue.Queue[TranscriptEvent]) -> None:
         self._cfg = config
@@ -257,9 +276,17 @@ class WhisperTranscriptWorker:
         self._capture_thread: threading.Thread | None = None
         self._recent_transcripts: deque[str] = deque(maxlen=RECENT_TRANSCRIPT_WINDOW)
 
-    def _emit(self, kind: str, text: str, *, display: bool = True, log_text: str | None = None) -> None:
+    def _emit(
+        self,
+        kind: str,
+        text: str,
+        *,
+        display: bool = True,
+        log_text: str | None = None,
+        final: bool = True,
+    ) -> None:
         _log_line(f"[avc] whisper {kind}: {log_text if log_text is not None else text}")
-        self._events.put(TranscriptEvent(kind, text, display, log_text))
+        self._events.put(TranscriptEvent(kind, text, display, log_text, final))
 
     def _accepted_segment_texts(self, segments) -> tuple[list[str], list[str]]:
         texts: list[str] = []
@@ -475,6 +502,7 @@ class WhisperTranscriptWorker:
         translation_failed = False
         committed_text = ""
         committed_translation_text = ""
+        pending_transcript_text = ""
         self._emit(
             "status",
             f"Whisper 전사 루프 시작: step_seconds={step_seconds} window_seconds={window_seconds} "
@@ -522,6 +550,7 @@ class WhisperTranscriptWorker:
             chunk_started_at = time.perf_counter()
             translation_elapsed = 0.0
             translation_attempted = False
+            translation_started_at = chunk_started_at
             text = ""
             try:
                 stt_started_at = time.perf_counter()
@@ -549,13 +578,23 @@ class WhisperTranscriptWorker:
                         f"Whisper 전사 후보 무시: chunk={chunks} reasons={'; '.join(rejected_reasons)}",
                         display=False,
                     )
+                completed_sentences: list[str] = []
                 if text and self._is_repeated_hallucination(text):
                     self._emit("status", f"Whisper 반복 전사 무시: chunk={chunks} text={text!r}", display=False)
                     text = ""
                 if text:
-                    committed_text = _append_committed_text(committed_text, text)
-                    self._remember_transcript(text)
-                    self._emit("transcript", text, log_text=f"[{detected}] {text}")
+                    completed_sentences, pending_transcript_text = _split_completed_sentences("", text)
+                    for sentence in completed_sentences:
+                        committed_text = _append_committed_text(committed_text, sentence)
+                        self._remember_transcript(sentence)
+                        self._emit("transcript", sentence, log_text=f"[{detected}] {sentence}", final=True)
+                    if pending_transcript_text:
+                        self._emit(
+                            "transcript",
+                            pending_transcript_text,
+                            log_text=f"[{detected}] {pending_transcript_text}",
+                            final=False,
+                        )
                 else:
                     preview_chars = max(0, len(_normalized_text(window_text)) - len(_normalized_text(stable_text)))
                     self._emit(
@@ -563,55 +602,56 @@ class WhisperTranscriptWorker:
                         f"Whisper 전사 결과 없음: chunk={chunks} preview_chars={preview_chars}",
                         display=False,
                     )
-                if self._cfg.translationEnabled and not translation_failed and text:
+                if self._cfg.translationEnabled and not translation_failed and completed_sentences:
                     try:
                         translation_attempted = True
-                        translation_started_at = time.perf_counter()
                         request_label = "Whisper 내장 번역 요청" if text_translator is None else "외부 텍스트 번역 요청"
-                        self._emit("status", f"{request_label}: chunk={chunks}", display=False)
-                        translated_text = ""
                         target_language = self._cfg.translationTargetLanguage
-                        if text_translator is None:
-                            translated_segments, _translated_info = model.transcribe(
-                                audio,
-                                language=language,
-                                task="translate",
-                                vad_filter=self._cfg.vadFilter,
-                                beam_size=self._cfg.beamSize,
-                                temperature=self._cfg.temperature,
-                                max_new_tokens=self._cfg.maxNewTokens,
-                                without_timestamps=True,
-                                condition_on_previous_text=False,
-                            )
-                            translated_window_text = " ".join(
-                                segment.text.strip() for segment in translated_segments if segment.text.strip()
-                            ).strip()
-                            translated_stable_text = _stable_window_text(
-                                translated_window_text,
-                                commit_lag_seconds,
-                                window_seconds,
-                            )
-                            translated_text = _new_text_delta(committed_translation_text, translated_stable_text)
-                            target_language = "en"
-                        elif text:
-                            source_language = detected if detected in {"ko", "en", "zh"} else self._cfg.language
-                            translated_text = text_translator.translate(
-                                TranslationRequest(
-                                    text=text,
-                                    source_language=source_language,
-                                    target_language=target_language,
+                        source_language = detected if detected in {"ko", "en", "zh"} else self._cfg.language
+                        for sentence in completed_sentences:
+                            translation_started_at = time.perf_counter()
+                            self._emit("status", f"{request_label}: chunk={chunks}", display=False)
+                            translated_text = ""
+                            if text_translator is None:
+                                translated_segments, _translated_info = model.transcribe(
+                                    audio,
+                                    language=language,
+                                    task="translate",
+                                    vad_filter=self._cfg.vadFilter,
+                                    beam_size=self._cfg.beamSize,
+                                    temperature=self._cfg.temperature,
+                                    max_new_tokens=self._cfg.maxNewTokens,
+                                    without_timestamps=True,
+                                    condition_on_previous_text=False,
                                 )
-                            )
-                        translation_elapsed = time.perf_counter() - translation_started_at
-                        if translated_text:
-                            committed_translation_text = _append_committed_text(committed_translation_text, translated_text)
-                            self._emit(
-                                "translation",
-                                translated_text,
-                                log_text=f"[{detected}->{target_language}] {translated_text}",
-                            )
-                        else:
-                            self._emit("status", f"Whisper 번역 결과 없음: chunk={chunks}", display=False)
+                                translated_window_text = " ".join(
+                                    segment.text.strip() for segment in translated_segments if segment.text.strip()
+                                ).strip()
+                                translated_stable_text = _stable_window_text(
+                                    translated_window_text,
+                                    commit_lag_seconds,
+                                    window_seconds,
+                                )
+                                translated_text = _new_text_delta(committed_translation_text, translated_stable_text)
+                                target_language = "en"
+                            else:
+                                translated_text = text_translator.translate(
+                                    TranslationRequest(
+                                        text=sentence,
+                                        source_language=source_language,
+                                        target_language=target_language,
+                                    )
+                                )
+                            translation_elapsed += time.perf_counter() - translation_started_at
+                            if translated_text:
+                                committed_translation_text = _append_committed_text(committed_translation_text, translated_text)
+                                self._emit(
+                                    "translation",
+                                    translated_text,
+                                    log_text=f"[{detected}->{target_language}] {translated_text}",
+                                )
+                            else:
+                                self._emit("status", f"Whisper 번역 결과 없음: chunk={chunks}", display=False)
                     except Exception as exc:
                         translation_elapsed = time.perf_counter() - translation_started_at if translation_attempted else 0.0
                         translation_failed = True
@@ -666,6 +706,7 @@ class WhisperTranscriptWindow:
         self._translation_root = None
         self._translation_text = None
         self._context_text = None
+        self._transcript_partial_active = False
         self._events: queue.Queue[TranscriptEvent] = queue.Queue()
         self._worker = WhisperTranscriptWorker(app_config.whisper, self._events)
         self._thread = threading.Thread(target=self._worker.run, daemon=True)
@@ -763,9 +804,18 @@ class WhisperTranscriptWindow:
             return None
         return "break"
 
-    def _append(self, line: str, text_widget=None) -> None:
+    def _append(self, line: str, text_widget=None, *, final: bool = True) -> None:
         target = text_widget if text_widget is not None else self._text
-        target.insert("end", f"{line}\n")
+        if target is self._text and self._transcript_partial_active:
+            target.delete("end-1c linestart", "end-1c")
+        if final:
+            target.insert("end", f"{line}\n")
+            if target is self._text:
+                self._transcript_partial_active = False
+        else:
+            target.insert("end", line)
+            if target is self._text:
+                self._transcript_partial_active = True
         target.see("end")
 
     def _poll_events(self) -> None:
@@ -779,7 +829,7 @@ class WhisperTranscriptWindow:
             if event.kind == "translation" and self._translation_text is not None:
                 self._append(event.text, self._translation_text)
             elif event.kind == "transcript":
-                self._append(event.text, self._text)
+                self._append(event.text, self._text, final=event.final)
         self._root.after(100, self._poll_events)
 
     def _on_configure(self, event) -> None:
@@ -859,6 +909,8 @@ class WhisperTranscriptWindow:
     def _clear(self, text_widget=None) -> None:
         target = text_widget if text_widget is not None else (self._context_text or self._text)
         target.delete("1.0", "end")
+        if target is self._text:
+            self._transcript_partial_active = False
 
     def _hide_translation_window(self) -> None:
         if self._translation_root is not None:
@@ -890,6 +942,8 @@ class WhisperTranscriptWindow:
 
 
 def main() -> int:
+    log_path = install_rotating_stdout_log("avc-whisper")
+    _log_line(f"[avc] whisper rotating log file: {log_path}")
     args = parse_args()
     config_path = Path(args.config).expanduser()
     app_config = AppConfig.load(config_path)
