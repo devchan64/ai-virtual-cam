@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from src.domain.config import AppConfig, WhisperConfig
+from src.domain.whisper_defaults import whisper_default
 from src.tools.config_builder import build_config
 
 
@@ -115,12 +116,12 @@ class WhisperConfigTest(unittest.TestCase):
         self.assertEqual(loaded.whisper.translationModel, "facebook/nllb-200-distilled-600M")
         self.assertEqual(loaded.whisper.translationDevice, "cuda")
         self.assertEqual(loaded.whisper.translationComputeType, "float16")
-        self.assertEqual(loaded.whisper.translationBeamSize, 1)
-        self.assertEqual(loaded.whisper.translationMaxNewTokens, 128)
-        self.assertEqual(loaded.whisper.chunkSeconds, 5.0)
-        self.assertEqual(loaded.whisper.beamSize, 5)
-        self.assertEqual(loaded.whisper.maxNewTokens, 96)
-        self.assertEqual(loaded.whisper.temperature, 0.0)
+        self.assertEqual(loaded.whisper.translationBeamSize, whisper_default("translationBeamSize"))
+        self.assertEqual(loaded.whisper.translationMaxNewTokens, whisper_default("translationMaxNewTokens"))
+        self.assertEqual(loaded.whisper.chunkSeconds, whisper_default("chunkSeconds"))
+        self.assertEqual(loaded.whisper.beamSize, whisper_default("beamSize"))
+        self.assertEqual(loaded.whisper.maxNewTokens, whisper_default("maxNewTokens"))
+        self.assertEqual(loaded.whisper.temperature, whisper_default("temperature"))
 
     def test_whisper_rejects_invalid_backend(self) -> None:
         with self.assertRaisesRegex(ValueError, "whisper.backend"):

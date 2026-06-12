@@ -12,19 +12,25 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
 
 from src.app.translation_model import TranslationRequest, build_text_translator
+from src.domain.whisper_defaults import whisper_default
 from src.domain.config import AppConfig, WhisperConfig
 
 
 SAMPLE_RATE = 16000
-DEFAULT_CHUNK_SECONDS = 5.0
+DEFAULT_CHUNK_SECONDS = float(whisper_default("chunkSeconds"))
 DEFAULT_WINDOW_GEOMETRY = "780x420"
 MIN_WINDOW_WIDTH = 520
 MIN_WINDOW_HEIGHT = 280
+MIN_SEGMENT_AVG_LOGPROB = -1.0
+MAX_SEGMENT_NO_SPEECH_PROB = 0.75
+RECENT_TRANSCRIPT_WINDOW = 8
+MAX_RECENT_SHORT_TEXT_REPEATS = 2
 _WINDOW_TITLES = {
     "en": {
         "transcript": "ai-virtual-cam Whisper Transcript",
@@ -189,10 +195,41 @@ class WhisperTranscriptWorker:
         self._audio_queue: queue.Queue[object] = queue.Queue(maxsize=120)
         self._capture_process: subprocess.Popen[bytes] | None = None
         self._capture_thread: threading.Thread | None = None
+        self._recent_transcripts: deque[str] = deque(maxlen=RECENT_TRANSCRIPT_WINDOW)
 
     def _emit(self, kind: str, text: str, *, display: bool = True, log_text: str | None = None) -> None:
         _log_line(f"[avc] whisper {kind}: {log_text if log_text is not None else text}")
         self._events.put(TranscriptEvent(kind, text, display, log_text))
+
+    def _accepted_segment_texts(self, segments) -> tuple[list[str], list[str]]:
+        texts: list[str] = []
+        rejected: list[str] = []
+        for segment in segments:
+            text = segment.text.strip()
+            if not text:
+                continue
+            avg_logprob = float(getattr(segment, "avg_logprob", 0.0) or 0.0)
+            no_speech_prob = float(getattr(segment, "no_speech_prob", 0.0) or 0.0)
+            if no_speech_prob >= MAX_SEGMENT_NO_SPEECH_PROB:
+                rejected.append(f"no_speech text={text!r} prob={no_speech_prob:.2f}")
+                continue
+            if avg_logprob <= MIN_SEGMENT_AVG_LOGPROB:
+                rejected.append(f"low_logprob text={text!r} avg_logprob={avg_logprob:.2f}")
+                continue
+            texts.append(text)
+        return texts, rejected
+
+    def _is_repeated_hallucination(self, text: str) -> bool:
+        normalized = " ".join(text.split())
+        if not normalized:
+            return False
+        repeats = sum(1 for item in self._recent_transcripts if item == normalized)
+        return len(normalized) <= 24 and repeats >= MAX_RECENT_SHORT_TEXT_REPEATS
+
+    def _remember_transcript(self, text: str) -> None:
+        normalized = " ".join(text.split())
+        if normalized:
+            self._recent_transcripts.append(normalized)
 
     def stop(self) -> None:
         self._stop.set()
@@ -414,14 +451,26 @@ class WhisperTranscriptWorker:
                     without_timestamps=True,
                     condition_on_previous_text=False,
                 )
-                text = " ".join(segment.text.strip() for segment in segments if segment.text.strip()).strip()
+                segment_list = list(segments)
+                accepted_texts, rejected_reasons = self._accepted_segment_texts(segment_list)
+                text = " ".join(accepted_texts).strip()
                 stt_elapsed = time.perf_counter() - stt_started_at
                 detected = getattr(info, "language", self._cfg.language)
+                if rejected_reasons:
+                    self._emit(
+                        "status",
+                        f"Whisper 전사 후보 무시: chunk={chunks} reasons={'; '.join(rejected_reasons)}",
+                        display=False,
+                    )
+                if text and self._is_repeated_hallucination(text):
+                    self._emit("status", f"Whisper 반복 전사 무시: chunk={chunks} text={text!r}", display=False)
+                    text = ""
                 if text:
+                    self._remember_transcript(text)
                     self._emit("transcript", text, log_text=f"[{detected}] {text}")
                 else:
                     self._emit("status", f"Whisper 전사 결과 없음: chunk={chunks}", display=False)
-                if self._cfg.translationEnabled and not translation_failed:
+                if self._cfg.translationEnabled and not translation_failed and text:
                     try:
                         translation_attempted = True
                         translation_started_at = time.perf_counter()

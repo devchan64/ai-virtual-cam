@@ -3,6 +3,8 @@ from __future__ import annotations
 import platform
 import subprocess
 
+from src.domain.whisper_defaults import whisper_default
+
 
 def _default_audio_output_device() -> str:
     if platform.system() != "Linux":
@@ -442,27 +444,27 @@ def build_config(
     face_enhance_min_size_ratio: float = 0.12,
     face_enhance_edge_dither: float = 0.25,
     face_deidentify_enabled: bool = False,
-    whisper_enabled: bool = False,
+    whisper_enabled: bool = whisper_default("enabled"),
     whisper_input_device: str | None = None,
-    whisper_backend: str = "faster-whisper",
-    whisper_model: str = "large-v3",
-    whisper_language: str = "ko",
-    whisper_task: str = "transcribe",
-    whisper_translation_enabled: bool = False,
-    whisper_translation_target_language: str = "en",
-    whisper_translation_backend: str = "whisper",
-    whisper_translation_model: str = "facebook/nllb-200-distilled-600M",
-    whisper_translation_device: str = "cuda",
-    whisper_translation_compute_type: str = "float16",
-    whisper_translation_beam_size: int = 1,
-    whisper_translation_max_new_tokens: int = 128,
-    whisper_device: str = "cuda",
-    whisper_compute_type: str = "float16",
-    whisper_vad_filter: bool = True,
-    whisper_chunk_seconds: float = 5.0,
-    whisper_beam_size: int = 5,
-    whisper_max_new_tokens: int = 96,
-    whisper_temperature: float = 0.0,
+    whisper_backend: str = whisper_default("backend"),
+    whisper_model: str = whisper_default("model"),
+    whisper_language: str = whisper_default("language"),
+    whisper_task: str = whisper_default("task"),
+    whisper_translation_enabled: bool = whisper_default("translationEnabled"),
+    whisper_translation_target_language: str = whisper_default("translationTargetLanguage"),
+    whisper_translation_backend: str = whisper_default("translationBackend"),
+    whisper_translation_model: str = whisper_default("translationModel"),
+    whisper_translation_device: str = whisper_default("translationDevice"),
+    whisper_translation_compute_type: str = whisper_default("translationComputeType"),
+    whisper_translation_beam_size: int = whisper_default("translationBeamSize"),
+    whisper_translation_max_new_tokens: int = whisper_default("translationMaxNewTokens"),
+    whisper_device: str = whisper_default("device"),
+    whisper_compute_type: str = whisper_default("computeType"),
+    whisper_vad_filter: bool = whisper_default("vadFilter"),
+    whisper_chunk_seconds: float = whisper_default("chunkSeconds"),
+    whisper_beam_size: int = whisper_default("beamSize"),
+    whisper_max_new_tokens: int = whisper_default("maxNewTokens"),
+    whisper_temperature: float = whisper_default("temperature"),
 ) -> dict:
     if audio_output_device is None:
         audio_output_device = _default_audio_output_device()

@@ -3,10 +3,14 @@ import io
 import json
 import tempfile
 import unittest
+import queue
+from types import SimpleNamespace
 from pathlib import Path
 
+from src.domain.config import WhisperConfig
 from src.app.whisper_window import (
     TranscriptEvent,
+    WhisperTranscriptWorker,
     _is_modal_output_event,
     _load_ui_language,
     _sanitize_window_geometry,
@@ -91,6 +95,29 @@ class WhisperWindowGeometryTest(unittest.TestCase):
         self.assertIsNone(_sanitize_window_geometry("200x100+120+80", 1920, 1080))
         self.assertIsNone(_sanitize_window_geometry("820x460+5000+80", 1920, 1080))
         self.assertIsNone(_sanitize_window_geometry("invalid", 1920, 1080))
+
+    def test_filters_low_confidence_segments(self) -> None:
+        worker = WhisperTranscriptWorker(WhisperConfig.from_dict({"inputDevice": "default"}), queue.Queue())
+        segments = [
+            SimpleNamespace(text=" 정상 문장 ", avg_logprob=-0.2, no_speech_prob=0.1),
+            SimpleNamespace(text=" 무음 환각 ", avg_logprob=-0.2, no_speech_prob=0.9),
+            SimpleNamespace(text=" 저신뢰 ", avg_logprob=-1.4, no_speech_prob=0.1),
+        ]
+
+        texts, rejected = worker._accepted_segment_texts(segments)
+
+        self.assertEqual(texts, ["정상 문장"])
+        self.assertEqual(len(rejected), 2)
+        self.assertIn("no_speech", rejected[0])
+        self.assertIn("low_logprob", rejected[1])
+
+    def test_rejects_repeated_short_transcripts(self) -> None:
+        worker = WhisperTranscriptWorker(WhisperConfig.from_dict({"inputDevice": "default"}), queue.Queue())
+        worker._remember_transcript("다음 영상에서 만나요.")
+        worker._remember_transcript("다음 영상에서 만나요.")
+
+        self.assertTrue(worker._is_repeated_hallucination("다음 영상에서 만나요."))
+        self.assertFalse(worker._is_repeated_hallucination("이 문장은 충분히 긴 새로운 설명이라 반복으로 보지 않습니다"))
 
 
 if __name__ == "__main__":

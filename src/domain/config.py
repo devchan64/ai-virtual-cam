@@ -6,6 +6,8 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from src.domain.whisper_defaults import whisper_default
+
 
 def _default_audio_output_device() -> str:
     if platform.system() != "Linux":
@@ -735,27 +737,27 @@ class WhisperConfig:
     @classmethod
     def from_dict(cls, raw: dict) -> "WhisperConfig":
         config = cls(
-            enabled=bool(raw.get("enabled", False)),
+            enabled=bool(raw.get("enabled", whisper_default("enabled"))),
             inputDevice=str(raw.get("inputDevice", _default_audio_input_device())).strip(),
-            backend=str(raw.get("backend", "faster-whisper")).strip(),
-            model=str(raw.get("model", "large-v3")).strip(),
-            language=str(raw.get("language", "ko")).strip(),
-            task=str(raw.get("task", "transcribe")).strip(),
+            backend=str(raw.get("backend", whisper_default("backend"))).strip(),
+            model=str(raw.get("model", whisper_default("model"))).strip(),
+            language=str(raw.get("language", whisper_default("language"))).strip(),
+            task=str(raw.get("task", whisper_default("task"))).strip(),
             translationEnabled=bool(raw.get("translationEnabled", raw.get("task") == "translate")),
-            translationTargetLanguage=str(raw.get("translationTargetLanguage", "en")).strip(),
-            translationBackend=str(raw.get("translationBackend", "whisper")).strip(),
-            translationModel=str(raw.get("translationModel", "facebook/nllb-200-distilled-600M")).strip(),
-            translationDevice=str(raw.get("translationDevice", "cuda")).strip(),
-            translationComputeType=str(raw.get("translationComputeType", "float16")).strip(),
-            translationBeamSize=int(raw.get("translationBeamSize", 1)),
-            translationMaxNewTokens=int(raw.get("translationMaxNewTokens", 128)),
-            device=str(raw.get("device", "cuda")).strip(),
-            computeType=str(raw.get("computeType", "float16")).strip(),
-            vadFilter=bool(raw.get("vadFilter", True)),
-            chunkSeconds=float(raw.get("chunkSeconds", 5.0)),
-            beamSize=int(raw.get("beamSize", 5)),
-            maxNewTokens=int(raw.get("maxNewTokens", 96)),
-            temperature=float(raw.get("temperature", 0.0)),
+            translationTargetLanguage=str(raw.get("translationTargetLanguage", whisper_default("translationTargetLanguage"))).strip(),
+            translationBackend=str(raw.get("translationBackend", whisper_default("translationBackend"))).strip(),
+            translationModel=str(raw.get("translationModel", whisper_default("translationModel"))).strip(),
+            translationDevice=str(raw.get("translationDevice", whisper_default("translationDevice"))).strip(),
+            translationComputeType=str(raw.get("translationComputeType", whisper_default("translationComputeType"))).strip(),
+            translationBeamSize=int(raw.get("translationBeamSize", whisper_default("translationBeamSize"))),
+            translationMaxNewTokens=int(raw.get("translationMaxNewTokens", whisper_default("translationMaxNewTokens"))),
+            device=str(raw.get("device", whisper_default("device"))).strip(),
+            computeType=str(raw.get("computeType", whisper_default("computeType"))).strip(),
+            vadFilter=bool(raw.get("vadFilter", whisper_default("vadFilter"))),
+            chunkSeconds=float(raw.get("chunkSeconds", whisper_default("chunkSeconds"))),
+            beamSize=int(raw.get("beamSize", whisper_default("beamSize"))),
+            maxNewTokens=int(raw.get("maxNewTokens", whisper_default("maxNewTokens"))),
+            temperature=float(raw.get("temperature", whisper_default("temperature"))),
         )
         allowed_backends = {"faster-whisper", "openai-whisper", "whisper.cpp", "mock"}
         if config.backend not in allowed_backends:

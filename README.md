@@ -352,7 +352,7 @@ Whisper 활성화:
 
 - `청크 길이(초)`(`chunkSeconds`): 입력 오디오를 몇 초 단위로 잘라 전사할지 결정합니다. 짧게 잡으면 첫 결과가 빨리 나오고 화면 갱신 주기가 짧아지지만, 문맥이 부족해 문장이 잘리거나 짧은 구간의 인식 품질이 흔들릴 수 있습니다. 길게 잡으면 문맥이 늘어 정확도와 문장 완성도에 유리하지만, 해당 길이만큼 결과 출력 지연이 커집니다.
 - `Beam 크기`(`beamSize`): 디코딩 후보를 몇 갈래로 탐색할지 결정합니다. `1`은 가장 빠른 greedy 디코딩에 가깝고 지연을 줄이는 데 유리합니다. 값을 키우면 후보 탐색이 늘어 일부 발화의 정확도와 안정성이 좋아질 수 있지만, large-v3에서는 GPU 사용량과 디코딩 시간이 늘어 응답이 늦어질 수 있습니다.
-- large-v3에서 실시간성이 중요하면 우선 `chunkSeconds=2.0`, `beamSize=1`, `temperature=0.0` 조합을 시작점으로 사용하세요. `maxNewTokens=96`은 속도 튜닝값이라기보다 긴 출력 생성을 막는 상한값입니다.
+- large-v3에서 실시간성이 중요하면 우선 `chunkSeconds=2.5`, `beamSize=3`, `temperature=0.0` 조합을 시작점으로 사용하세요. `maxNewTokens=96`은 속도 튜닝값이라기보다 긴 출력 생성을 막는 상한값입니다.
 - 문장이 너무 자주 끊기거나 앞뒤 문맥을 놓치면 `chunkSeconds`를 `3.0`~`5.0`으로 늘립니다.
 - 속도는 충분하지만 고유명사나 짧은 발화 인식이 흔들리면 `beamSize`를 `3` 또는 `5`로 올려 비교합니다. 문장이 실제로 잘릴 때만 `maxNewTokens`를 `128` 또는 `192`로 올립니다. 짧은 청크에서는 이 값이 응답속도에 거의 영향을 주지 않을 수 있습니다.
 - 번역까지 포함한 지연은 NLLB `translationBeamSize`와 `translationMaxNewTokens`의 영향을 받습니다. 실시간 응답성은 `translationBeamSize=1`, `translationMaxNewTokens=128`에서 시작하고, 번역 품질이나 긴 문장 완성도가 부족하면 각각 `3` 또는 `256`으로 올려 비교합니다.
@@ -564,8 +564,8 @@ Whisper 활성화:
     "device": "cuda",
     "computeType": "float16",
     "vadFilter": true,
-    "chunkSeconds": 2.0,
-    "beamSize": 1,
+    "chunkSeconds": 2.5,
+    "beamSize": 3,
     "maxNewTokens": 96,
     "temperature": 0.0
   }

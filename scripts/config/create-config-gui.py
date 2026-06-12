@@ -45,6 +45,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from src.tools.config_builder import build_config
+from src.domain.whisper_defaults import whisper_defaults
 from src.tools.config_io import discover_camera_mode_options, discover_cameras, write_config
 from src.audio.gate import AudioGateConfig, NoiseGate
 from scripts.config.audio_devices import (
@@ -1359,6 +1360,7 @@ class ConfigGui:
             self.vars["bg_image"].set(selected)
 
     def _build_video_defaults(self) -> dict[str, float | int | str]:
+        whisper = whisper_defaults()
         is_macos = platform.system() == "Darwin"
         cameras = discover_cameras()
         camera_values = [c["devicePath"] for c in cameras] or (["0"] if is_macos else ["/dev/video0"])
@@ -1426,27 +1428,27 @@ class ConfigGui:
             "face_enhance_min_size_ratio": 0.12,
             "face_enhance_edge_dither": 0.25,
             "face_deidentify_enabled": False,
-            "whisper_enabled": False,
+            "whisper_enabled": whisper["enabled"],
             "whisper_input_device": _audio_default_input_device(),
-            "whisper_backend": "faster-whisper",
-            "whisper_model": "large-v3",
-            "whisper_language": _whisper_language_display_from_raw("ko"),
-            "whisper_task": "transcribe",
-            "whisper_translation_enabled": False,
-            "whisper_translation_backend": "whisper",
-            "whisper_translation_target_language": _whisper_translation_target_display_from_raw("en"),
-            "whisper_translation_model": "facebook/nllb-200-distilled-600M",
-            "whisper_translation_device": "cuda",
-            "whisper_translation_compute_type": "float16",
-            "whisper_translation_beam_size": 1,
-            "whisper_translation_max_new_tokens": 128,
-            "whisper_device": "cuda",
-            "whisper_compute_type": "float16",
-            "whisper_vad_filter": True,
-            "whisper_chunk_seconds": 5.0,
-            "whisper_beam_size": 5,
-            "whisper_max_new_tokens": 96,
-            "whisper_temperature": 0.0,
+            "whisper_backend": whisper["backend"],
+            "whisper_model": whisper["model"],
+            "whisper_language": _whisper_language_display_from_raw(whisper["language"]),
+            "whisper_task": whisper["task"],
+            "whisper_translation_enabled": whisper["translationEnabled"],
+            "whisper_translation_backend": whisper["translationBackend"],
+            "whisper_translation_target_language": _whisper_translation_target_display_from_raw(whisper["translationTargetLanguage"]),
+            "whisper_translation_model": whisper["translationModel"],
+            "whisper_translation_device": whisper["translationDevice"],
+            "whisper_translation_compute_type": whisper["translationComputeType"],
+            "whisper_translation_beam_size": whisper["translationBeamSize"],
+            "whisper_translation_max_new_tokens": whisper["translationMaxNewTokens"],
+            "whisper_device": whisper["device"],
+            "whisper_compute_type": whisper["computeType"],
+            "whisper_vad_filter": whisper["vadFilter"],
+            "whisper_chunk_seconds": whisper["chunkSeconds"],
+            "whisper_beam_size": whisper["beamSize"],
+            "whisper_max_new_tokens": whisper["maxNewTokens"],
+            "whisper_temperature": whisper["temperature"],
         }
 
     def _create_virtual_camera(self) -> None:

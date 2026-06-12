@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from src.domain.whisper_defaults import whisper_default
+
 from scripts.config.whisper_options import (
     whisper_backend_options,
     whisper_language_display_from_raw,
@@ -80,7 +82,7 @@ def build_whisper_tab(
         "whisper_backend",
         gui._tr("label.whisper_backend", "Whisper backend"),
         whisper_backend_options(),
-        whisper_backend_options()[0],
+        whisper_default("backend"),
         label_key="label.whisper_backend",
     )
     row += 1
@@ -90,7 +92,7 @@ def build_whisper_tab(
         "whisper_model",
         gui._tr("label.whisper_model", "Whisper model"),
         whisper_model_options(),
-        "base",
+        whisper_default("model"),
         label_key="label.whisper_model",
     )
     row += 1
@@ -100,7 +102,7 @@ def build_whisper_tab(
         "whisper_language",
         gui._tr("label.whisper_language", "Recognition language (single choice)"),
         whisper_language_options(),
-        whisper_language_display_from_raw("ko"),
+        whisper_language_display_from_raw(whisper_default("language")),
         label_key="label.whisper_language",
     )
     row += 1
@@ -119,7 +121,7 @@ def build_whisper_tab(
         "whisper_device",
         gui._tr("label.whisper_device", "STT device"),
         ["auto", "cpu", "cuda", "mps"],
-        "cuda",
+        whisper_default("device"),
         label_key="label.whisper_device",
     )
     row += 1
@@ -129,7 +131,7 @@ def build_whisper_tab(
         "whisper_compute_type",
         gui._tr("label.whisper_compute_type", "STT compute type"),
         ["auto", "int8", "float16", "float32"],
-        "auto",
+        whisper_default("computeType"),
         label_key="label.whisper_compute_type",
     )
     row += 1
@@ -138,7 +140,7 @@ def build_whisper_tab(
         row,
         "whisper_vad_filter",
         gui._tr("label.whisper_vad_filter", "VAD filter"),
-        True,
+        whisper_default("vadFilter"),
         label_key="label.whisper_vad_filter",
     )
     row += 1
@@ -155,7 +157,7 @@ def build_whisper_tab(
         row,
         "whisper_chunk_seconds",
         gui._tr("label.whisper_chunk_seconds", "Chunk seconds"),
-        5.0,
+        whisper_default("chunkSeconds"),
         1.0,
         10.0,
         resolution=0.5,
@@ -167,7 +169,7 @@ def build_whisper_tab(
         row,
         "whisper_beam_size",
         gui._tr("label.whisper_beam_size", "Beam size"),
-        5,
+        whisper_default("beamSize"),
         1,
         8,
         resolution=1,
@@ -179,7 +181,7 @@ def build_whisper_tab(
         row,
         "whisper_max_new_tokens",
         gui._tr("label.whisper_max_new_tokens", "STT max tokens"),
-        96,
+        whisper_default("maxNewTokens"),
         16,
         512,
         resolution=16,
@@ -191,7 +193,7 @@ def build_whisper_tab(
         row,
         "whisper_temperature",
         gui._tr("label.whisper_temperature", "STT temperature"),
-        0.0,
+        whisper_default("temperature"),
         0.0,
         1.0,
         resolution=0.1,
@@ -212,7 +214,7 @@ def build_whisper_tab(
         row,
         "whisper_translation_enabled",
         gui._tr("label.whisper_translation_enabled", "Translation window"),
-        False,
+        whisper_default("translationEnabled"),
         label_key="label.whisper_translation_enabled",
     )
     row += 1
@@ -222,7 +224,7 @@ def build_whisper_tab(
         "whisper_translation_backend",
         gui._tr("label.whisper_translation_backend", "Translation backend"),
         whisper_translation_backend_options(),
-        "whisper",
+        whisper_default("translationBackend"),
         label_key="label.whisper_translation_backend",
     )
     row += 1
@@ -251,7 +253,7 @@ def build_whisper_tab(
         "whisper_translation_target_language",
         gui._tr("label.whisper_translation_target_language", "Translation target language"),
         whisper_translation_target_options(),
-        whisper_translation_target_display_from_raw("en"),
+        whisper_translation_target_display_from_raw(whisper_default("translationTargetLanguage")),
         label_key="label.whisper_translation_target_language",
     )
     nllb_row += 1
@@ -261,7 +263,7 @@ def build_whisper_tab(
         "whisper_translation_model",
         gui._tr("label.whisper_translation_model", "Translation model"),
         whisper_translation_model_options(),
-        whisper_translation_model_options()[0],
+        whisper_default("translationModel"),
         label_key="label.whisper_translation_model",
     )
     nllb_row += 1
@@ -271,7 +273,7 @@ def build_whisper_tab(
         "whisper_translation_device",
         gui._tr("label.whisper_translation_device", "Translation device"),
         ["cuda"],
-        "cuda",
+        whisper_default("translationDevice"),
         label_key="label.whisper_translation_device",
     )
     nllb_row += 1
@@ -281,7 +283,7 @@ def build_whisper_tab(
         "whisper_translation_compute_type",
         gui._tr("label.whisper_translation_compute_type", "Translation compute type"),
         ["float16", "float32"],
-        "float16",
+        whisper_default("translationComputeType"),
         label_key="label.whisper_translation_compute_type",
     )
     nllb_row += 1
@@ -290,7 +292,7 @@ def build_whisper_tab(
         nllb_row,
         "whisper_translation_beam_size",
         gui._tr("label.whisper_translation_beam_size", "Translation beam size"),
-        1,
+        whisper_default("translationBeamSize"),
         1,
         8,
         resolution=1,
@@ -302,7 +304,7 @@ def build_whisper_tab(
         nllb_row,
         "whisper_translation_max_new_tokens",
         gui._tr("label.whisper_translation_max_new_tokens", "Translation max tokens"),
-        128,
+        whisper_default("translationMaxNewTokens"),
         16,
         512,
         resolution=16,
