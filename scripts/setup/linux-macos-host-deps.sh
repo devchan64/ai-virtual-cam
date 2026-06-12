@@ -13,6 +13,8 @@ TENSORRT_ENGINE_SHA256="${AVC_TENSORRT_ENGINE_SHA256:-}"
 TENSORRT_ENGINE_FORCE="${AVC_TENSORRT_ENGINE_FORCE:-0}"
 TENSORRT_ENGINE_PATH="${AVC_TENSORRT_ENGINE_PATH:-}"
 INSTALL_WHISPER_CUDA="${AVC_INSTALL_WHISPER_CUDA:-1}"
+INSTALL_TRANSLATION_TORCH="${AVC_INSTALL_TRANSLATION_TORCH:-1}"
+TORCH_INDEX_URL="${AVC_TORCH_INDEX_URL:-}"
 
 log() {
   printf '[ai-virtual-cam] %s\n' "$*"
@@ -69,6 +71,8 @@ Environment:
   AVC_TENSORRT_ENGINE_SHA256   Optional sha256 checksum for downloaded engine
   AVC_TENSORRT_ENGINE_FORCE    Set 1 to re-download when output path already exists
   AVC_INSTALL_WHISPER_CUDA     Linux only: install CUDA runtime libs for faster-whisper (default: 1)
+  AVC_INSTALL_TRANSLATION_TORCH Install PyTorch for NLLB translation (default: 1)
+  AVC_TORCH_INDEX_URL           PyTorch wheel index URL (Linux default: CUDA 12.8)
   -h, --help               Show this help
 EOF
 }
@@ -100,6 +104,8 @@ elevate_linux_with_sudo() {
     AVC_TENSORRT_ENGINE_SHA256="$TENSORRT_ENGINE_SHA256" \
     AVC_TENSORRT_ENGINE_FORCE="$TENSORRT_ENGINE_FORCE" \
     AVC_INSTALL_WHISPER_CUDA="$INSTALL_WHISPER_CUDA" \
+    AVC_INSTALL_TRANSLATION_TORCH="$INSTALL_TRANSLATION_TORCH" \
+    AVC_TORCH_INDEX_URL="$TORCH_INDEX_URL" \
     bash "$0" "$@"
 }
 
@@ -245,6 +251,31 @@ install_python_runtime_packages() {
   run_as_invoking_user "$(pwd)/scripts/bin/avc-env" sync
 }
 
+install_translation_torch_packages() {
+  if [[ "$INSTALL_TRANSLATION_TORCH" != "1" ]]; then
+    log "Whisper translation PyTorch install skipped (AVC_INSTALL_TRANSLATION_TORCH=$INSTALL_TRANSLATION_TORCH)"
+    return 0
+  fi
+
+  local venv_py
+  venv_py="$(pwd)/.venv/bin/python3"
+  if [[ ! -x "$venv_py" ]]; then
+    fail ".venv python not found after runtime sync: $venv_py"
+  fi
+
+  local torch_index_url="$TORCH_INDEX_URL"
+  if [[ -z "$torch_index_url" ]]; then
+    if [[ "$OS_KIND" == "linux" ]]; then
+      torch_index_url="https://download.pytorch.org/whl/cu128"
+    else
+      torch_index_url="https://download.pytorch.org/whl/cpu"
+    fi
+  fi
+
+  log "Installing PyTorch for Whisper translation from $torch_index_url"
+  run_as_invoking_user "$venv_py" -m pip install --upgrade torch --index-url "$torch_index_url"
+}
+
 install_whisper_cuda_runtime_packages() {
   if [[ "$OS_KIND" != "linux" ]]; then
     log "Whisper CUDA runtime package install skipped (non-Linux host)"
@@ -282,6 +313,27 @@ verify_whisper_runtime_contract() {
   fi
   if ! run_as_invoking_user "$venv_py" -c "import transformers, sentencepiece, torch" >/dev/null 2>&1; then
     fail "Whisper translation dependencies are not importable in .venv. Run ./bin/avc setup again to install transformers, sentencepiece, and torch."
+  fi
+  if [[ "$OS_KIND" == "linux" && "$INSTALL_TRANSLATION_TORCH" == "1" ]]; then
+    run_as_invoking_user "$venv_py" - <<'PYVERIFY'
+import torch
+if not torch.cuda.is_available():
+    raise SystemExit("torch CUDA is not available. NLLB translation requires CUDA for practical performance; reinstall with AVC_TORCH_INDEX_URL set to a CUDA wheel index.")
+arch = None
+try:
+    major, minor = torch.cuda.get_device_capability()
+    arch = f"sm_{major}{minor}"
+except Exception:
+    pass
+arches = list(torch.cuda.get_arch_list() or [])
+if arch and arches and arch not in arches:
+    raise SystemExit(
+        f"torch CUDA build does not support this GPU architecture: capability={arch} supported={','.join(arches)}. "
+        "Install a PyTorch CUDA wheel that supports this GPU, for example set AVC_TORCH_INDEX_URL=https://download.pytorch.org/whl/cu128 and rerun ./bin/avc setup."
+    )
+print(f"torch CUDA verified: version={torch.__version__} device={torch.cuda.get_device_name()} capability={arch} supported={','.join(arches)}")
+PYVERIFY
+    log "Whisper translation PyTorch CUDA runtime verified"
   fi
 
   if [[ "$OS_KIND" == "linux" ]]; then
@@ -412,6 +464,7 @@ main() {
   log "Setup now installs dependencies only; create virtual devices in config."
   repair_workspace_permissions
   install_python_runtime_packages
+  install_translation_torch_packages
   install_whisper_cuda_runtime_packages
   download_tensorrt_engine
   verify_host_contract

@@ -741,8 +741,8 @@ class WhisperConfig:
             translationTargetLanguage=str(raw.get("translationTargetLanguage", "en")).strip(),
             translationBackend=str(raw.get("translationBackend", "whisper")).strip(),
             translationModel=str(raw.get("translationModel", "facebook/nllb-200-distilled-600M")).strip(),
-            translationDevice=str(raw.get("translationDevice", "auto")).strip(),
-            translationComputeType=str(raw.get("translationComputeType", "auto")).strip(),
+            translationDevice=str(raw.get("translationDevice", "cuda")).strip(),
+            translationComputeType=str(raw.get("translationComputeType", "float16")).strip(),
             device=str(raw.get("device", "cuda")).strip(),
             computeType=str(raw.get("computeType", "float16")).strip(),
             vadFilter=bool(raw.get("vadFilter", True)),
@@ -768,10 +768,12 @@ class WhisperConfig:
             raise ValueError("whisper.translationTargetLanguage must be en when whisper.translationBackend=whisper")
         if config.translationEnabled and config.translationBackend == "nllb-transformers" and not config.translationModel:
             raise ValueError("whisper.translationModel is required when whisper.translationBackend=nllb-transformers")
-        if config.translationDevice not in {"auto", "cpu", "cuda"}:
-            raise ValueError("whisper.translationDevice must be one of: auto, cpu, cuda")
-        if config.translationComputeType not in {"auto", "float16", "float32"}:
-            raise ValueError("whisper.translationComputeType must be one of: auto, float16, float32")
+        if config.translationDevice not in {"cuda", "cpu"}:
+            raise ValueError("whisper.translationDevice must be one of: cuda, cpu")
+        if config.translationComputeType not in {"float16", "float32"}:
+            raise ValueError("whisper.translationComputeType must be one of: float16, float32")
+        if config.translationEnabled and config.translationBackend == "nllb-transformers" and config.translationDevice != "cuda":
+            raise ValueError("whisper.translationDevice must be cuda when whisper.translationBackend=nllb-transformers")
         if not config.device:
             raise ValueError("whisper.device is required")
         if not config.computeType:

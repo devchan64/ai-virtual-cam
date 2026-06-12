@@ -105,8 +105,8 @@ class WhisperConfigTest(unittest.TestCase):
         self.assertEqual(loaded.whisper.translationTargetLanguage, "en")
         self.assertEqual(loaded.whisper.translationBackend, "whisper")
         self.assertEqual(loaded.whisper.translationModel, "facebook/nllb-200-distilled-600M")
-        self.assertEqual(loaded.whisper.translationDevice, "auto")
-        self.assertEqual(loaded.whisper.translationComputeType, "auto")
+        self.assertEqual(loaded.whisper.translationDevice, "cuda")
+        self.assertEqual(loaded.whisper.translationComputeType, "float16")
         self.assertEqual(loaded.whisper.chunkSeconds, 5.0)
         self.assertEqual(loaded.whisper.beamSize, 5)
 
@@ -143,13 +143,25 @@ class WhisperConfigTest(unittest.TestCase):
         self.assertEqual(loaded.translationTargetLanguage, "ko")
         self.assertEqual(loaded.translationBackend, "nllb-transformers")
 
+    def test_whisper_rejects_cpu_for_enabled_nllb_translation(self) -> None:
+        with self.assertRaisesRegex(ValueError, "whisper.translationDevice"):
+            WhisperConfig.from_dict({
+                "translationEnabled": True,
+                "translationBackend": "nllb-transformers",
+                "translationDevice": "cpu",
+            })
+
     def test_whisper_rejects_invalid_translation_backend(self) -> None:
         with self.assertRaisesRegex(ValueError, "whisper.translationBackend"):
             WhisperConfig.from_dict({"translationBackend": "invalid"})
 
     def test_whisper_rejects_invalid_translation_runtime_options(self) -> None:
         with self.assertRaisesRegex(ValueError, "whisper.translationDevice"):
+            WhisperConfig.from_dict({"translationDevice": "auto"})
+        with self.assertRaisesRegex(ValueError, "whisper.translationDevice"):
             WhisperConfig.from_dict({"translationDevice": "mps"})
+        with self.assertRaisesRegex(ValueError, "whisper.translationComputeType"):
+            WhisperConfig.from_dict({"translationComputeType": "auto"})
         with self.assertRaisesRegex(ValueError, "whisper.translationComputeType"):
             WhisperConfig.from_dict({"translationComputeType": "int8"})
 

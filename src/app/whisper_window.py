@@ -333,6 +333,7 @@ class WhisperTranscriptWorker:
         buffered = 0
         language = None if self._cfg.language == "auto" else self._cfg.language
         chunks = 0
+        translation_failed = False
         self._emit(
             "status",
             f"Whisper 전사 루프 시작: chunk_seconds={chunk_seconds} language={self._cfg.language} "
@@ -370,40 +371,48 @@ class WhisperTranscriptWorker:
                     self._emit("transcript", text, log_text=f"[{detected}] {text}")
                 else:
                     self._emit("status", f"Whisper 전사 결과 없음: chunk={chunks}", display=False)
-                if self._cfg.translationEnabled:
-                    self._emit("status", f"Whisper 번역 요청: chunk={chunks}", display=False)
-                    translated_text = ""
-                    target_language = self._cfg.translationTargetLanguage
-                    if text_translator is None:
-                        translated_segments, _translated_info = model.transcribe(
-                            audio,
-                            language=language,
-                            task="translate",
-                            vad_filter=self._cfg.vadFilter,
-                            beam_size=self._cfg.beamSize,
-                            condition_on_previous_text=False,
-                        )
-                        translated_text = " ".join(
-                            segment.text.strip() for segment in translated_segments if segment.text.strip()
-                        ).strip()
-                        target_language = "en"
-                    elif text:
-                        source_language = detected if detected in {"ko", "en", "zh"} else self._cfg.language
-                        translated_text = text_translator.translate(
-                            TranslationRequest(
-                                text=text,
-                                source_language=source_language,
-                                target_language=target_language,
+                if self._cfg.translationEnabled and not translation_failed:
+                    try:
+                        self._emit("status", f"Whisper 번역 요청: chunk={chunks}", display=False)
+                        translated_text = ""
+                        target_language = self._cfg.translationTargetLanguage
+                        if text_translator is None:
+                            translated_segments, _translated_info = model.transcribe(
+                                audio,
+                                language=language,
+                                task="translate",
+                                vad_filter=self._cfg.vadFilter,
+                                beam_size=self._cfg.beamSize,
+                                condition_on_previous_text=False,
                             )
-                        )
-                    if translated_text:
+                            translated_text = " ".join(
+                                segment.text.strip() for segment in translated_segments if segment.text.strip()
+                            ).strip()
+                            target_language = "en"
+                        elif text:
+                            source_language = detected if detected in {"ko", "en", "zh"} else self._cfg.language
+                            translated_text = text_translator.translate(
+                                TranslationRequest(
+                                    text=text,
+                                    source_language=source_language,
+                                    target_language=target_language,
+                                )
+                            )
+                        if translated_text:
+                            self._emit(
+                                "translation",
+                                translated_text,
+                                log_text=f"[{detected}->{target_language}] {translated_text}",
+                            )
+                        else:
+                            self._emit("status", f"Whisper 번역 결과 없음: chunk={chunks}", display=False)
+                    except Exception as exc:
+                        translation_failed = True
                         self._emit(
-                            "translation",
-                            translated_text,
-                            log_text=f"[{detected}->{target_language}] {translated_text}",
+                            "error",
+                            "Whisper 번역 실패: "
+                            f"{exc}. 번역을 이번 세션에서 중지합니다. STT 전사는 계속됩니다.",
                         )
-                    else:
-                        self._emit("status", f"Whisper 번역 결과 없음: chunk={chunks}", display=False)
             except Exception as exc:
                 self._emit("error", f"Whisper 전사 실패: {exc}")
 

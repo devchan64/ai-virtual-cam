@@ -42,6 +42,9 @@ class NllbTransformersTranslator(LocalTextTranslator):
 
         resolved_device = self._resolve_device(torch, device)
         torch_dtype = self._resolve_dtype(torch, compute_type, resolved_device)
+        self._model_name = model_name
+        self._requested_device = str(device or "auto").strip()
+        self._requested_compute_type = str(compute_type or "auto").strip()
         try:
             self._tokenizer = AutoTokenizer.from_pretrained(model_name)
             self._model = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=torch_dtype)
@@ -59,20 +62,25 @@ class NllbTransformersTranslator(LocalTextTranslator):
 
     @staticmethod
     def _resolve_device(torch, device: str) -> str:
-        normalized = str(device or "auto").strip().lower()
+        normalized = str(device or "").strip().lower()
         if normalized == "auto":
-            return "cuda" if torch.cuda.is_available() else "cpu"
-        if normalized == "cuda" and not torch.cuda.is_available():
-            raise RuntimeError("whisper.translationDevice=cuda 이지만 torch CUDA를 사용할 수 없습니다. CUDA 런타임을 확인하거나 translationDevice=cpu로 설정하세요.")
+            raise RuntimeError("whisper.translationDevice=auto 는 실행 단계에서 허용하지 않습니다. cuda 또는 cpu를 명시하세요.")
+        if normalized == "cuda":
+            if not torch.cuda.is_available():
+                raise RuntimeError(
+                    "whisper.translationDevice=cuda 이지만 torch CUDA를 사용할 수 없습니다. "
+                    "CUDA 런타임을 확인하거나 translationDevice=cpu로 설정하세요."
+                )
+            _validate_torch_cuda_supports_current_gpu(torch)
         if normalized not in {"cpu", "cuda"}:
-            raise RuntimeError(f"translation device는 auto/cpu/cuda 중 하나여야 합니다. 설정값={device}")
+            raise RuntimeError(f"translation device는 cpu/cuda 중 하나여야 합니다. 설정값={device}")
         return normalized
 
     @staticmethod
     def _resolve_dtype(torch, compute_type: str, device: str):
-        normalized = str(compute_type or "auto").strip().lower()
+        normalized = str(compute_type or "").strip().lower()
         if normalized == "auto":
-            return torch.float16 if device == "cuda" else torch.float32
+            raise RuntimeError("whisper.translationComputeType=auto 는 실행 단계에서 허용하지 않습니다. float16 또는 float32를 명시하세요.")
         if normalized == "float16":
             if device != "cuda":
                 raise RuntimeError("translation computeType=float16은 cuda 장치에서만 사용하세요. CPU에서는 float32를 설정하세요.")
@@ -81,7 +89,7 @@ class NllbTransformersTranslator(LocalTextTranslator):
             return torch.float32
         if normalized == "int8":
             raise RuntimeError("whisper.translationComputeType=int8은 nllb-transformers에서 지원하지 않습니다. float16 또는 float32를 사용하세요.")
-        raise RuntimeError(f"whisper.translationComputeType은 auto/float16/float32 중 하나여야 합니다. 설정값={compute_type}")
+        raise RuntimeError(f"whisper.translationComputeType은 float16/float32 중 하나여야 합니다. 설정값={compute_type}")
 
     def translate(self, request: TranslationRequest) -> str:
         source = _nllb_language_code(request.source_language)
@@ -104,10 +112,85 @@ class NllbTransformersTranslator(LocalTextTranslator):
                 )
             return self._tokenizer.batch_decode(generated, skip_special_tokens=True)[0].strip()
         except Exception as exc:
-            raise RuntimeError(
-                "NLLB 번역 실패: "
-                f"source={request.source_language} target={request.target_language}. 원인: {exc}"
-            ) from exc
+            detail = _translation_failure_detail(
+                exc,
+                model_name=self._model_name,
+                device=self._requested_device,
+                resolved_device=self._device,
+                compute_type=self._requested_compute_type,
+                source_language=request.source_language,
+                target_language=request.target_language,
+            )
+            raise RuntimeError(detail) from exc
+
+
+def _torch_cuda_arch_tag(torch) -> str | None:
+    try:
+        major, minor = torch.cuda.get_device_capability()
+    except Exception:
+        return None
+    return f"sm_{major}{minor}"
+
+
+def _torch_supported_cuda_arches(torch) -> list[str]:
+    try:
+        return [str(item) for item in torch.cuda.get_arch_list()]
+    except Exception:
+        return []
+
+
+def _torch_cuda_is_usable_for_current_gpu(torch) -> bool:
+    if not torch.cuda.is_available():
+        return False
+    arch_tag = _torch_cuda_arch_tag(torch)
+    supported_arches = _torch_supported_cuda_arches(torch)
+    return torch.cuda.is_available() and (arch_tag is None or not supported_arches or arch_tag in supported_arches)
+
+
+def _validate_torch_cuda_supports_current_gpu(torch) -> None:
+    arch_tag = _torch_cuda_arch_tag(torch)
+    supported_arches = _torch_supported_cuda_arches(torch)
+    if arch_tag is None or not supported_arches or arch_tag in supported_arches:
+        return
+    device_name = "unknown"
+    try:
+        device_name = str(torch.cuda.get_device_name())
+    except Exception:
+        pass
+    raise RuntimeError(
+        "whisper.translationDevice=cuda 이지만 현재 PyTorch CUDA 빌드가 GPU 아키텍처를 지원하지 않습니다. "
+        f"gpu={device_name} capability={arch_tag} supported={','.join(supported_arches)}. "
+        "권장 조치: translationDevice=cpu, translationComputeType=float32로 설정하거나, "
+        "현재 GPU 아키텍처를 지원하는 PyTorch/CUDA 빌드를 설치하세요."
+    )
+
+
+def _translation_failure_detail(
+    exc: Exception,
+    *,
+    model_name: str,
+    device: str,
+    resolved_device: str,
+    compute_type: str,
+    source_language: str,
+    target_language: str,
+) -> str:
+    cause = str(exc)
+    base = (
+        "NLLB 번역 실패: "
+        f"source={source_language} target={target_language} "
+        f"translationModel={model_name} translationDevice={device} "
+        f"resolvedDevice={resolved_device} translationComputeType={compute_type}. "
+    )
+    if "no kernel image is available for execution on the device" in cause:
+        return (
+            base
+            + "원인: 현재 torch/CUDA 빌드가 이 GPU 아키텍처의 CUDA 커널을 지원하지 않습니다. "
+            + "권장 조치: config Whisper 탭에서 번역 장치를 cpu, 번역 연산 타입을 float32로 바꾸거나, "
+            + "현재 GPU를 지원하는 torch/CUDA 빌드를 설치한 뒤 재시도하세요. "
+            + f"원본 오류: {cause}"
+        )
+    return base + f"원인: {cause}"
 
 
 def _nllb_language_code(language: str) -> str:

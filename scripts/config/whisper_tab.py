@@ -157,8 +157,8 @@ def build_whisper_tab(
         row,
         "whisper_translation_device",
         gui._tr("label.whisper_translation_device", "Translation device"),
-        ["auto", "cpu", "cuda"],
-        "auto",
+        ["cuda", "cpu"],
+        "cuda",
         label_key="label.whisper_translation_device",
     )
     row += 1
@@ -167,8 +167,8 @@ def build_whisper_tab(
         row,
         "whisper_translation_compute_type",
         gui._tr("label.whisper_translation_compute_type", "Translation compute type"),
-        ["auto", "float16", "float32"],
-        "auto",
+        ["float16", "float32"],
+        "float16",
         label_key="label.whisper_translation_compute_type",
     )
     row += 1
