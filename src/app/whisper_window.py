@@ -25,6 +25,16 @@ DEFAULT_CHUNK_SECONDS = 5.0
 DEFAULT_WINDOW_GEOMETRY = "780x420"
 MIN_WINDOW_WIDTH = 520
 MIN_WINDOW_HEIGHT = 280
+_WINDOW_TITLES = {
+    "en": {
+        "transcript": "ai-virtual-cam Whisper Transcript",
+        "translation": "ai-virtual-cam Whisper Translation",
+    },
+    "ko": {
+        "transcript": "ai-virtual-cam 위스퍼 전사",
+        "translation": "ai-virtual-cam 위스퍼 번역",
+    },
+}
 _WINDOW_GEOMETRY_RE = re.compile(
     r"^(?P<width>\d+)x(?P<height>\d+)(?P<x_sign>[+-])(?P<x>\d+)(?P<y_sign>[+-])(?P<y>\d+)$"
 )
@@ -47,6 +57,26 @@ def parse_args() -> argparse.Namespace:
 def _log_line(message: str, *, file=None) -> None:
     target = sys.stdout if file is None else file
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}", file=target, flush=True)
+
+
+def _load_ui_language(config_path: Path) -> str:
+    try:
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        _log_line(f"[avc] whisper status: UI language load failed: {exc}")
+        return "en"
+    if not isinstance(raw, dict):
+        return "en"
+    meta = raw.get("meta") or {}
+    if not isinstance(meta, dict):
+        return "en"
+    language = str(meta.get("language", "en")).strip().lower()
+    return language if language in _WINDOW_TITLES else "en"
+
+
+def _window_title(kind: str, language: str) -> str:
+    titles = _WINDOW_TITLES.get(language) or _WINDOW_TITLES["en"]
+    return titles.get(kind, _WINDOW_TITLES["en"].get(kind, "ai-virtual-cam"))
 
 
 def _parse_window_geometry(geometry: object) -> dict[str, int] | None:
@@ -440,6 +470,7 @@ class WhisperTranscriptWindow:
         self._tk = tk
         self._ttk = ttk
         self._config_path = config_path
+        self._ui_language = _load_ui_language(config_path)
         self._whisper_config = app_config.whisper
         self._geometry_save_after_id: str | None = None
         self._translation_geometry_save_after_id: str | None = None
@@ -450,7 +481,7 @@ class WhisperTranscriptWindow:
         self._worker = WhisperTranscriptWorker(app_config.whisper, self._events)
         self._thread = threading.Thread(target=self._worker.run, daemon=True)
         self._root = tk.Tk()
-        self._root.title("ai-virtual-cam Whisper Transcript")
+        self._root.title(_window_title("transcript", self._ui_language))
         restored_geometry = _load_window_geometry(self._config_path, "whisperWindowGeometry", self._root)
         self._root.geometry(restored_geometry or DEFAULT_WINDOW_GEOMETRY)
         self._root.minsize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
@@ -495,7 +526,7 @@ class WhisperTranscriptWindow:
         tk = self._tk
         ttk = self._ttk
         self._translation_root = tk.Toplevel(self._root)
-        self._translation_root.title("ai-virtual-cam Whisper Translation")
+        self._translation_root.title(_window_title("translation", self._ui_language))
         restored_geometry = _load_window_geometry(
             self._config_path, "whisperTranslationWindowGeometry", self._translation_root
         )

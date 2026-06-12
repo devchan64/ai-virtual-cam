@@ -1,3 +1,4 @@
+import importlib
 import importlib.util
 import sys
 import types
@@ -24,10 +25,11 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.module = _load_config_gui_module()
+        cls.audio_devices = importlib.import_module("scripts.config.audio_devices")
 
     def test_resolve_and_validate_audio_runtime_devices_maps_display_values(self) -> None:
-        with mock.patch.object(self.module.platform, "system", return_value="Linux"), mock.patch.object(
-            self.module,
+        with mock.patch.object(self.audio_devices.platform, "system", return_value="Linux"), mock.patch.object(
+            self.audio_devices,
             "_pactl_short_entries",
             side_effect=lambda kind: [
                 ("1", "alsa_input.usb-mic", "module"),
@@ -37,7 +39,7 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
                 ("2", "ai-virtual-cam", "module"),
             ],
         ):
-            raw_input, raw_output = self.module._resolve_and_validate_audio_runtime_devices(
+            raw_input, raw_output = self.audio_devices._resolve_and_validate_audio_runtime_devices(
                 "USB mic (alsa_input.usb-mic)",
                 "Virtual mic (ai-virtual-cam)",
                 {"USB mic (alsa_input.usb-mic)": "alsa_input.usb-mic"},
@@ -48,8 +50,8 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         self.assertEqual(raw_output, "ai-virtual-cam")
 
     def test_resolve_and_validate_audio_runtime_devices_rejects_missing_output(self) -> None:
-        with mock.patch.object(self.module.platform, "system", return_value="Linux"), mock.patch.object(
-            self.module,
+        with mock.patch.object(self.audio_devices.platform, "system", return_value="Linux"), mock.patch.object(
+            self.audio_devices,
             "_pactl_short_entries",
             side_effect=lambda kind: [
                 ("1", "alsa_input.usb-mic", "module"),
@@ -60,7 +62,7 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
             ],
         ):
             with self.assertRaisesRegex(ValueError, "Pulse runtime"):
-                self.module._resolve_and_validate_audio_runtime_devices(
+                self.audio_devices._resolve_and_validate_audio_runtime_devices(
                     "alsa_input.usb-mic",
                     "ai-virtual-cam",
                 )

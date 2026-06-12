@@ -132,54 +132,79 @@ def build_whisper_tab(
         label_key="label.whisper_translation_backend",
     )
     row += 1
+
+    whisper_translation_frame = ttk.Frame(tab_whisper)
+    whisper_translation_frame.grid(row=row, column=0, columnspan=4, sticky="ew", padx=0, pady=(0, 4))
+    whisper_translation_frame.columnconfigure(0, weight=1)
+    _add_hint(
+        gui,
+        ttk,
+        whisper_translation_frame,
+        0,
+        "hint.whisper_translation_whisper_backend",
+        "Whisper translation outputs English only and does not use the external translation model settings.",
+    )
+    row += 1
+
+    nllb_translation_frame = ttk.Frame(tab_whisper)
+    nllb_translation_frame.grid(row=row, column=0, columnspan=4, sticky="ew", padx=0, pady=(0, 4))
+    for col in range(4):
+        nllb_translation_frame.columnconfigure(col, weight=1 if col in (1, 3) else 0)
+    nllb_row = 0
     gui._add_combo(
-        tab_whisper,
-        row,
+        nllb_translation_frame,
+        nllb_row,
         "whisper_translation_target_language",
         gui._tr("label.whisper_translation_target_language", "Translation target language"),
         whisper_translation_target_options(),
         whisper_translation_target_display_from_raw("en"),
         label_key="label.whisper_translation_target_language",
     )
-    row += 1
+    nllb_row += 1
     gui._add_combo(
-        tab_whisper,
-        row,
+        nllb_translation_frame,
+        nllb_row,
         "whisper_translation_model",
         gui._tr("label.whisper_translation_model", "Translation model"),
         whisper_translation_model_options(),
         whisper_translation_model_options()[0],
         label_key="label.whisper_translation_model",
     )
-    row += 1
+    nllb_row += 1
     gui._add_combo(
-        tab_whisper,
-        row,
+        nllb_translation_frame,
+        nllb_row,
         "whisper_translation_device",
         gui._tr("label.whisper_translation_device", "Translation device"),
-        ["cuda", "cpu"],
+        ["cuda"],
         "cuda",
         label_key="label.whisper_translation_device",
     )
-    row += 1
+    nllb_row += 1
     gui._add_combo(
-        tab_whisper,
-        row,
+        nllb_translation_frame,
+        nllb_row,
         "whisper_translation_compute_type",
         gui._tr("label.whisper_translation_compute_type", "Translation compute type"),
         ["float16", "float32"],
         "float16",
         label_key="label.whisper_translation_compute_type",
     )
-    row += 1
-    row = _add_hint(
+    nllb_row += 1
+    _add_hint(
         gui,
         ttk,
-        tab_whisper,
-        row,
+        nllb_translation_frame,
+        nllb_row,
         "hint.whisper_translation_target_language",
-        "Whisper backend translates to English only. Use nllb-transformers for Korean, English, and Chinese targets.",
+        "NLLB translation uses the external model and requires CUDA for real-time performance.",
     )
+    gui._whisper_translation_backend_frames = {
+        "whisper": whisper_translation_frame,
+        "mock": whisper_translation_frame,
+        "nllb-transformers": nllb_translation_frame,
+    }
+    row += 1
 
     gui._add_combo(
         tab_whisper,
