@@ -722,11 +722,15 @@ class WhisperConfig:
     translationModel: str
     translationDevice: str
     translationComputeType: str
+    translationBeamSize: int
+    translationMaxNewTokens: int
     device: str
     computeType: str
     vadFilter: bool
     chunkSeconds: float
     beamSize: int
+    maxNewTokens: int
+    temperature: float
 
     @classmethod
     def from_dict(cls, raw: dict) -> "WhisperConfig":
@@ -743,11 +747,15 @@ class WhisperConfig:
             translationModel=str(raw.get("translationModel", "facebook/nllb-200-distilled-600M")).strip(),
             translationDevice=str(raw.get("translationDevice", "cuda")).strip(),
             translationComputeType=str(raw.get("translationComputeType", "float16")).strip(),
+            translationBeamSize=int(raw.get("translationBeamSize", 1)),
+            translationMaxNewTokens=int(raw.get("translationMaxNewTokens", 128)),
             device=str(raw.get("device", "cuda")).strip(),
             computeType=str(raw.get("computeType", "float16")).strip(),
             vadFilter=bool(raw.get("vadFilter", True)),
             chunkSeconds=float(raw.get("chunkSeconds", 5.0)),
             beamSize=int(raw.get("beamSize", 5)),
+            maxNewTokens=int(raw.get("maxNewTokens", 96)),
+            temperature=float(raw.get("temperature", 0.0)),
         )
         allowed_backends = {"faster-whisper", "openai-whisper", "whisper.cpp", "mock"}
         if config.backend not in allowed_backends:
@@ -774,6 +782,10 @@ class WhisperConfig:
             raise ValueError("whisper.translationDevice must be one of: cuda, cpu")
         if config.translationComputeType not in {"float16", "float32"}:
             raise ValueError("whisper.translationComputeType must be one of: float16, float32")
+        if not 1 <= config.translationBeamSize <= 8:
+            raise ValueError("whisper.translationBeamSize must be between 1 and 8")
+        if not 16 <= config.translationMaxNewTokens <= 512:
+            raise ValueError("whisper.translationMaxNewTokens must be between 16 and 512")
         if config.translationEnabled and config.translationBackend == "nllb-transformers" and config.translationDevice != "cuda":
             raise ValueError("whisper.translationDevice must be cuda when whisper.translationBackend=nllb-transformers")
         if not config.device:
@@ -784,6 +796,10 @@ class WhisperConfig:
             raise ValueError("whisper.chunkSeconds must be between 1.0 and 15.0")
         if not 1 <= config.beamSize <= 8:
             raise ValueError("whisper.beamSize must be between 1 and 8")
+        if not 16 <= config.maxNewTokens <= 512:
+            raise ValueError("whisper.maxNewTokens must be between 16 and 512")
+        if not 0.0 <= config.temperature <= 1.0:
+            raise ValueError("whisper.temperature must be between 0.0 and 1.0")
         return config
 
 

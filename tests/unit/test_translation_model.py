@@ -6,6 +6,7 @@ from src.app.translation_model import (
     _nllb_language_code,
     _torch_cuda_is_usable_for_current_gpu,
     _translation_failure_detail,
+    _validate_generation_int,
     _validate_torch_cuda_supports_current_gpu,
     build_text_translator,
 )
@@ -52,7 +53,7 @@ class TranslationModelTest(unittest.TestCase):
     def test_explicit_cuda_rejects_unsupported_gpu_architecture(self) -> None:
         torch = _FakeTorch(_FakeCuda(capability=(12, 0), arches=["sm_80", "sm_86", "sm_90"]))
 
-        with self.assertRaisesRegex(RuntimeError, "translationDevice=cpu"):
+        with self.assertRaisesRegex(RuntimeError, "PyTorch/CUDA 빌드"):
             _validate_torch_cuda_supports_current_gpu(torch)
 
     def test_auto_runtime_options_are_rejected(self) -> None:
@@ -85,8 +86,12 @@ class TranslationModelTest(unittest.TestCase):
 
         self.assertIn("translationDevice=cuda", detail)
         self.assertIn("translationComputeType=float16", detail)
-        self.assertIn("번역 장치를 cpu", detail)
-        self.assertIn("번역 연산 타입을 float32", detail)
+        self.assertIn("현재 GPU를 지원하는 torch/CUDA 빌드", detail)
+
+    def test_translation_generation_options_are_validated(self) -> None:
+        self.assertEqual(_validate_generation_int("test.option", 1, 1, 8), 1)
+        with self.assertRaisesRegex(RuntimeError, "test.option"):
+            _validate_generation_int("test.option", 0, 1, 8)
 
     def test_mock_translator_keeps_target_metadata(self) -> None:
         translator = MockTextTranslator()

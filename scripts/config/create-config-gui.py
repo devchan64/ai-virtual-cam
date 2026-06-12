@@ -65,6 +65,7 @@ from scripts.config.audio_devices import (
     _get_audio_source_module_ids,
     _resolve_and_validate_audio_runtime_devices,
 )
+from scripts.config.components import add_numeric_slider
 from scripts.config.audio_tab import build_audio_tab
 from scripts.config.background_tab import build_background_tab
 from scripts.config.crop_tab import build_crop_tab
@@ -406,6 +407,8 @@ def _default_virtual_output_device(cameras: list[dict[str, str]]) -> str:
 class ConfigGui:
     def __init__(self, root: tk.Tk, output_path: str, language: str = "ko") -> None:
         self.root = root
+        self._tk = tk
+        self._ttk = ttk
         self.output_path = output_path
         self._lang = (language or "ko").strip().lower()
         if self._lang not in {"ko", "en"}:
@@ -441,7 +444,9 @@ class ConfigGui:
         self._input_modes: list[tuple[int, int, str]] = []
         self._output_modes: list[tuple[int, int, str]] = []
         self._slider_value_vars: dict[str, tk.StringVar] = {}
-        self._slider_formatters: dict[str, Callable[[float], str]] = {}
+        self._slider_formatters: dict[str, object] = {}
+        self._slider_normalizers: dict[str, object] = {}
+        self._slider_entries: dict[str, object] = {}
         self._audio_gate_test_running = False
         self._audio_gate_test_lock: Lock = Lock()
         self._audio_gate_test_window: tk.Toplevel | None = None
@@ -507,6 +512,7 @@ class ConfigGui:
         self._scroll_inner: ttk.Frame | None = None
         self._scroll_window: int | None = None
         self._scrollbar_update_after_id = None
+        self._window_geometry_save_after_id: str | None = None
         self._tab_meta: list[tuple[ttk.Frame, str, str]] = []
         self._input_device_label: ttk.Label | None = None
         self._output_device_label: ttk.Label | None = None
@@ -523,6 +529,7 @@ class ConfigGui:
         )
         self._build_form()
         self._load_existing_config()
+        self.root.bind("<Configure>", self._on_root_configure)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _is_serve_running(self) -> bool:
@@ -792,6 +799,12 @@ class ConfigGui:
         threading.Timer(1.5, _force_kill).start()
 
     def _on_close(self) -> None:
+        if self._window_geometry_save_after_id is not None:
+            try:
+                self.root.after_cancel(self._window_geometry_save_after_id)
+            except Exception:
+                pass
+            self._window_geometry_save_after_id = None
         self._save_window_geometry_meta()
         if self._is_serve_running():
             self._stop_serve()
@@ -805,6 +818,19 @@ class ConfigGui:
         except Exception:
             pass
         return self.root.winfo_geometry()
+
+    def _on_root_configure(self, event) -> None:
+        if event.widget != self.root:
+            return
+        self._schedule_save_window_geometry_meta()
+
+    def _schedule_save_window_geometry_meta(self) -> None:
+        if self._window_geometry_save_after_id is not None:
+            try:
+                self.root.after_cancel(self._window_geometry_save_after_id)
+            except Exception:
+                pass
+        self._window_geometry_save_after_id = self.root.after(600, self._save_window_geometry_meta)
 
     def _restore_window_geometry(self, meta_cfg: dict) -> None:
         geometry = _sanitize_window_geometry(
@@ -820,6 +846,7 @@ class ConfigGui:
         config.setdefault("meta", {})["windowGeometry"] = self._current_window_geometry()
 
     def _save_window_geometry_meta(self) -> None:
+        self._window_geometry_save_after_id = None
         config_path = Path(self.output_path).expanduser()
         if not config_path.exists():
             return
@@ -1119,43 +1146,18 @@ class ConfigGui:
         return self._add_text(parent, row, key, label, str(default), col_offset, label_key=label_key)
 
     def _add_slider(self, parent, row, key, label, default, min_value, max_value, resolution=0.01, label_key: str | None = None):
-        label_text = self._tr(label_key or label, label)
-        label_widget = ttk.Label(parent, text=label_text)
-        if label_key is not None:
-            self._register_localized_widget(label_widget, label_key, label)
-        label_widget.grid(row=row, column=0, sticky="w")
-        var = tk.DoubleVar(value=float(default))
-        self.vars[key] = var
-        value_var = tk.StringVar()
-
-        def format_value(value: float) -> str:
-            if resolution >= 1:
-                return str(int(round(value)))
-            return f"{value:.2f}"
-
-        def on_change(raw):
-            value_var.set(format_value(float(raw)))
-
-        value_var.set(format_value(float(default)))
-        scale = ttk.Scale(parent, from_=min_value, to=max_value, variable=var, command=on_change)
-
-        def on_click(event):
-            widget = event.widget
-            width = max(1, widget.winfo_width())
-            ratio = max(0.0, min(1.0, float(event.x) / float(width)))
-            value = float(min_value) + ratio * (float(max_value) - float(min_value))
-            var.set(value)
-            value_var.set(format_value(value))
-            return "break"
-
-        scale.bind("<Button-1>", on_click)
-        scale.grid(
-            row=row, column=1, columnspan=2, sticky="ew", padx=4
+        return add_numeric_slider(
+            self,
+            parent,
+            row,
+            key,
+            label,
+            default,
+            min_value,
+            max_value,
+            step=resolution,
+            label_key=label_key,
         )
-        ttk.Label(parent, textvariable=value_var).grid(row=row, column=3, sticky="e")
-        self._slider_value_vars[key] = value_var
-        self._slider_formatters[key] = format_value
-        self._widgets[key] = scale
 
     def _add_combo(self, parent, row, key, label, values, default, readonly=False, col_offset=0, label_key: str | None = None):
         label_text = self._tr(label_key or label, label)
@@ -1436,11 +1438,15 @@ class ConfigGui:
             "whisper_translation_model": "facebook/nllb-200-distilled-600M",
             "whisper_translation_device": "cuda",
             "whisper_translation_compute_type": "float16",
+            "whisper_translation_beam_size": 1,
+            "whisper_translation_max_new_tokens": 128,
             "whisper_device": "cuda",
             "whisper_compute_type": "float16",
             "whisper_vad_filter": True,
             "whisper_chunk_seconds": 5.0,
             "whisper_beam_size": 5,
+            "whisper_max_new_tokens": 96,
+            "whisper_temperature": 0.0,
         }
 
     def _create_virtual_camera(self) -> None:
@@ -1792,11 +1798,15 @@ class ConfigGui:
             "whisper_translation_model",
             "whisper_translation_device",
             "whisper_translation_compute_type",
+            "whisper_translation_beam_size",
+            "whisper_translation_max_new_tokens",
             "whisper_device",
             "whisper_compute_type",
             "whisper_vad_filter",
             "whisper_chunk_seconds",
             "whisper_beam_size",
+            "whisper_max_new_tokens",
+            "whisper_temperature",
         ):
             self._set_var(key, defaults.get(key))
         self._sync_whisper_translation_backend_options()
@@ -2001,11 +2011,15 @@ class ConfigGui:
         self._set_var("whisper_translation_model", whisper_cfg.get("translationModel", defaults["whisper_translation_model"]))
         self._set_var("whisper_translation_device", whisper_cfg.get("translationDevice", defaults["whisper_translation_device"]))
         self._set_var("whisper_translation_compute_type", whisper_cfg.get("translationComputeType", defaults["whisper_translation_compute_type"]))
+        self._set_var("whisper_translation_beam_size", whisper_cfg.get("translationBeamSize", defaults["whisper_translation_beam_size"]))
+        self._set_var("whisper_translation_max_new_tokens", whisper_cfg.get("translationMaxNewTokens", defaults["whisper_translation_max_new_tokens"]))
         self._set_var("whisper_device", whisper_cfg.get("device", defaults["whisper_device"]))
         self._set_var("whisper_compute_type", whisper_cfg.get("computeType", defaults["whisper_compute_type"]))
         self._set_var("whisper_vad_filter", whisper_cfg.get("vadFilter", defaults["whisper_vad_filter"]))
         self._set_var("whisper_chunk_seconds", whisper_cfg.get("chunkSeconds", defaults["whisper_chunk_seconds"]))
         self._set_var("whisper_beam_size", whisper_cfg.get("beamSize", defaults["whisper_beam_size"]))
+        self._set_var("whisper_max_new_tokens", whisper_cfg.get("maxNewTokens", defaults["whisper_max_new_tokens"]))
+        self._set_var("whisper_temperature", whisper_cfg.get("temperature", defaults["whisper_temperature"]))
         self._sync_whisper_translation_backend_options()
 
     def _set_var(self, key: str, value):
@@ -2022,6 +2036,9 @@ class ConfigGui:
                 float_value = float(value)
             except (TypeError, ValueError):
                 return
+            normalizer = self._slider_normalizers.get(key)
+            if normalizer is not None:
+                float_value = normalizer(float_value)
             var.set(float_value)
             value_var = self._slider_value_vars.get(key)
             if value_var is not None:
@@ -2034,6 +2051,9 @@ class ConfigGui:
                 int_value = int(float(value))
             except (TypeError, ValueError):
                 return
+            normalizer = self._slider_normalizers.get(key)
+            if normalizer is not None:
+                int_value = int(round(normalizer(int_value)))
             var.set(int_value)
             value_var = self._slider_value_vars.get(key)
             if value_var is not None:
@@ -3668,11 +3688,15 @@ class ConfigGui:
             whisper_translation_model=iv["whisper_translation_model"].get().strip(),
             whisper_translation_device=iv["whisper_translation_device"].get().strip(),
             whisper_translation_compute_type=iv["whisper_translation_compute_type"].get().strip(),
+            whisper_translation_beam_size=int(round(float(iv["whisper_translation_beam_size"].get()))),
+            whisper_translation_max_new_tokens=int(round(float(iv["whisper_translation_max_new_tokens"].get()))),
             whisper_device=iv["whisper_device"].get().strip(),
             whisper_compute_type=iv["whisper_compute_type"].get().strip(),
             whisper_vad_filter=self._parse_bool(iv["whisper_vad_filter"].get()),
             whisper_chunk_seconds=float(iv["whisper_chunk_seconds"].get()),
             whisper_beam_size=int(round(float(iv["whisper_beam_size"].get()))),
+            whisper_max_new_tokens=int(round(float(iv["whisper_max_new_tokens"].get()))),
+            whisper_temperature=float(iv["whisper_temperature"].get()),
         )
 
 

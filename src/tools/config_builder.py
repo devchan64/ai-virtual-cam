@@ -454,11 +454,15 @@ def build_config(
     whisper_translation_model: str = "facebook/nllb-200-distilled-600M",
     whisper_translation_device: str = "cuda",
     whisper_translation_compute_type: str = "float16",
+    whisper_translation_beam_size: int = 1,
+    whisper_translation_max_new_tokens: int = 128,
     whisper_device: str = "cuda",
     whisper_compute_type: str = "float16",
     whisper_vad_filter: bool = True,
     whisper_chunk_seconds: float = 5.0,
     whisper_beam_size: int = 5,
+    whisper_max_new_tokens: int = 96,
+    whisper_temperature: float = 0.0,
 ) -> dict:
     if audio_output_device is None:
         audio_output_device = _default_audio_output_device()
@@ -577,10 +581,14 @@ def build_config(
             "translationModel": str(whisper_translation_model),
             "translationDevice": str(whisper_translation_device),
             "translationComputeType": str(whisper_translation_compute_type),
+            "translationBeamSize": int(whisper_translation_beam_size),
+            "translationMaxNewTokens": int(whisper_translation_max_new_tokens),
             "device": str(whisper_device),
             "computeType": str(whisper_compute_type),
             "vadFilter": bool(whisper_vad_filter),
             "chunkSeconds": float(whisper_chunk_seconds),
             "beamSize": int(whisper_beam_size),
+            "maxNewTokens": int(whisper_max_new_tokens),
+            "temperature": float(whisper_temperature),
         },
     }

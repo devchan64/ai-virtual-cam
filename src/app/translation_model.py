@@ -28,7 +28,7 @@ class MockTextTranslator(LocalTextTranslator):
 
 
 class NllbTransformersTranslator(LocalTextTranslator):
-    def __init__(self, model_name: str, device: str, compute_type: str) -> None:
+    def __init__(self, model_name: str, device: str, compute_type: str, beam_size: int = 1, max_new_tokens: int = 128) -> None:
         if not model_name:
             raise RuntimeError("whisper.translationModel is required for nllb-transformers")
         try:
@@ -45,6 +45,8 @@ class NllbTransformersTranslator(LocalTextTranslator):
         self._model_name = model_name
         self._requested_device = str(device or "auto").strip()
         self._requested_compute_type = str(compute_type or "auto").strip()
+        self._beam_size = _validate_generation_int("whisper.translationBeamSize", beam_size, 1, 8)
+        self._max_new_tokens = _validate_generation_int("whisper.translationMaxNewTokens", max_new_tokens, 16, 512)
         try:
             self._tokenizer = AutoTokenizer.from_pretrained(model_name)
             self._model = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=torch_dtype)
@@ -69,7 +71,7 @@ class NllbTransformersTranslator(LocalTextTranslator):
             if not torch.cuda.is_available():
                 raise RuntimeError(
                     "whisper.translationDevice=cuda 이지만 torch CUDA를 사용할 수 없습니다. "
-                    "CUDA 런타임을 확인하거나 translationDevice=cpu로 설정하세요."
+                    "CUDA 런타임과 현재 GPU를 지원하는 PyTorch/CUDA 빌드를 확인하세요."
                 )
             _validate_torch_cuda_supports_current_gpu(torch)
         if normalized not in {"cpu", "cuda"}:
@@ -107,8 +109,8 @@ class NllbTransformersTranslator(LocalTextTranslator):
                 generated = self._model.generate(
                     **encoded,
                     forced_bos_token_id=forced_bos_token_id,
-                    max_new_tokens=256,
-                    num_beams=4,
+                    max_new_tokens=self._max_new_tokens,
+                    num_beams=self._beam_size,
                 )
             return self._tokenizer.batch_decode(generated, skip_special_tokens=True)[0].strip()
         except Exception as exc:
@@ -122,6 +124,16 @@ class NllbTransformersTranslator(LocalTextTranslator):
                 target_language=request.target_language,
             )
             raise RuntimeError(detail) from exc
+
+
+def _validate_generation_int(name: str, value: int, minimum: int, maximum: int) -> int:
+    try:
+        normalized = int(value)
+    except Exception as exc:
+        raise RuntimeError(f"{name} must be an integer between {minimum} and {maximum}. 설정값={value}") from exc
+    if not minimum <= normalized <= maximum:
+        raise RuntimeError(f"{name} must be between {minimum} and {maximum}. 설정값={value}")
+    return normalized
 
 
 def _torch_cuda_arch_tag(torch) -> str | None:
@@ -160,8 +172,7 @@ def _validate_torch_cuda_supports_current_gpu(torch) -> None:
     raise RuntimeError(
         "whisper.translationDevice=cuda 이지만 현재 PyTorch CUDA 빌드가 GPU 아키텍처를 지원하지 않습니다. "
         f"gpu={device_name} capability={arch_tag} supported={','.join(supported_arches)}. "
-        "권장 조치: translationDevice=cpu, translationComputeType=float32로 설정하거나, "
-        "현재 GPU 아키텍처를 지원하는 PyTorch/CUDA 빌드를 설치하세요."
+        "권장 조치: 현재 GPU 아키텍처를 지원하는 PyTorch/CUDA 빌드를 설치하세요."
     )
 
 
@@ -186,8 +197,7 @@ def _translation_failure_detail(
         return (
             base
             + "원인: 현재 torch/CUDA 빌드가 이 GPU 아키텍처의 CUDA 커널을 지원하지 않습니다. "
-            + "권장 조치: config Whisper 탭에서 번역 장치를 cpu, 번역 연산 타입을 float32로 바꾸거나, "
-            + "현재 GPU를 지원하는 torch/CUDA 빌드를 설치한 뒤 재시도하세요. "
+            + "권장 조치: 현재 GPU를 지원하는 torch/CUDA 빌드를 설치한 뒤 재시도하세요. "
             + f"원본 오류: {cause}"
         )
     return base + f"원인: {cause}"
@@ -200,12 +210,19 @@ def _nllb_language_code(language: str) -> str:
     return NLLB_LANGUAGE_CODES[normalized]
 
 
-def build_text_translator(backend: str, model_name: str, device: str, compute_type: str) -> LocalTextTranslator | None:
+def build_text_translator(
+    backend: str,
+    model_name: str,
+    device: str,
+    compute_type: str,
+    beam_size: int = 1,
+    max_new_tokens: int = 128,
+) -> LocalTextTranslator | None:
     normalized = str(backend or "whisper").strip().lower()
     if normalized == "whisper":
         return None
     if normalized == "mock":
         return MockTextTranslator()
     if normalized == "nllb-transformers":
-        return NllbTransformersTranslator(model_name, device, compute_type)
+        return NllbTransformersTranslator(model_name, device, compute_type, beam_size, max_new_tokens)
     raise RuntimeError(f"지원하지 않는 whisper.translationBackend입니다: {backend}")

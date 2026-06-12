@@ -324,7 +324,7 @@ Whisper 활성화:
 - `Whisper 입력 dB 미터`로 선택한 장치에 실제 신호가 들어오는지 확인합니다.
 - `번역 창`을 켠 뒤 `번역 백엔드`를 선택합니다. `whisper`는 영어 번역만 지원하고, `nllb-transformers`는 `facebook/nllb-200-distilled-600M` 로컬 모델로 한국어/영어/중국어 대상 번역을 지원합니다.
 - Linux PulseAudio/PipeWire 장치는 `alsa_input...`, `*.monitor`, `ai-virtual-cam` 같은 원본 ID를 설정값으로 저장합니다.
-- Whisper 탭의 설정값은 `setting.json`의 `whisper` 블록에 저장됩니다. 주요 키는 `enabled`, `inputDevice`, `backend`, `model`, `language`, `translationEnabled`, `translationBackend`, `translationTargetLanguage`, `translationModel`, `translationDevice`, `translationComputeType`, `device`, `computeType`, `vadFilter`, `chunkSeconds`, `beamSize`입니다.
+- Whisper 탭의 설정값은 `setting.json`의 `whisper` 블록에 저장됩니다. 주요 키는 `enabled`, `inputDevice`, `backend`, `model`, `language`, `translationEnabled`, `translationBackend`, `translationTargetLanguage`, `translationModel`, `translationDevice`, `translationComputeType`, `translationBeamSize`, `translationMaxNewTokens`, `device`, `computeType`, `vadFilter`, `chunkSeconds`, `beamSize`, `maxNewTokens`, `temperature`입니다.
 
 실행 동작:
 
@@ -344,7 +344,7 @@ Whisper 활성화:
 - 인식 언어는 단일 선택입니다. 한국어/영어/중국어가 섞이면 `자동 감지 (auto)`를 사용하고, 한 언어가 주로 나오면 `한국어 (ko)`, `English (en)`, `中文 (zh)` 중 하나로 고정합니다.
 - `whisper` 번역 백엔드는 Whisper의 `translate` 경로를 사용하므로 영어 번역만 지원합니다. 한국어/영어/중국어 대상 번역은 `nllb-transformers` 백엔드를 사용합니다.
 - `nllb-transformers` 번역을 선택하면 Whisper는 STT 전사(`task=transcribe`)만 수행하고, 번역은 외부 NLLB 텍스트 번역 경로에서만 수행합니다. 이때 `task=translate` 설정은 유효하지 않습니다.
-- NLLB 번역은 실시간 성능을 위해 `translationDevice=cuda`, `translationComputeType=float16`을 전제로 하며 실행 단계의 자동 CPU fallback은 허용하지 않습니다.
+- NLLB 번역은 실시간 성능을 위해 `translationDevice=cuda`, `translationComputeType=float16`, `translationBeamSize=1`, `translationMaxNewTokens=128`을 기본 테스트값으로 사용하며 실행 단계의 자동 CPU fallback은 허용하지 않습니다.
 - 테스트 설정은 STT 장치와 번역 장치를 모두 `cuda`로 두고, 연산 타입을 `float16`으로 맞춥니다. Whisper large-v3와 NLLB 600M은 CPU/float32에서 지연이 커질 수 있으므로, 실시간 회의 자막처럼 짧은 주기로 전사/번역 창을 갱신하려면 GPU 텐서코어를 쓰는 반정밀도 실행이 유리합니다.
 - `float16`은 메모리 사용량과 연산량을 줄여 응답성을 높이는 대신, GPU와 PyTorch/CUDA 빌드가 해당 아키텍처를 지원해야 합니다. 지원하지 않으면 자동 CPU fallback 대신 즉시 실패하도록 두고, CUDA 빌드나 설정을 명확히 수정합니다.
 
@@ -352,9 +352,10 @@ Whisper 활성화:
 
 - `청크 길이(초)`(`chunkSeconds`): 입력 오디오를 몇 초 단위로 잘라 전사할지 결정합니다. 짧게 잡으면 첫 결과가 빨리 나오고 화면 갱신 주기가 짧아지지만, 문맥이 부족해 문장이 잘리거나 짧은 구간의 인식 품질이 흔들릴 수 있습니다. 길게 잡으면 문맥이 늘어 정확도와 문장 완성도에 유리하지만, 해당 길이만큼 결과 출력 지연이 커집니다.
 - `Beam 크기`(`beamSize`): 디코딩 후보를 몇 갈래로 탐색할지 결정합니다. `1`은 가장 빠른 greedy 디코딩에 가깝고 지연을 줄이는 데 유리합니다. 값을 키우면 후보 탐색이 늘어 일부 발화의 정확도와 안정성이 좋아질 수 있지만, large-v3에서는 GPU 사용량과 디코딩 시간이 늘어 응답이 늦어질 수 있습니다.
-- large-v3에서 실시간성이 중요하면 우선 `chunkSeconds=2.0`, `beamSize=1` 조합을 시작점으로 사용하세요.
+- large-v3에서 실시간성이 중요하면 우선 `chunkSeconds=2.0`, `beamSize=1`, `temperature=0.0` 조합을 시작점으로 사용하세요. `maxNewTokens=96`은 속도 튜닝값이라기보다 긴 출력 생성을 막는 상한값입니다.
 - 문장이 너무 자주 끊기거나 앞뒤 문맥을 놓치면 `chunkSeconds`를 `3.0`~`5.0`으로 늘립니다.
-- 속도는 충분하지만 고유명사나 짧은 발화 인식이 흔들리면 `beamSize`를 `3` 또는 `5`로 올려 비교합니다. 지연이 다시 커지면 `beamSize=1`로 되돌립니다.
+- 속도는 충분하지만 고유명사나 짧은 발화 인식이 흔들리면 `beamSize`를 `3` 또는 `5`로 올려 비교합니다. 문장이 실제로 잘릴 때만 `maxNewTokens`를 `128` 또는 `192`로 올립니다. 짧은 청크에서는 이 값이 응답속도에 거의 영향을 주지 않을 수 있습니다.
+- 번역까지 포함한 지연은 NLLB `translationBeamSize`와 `translationMaxNewTokens`의 영향을 받습니다. 실시간 응답성은 `translationBeamSize=1`, `translationMaxNewTokens=128`에서 시작하고, 번역 품질이나 긴 문장 완성도가 부족하면 각각 `3` 또는 `256`으로 올려 비교합니다.
 
 ## 오디오 운영 가이드
 
@@ -558,11 +559,15 @@ Whisper 활성화:
     "translationModel": "facebook/nllb-200-distilled-600M",
     "translationDevice": "cuda",
     "translationComputeType": "float16",
+    "translationBeamSize": 1,
+    "translationMaxNewTokens": 128,
     "device": "cuda",
     "computeType": "float16",
     "vadFilter": true,
     "chunkSeconds": 2.0,
-    "beamSize": 1
+    "beamSize": 1,
+    "maxNewTokens": 96,
+    "temperature": 0.0
   }
 }
 ```

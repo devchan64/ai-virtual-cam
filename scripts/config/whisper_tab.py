@@ -142,6 +142,14 @@ def build_whisper_tab(
         label_key="label.whisper_vad_filter",
     )
     row += 1
+    row = _add_hint(
+        gui,
+        ttk,
+        tab_whisper,
+        row,
+        "hint.whisper_vad_filter",
+        "VAD skips silence and non-speech sections, but may trim very short speech.",
+    )
     gui._add_slider(
         tab_whisper,
         row,
@@ -164,6 +172,30 @@ def build_whisper_tab(
         8,
         resolution=1,
         label_key="label.whisper_beam_size",
+    )
+    row += 1
+    gui._add_slider(
+        tab_whisper,
+        row,
+        "whisper_max_new_tokens",
+        gui._tr("label.whisper_max_new_tokens", "STT max tokens"),
+        96,
+        16,
+        512,
+        resolution=16,
+        label_key="label.whisper_max_new_tokens",
+    )
+    row += 1
+    gui._add_slider(
+        tab_whisper,
+        row,
+        "whisper_temperature",
+        gui._tr("label.whisper_temperature", "STT temperature"),
+        0.0,
+        0.0,
+        1.0,
+        resolution=0.1,
+        label_key="label.whisper_temperature",
     )
     row += 1
     row = _add_hint(
@@ -251,6 +283,30 @@ def build_whisper_tab(
         ["float16", "float32"],
         "float16",
         label_key="label.whisper_translation_compute_type",
+    )
+    nllb_row += 1
+    gui._add_slider(
+        nllb_translation_frame,
+        nllb_row,
+        "whisper_translation_beam_size",
+        gui._tr("label.whisper_translation_beam_size", "Translation beam size"),
+        1,
+        1,
+        8,
+        resolution=1,
+        label_key="label.whisper_translation_beam_size",
+    )
+    nllb_row += 1
+    gui._add_slider(
+        nllb_translation_frame,
+        nllb_row,
+        "whisper_translation_max_new_tokens",
+        gui._tr("label.whisper_translation_max_new_tokens", "Translation max tokens"),
+        128,
+        16,
+        512,
+        resolution=16,
+        label_key="label.whisper_translation_max_new_tokens",
     )
     nllb_row += 1
     _add_hint(

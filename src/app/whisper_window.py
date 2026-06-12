@@ -270,13 +270,16 @@ class WhisperTranscriptWorker:
                     f"{translation_status}: "
                     f"backend={self._cfg.translationBackend} target_language={self._cfg.translationTargetLanguage} "
                     f"model={self._cfg.translationModel} device={self._cfg.translationDevice} "
-                    f"compute={self._cfg.translationComputeType}",
+                    f"compute={self._cfg.translationComputeType} translation_beam={self._cfg.translationBeamSize} "
+                    f"translation_max_tokens={self._cfg.translationMaxNewTokens}",
                 )
                 text_translator = build_text_translator(
                     self._cfg.translationBackend,
                     self._cfg.translationModel,
                     self._cfg.translationDevice,
                     self._cfg.translationComputeType,
+                    self._cfg.translationBeamSize,
+                    self._cfg.translationMaxNewTokens,
                 )
             self._emit("status", f"입력 장치 열기: {self._cfg.inputDevice}")
 
@@ -374,7 +377,10 @@ class WhisperTranscriptWorker:
             f"Whisper 전사 루프 시작: chunk_seconds={chunk_seconds} language={self._cfg.language} "
             f"translation_enabled={self._cfg.translationEnabled} "
             f"translation_backend={self._cfg.translationBackend} "
-            f"translation_target={self._cfg.translationTargetLanguage} beam_size={self._cfg.beamSize}",
+            f"translation_target={self._cfg.translationTargetLanguage} beam_size={self._cfg.beamSize} "
+            f"max_new_tokens={self._cfg.maxNewTokens} temperature={self._cfg.temperature} "
+            f"without_timestamps=True translation_beam_size={self._cfg.translationBeamSize} "
+            f"translation_max_new_tokens={self._cfg.translationMaxNewTokens}",
         )
         while not self._stop.is_set():
             try:
@@ -391,16 +397,25 @@ class WhisperTranscriptWorker:
             audio = np.concatenate(samples).astype(np.float32, copy=False)
             samples.clear()
             buffered = 0
+            chunk_audio_seconds = float(audio.shape[0]) / float(SAMPLE_RATE)
+            chunk_started_at = time.perf_counter()
+            translation_elapsed = 0.0
+            translation_attempted = False
             try:
+                stt_started_at = time.perf_counter()
                 segments, info = model.transcribe(
                     audio,
                     language=language,
                     task="transcribe",
                     vad_filter=self._cfg.vadFilter,
                     beam_size=self._cfg.beamSize,
+                    temperature=self._cfg.temperature,
+                    max_new_tokens=self._cfg.maxNewTokens,
+                    without_timestamps=True,
                     condition_on_previous_text=False,
                 )
                 text = " ".join(segment.text.strip() for segment in segments if segment.text.strip()).strip()
+                stt_elapsed = time.perf_counter() - stt_started_at
                 detected = getattr(info, "language", self._cfg.language)
                 if text:
                     self._emit("transcript", text, log_text=f"[{detected}] {text}")
@@ -408,6 +423,8 @@ class WhisperTranscriptWorker:
                     self._emit("status", f"Whisper 전사 결과 없음: chunk={chunks}", display=False)
                 if self._cfg.translationEnabled and not translation_failed:
                     try:
+                        translation_attempted = True
+                        translation_started_at = time.perf_counter()
                         request_label = "Whisper 내장 번역 요청" if text_translator is None else "외부 텍스트 번역 요청"
                         self._emit("status", f"{request_label}: chunk={chunks}", display=False)
                         translated_text = ""
@@ -419,6 +436,9 @@ class WhisperTranscriptWorker:
                                 task="translate",
                                 vad_filter=self._cfg.vadFilter,
                                 beam_size=self._cfg.beamSize,
+                                temperature=self._cfg.temperature,
+                                max_new_tokens=self._cfg.maxNewTokens,
+                                without_timestamps=True,
                                 condition_on_previous_text=False,
                             )
                             translated_text = " ".join(
@@ -434,6 +454,7 @@ class WhisperTranscriptWorker:
                                     target_language=target_language,
                                 )
                             )
+                        translation_elapsed = time.perf_counter() - translation_started_at
                         if translated_text:
                             self._emit(
                                 "translation",
@@ -443,12 +464,24 @@ class WhisperTranscriptWorker:
                         else:
                             self._emit("status", f"Whisper 번역 결과 없음: chunk={chunks}", display=False)
                     except Exception as exc:
+                        translation_elapsed = time.perf_counter() - translation_started_at if translation_attempted else 0.0
                         translation_failed = True
                         self._emit(
                             "error",
                             "Whisper 번역 실패: "
                             f"{exc}. 번역을 이번 세션에서 중지합니다. STT 전사는 계속됩니다.",
                         )
+                total_elapsed = time.perf_counter() - chunk_started_at
+                self._emit(
+                    "status",
+                    "Whisper 성능: "
+                    f"chunk={chunks} audio={chunk_audio_seconds:.2f}s "
+                    f"stt={stt_elapsed:.2f}s stt_rtf={stt_elapsed / max(chunk_audio_seconds, 0.001):.2f} "
+                    f"translation={translation_elapsed:.2f}s translation_enabled={self._cfg.translationEnabled and not translation_failed} "
+                    f"total={total_elapsed:.2f}s total_rtf={total_elapsed / max(chunk_audio_seconds, 0.001):.2f} "
+                    f"beam={self._cfg.beamSize} max_tokens={self._cfg.maxNewTokens} text_chars={len(text)}",
+                    display=False,
+                )
             except Exception as exc:
                 self._emit("error", f"Whisper 전사 실패: {exc}")
 

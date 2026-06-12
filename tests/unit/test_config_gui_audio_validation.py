@@ -67,6 +67,34 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
                     "ai-virtual-cam",
                 )
 
+    def test_apply_window_geometry_meta_preserves_existing_meta(self) -> None:
+        root = types.SimpleNamespace(
+            update_idletasks=lambda: None,
+            winfo_geometry=lambda: "900x700+120+80",
+        )
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        gui.root = root
+        config = {"meta": {"language": "ko"}}
+
+        self.module.ConfigGui._apply_window_geometry_meta(gui, config)
+
+        self.assertEqual(config["meta"]["language"], "ko")
+        self.assertEqual(config["meta"]["windowGeometry"], "900x700+120+80")
+
+    def test_restore_window_geometry_uses_saved_meta_value(self) -> None:
+        applied = []
+        root = types.SimpleNamespace(
+            winfo_screenwidth=lambda: 1920,
+            winfo_screenheight=lambda: 1080,
+            geometry=lambda value: applied.append(value),
+        )
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        gui.root = root
+
+        self.module.ConfigGui._restore_window_geometry(gui, {"windowGeometry": "900x700+120+80"})
+
+        self.assertEqual(applied, ["900x700+120+80"])
+
     def test_sanitize_window_geometry_accepts_visible_geometry(self) -> None:
         geometry = self.module._sanitize_window_geometry("900x700+120+80", 1920, 1080)
 

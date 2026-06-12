@@ -38,11 +38,15 @@ class WhisperConfigTest(unittest.TestCase):
             whisper_translation_model="facebook/nllb-200-distilled-600M",
             whisper_translation_device="cpu",
             whisper_translation_compute_type="float32",
+            whisper_translation_beam_size=3,
+            whisper_translation_max_new_tokens=256,
             whisper_device="cpu",
             whisper_compute_type="int8",
             whisper_vad_filter=False,
             whisper_chunk_seconds=2.5,
             whisper_beam_size=1,
+            whisper_max_new_tokens=128,
+            whisper_temperature=0.2,
         )
 
         self.assertEqual(
@@ -60,11 +64,15 @@ class WhisperConfigTest(unittest.TestCase):
                 "translationModel": "facebook/nllb-200-distilled-600M",
                 "translationDevice": "cpu",
                 "translationComputeType": "float32",
+                "translationBeamSize": 3,
+                "translationMaxNewTokens": 256,
                 "device": "cpu",
                 "computeType": "int8",
                 "vadFilter": False,
                 "chunkSeconds": 2.5,
                 "beamSize": 1,
+                "maxNewTokens": 128,
+                "temperature": 0.2,
             },
         )
 
@@ -107,8 +115,12 @@ class WhisperConfigTest(unittest.TestCase):
         self.assertEqual(loaded.whisper.translationModel, "facebook/nllb-200-distilled-600M")
         self.assertEqual(loaded.whisper.translationDevice, "cuda")
         self.assertEqual(loaded.whisper.translationComputeType, "float16")
+        self.assertEqual(loaded.whisper.translationBeamSize, 1)
+        self.assertEqual(loaded.whisper.translationMaxNewTokens, 128)
         self.assertEqual(loaded.whisper.chunkSeconds, 5.0)
         self.assertEqual(loaded.whisper.beamSize, 5)
+        self.assertEqual(loaded.whisper.maxNewTokens, 96)
+        self.assertEqual(loaded.whisper.temperature, 0.0)
 
     def test_whisper_rejects_invalid_backend(self) -> None:
         with self.assertRaisesRegex(ValueError, "whisper.backend"):
@@ -180,6 +192,14 @@ class WhisperConfigTest(unittest.TestCase):
             WhisperConfig.from_dict({"chunkSeconds": 0.5})
         with self.assertRaisesRegex(ValueError, "whisper.beamSize"):
             WhisperConfig.from_dict({"beamSize": 0})
+        with self.assertRaisesRegex(ValueError, "whisper.maxNewTokens"):
+            WhisperConfig.from_dict({"maxNewTokens": 8})
+        with self.assertRaisesRegex(ValueError, "whisper.temperature"):
+            WhisperConfig.from_dict({"temperature": 1.5})
+        with self.assertRaisesRegex(ValueError, "whisper.translationBeamSize"):
+            WhisperConfig.from_dict({"translationBeamSize": 0})
+        with self.assertRaisesRegex(ValueError, "whisper.translationMaxNewTokens"):
+            WhisperConfig.from_dict({"translationMaxNewTokens": 8})
 
 
 if __name__ == "__main__":
