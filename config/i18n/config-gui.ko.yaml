@@ -115,8 +115,6 @@ hint.whisper_translation_whisper_backend: "Whisper 번역은 영어 출력만 �
 hint.whisper_translation_target_language: "NLLB 번역은 외부 번역 모델과 CUDA 실행을 사용합니다. 번역 Beam/최대 토큰을 낮추면 응답성이 좋아질 수 있습니다."
 label.whisper_device: "STT 장치"
 label.whisper_compute_type: "STT 연산 타입"
-label.whisper_vad_filter: "VAD 필터"
-hint.whisper_vad_filter: "무음이나 비음성 구간을 건너뛰어 불필요한 전사를 줄입니다. 짧은 발화는 앞뒤가 잘릴 수 있습니다."
 label.whisper_chunk_seconds: "청크 길이(초)"
 label.whisper_beam_size: "Beam 크기"
 label.whisper_max_new_tokens: "STT 최대 토큰"

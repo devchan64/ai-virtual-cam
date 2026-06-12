@@ -324,7 +324,7 @@ Whisper 활성화:
 - `Whisper 입력 dB 미터`로 선택한 장치에 실제 신호가 들어오는지 확인합니다.
 - `번역 창`을 켠 뒤 `번역 백엔드`를 선택합니다. `whisper`는 영어 번역만 지원하고, `nllb-transformers`는 `facebook/nllb-200-distilled-600M` 로컬 모델로 한국어/영어/중국어 대상 번역을 지원합니다.
 - Linux PulseAudio/PipeWire 장치는 `alsa_input...`, `*.monitor`, `ai-virtual-cam` 같은 원본 ID를 설정값으로 저장합니다.
-- Whisper 탭의 설정값은 `setting.json`의 `whisper` 블록에 저장됩니다. 주요 키는 `enabled`, `inputDevice`, `backend`, `model`, `language`, `translationEnabled`, `translationBackend`, `translationTargetLanguage`, `translationModel`, `translationDevice`, `translationComputeType`, `translationBeamSize`, `translationMaxNewTokens`, `device`, `computeType`, `vadFilter`, `chunkSeconds`, `beamSize`, `maxNewTokens`, `temperature`입니다.
+- Whisper 탭의 설정값은 `setting.json`의 `whisper` 블록에 저장됩니다. 주요 키는 `enabled`, `inputDevice`, `backend`, `model`, `language`, `translationEnabled`, `translationBackend`, `translationTargetLanguage`, `translationModel`, `translationDevice`, `translationComputeType`, `translationBeamSize`, `translationMaxNewTokens`, `device`, `computeType`, `chunkSeconds`, `beamSize`, `maxNewTokens`, `temperature`입니다.
 
 실행 동작:
 
@@ -335,7 +335,7 @@ Whisper 활성화:
 - 전사/번역 창에는 복사용 텍스트만 표시합니다. 시간, `[ko]` 같은 언어 태그, `전사 결과 없음` 같은 추적 로그는 표시하지 않습니다.
 - stdout/stderr 로그에는 시간 prefix와 함께 모델 로딩, 입력 장치, chunk 처리, 오류 상태가 출력됩니다.
 - 전사 창의 위치와 크기는 `setting.json`의 `meta.whisperWindowGeometry`, 번역 창의 위치와 크기는 `meta.whisperTranslationWindowGeometry`에 저장되고 다음 실행 때 재사용됩니다.
-- 설정 GUI 자체의 위치와 크기는 `setting.json`의 `meta.windowGeometry`, 카메라 미리보기 창은 `meta.previewWindowGeometry`, 설정 모달은 `meta.audioTuneWindowGeometry`/`meta.audioGateTestWindowGeometry`/`meta.inputMeterWindowGeometry`에 저장됩니다.
+- 설정 GUI 자체의 위치와 크기는 `meta.windowGeometry`, 카메라 미리보기 창은 `meta.previewWindowGeometry`, 설정 모달은 `meta.audioTuneWindowGeometry`/`meta.audioGateTestWindowGeometry`/`meta.inputMeterWindowGeometry`로 `JSON 저장` 시 `setting.json`에 저장됩니다.
 
 모델/언어 설정:
 
@@ -563,7 +563,6 @@ Whisper 활성화:
     "translationMaxNewTokens": 128,
     "device": "cuda",
     "computeType": "float16",
-    "vadFilter": true,
     "chunkSeconds": 3.0,
     "beamSize": 5,
     "maxNewTokens": 64,

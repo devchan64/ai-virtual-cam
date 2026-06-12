@@ -114,8 +114,6 @@ hint.whisper_translation_whisper_backend: "Whisper translation outputs English o
 hint.whisper_translation_target_language: "NLLB translation uses the external model and CUDA execution. Lower translation beam/max tokens can improve responsiveness."
 label.whisper_device: "STT device"
 label.whisper_compute_type: "STT compute type"
-label.whisper_vad_filter: "VAD filter"
-hint.whisper_vad_filter: "Skips silence and non-speech sections to reduce unnecessary transcription. Very short speech can be trimmed."
 label.whisper_chunk_seconds: "Chunk seconds"
 label.whisper_beam_size: "Beam size"
 label.whisper_max_new_tokens: "STT max tokens"

@@ -28,12 +28,21 @@ DEFAULT_CHUNK_SECONDS = float(whisper_default("chunkSeconds"))
 DEFAULT_WINDOW_GEOMETRY = "780x420"
 MIN_WINDOW_WIDTH = 520
 MIN_WINDOW_HEIGHT = 280
+FINAL_TEXT_TAG = "final_text"
+PARTIAL_TEXT_TAG = "partial_text"
+FINAL_TEXT_COLOR = "black"
+PARTIAL_TEXT_COLOR = "#008000"
 MIN_SEGMENT_AVG_LOGPROB = -1.0
 MAX_SEGMENT_NO_SPEECH_PROB = 0.75
 RECENT_TRANSCRIPT_WINDOW = 8
 MAX_RECENT_SHORT_TEXT_REPEATS = 2
-MAX_PENDING_SENTENCE_CHUNKS = 6
-MAX_PENDING_SENTENCE_CHARS = 90
+MAX_PENDING_SENTENCE_CHUNKS = 10
+MAX_PENDING_SENTENCE_CHARS = 180
+SLOW_PENDING_SENTENCE_CHUNKS = 4
+SLOW_PENDING_SENTENCE_CHARS = 45
+SLOW_PENDING_MAX_CHARS_PER_CHUNK = 18.0
+SENTENCE_CONFIRM_CHUNKS = 2
+SENTENCE_CONFIRM_MAX_AGE_CHUNKS = 2
 _SENTENCE_END_PATTERN = r"(?:(?<!\d)\.(?!\d)|[!?。！？…]+)"
 _SENTENCE_END_RE = re.compile(rf"(.+?{_SENTENCE_END_PATTERN})(?=\s+|$)")
 _SENTENCE_END_MARK_RE = re.compile(_SENTENCE_END_PATTERN)
@@ -118,6 +127,24 @@ def _format_window_geometry(parts: dict[str, int]) -> str:
     return f'{int(parts["width"])}x{int(parts["height"])}{x:+d}{y:+d}'
 
 
+def _window_restore_extent(root) -> tuple[int, int]:
+    width = 0
+    height = 0
+    for width_name, height_name in (("winfo_vrootwidth", "winfo_vrootheight"), ("winfo_screenwidth", "winfo_screenheight")):
+        try:
+            width = max(width, int(getattr(root, width_name)()))
+            height = max(height, int(getattr(root, height_name)()))
+        except Exception:
+            pass
+    # Some X11/Tk setups report only the primary monitor before the window is mapped.
+    # Allow the common two-monitor desktop extent so saved secondary-monitor windows reopen in place.
+    if width > 0:
+        width *= 2
+    if height > 0:
+        height *= 2
+    return width, height
+
+
 def _sanitize_window_geometry(geometry: object, screen_width: int, screen_height: int) -> str | None:
     parts = _parse_window_geometry(geometry)
     if parts is None:
@@ -146,7 +173,19 @@ def _load_window_geometry(config_path: Path, key: str, root) -> str | None:
         meta = raw.get("meta") or {}
         if not isinstance(meta, dict):
             return None
-        return _sanitize_window_geometry(meta.get(key), root.winfo_screenwidth(), root.winfo_screenheight())
+        screen_width, screen_height = _window_restore_extent(root)
+        restored = _sanitize_window_geometry(meta.get(key), screen_width, screen_height)
+        if restored:
+            _log_line(
+                f"[avc] whisper status: window geometry restored: key={key} geometry={restored} "
+                f"extent={screen_width}x{screen_height}"
+            )
+        else:
+            _log_line(
+                f"[avc] whisper status: window geometry restore skipped: key={key} "
+                f"saved={meta.get(key)!r} extent={screen_width}x{screen_height}"
+            )
+        return restored
     except Exception as exc:
         _log_line(f"[avc] whisper status: window geometry load failed: {exc}")
         return None
@@ -159,20 +198,15 @@ def _save_window_geometry(
     screen_width: int = 0,
     screen_height: int = 0,
 ) -> None:
+    del config_path
     try:
         sanitized = _sanitize_window_geometry(geometry, screen_width, screen_height)
         if sanitized is None:
-            _log_line(f"[avc] whisper status: window geometry save skipped: invalid geometry={geometry}")
+            _log_line(f"[avc] whisper status: window geometry cache skipped: key={key} invalid_geometry={geometry}")
             return
-        raw = json.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
-        if not isinstance(raw, dict):
-            return
-        raw.setdefault("meta", {})[key] = sanitized
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(json.dumps(raw, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        _log_line(f"[avc] whisper status: window geometry saved: {sanitized}")
+        _log_line(f"[avc] whisper status: window geometry cached: key={key} geometry={sanitized}")
     except Exception as exc:
-        _log_line(f"[avc] whisper status: window geometry save failed: {exc}")
+        _log_line(f"[avc] whisper status: window geometry cache failed: key={key} error={exc}")
 
 def _sounddevice_device_name(configured: str) -> str | None:
     value = str(configured).strip()
@@ -244,11 +278,84 @@ def _new_text_delta(committed_text: str, stable_text: str) -> str:
             return _join_text_units(stable_units[overlap:], stable_separator)
     if stable in committed:
         return ""
+    internal_delta = _new_text_delta_after_internal_overlap(committed, stable)
+    if internal_delta is not None:
+        return internal_delta
     return stable
 
 
 def _word_units(text: str) -> list[str]:
     return re.findall(r"[0-9A-Za-z가-힣]+", _normalized_text(text).lower())
+
+
+def _new_text_delta_after_internal_overlap(committed_text: str, stable_text: str) -> str | None:
+    committed_words = _word_units(committed_text)
+    stable_units, stable_separator = _text_units(stable_text)
+    if stable_separator != " ":
+        return None
+    stable_word_pairs: list[tuple[str, int]] = []
+    for unit_index, unit in enumerate(stable_units):
+        for word in _word_units(unit):
+            stable_word_pairs.append((word, unit_index))
+    stable_words = [word for word, _unit_index in stable_word_pairs]
+    if len(committed_words) < 4 or len(stable_words) < 4:
+        return None
+
+    best_j = 0
+    best_len = 0
+    for i in range(len(committed_words)):
+        for j in range(len(stable_words)):
+            length = 0
+            while (
+                i + length < len(committed_words)
+                and j + length < len(stable_words)
+                and committed_words[i + length] == stable_words[j + length]
+            ):
+                length += 1
+            if length > best_len:
+                best_j = j
+                best_len = length
+    if best_len < 4:
+        return None
+    if best_len / max(len(stable_words), 1) >= 0.85:
+        return ""
+    suffix_word_index = best_j + best_len
+    if suffix_word_index >= len(stable_word_pairs):
+        return ""
+    suffix_unit_index = stable_word_pairs[suffix_word_index][1]
+    suffix = _join_text_units(stable_units[suffix_unit_index:], stable_separator)
+    return suffix or ""
+
+
+def _phrase_key(units: list[str]) -> list[str]:
+    return _word_units(" ".join(units))
+
+
+def _collapse_adjacent_repeated_phrases(text: str) -> str:
+    normalized = _normalized_text(text)
+    units, separator = _text_units(normalized)
+    if separator == "" or len(units) < 6:
+        return normalized
+    passes = 0
+    changed = True
+    while changed and passes < 4:
+        passes += 1
+        changed = False
+        index = 0
+        while index < len(units):
+            collapsed = False
+            max_phrase_len = min(16, (len(units) - index) // 2)
+            for phrase_len in range(max_phrase_len, 2, -1):
+                left = units[index : index + phrase_len]
+                right = units[index + phrase_len : index + (phrase_len * 2)]
+                if _phrase_key(left) and _phrase_key(left) == _phrase_key(right):
+                    del units[index + phrase_len : index + (phrase_len * 2)]
+                    changed = True
+                    collapsed = True
+                    break
+            if not collapsed:
+                index += 1
+    return _join_text_units(units, separator)
 
 
 def _is_subsequence_at(words: list[str], candidate: list[str], start: int) -> bool:
@@ -298,6 +405,39 @@ def _sentence_output_delta(committed_text: str, sentence: str) -> str:
     return normalized
 
 
+def _common_word_run(a_words: list[str], b_words: list[str]) -> int:
+    best_len = 0
+    for i in range(len(a_words)):
+        for j in range(len(b_words)):
+            length = 0
+            while i + length < len(a_words) and j + length < len(b_words) and a_words[i + length] == b_words[j + length]:
+                length += 1
+            best_len = max(best_len, length)
+    return best_len
+
+
+def _sentences_are_revisions(left: str, right: str) -> bool:
+    left_words = _word_units(left)
+    right_words = _word_units(right)
+    if not left_words or not right_words:
+        return False
+    if left_words == right_words:
+        return True
+    shorter = min(len(left_words), len(right_words))
+    common_run = _common_word_run(left_words, right_words)
+    return common_run >= 4 and common_run / max(shorter, 1) >= 0.6
+
+
+def _prefer_sentence_revision(left: str, right: str) -> str:
+    left_words = _word_units(left)
+    right_words = _word_units(right)
+    if len(right_words) > len(left_words):
+        return _normalized_text(right)
+    if _sentence_end_count(right) > _sentence_end_count(left):
+        return _normalized_text(right)
+    return _normalized_text(left)
+
+
 def _append_committed_text(committed_text: str, new_text: str) -> str:
     combined = _normalized_text(f"{committed_text} {new_text}")
     if len(combined) <= 4000:
@@ -305,8 +445,33 @@ def _append_committed_text(committed_text: str, new_text: str) -> str:
     return combined[-4000:]
 
 
+def _pending_new_text_combined(pending_text: str, new_text: str) -> str:
+    pending = _normalized_text(pending_text)
+    new = _normalized_text(new_text)
+    if not pending:
+        return new
+    if not new:
+        return pending
+    pending_words = _word_units(pending)
+    new_words = _word_units(new)
+    if pending_words and new_words[: len(pending_words)] == pending_words:
+        return new
+    connective_words = {"and", "but", "because", "so", "or"}
+    if pending_words and new_words and len(pending_words) <= 2 and pending_words[0] in connective_words and new_words[0] in connective_words:
+        return new
+    pending_units, pending_separator = _text_units(pending)
+    new_units, new_separator = _text_units(new)
+    if pending_separator != new_separator:
+        return _normalized_text(f"{pending} {new}")
+    max_overlap = min(len(pending_units), len(new_units))
+    for overlap in range(max_overlap, 0, -1):
+        if pending_units[-overlap:] == new_units[:overlap]:
+            return _join_text_units(pending_units + new_units[overlap:], pending_separator)
+    return _normalized_text(f"{pending} {new}")
+
+
 def _split_completed_sentences(pending_text: str, new_text: str) -> tuple[list[str], str]:
-    combined = _normalized_text(f"{pending_text} {new_text}")
+    combined = _pending_new_text_combined(pending_text, new_text)
     if not combined:
         return [], ""
     completed: list[str] = []
@@ -329,10 +494,18 @@ def _forced_sentence_reason(pending_text: str, pending_chunks: int) -> str:
     normalized = _normalized_text(pending_text)
     if not normalized:
         return ""
+    pending_chars = len(normalized)
+    chars_per_chunk = pending_chars / max(pending_chunks, 1)
     if pending_chunks >= MAX_PENDING_SENTENCE_CHUNKS:
         return "pending_chunks"
-    if len(normalized) >= MAX_PENDING_SENTENCE_CHARS:
+    if pending_chars >= MAX_PENDING_SENTENCE_CHARS and _sentence_end_count(normalized) > 0:
         return "pending_chars"
+    if (
+        pending_chunks >= SLOW_PENDING_SENTENCE_CHUNKS
+        and pending_chars >= SLOW_PENDING_SENTENCE_CHARS
+        and chars_per_chunk <= SLOW_PENDING_MAX_CHARS_PER_CHUNK
+    ):
+        return "slow_pending"
     return ""
 
 
@@ -581,6 +754,10 @@ class WhisperTranscriptWorker:
         committed_translation_text = ""
         pending_transcript_text = ""
         pending_chunks = 0
+        staged_sentence = ""
+        staged_confirmations = 0
+        staged_age = 0
+        staged_translation_pending = False
         self._emit(
             "status",
             f"Whisper 전사 루프 시작: step_seconds={step_seconds} window_seconds={window_seconds} "
@@ -607,6 +784,71 @@ class WhisperTranscriptWorker:
                 buffered -= excess
                 break
 
+        def finalize_staged_sentence(detected: str, reason: str) -> list[str]:
+            nonlocal committed_text, staged_sentence, staged_confirmations, staged_age
+            if not staged_sentence:
+                return []
+            output_sentence = _sentence_output_delta(committed_text, staged_sentence)
+            staged_before = staged_sentence
+            staged_sentence = ""
+            staged_confirmations = 0
+            staged_age = 0
+            if not output_sentence:
+                self._emit(
+                    "status",
+                    f"Whisper 확정 후보 중복 무시: chunk={chunks} reason={reason} text={staged_before!r}",
+                    display=False,
+                )
+                return []
+            committed_text = _append_committed_text(committed_text, output_sentence)
+            self._remember_transcript(output_sentence)
+            self._emit(
+                "status",
+                f"Whisper 문장 확정: chunk={chunks} reason={reason} text={output_sentence!r}",
+                display=False,
+            )
+            self._emit("transcript", output_sentence, log_text=f"[{detected}] {output_sentence}", final=True)
+            return [output_sentence]
+
+        def stage_completed_sentence(sentence: str, detected: str) -> list[str]:
+            nonlocal staged_sentence, staged_confirmations, staged_age, staged_translation_pending
+            candidate = _sentence_output_delta(committed_text, sentence)
+            if not candidate:
+                self._emit("status", f"Whisper 중복 문장 무시: chunk={chunks} text={sentence!r}", display=False)
+                return []
+            if not staged_sentence:
+                staged_sentence = candidate
+                staged_confirmations = 1
+                staged_age = 0
+                staged_translation_pending = True
+                self._emit("transcript", staged_sentence, log_text=f"[{detected}] {staged_sentence}", final=False)
+                return []
+            if _sentences_are_revisions(staged_sentence, candidate):
+                staged_sentence = _prefer_sentence_revision(staged_sentence, candidate)
+                staged_confirmations += 1
+                staged_age = 0
+                if staged_confirmations >= SENTENCE_CONFIRM_CHUNKS:
+                    return finalize_staged_sentence(detected, "confirmed")
+                staged_translation_pending = True
+                self._emit("transcript", staged_sentence, log_text=f"[{detected}] {staged_sentence}", final=False)
+                return []
+            finalized = finalize_staged_sentence(detected, "replaced")
+            staged_sentence = candidate
+            staged_confirmations = 1
+            staged_age = 0
+            staged_translation_pending = True
+            self._emit("transcript", staged_sentence, log_text=f"[{detected}] {staged_sentence}", final=False)
+            return finalized
+
+        def age_staged_sentence(detected: str) -> list[str]:
+            nonlocal staged_age
+            if not staged_sentence:
+                return []
+            staged_age += 1
+            if staged_age >= SENTENCE_CONFIRM_MAX_AGE_CHUNKS:
+                return finalize_staged_sentence(detected, "aged")
+            return []
+
         while not self._stop.is_set():
             try:
                 block = self._audio_queue.get(timeout=0.2)
@@ -630,13 +872,13 @@ class WhisperTranscriptWorker:
             translation_attempted = False
             translation_started_at = chunk_started_at
             text = ""
+            staged_translation_pending = False
             try:
                 stt_started_at = time.perf_counter()
                 segments, info = model.transcribe(
                     audio,
                     language=language,
                     task="transcribe",
-                    vad_filter=self._cfg.vadFilter,
                     beam_size=self._cfg.beamSize,
                     temperature=self._cfg.temperature,
                     max_new_tokens=self._cfg.maxNewTokens,
@@ -645,9 +887,12 @@ class WhisperTranscriptWorker:
                 )
                 segment_list = list(segments)
                 accepted_texts, rejected_reasons = self._accepted_segment_texts(segment_list)
-                window_text = " ".join(accepted_texts).strip()
+                raw_window_text = " ".join(accepted_texts).strip()
+                window_text = _collapse_adjacent_repeated_phrases(raw_window_text)
+                repeat_collapse_chars = max(0, len(_normalized_text(raw_window_text)) - len(_normalized_text(window_text)))
                 stable_text = _stable_window_text(window_text, commit_lag_seconds, window_seconds)
-                text = _new_text_delta(committed_text, stable_text)
+                delta_base_text = _append_committed_text(committed_text, pending_transcript_text)
+                text = _new_text_delta(delta_base_text, stable_text)
                 stt_elapsed = time.perf_counter() - stt_started_at
                 detected = getattr(info, "language", self._cfg.language)
                 if rejected_reasons:
@@ -657,12 +902,13 @@ class WhisperTranscriptWorker:
                         display=False,
                     )
                 completed_sentences: list[str] = []
+                final_sentences: list[str] = []
                 forced_by = ""
                 if text and self._is_repeated_hallucination(text):
                     self._emit("status", f"Whisper 반복 전사 무시: chunk={chunks} text={text!r}", display=False)
                     text = ""
                 if text:
-                    completed_sentences, pending_transcript_text = _split_completed_sentences("", text)
+                    completed_sentences, pending_transcript_text = _split_completed_sentences(pending_transcript_text, text)
                     if completed_sentences:
                         pending_chunks = 0
                     elif pending_transcript_text:
@@ -672,21 +918,8 @@ class WhisperTranscriptWorker:
                             completed_sentences = [pending_transcript_text]
                             pending_transcript_text = ""
                             pending_chunks = 0
-                    output_sentences: list[str] = []
                     for sentence in completed_sentences:
-                        output_sentence = _sentence_output_delta(committed_text, sentence)
-                        if not output_sentence:
-                            self._emit(
-                                "status",
-                                f"Whisper 중복 문장 무시: chunk={chunks} text={sentence!r}",
-                                display=False,
-                            )
-                            continue
-                        committed_text = _append_committed_text(committed_text, output_sentence)
-                        self._remember_transcript(output_sentence)
-                        output_sentences.append(output_sentence)
-                        self._emit("transcript", output_sentence, log_text=f"[{detected}] {output_sentence}", final=True)
-                    completed_sentences = output_sentences
+                        final_sentences.extend(stage_completed_sentence(sentence, detected))
                     if pending_transcript_text:
                         self._emit(
                             "transcript",
@@ -694,6 +927,8 @@ class WhisperTranscriptWorker:
                             log_text=f"[{detected}] {pending_transcript_text}",
                             final=False,
                         )
+                    elif not completed_sentences:
+                        final_sentences.extend(age_staged_sentence(detected))
                 else:
                     preview_chars = max(0, len(_normalized_text(window_text)) - len(_normalized_text(stable_text)))
                     self._emit(
@@ -708,51 +943,51 @@ class WhisperTranscriptWorker:
                             completed_sentences = [pending_transcript_text]
                             pending_transcript_text = ""
                             pending_chunks = 0
-                            output_sentences: list[str] = []
                             for sentence in completed_sentences:
-                                output_sentence = _sentence_output_delta(committed_text, sentence)
-                                if not output_sentence:
-                                    self._emit(
-                                        "status",
-                                        f"Whisper 중복 문장 무시: chunk={chunks} text={sentence!r}",
-                                        display=False,
-                                    )
-                                    continue
-                                committed_text = _append_committed_text(committed_text, output_sentence)
-                                self._remember_transcript(output_sentence)
-                                output_sentences.append(output_sentence)
-                                self._emit("transcript", output_sentence, log_text=f"[{detected}] {output_sentence}", final=True)
-                            completed_sentences = output_sentences
+                                final_sentences.extend(stage_completed_sentence(sentence, detected))
+                        else:
+                            final_sentences.extend(age_staged_sentence(detected))
+                    else:
+                        final_sentences.extend(age_staged_sentence(detected))
                 self._emit(
                     "status",
                     "Whisper 문장 진단: "
-                    f"chunk={chunks} completed={len(completed_sentences)} forced_by={forced_by or 'none'} "
+                    f"chunk={chunks} completed={len(completed_sentences)} final={len(final_sentences)} forced_by={forced_by or 'none'} "
                     f"pending_chars={len(pending_transcript_text)} pending_chunks={pending_chunks} "
+                    f"pending_chars_per_chunk={len(pending_transcript_text) / max(pending_chunks, 1):.1f} "
                     f"window_chars={len(_normalized_text(window_text))} stable_chars={len(_normalized_text(stable_text))} "
+                    f"repeat_collapse_chars={repeat_collapse_chars} "
                     f"delta_chars={len(_normalized_text(text))} "
                     f"end_marks_window={_sentence_end_count(window_text)} end_marks_stable={_sentence_end_count(stable_text)} "
                     f"end_marks_delta={_sentence_end_count(text)} "
                     f"stable_tail={_diagnostic_tail(stable_text)} delta_tail={_diagnostic_tail(text)} "
-                    f"pending_tail={_diagnostic_tail(pending_transcript_text)}",
+                    f"pending_tail={_diagnostic_tail(pending_transcript_text)} "
+                    f"staged_confirmations={staged_confirmations} staged_age={staged_age} "
+                    f"staged_tail={_diagnostic_tail(staged_sentence)}",
                     display=False,
                 )
-                if self._cfg.translationEnabled and not translation_failed and completed_sentences:
+                translation_jobs: list[tuple[str, bool]] = []
+                if text_translator is not None and staged_translation_pending and staged_sentence:
+                    translation_jobs.append((staged_sentence, False))
+                translation_jobs.extend((sentence, True) for sentence in final_sentences)
+                if self._cfg.translationEnabled and not translation_failed and translation_jobs:
                     try:
                         translation_attempted = True
                         request_label = "Whisper 내장 번역 요청" if text_translator is None else "외부 텍스트 번역 요청"
                         target_language = self._cfg.translationTargetLanguage
                         source_language = detected if detected in {"ko", "en", "zh"} else self._cfg.language
-                        for sentence in completed_sentences:
+                        for sentence, is_final_translation in translation_jobs:
+                            if text_translator is None and not is_final_translation:
+                                continue
                             translation_started_at = time.perf_counter()
-                            self._emit("status", f"{request_label}: chunk={chunks}", display=False)
+                            self._emit("status", f"{request_label}: chunk={chunks} final={is_final_translation}", display=False)
                             translated_text = ""
                             if text_translator is None:
                                 translated_segments, _translated_info = model.transcribe(
                                     audio,
                                     language=language,
                                     task="translate",
-                                    vad_filter=self._cfg.vadFilter,
-                                    beam_size=self._cfg.beamSize,
+                                                    beam_size=self._cfg.beamSize,
                                     temperature=self._cfg.temperature,
                                     max_new_tokens=self._cfg.maxNewTokens,
                                     without_timestamps=True,
@@ -778,11 +1013,13 @@ class WhisperTranscriptWorker:
                                 )
                             translation_elapsed += time.perf_counter() - translation_started_at
                             if translated_text:
-                                committed_translation_text = _append_committed_text(committed_translation_text, translated_text)
+                                if is_final_translation:
+                                    committed_translation_text = _append_committed_text(committed_translation_text, translated_text)
                                 self._emit(
                                     "translation",
                                     translated_text,
                                     log_text=f"[{detected}->{target_language}] {translated_text}",
+                                    final=is_final_translation,
                                 )
                             else:
                                 self._emit("status", f"Whisper 번역 결과 없음: chunk={chunks}", display=False)
@@ -841,6 +1078,7 @@ class WhisperTranscriptWindow:
         self._translation_text = None
         self._context_text = None
         self._transcript_partial_active = False
+        self._translation_partial_active = False
         self._events: queue.Queue[TranscriptEvent] = queue.Queue()
         self._worker = WhisperTranscriptWorker(app_config.whisper, self._events)
         self._thread = threading.Thread(target=self._worker.run, daemon=True)
@@ -858,6 +1096,7 @@ class WhisperTranscriptWindow:
         frame.rowconfigure(0, weight=1)
 
         self._text = tk.Text(frame, wrap="word", undo=False)
+        self._configure_transcript_text_tags(self._text)
         self._text.grid(row=0, column=0, sticky="nsew")
         scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self._text.yview)
         scrollbar.grid(row=0, column=1, sticky="ns")
@@ -905,6 +1144,7 @@ class WhisperTranscriptWindow:
         frame.rowconfigure(0, weight=1)
 
         self._translation_text = tk.Text(frame, wrap="word", undo=False)
+        self._configure_transcript_text_tags(self._translation_text)
         self._translation_text.grid(row=0, column=0, sticky="nsew")
         scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self._translation_text.yview)
         scrollbar.grid(row=0, column=1, sticky="ns")
@@ -938,18 +1178,27 @@ class WhisperTranscriptWindow:
             return None
         return "break"
 
+    def _configure_transcript_text_tags(self, text_widget) -> None:
+        text_widget.tag_configure(FINAL_TEXT_TAG, foreground=FINAL_TEXT_COLOR)
+        text_widget.tag_configure(PARTIAL_TEXT_TAG, foreground=PARTIAL_TEXT_COLOR)
+
     def _append(self, line: str, text_widget=None, *, final: bool = True) -> None:
         target = text_widget if text_widget is not None else self._text
-        if target is self._text and self._transcript_partial_active:
+        partial_attr = None
+        if target is self._text:
+            partial_attr = "_transcript_partial_active"
+        elif target is self._translation_text:
+            partial_attr = "_translation_partial_active"
+        if partial_attr is not None and getattr(self, partial_attr):
             target.delete("end-1c linestart", "end-1c")
         if final:
-            target.insert("end", f"{line}\n")
-            if target is self._text:
-                self._transcript_partial_active = False
+            target.insert("end", f"{line}\n", FINAL_TEXT_TAG)
+            if partial_attr is not None:
+                setattr(self, partial_attr, False)
         else:
-            target.insert("end", line)
-            if target is self._text:
-                self._transcript_partial_active = True
+            target.insert("end", line, PARTIAL_TEXT_TAG)
+            if partial_attr is not None:
+                setattr(self, partial_attr, True)
         target.see("end")
 
     def _poll_events(self) -> None:
@@ -961,7 +1210,7 @@ class WhisperTranscriptWindow:
             if not _is_modal_output_event(event):
                 continue
             if event.kind == "translation" and self._translation_text is not None:
-                self._append(event.text, self._translation_text)
+                self._append(event.text, self._translation_text, final=event.final)
             elif event.kind == "transcript":
                 self._append(event.text, self._text, final=event.final)
         self._root.after(100, self._poll_events)
@@ -999,8 +1248,7 @@ class WhisperTranscriptWindow:
             self._config_path,
             "whisperWindowGeometry",
             self._current_geometry(),
-            self._root.winfo_screenwidth(),
-            self._root.winfo_screenheight(),
+            *_window_restore_extent(self._root),
         )
 
     def _save_translation_geometry(self) -> None:
@@ -1011,8 +1259,7 @@ class WhisperTranscriptWindow:
             self._config_path,
             "whisperTranslationWindowGeometry",
             self._translation_root.winfo_geometry(),
-            self._translation_root.winfo_screenwidth(),
-            self._translation_root.winfo_screenheight(),
+            *_window_restore_extent(self._translation_root),
         )
 
     def _show_context_menu(self, event) -> str:
@@ -1045,6 +1292,8 @@ class WhisperTranscriptWindow:
         target.delete("1.0", "end")
         if target is self._text:
             self._transcript_partial_active = False
+        elif target is self._translation_text:
+            self._translation_partial_active = False
 
     def _hide_translation_window(self) -> None:
         if self._translation_root is not None:

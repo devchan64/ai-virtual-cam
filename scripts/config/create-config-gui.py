@@ -117,6 +117,9 @@ MIN_WINDOW_HEIGHT = 480
 _WINDOW_GEOMETRY_RE = re.compile(
     r"^(?P<width>\d+)x(?P<height>\d+)(?P<x_sign>[+-])(?P<x>\d+)(?P<y_sign>[+-])(?P<y>\d+)$"
 )
+_WINDOW_GEOMETRY_CACHE_LOG_RE = re.compile(
+    r"window geometry cached: key=(?P<key>[A-Za-z0-9_]+Geometry) geometry=(?P<geometry>\S+)"
+)
 
 
 def _default_tensorrt_engine_path() -> str:
@@ -153,6 +156,22 @@ def _format_window_geometry(parts: dict[str, int]) -> str:
     return f'{int(parts["width"])}x{int(parts["height"])}{x:+d}{y:+d}'
 
 
+def _window_restore_extent(root) -> tuple[int, int]:
+    width = 0
+    height = 0
+    for width_name, height_name in (("winfo_vrootwidth", "winfo_vrootheight"), ("winfo_screenwidth", "winfo_screenheight")):
+        try:
+            width = max(width, int(getattr(root, width_name)()))
+            height = max(height, int(getattr(root, height_name)()))
+        except Exception:
+            pass
+    if width > 0:
+        width *= 2
+    if height > 0:
+        height *= 2
+    return width, height
+
+
 def _sanitize_window_geometry(geometry: object, screen_width: int, screen_height: int) -> str | None:
     parts = _parse_window_geometry(geometry)
     if parts is None:
@@ -171,6 +190,30 @@ def _sanitize_window_geometry(geometry: object, screen_width: int, screen_height
     if x + width <= visible_margin or y + height <= visible_margin:
         return None
     return _format_window_geometry(parts)
+
+
+def _merge_window_geometry_meta(config: dict, existing_meta: dict | None, cached_meta: dict[str, str]) -> None:
+    meta = config.setdefault("meta", {})
+    if not isinstance(meta, dict):
+        meta = {}
+        config["meta"] = meta
+    if isinstance(existing_meta, dict):
+        for key, value in existing_meta.items():
+            if str(key).endswith("Geometry") and isinstance(value, str):
+                meta.setdefault(str(key), value)
+    for key, value in cached_meta.items():
+        meta[key] = value
+
+
+def _parse_window_geometry_cache_log(line: str) -> tuple[str, str] | None:
+    match = _WINDOW_GEOMETRY_CACHE_LOG_RE.search(line or "")
+    if match is None:
+        return None
+    key = match.group("key")
+    parts = _parse_window_geometry(match.group("geometry"))
+    if parts is None:
+        return None
+    return key, _format_window_geometry(parts)
 
 
 def _read_flat_yaml(path: Path) -> dict[str, str]:
@@ -514,6 +557,7 @@ class ConfigGui:
         self._scroll_window: int | None = None
         self._scrollbar_update_after_id = None
         self._window_geometry_save_after_id: str | None = None
+        self._window_geometry_meta_cache: dict[str, str] = {}
         self._tab_meta: list[tuple[ttk.Frame, str, str]] = []
         self._input_device_label: ttk.Label | None = None
         self._output_device_label: ttk.Label | None = None
@@ -755,17 +799,19 @@ class ConfigGui:
         try:
             if process.stdout is not None:
                 for line in process.stdout:
-                    print(line.rstrip("\n"), flush=True)
+                    clean_line = line.rstrip("\n")
+                    print(clean_line, flush=True)
+                    self._remember_external_window_geometry_from_log(clean_line)
             return_code = process.wait()
         except Exception as exc:
             _log(f"Serve watcher failed: {exc}")
             return_code = process.returncode
-        if not self.root.winfo_exists():
+        try:
+            self.root.after(0, lambda: self._serve_process_finished(return_code))
+        except RuntimeError:
             self._serve_process = None
             self._serve_stop_requested = False
             self._serve_output_thread = None
-            return
-        self.root.after(0, lambda: self._serve_process_finished(return_code))
 
     def _stop_serve(self) -> None:
         process = self._serve_process
@@ -806,7 +852,7 @@ class ConfigGui:
             except Exception:
                 pass
             self._window_geometry_save_after_id = None
-        self._save_window_geometry_meta()
+        self._capture_all_window_geometry_meta()
         if self._is_serve_running():
             self._stop_serve()
         if self._preview_active:
@@ -848,13 +894,12 @@ class ConfigGui:
                 self.root.after_cancel(self._window_geometry_save_after_id)
             except Exception:
                 pass
-        self._window_geometry_save_after_id = self.root.after(600, self._save_window_geometry_meta)
+        self._window_geometry_save_after_id = self.root.after(600, self._capture_all_window_geometry_meta)
 
     def _restore_window_geometry(self, meta_cfg: dict) -> None:
         geometry = _sanitize_window_geometry(
             meta_cfg.get("windowGeometry"),
-            self.root.winfo_screenwidth(),
-            self.root.winfo_screenheight(),
+            *_window_restore_extent(self.root),
         )
         if geometry is None:
             return
@@ -868,8 +913,7 @@ class ConfigGui:
             meta_cfg = self._read_geometry_meta()
         geometry = _sanitize_window_geometry(
             meta_cfg.get(key),
-            window.winfo_screenwidth(),
-            window.winfo_screenheight(),
+            *_window_restore_extent(window),
         )
         if geometry is None:
             return
@@ -889,7 +933,7 @@ class ConfigGui:
             _log(f"Window geometry meta load failed: {exc}")
             return {}
 
-    def _save_named_window_geometry(self, key: str, window: tk.Toplevel | None) -> None:
+    def _remember_named_window_geometry(self, key: str, window: tk.Toplevel | None) -> None:
         if window is None:
             return
         try:
@@ -898,46 +942,49 @@ class ConfigGui:
             window.update_idletasks()
             geometry = _sanitize_window_geometry(
                 window.winfo_geometry(),
-                window.winfo_screenwidth(),
-                window.winfo_screenheight(),
+                *_window_restore_extent(window),
             )
-            if geometry is None:
-                return
-            config_path = Path(self.output_path).expanduser()
-            if not config_path.exists():
-                return
-            raw = json.loads(config_path.read_text(encoding="utf-8"))
-            if not isinstance(raw, dict):
-                return
-            meta = raw.get("meta")
-            if not isinstance(meta, dict):
-                meta = {}
-                raw["meta"] = meta
-            meta[key] = geometry
-            write_config(str(config_path), raw)
+            if geometry is not None:
+                self._geometry_meta_cache()[key] = geometry
         except Exception as exc:
-            _log(f"Window geometry save failed: key={key} error={exc}")
+            _log(f"Window geometry capture failed: key={key} error={exc}")
+
+    def _geometry_meta_cache(self) -> dict[str, str]:
+        cache = getattr(self, "_window_geometry_meta_cache", None)
+        if not isinstance(cache, dict):
+            cache = {}
+            self._window_geometry_meta_cache = cache
+        return cache
+
+    def _remember_external_window_geometry_from_log(self, line: str) -> None:
+        parsed = _parse_window_geometry_cache_log(line)
+        if parsed is None:
+            return
+        key, geometry = parsed
+        self._geometry_meta_cache()[key] = geometry
+        _log(f"Window geometry cached from serve log: key={key} geometry={geometry}")
+
+    def _capture_all_window_geometry_meta(self) -> None:
+        self._window_geometry_save_after_id = None
+        cache = self._geometry_meta_cache()
+        try:
+            cache["windowGeometry"] = self._current_window_geometry()
+            _log(f"Window geometry cached: key=windowGeometry geometry={cache['windowGeometry']}")
+            preview_geometry = self._current_preview_window_geometry()
+            if preview_geometry:
+                cache["previewWindowGeometry"] = preview_geometry
+                _log(f"Window geometry cached: key=previewWindowGeometry geometry={preview_geometry}")
+            self._remember_named_window_geometry("audioTuneWindowGeometry", getattr(self, "_audio_tune_window", None))
+            self._remember_named_window_geometry("audioGateTestWindowGeometry", getattr(self, "_audio_gate_test_window", None))
+            self._remember_named_window_geometry("inputMeterWindowGeometry", getattr(self, "_audio_input_meter_window", None))
+        except Exception as exc:
+            _log(f"Window geometry capture failed: {exc}")
 
     def _apply_window_geometry_meta(self, config: dict) -> None:
-        meta = config.setdefault("meta", {})
-        meta["windowGeometry"] = self._current_window_geometry()
-        preview_geometry = self._current_preview_window_geometry()
-        if preview_geometry:
-            meta["previewWindowGeometry"] = preview_geometry
-
-    def _save_window_geometry_meta(self) -> None:
-        self._window_geometry_save_after_id = None
-        config_path = Path(self.output_path).expanduser()
-        if not config_path.exists():
-            return
-        try:
-            raw = json.loads(config_path.read_text(encoding="utf-8"))
-            if not isinstance(raw, dict):
-                return
-            self._apply_window_geometry_meta(raw)
-            write_config(str(config_path), raw)
-        except Exception as exc:
-            _log(f"Config window geometry save failed: {exc}")
+        self._capture_all_window_geometry_meta()
+        _merge_window_geometry_meta(config, self._read_geometry_meta(), self._geometry_meta_cache())
+        keys = sorted(key for key in config.get("meta", {}) if str(key).endswith("Geometry"))
+        _log(f"Window geometry saved to setting.json on JSON save: keys={','.join(keys)}")
 
     def _tr(self, key: str, default: str) -> str:
         value = self._i18n.get(key)
@@ -1524,7 +1571,6 @@ class ConfigGui:
             "whisper_translation_max_new_tokens": whisper["translationMaxNewTokens"],
             "whisper_device": whisper["device"],
             "whisper_compute_type": whisper["computeType"],
-            "whisper_vad_filter": whisper["vadFilter"],
             "whisper_chunk_seconds": whisper["chunkSeconds"],
             "whisper_step_seconds": whisper["stepSeconds"],
             "whisper_window_seconds": whisper["windowSeconds"],
@@ -1887,7 +1933,6 @@ class ConfigGui:
             "whisper_translation_max_new_tokens",
             "whisper_device",
             "whisper_compute_type",
-            "whisper_vad_filter",
             "whisper_chunk_seconds",
             "whisper_step_seconds",
             "whisper_window_seconds",
@@ -1915,6 +1960,12 @@ class ConfigGui:
             )
             return
         meta_cfg = raw.get("meta") or {}
+        if isinstance(meta_cfg, dict):
+            self._window_geometry_meta_cache = {
+                str(key): str(value)
+                for key, value in meta_cfg.items()
+                if str(key).endswith("Geometry") and isinstance(value, str)
+            }
         lang = str(meta_cfg.get("language", "")).strip().lower()
         if lang in {"ko", "en"}:
             self._language_var.set(lang)
@@ -2105,7 +2156,6 @@ class ConfigGui:
         self._set_var("whisper_translation_max_new_tokens", whisper_cfg.get("translationMaxNewTokens", defaults["whisper_translation_max_new_tokens"]))
         self._set_var("whisper_device", whisper_cfg.get("device", defaults["whisper_device"]))
         self._set_var("whisper_compute_type", whisper_cfg.get("computeType", defaults["whisper_compute_type"]))
-        self._set_var("whisper_vad_filter", whisper_cfg.get("vadFilter", defaults["whisper_vad_filter"]))
         window_seconds = whisper_cfg.get("windowSeconds", whisper_cfg.get("chunkSeconds", defaults["whisper_window_seconds"]))
         self._set_var("whisper_chunk_seconds", window_seconds)
         self._set_var("whisper_step_seconds", whisper_cfg.get("stepSeconds", defaults["whisper_step_seconds"]))
@@ -2553,7 +2603,7 @@ class ConfigGui:
             self._audio_tune_after_id = None
         self._audio_tune_action_btn = None
         if self._audio_tune_window is not None:
-            self._save_named_window_geometry("audioTuneWindowGeometry", self._audio_tune_window)
+            self._remember_named_window_geometry("audioTuneWindowGeometry", self._audio_tune_window)
             try:
                 self._audio_tune_window.destroy()
             except Exception:
@@ -2710,7 +2760,7 @@ class ConfigGui:
         self._audio_gate_test_started_at = time.time()
 
         def close_window():
-            self._save_named_window_geometry("audioGateTestWindowGeometry", window)
+            self._remember_named_window_geometry("audioGateTestWindowGeometry", window)
             self._stop_audio_gate_test()
             if window.winfo_exists():
                 window.destroy()
@@ -3011,7 +3061,7 @@ class ConfigGui:
         self._audio_input_meter_started_at = time.time()
 
         def close_window():
-            self._save_named_window_geometry("inputMeterWindowGeometry", window)
+            self._remember_named_window_geometry("inputMeterWindowGeometry", window)
             self._stop_audio_input_meter()
             if window.winfo_exists():
                 window.destroy()
@@ -3391,7 +3441,7 @@ class ConfigGui:
         self._preview_tk_image = None
 
     def _destroy_preview_window(self) -> None:
-        self._save_window_geometry_meta()
+        self._capture_all_window_geometry_meta()
         window = self._preview_window
         self._preview_window = None
         self._preview_canvas = None
@@ -3803,7 +3853,6 @@ class ConfigGui:
             whisper_translation_max_new_tokens=int(round(float(iv["whisper_translation_max_new_tokens"].get()))),
             whisper_device=iv["whisper_device"].get().strip(),
             whisper_compute_type=iv["whisper_compute_type"].get().strip(),
-            whisper_vad_filter=self._parse_bool(iv["whisper_vad_filter"].get()),
             whisper_chunk_seconds=float(iv["whisper_window_seconds"].get()),
             whisper_step_seconds=float(iv["whisper_step_seconds"].get()),
             whisper_window_seconds=float(iv["whisper_window_seconds"].get()),

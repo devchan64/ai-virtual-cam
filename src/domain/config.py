@@ -738,7 +738,6 @@ class WhisperConfig:
     translationMaxNewTokens: int
     device: str
     computeType: str
-    vadFilter: bool
     chunkSeconds: float
     stepSeconds: float
     windowSeconds: float
@@ -769,7 +768,6 @@ class WhisperConfig:
             translationMaxNewTokens=int(raw.get("translationMaxNewTokens", whisper_default("translationMaxNewTokens"))),
             device=str(raw.get("device", whisper_default("device"))).strip(),
             computeType=str(raw.get("computeType", whisper_default("computeType"))).strip(),
-            vadFilter=bool(raw.get("vadFilter", whisper_default("vadFilter"))),
             chunkSeconds=float(raw.get("chunkSeconds", whisper_default("chunkSeconds"))),
             stepSeconds=float(raw.get("stepSeconds", whisper_default("stepSeconds"))),
             windowSeconds=float(raw.get("windowSeconds", raw.get("chunkSeconds", whisper_default("windowSeconds")))),

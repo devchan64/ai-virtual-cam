@@ -16,7 +16,6 @@ WHISPER_DEFAULTS = {
     "translationMaxNewTokens": 128,
     "device": "cuda",
     "computeType": "float16",
-    "vadFilter": True,
     "chunkSeconds": 8.0,
     "stepSeconds": 1.0,
     "windowSeconds": 8.0,

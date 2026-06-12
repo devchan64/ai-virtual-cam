@@ -135,23 +135,6 @@ def build_whisper_tab(
         label_key="label.whisper_compute_type",
     )
     row += 1
-    gui._add_bool_switch(
-        tab_whisper,
-        row,
-        "whisper_vad_filter",
-        gui._tr("label.whisper_vad_filter", "VAD filter"),
-        whisper_default("vadFilter"),
-        label_key="label.whisper_vad_filter",
-    )
-    row += 1
-    row = _add_hint(
-        gui,
-        ttk,
-        tab_whisper,
-        row,
-        "hint.whisper_vad_filter",
-        "VAD skips silence and non-speech sections, but may trim very short speech.",
-    )
     gui._add_slider(
         tab_whisper,
         row,

@@ -74,12 +74,34 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         )
         gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
         gui.root = root
+        gui._window_geometry_meta_cache = {"whisperWindowGeometry": "780x420+50+119"}
+        gui._read_geometry_meta = lambda: {"whisperTranslationWindowGeometry": "780x420+2479+1078"}
         config = {"meta": {"language": "ko"}}
 
         self.module.ConfigGui._apply_window_geometry_meta(gui, config)
 
         self.assertEqual(config["meta"]["language"], "ko")
         self.assertEqual(config["meta"]["windowGeometry"], "900x700+120+80")
+        self.assertEqual(config["meta"]["whisperWindowGeometry"], "780x420+50+119")
+        self.assertEqual(config["meta"]["whisperTranslationWindowGeometry"], "780x420+2479+1078")
+
+    def test_external_window_geometry_log_updates_memory_cache(self) -> None:
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        gui._window_geometry_meta_cache = {}
+
+        self.module.ConfigGui._remember_external_window_geometry_from_log(
+            gui,
+            "[2026-06-12] [avc] whisper status: window geometry cached: key=whisperWindowGeometry geometry=780x420+50+119",
+        )
+
+        self.assertEqual(gui._window_geometry_meta_cache["whisperWindowGeometry"], "780x420+50+119")
+
+    def test_parse_window_geometry_cache_log_rejects_invalid_geometry(self) -> None:
+        self.assertIsNone(
+            self.module._parse_window_geometry_cache_log(
+                "[avc] whisper status: window geometry cached: key=whisperWindowGeometry geometry=invalid"
+            )
+        )
 
     def test_restore_window_geometry_uses_saved_meta_value(self) -> None:
         applied = []
@@ -109,6 +131,20 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         geometry = self.module._sanitize_window_geometry("900x700+3000+80", 1920, 1080)
 
         self.assertIsNone(geometry)
+
+    def test_window_restore_extent_allows_secondary_monitor_coordinates(self) -> None:
+        root = types.SimpleNamespace(
+            winfo_screenwidth=lambda: 1920,
+            winfo_screenheight=lambda: 1080,
+        )
+
+        width, height = self.module._window_restore_extent(root)
+
+        self.assertEqual((width, height), (3840, 2160))
+        self.assertEqual(
+            self.module._sanitize_window_geometry("900x700+2912+627", width, height),
+            "900x700+2912+627",
+        )
 
 
 if __name__ == "__main__":
