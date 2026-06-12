@@ -260,9 +260,14 @@ class WhisperTranscriptWorker:
             self._emit("status", "Whisper 모델 로딩 완료")
             text_translator = None
             if self._cfg.translationEnabled:
+                translation_status = (
+                    "Whisper 내장 영어 번역 창 사용"
+                    if self._cfg.translationBackend == "whisper"
+                    else "외부 텍스트 번역 창 사용"
+                )
                 self._emit(
                     "status",
-                    "Whisper 번역 창 사용: "
+                    f"{translation_status}: "
                     f"backend={self._cfg.translationBackend} target_language={self._cfg.translationTargetLanguage} "
                     f"model={self._cfg.translationModel} device={self._cfg.translationDevice} "
                     f"compute={self._cfg.translationComputeType}",
@@ -403,7 +408,8 @@ class WhisperTranscriptWorker:
                     self._emit("status", f"Whisper 전사 결과 없음: chunk={chunks}", display=False)
                 if self._cfg.translationEnabled and not translation_failed:
                     try:
-                        self._emit("status", f"Whisper 번역 요청: chunk={chunks}", display=False)
+                        request_label = "Whisper 내장 번역 요청" if text_translator is None else "외부 텍스트 번역 요청"
+                        self._emit("status", f"{request_label}: chunk={chunks}", display=False)
                         translated_text = ""
                         target_language = self._cfg.translationTargetLanguage
                         if text_translator is None:

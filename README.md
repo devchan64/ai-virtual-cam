@@ -343,6 +343,7 @@ Whisper 활성화:
 - `./bin/avc setup`은 Linux에서 `faster-whisper`, NLLB 번역용 `transformers`/`sentencepiece`, CUDA 런타임 의존성을 설치하고, PyTorch는 기본적으로 CUDA 12.8 휠 인덱스에서 설치합니다.
 - 인식 언어는 단일 선택입니다. 한국어/영어/중국어가 섞이면 `자동 감지 (auto)`를 사용하고, 한 언어가 주로 나오면 `한국어 (ko)`, `English (en)`, `中文 (zh)` 중 하나로 고정합니다.
 - `whisper` 번역 백엔드는 Whisper의 `translate` 경로를 사용하므로 영어 번역만 지원합니다. 한국어/영어/중국어 대상 번역은 `nllb-transformers` 백엔드를 사용합니다.
+- `nllb-transformers` 번역을 선택하면 Whisper는 STT 전사(`task=transcribe`)만 수행하고, 번역은 외부 NLLB 텍스트 번역 경로에서만 수행합니다. 이때 `task=translate` 설정은 유효하지 않습니다.
 - NLLB 번역은 실시간 성능을 위해 `translationDevice=cuda`, `translationComputeType=float16`을 전제로 하며 실행 단계의 자동 CPU fallback은 허용하지 않습니다.
 - 테스트 설정은 STT 장치와 번역 장치를 모두 `cuda`로 두고, 연산 타입을 `float16`으로 맞춥니다. Whisper large-v3와 NLLB 600M은 CPU/float32에서 지연이 커질 수 있으므로, 실시간 회의 자막처럼 짧은 주기로 전사/번역 창을 갱신하려면 GPU 텐서코어를 쓰는 반정밀도 실행이 유리합니다.
 - `float16`은 메모리 사용량과 연산량을 줄여 응답성을 높이는 대신, GPU와 PyTorch/CUDA 빌드가 해당 아키텍처를 지원해야 합니다. 지원하지 않으면 자동 CPU fallback 대신 즉시 실패하도록 두고, CUDA 빌드나 설정을 명확히 수정합니다.

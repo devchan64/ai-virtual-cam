@@ -766,6 +766,8 @@ class WhisperConfig:
             raise ValueError("whisper.translationBackend must be one of: whisper, nllb-transformers, mock")
         if config.translationEnabled and config.translationBackend == "whisper" and config.translationTargetLanguage != "en":
             raise ValueError("whisper.translationTargetLanguage must be en when whisper.translationBackend=whisper")
+        if config.translationEnabled and config.translationBackend != "whisper" and config.task == "translate":
+            raise ValueError("whisper.task must be transcribe when whisper.translationBackend is not whisper")
         if config.translationEnabled and config.translationBackend == "nllb-transformers" and not config.translationModel:
             raise ValueError("whisper.translationModel is required when whisper.translationBackend=nllb-transformers")
         if config.translationDevice not in {"cuda", "cpu"}:

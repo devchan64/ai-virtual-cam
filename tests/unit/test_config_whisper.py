@@ -140,8 +140,18 @@ class WhisperConfigTest(unittest.TestCase):
         })
 
         self.assertTrue(loaded.translationEnabled)
+        self.assertEqual(loaded.task, "transcribe")
         self.assertEqual(loaded.translationTargetLanguage, "ko")
         self.assertEqual(loaded.translationBackend, "nllb-transformers")
+
+    def test_whisper_rejects_translate_task_for_nllb_backend(self) -> None:
+        with self.assertRaisesRegex(ValueError, "whisper.task"):
+            WhisperConfig.from_dict({
+                "task": "translate",
+                "translationEnabled": True,
+                "translationBackend": "nllb-transformers",
+                "translationTargetLanguage": "ko",
+            })
 
     def test_whisper_rejects_cpu_for_enabled_nllb_translation(self) -> None:
         with self.assertRaisesRegex(ValueError, "whisper.translationDevice"):

@@ -36,6 +36,14 @@
 - 소스코드는 파일당 1000라인을 넘지 않도록 한다. 가능하면 500라인 내외로 유지하는 것이 좋다.
 - 파일이 커지면 역할별 모듈로 분리하고, 특히 GUI 파일은 탭/위젯/동작 단위로 분할한다.
 
+## 현재 프로젝트 문맥 요약
+
+- 실행 진입점은 `./bin/avc`이다. `config`는 설정/GUI, `serve`는 저장된 설정 실행만 담당한다.
+- 설정 GUI는 탭/위젯/동작 단위로 계속 분리한다. 큰 변경은 기존 `scripts/config/*_tab.py` 패턴을 따른다.
+- Whisper 창은 config GUI의 `Serve 시작`에서만 열며, 창에는 복사용 STT/번역 결과만 표시한다. 추적 로그는 stdout/stderr에 남긴다.
+- Whisper/NLLB 실시간 경로는 CUDA/float16 중심의 Fail-Fast 정책을 따른다. NLLB 선택 시 Whisper는 `task=transcribe`만 수행하고 번역은 NLLB 경로만 사용한다.
+- Whisper/설정 GUI 창 위치와 UI 언어는 `setting.json`의 `meta`에 저장한다. README Whisper 문서는 `docs/images/whisper-config-runtime-sample.png` 기준으로 유지한다.
+
 ## 테스트 정책
 
 - 가상 비디오/오디오 장치 동작 계약(생성/상태/삭제)을 변경하는 패치에는 반드시 스펙 테스트를 포함한다.

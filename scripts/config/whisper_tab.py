@@ -113,6 +113,68 @@ def build_whisper_tab(
         "Whisper accepts one recognition language. Use auto detection when Korean, English, and Chinese are mixed.",
     )
 
+    gui._add_combo(
+        tab_whisper,
+        row,
+        "whisper_device",
+        gui._tr("label.whisper_device", "STT device"),
+        ["auto", "cpu", "cuda", "mps"],
+        "cuda",
+        label_key="label.whisper_device",
+    )
+    row += 1
+    gui._add_combo(
+        tab_whisper,
+        row,
+        "whisper_compute_type",
+        gui._tr("label.whisper_compute_type", "STT compute type"),
+        ["auto", "int8", "float16", "float32"],
+        "auto",
+        label_key="label.whisper_compute_type",
+    )
+    row += 1
+    gui._add_bool_switch(
+        tab_whisper,
+        row,
+        "whisper_vad_filter",
+        gui._tr("label.whisper_vad_filter", "VAD filter"),
+        True,
+        label_key="label.whisper_vad_filter",
+    )
+    row += 1
+    gui._add_slider(
+        tab_whisper,
+        row,
+        "whisper_chunk_seconds",
+        gui._tr("label.whisper_chunk_seconds", "Chunk seconds"),
+        5.0,
+        1.0,
+        10.0,
+        resolution=0.5,
+        label_key="label.whisper_chunk_seconds",
+    )
+    row += 1
+    gui._add_slider(
+        tab_whisper,
+        row,
+        "whisper_beam_size",
+        gui._tr("label.whisper_beam_size", "Beam size"),
+        5,
+        1,
+        8,
+        resolution=1,
+        label_key="label.whisper_beam_size",
+    )
+    row += 1
+    row = _add_hint(
+        gui,
+        ttk,
+        tab_whisper,
+        row,
+        "hint.whisper_speed",
+        "Lower STT chunk seconds and beam size improve response speed, but may reduce accuracy or sentence continuity.",
+    )
+
     gui._add_bool_switch(
         tab_whisper,
         row,
@@ -205,68 +267,6 @@ def build_whisper_tab(
         "nllb-transformers": nllb_translation_frame,
     }
     row += 1
-
-    gui._add_combo(
-        tab_whisper,
-        row,
-        "whisper_device",
-        gui._tr("label.whisper_device", "Device"),
-        ["auto", "cpu", "cuda", "mps"],
-        "cuda",
-        label_key="label.whisper_device",
-    )
-    row += 1
-    gui._add_combo(
-        tab_whisper,
-        row,
-        "whisper_compute_type",
-        gui._tr("label.whisper_compute_type", "Compute type"),
-        ["auto", "int8", "float16", "float32"],
-        "auto",
-        label_key="label.whisper_compute_type",
-    )
-    row += 1
-    gui._add_bool_switch(
-        tab_whisper,
-        row,
-        "whisper_vad_filter",
-        gui._tr("label.whisper_vad_filter", "VAD filter"),
-        True,
-        label_key="label.whisper_vad_filter",
-    )
-    row += 1
-    gui._add_slider(
-        tab_whisper,
-        row,
-        "whisper_chunk_seconds",
-        gui._tr("label.whisper_chunk_seconds", "Chunk seconds"),
-        5.0,
-        1.0,
-        10.0,
-        resolution=0.5,
-        label_key="label.whisper_chunk_seconds",
-    )
-    row += 1
-    gui._add_slider(
-        tab_whisper,
-        row,
-        "whisper_beam_size",
-        gui._tr("label.whisper_beam_size", "Beam size"),
-        5,
-        1,
-        8,
-        resolution=1,
-        label_key="label.whisper_beam_size",
-    )
-    row += 1
-    row = _add_hint(
-        gui,
-        ttk,
-        tab_whisper,
-        row,
-        "hint.whisper_speed",
-        "Lower chunk seconds and beam size improve response speed, but may reduce accuracy or sentence continuity.",
-    )
 
     reset_whisper_btn = ttk.Button(
         tab_whisper,
