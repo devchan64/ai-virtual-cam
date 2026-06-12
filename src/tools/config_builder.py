@@ -442,6 +442,15 @@ def build_config(
     face_enhance_min_size_ratio: float = 0.12,
     face_enhance_edge_dither: float = 0.25,
     face_deidentify_enabled: bool = False,
+    whisper_enabled: bool = False,
+    whisper_input_device: str | None = None,
+    whisper_backend: str = "faster-whisper",
+    whisper_model: str = "large-v3",
+    whisper_language: str = "ko",
+    whisper_task: str = "transcribe",
+    whisper_device: str = "cuda",
+    whisper_compute_type: str = "float16",
+    whisper_vad_filter: bool = True,
 ) -> dict:
     if audio_output_device is None:
         audio_output_device = _default_audio_output_device()
@@ -454,6 +463,11 @@ def build_config(
         audio_input_device = _default_audio_input_device()
     else:
         audio_input_device = str(audio_input_device).strip()
+
+    if not whisper_input_device:
+        whisper_input_device = audio_input_device
+    else:
+        whisper_input_device = str(whisper_input_device).strip()
 
     tilt_smoothing = float(crop_pan_smoothing if crop_tilt_smoothing is None else crop_tilt_smoothing)
     tilt_kp = float(crop_pan_pid_kp if crop_tilt_pid_kp is None else crop_tilt_pid_kp)
@@ -541,5 +555,16 @@ def build_config(
             "deidentify": {
                 "enabled": bool(face_deidentify_enabled),
             },
+        },
+        "whisper": {
+            "enabled": bool(whisper_enabled),
+            "inputDevice": whisper_input_device,
+            "backend": str(whisper_backend),
+            "model": str(whisper_model),
+            "language": str(whisper_language),
+            "task": str(whisper_task),
+            "device": str(whisper_device),
+            "computeType": str(whisper_compute_type),
+            "vadFilter": bool(whisper_vad_filter),
         },
     }

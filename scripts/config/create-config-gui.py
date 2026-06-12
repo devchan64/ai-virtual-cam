@@ -59,8 +59,8 @@ SEG_ENGINE_OPTION_FIELDS: dict[str, tuple[str, ...]] = {
     "selfie": ("temporalAlpha", "maskBlur", "morphOpen", "morphClose", "maskGamma"),
     "selfie_ensemble": ("modelBlend", "temporalAlpha", "maskBlur", "morphOpen", "morphClose", "maskGamma"),
     "onnxruntime": ("temporalAlpha", "maskBlur", "morphOpen", "morphClose", "maskGamma"),
+    "tensorrt": ("enginePath", "temporalAlpha", "maskBlur", "morphOpen", "morphClose", "maskGamma"),
     "mock": (),
-    "tensorrt": (),
 }
 
 
@@ -76,14 +76,82 @@ def _audio_denoise_backend_options():
     return ["none", "rnnoise", "deepfilternet"]
 
 
+def _whisper_backend_options():
+    return ["faster-whisper", "openai-whisper", "whisper.cpp", "mock"]
+
+
+def _whisper_model_options():
+    return ["large-v3", "medium", "small", "base", "tiny"]
+
+
+def _whisper_language_options():
+    return ["ko", "en", "zh", "auto"]
+
+
 AUDIO_VIRTUAL_SINK_NAME = "ai-virtual-cam"
 VIRTUAL_CAMERA_LABEL = "ai-virtual-cam"
 AUDIO_VIRTUAL_SOURCE_NAME = "ai-virtual-cam"
 LANG_PACK_DIR = ROOT_DIR / "config" / "i18n"
+DEFAULT_WINDOW_GEOMETRY = "640x640"
+MIN_WINDOW_WIDTH = 640
+MIN_WINDOW_HEIGHT = 480
+_WINDOW_GEOMETRY_RE = re.compile(
+    r"^(?P<width>\d+)x(?P<height>\d+)(?P<x_sign>[+-])(?P<x>\d+)(?P<y_sign>[+-])(?P<y>\d+)$"
+)
+
+
+def _default_tensorrt_engine_path() -> str:
+    return str(Path.home() / ".avc" / "models" / "person-segmentation.engine")
 
 
 def _log(msg: str) -> None:
     print(f"[avc] {msg}", flush=True)
+
+
+def _parse_window_geometry(geometry: object) -> dict[str, int] | None:
+    if not isinstance(geometry, str):
+        return None
+    match = _WINDOW_GEOMETRY_RE.match(geometry.strip())
+    if match is None:
+        return None
+    x = int(match.group("x"))
+    y = int(match.group("y"))
+    if match.group("x_sign") == "-":
+        x = -x
+    if match.group("y_sign") == "-":
+        y = -y
+    return {
+        "width": int(match.group("width")),
+        "height": int(match.group("height")),
+        "x": x,
+        "y": y,
+    }
+
+
+def _format_window_geometry(parts: dict[str, int]) -> str:
+    x = int(parts["x"])
+    y = int(parts["y"])
+    return f'{int(parts["width"])}x{int(parts["height"])}{x:+d}{y:+d}'
+
+
+def _sanitize_window_geometry(geometry: object, screen_width: int, screen_height: int) -> str | None:
+    parts = _parse_window_geometry(geometry)
+    if parts is None:
+        return None
+    width = parts["width"]
+    height = parts["height"]
+    x = parts["x"]
+    y = parts["y"]
+    if width < MIN_WINDOW_WIDTH or height < MIN_WINDOW_HEIGHT:
+        return None
+    if screen_width <= 0 or screen_height <= 0:
+        return _format_window_geometry(parts)
+    visible_margin = 80
+    if x >= screen_width - visible_margin or y >= screen_height - visible_margin:
+        return None
+    if x + width <= visible_margin or y + height <= visible_margin:
+        return None
+    return _format_window_geometry(parts)
 
 
 def _read_flat_yaml(path: Path) -> dict[str, str]:
@@ -920,6 +988,25 @@ def _validate_pulse_runtime_device(kind: str, device_name: str) -> None:
         )
 
 
+def _resolve_and_validate_audio_runtime_devices(
+    audio_input_display: str,
+    audio_output_display: str,
+    input_display_to_raw: dict[str, str] | None = None,
+    output_display_to_raw: dict[str, str] | None = None,
+) -> tuple[str, str]:
+    raw_audio_input = _audio_device_raw_from_display(
+        audio_input_display.strip(),
+        input_display_to_raw or {},
+    )
+    raw_audio_output = _audio_device_raw_from_display(
+        audio_output_display.strip(),
+        output_display_to_raw or {},
+    )
+    _validate_pulse_runtime_device("input", raw_audio_input)
+    _validate_pulse_runtime_device("output", raw_audio_output)
+    return raw_audio_input, raw_audio_output
+
+
 def _audio_sink_exists(name: str) -> bool:
     return any(sink_id == name for _, sink_id, _ in _pactl_short_entries("sink"))
 
@@ -960,7 +1047,7 @@ class ConfigGui:
         self._localized_widgets: list[tuple[object, str, str]] = []
         self._bool_switch_meta: list[tuple[ttk.Checkbutton, tk.BooleanVar, str, str]] = []
         self.root.title(self._tr("title.main", "ai-virtual-cam config GUI"))
-        self.root.geometry("640x640")
+        self.root.geometry(DEFAULT_WINDOW_GEOMETRY)
         self.root.minsize(640, 480)
         self.root.resizable(True, True)
         self.vars: dict[str, tk.Variable] = {}
@@ -1082,7 +1169,7 @@ class ConfigGui:
                     "Host 터미널에서 `./bin/avc docker serve`를 실행하세요."
                 )
             _log("Detected container runtime for serve control.")
-        return [avc_bin, "serve", "--config", config_path]
+        return [avc_bin, "serve", "--config", config_path, "--with-whisper-window"]
 
     def _set_serve_status(
         self,
@@ -1336,11 +1423,45 @@ class ConfigGui:
         threading.Timer(1.5, _force_kill).start()
 
     def _on_close(self) -> None:
+        self._save_window_geometry_meta()
         if self._is_serve_running():
             self._stop_serve()
         if self._preview_active:
             self._stop_preview()
         self.root.destroy()
+
+    def _current_window_geometry(self) -> str:
+        try:
+            self.root.update_idletasks()
+        except Exception:
+            pass
+        return self.root.winfo_geometry()
+
+    def _restore_window_geometry(self, meta_cfg: dict) -> None:
+        geometry = _sanitize_window_geometry(
+            meta_cfg.get("windowGeometry"),
+            self.root.winfo_screenwidth(),
+            self.root.winfo_screenheight(),
+        )
+        if geometry is None:
+            return
+        self.root.geometry(geometry)
+
+    def _apply_window_geometry_meta(self, config: dict) -> None:
+        config.setdefault("meta", {})["windowGeometry"] = self._current_window_geometry()
+
+    def _save_window_geometry_meta(self) -> None:
+        config_path = Path(self.output_path).expanduser()
+        if not config_path.exists():
+            return
+        try:
+            raw = json.loads(config_path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                return
+            self._apply_window_geometry_meta(raw)
+            write_config(str(config_path), raw)
+        except Exception as exc:
+            _log(f"Config window geometry save failed: {exc}")
 
     def _tr(self, key: str, default: str) -> str:
         value = self._i18n.get(key)
@@ -1409,6 +1530,7 @@ class ConfigGui:
         tab_crop = ttk.Frame(notebook, padding=8)
         tab_audio = ttk.Frame(notebook, padding=8)
         tab_face = ttk.Frame(notebook, padding=8)
+        tab_whisper = ttk.Frame(notebook, padding=8)
         self._tab_meta = [
             (tab_io, "title.tab.io", "I/O"),
             (tab_seg, "title.tab.seg", "Segmentation"),
@@ -1416,10 +1538,11 @@ class ConfigGui:
             (tab_crop, "title.tab.crop", "Framing"),
             (tab_face, "title.tab.face", "Face"),
             (tab_audio, "title.tab.audio", "Audio"),
+            (tab_whisper, "title.tab.whisper", "Whisper"),
         ]
         for tab, key, default in self._tab_meta:
             notebook.add(tab, text=self._tr(key, default))
-        for tab in (tab_io, tab_seg, tab_bg, tab_crop, tab_audio, tab_face):
+        for tab in (tab_io, tab_seg, tab_bg, tab_crop, tab_audio, tab_face, tab_whisper):
             for col in range(4):
                 tab.columnconfigure(col, weight=1 if col in (1, 3) else 0)
 
@@ -1738,6 +1861,15 @@ class ConfigGui:
             1.5,
             resolution=0.01,
             label_key="label.seg_opt_mask_gamma",
+        )
+        row += 1
+        self._add_text(
+            tab_seg,
+            row,
+            "seg_opt_engine_path",
+            self._tr("label.seg_opt_engine_path", "TensorRT engine path"),
+            "",
+            label_key="label.seg_opt_engine_path",
         )
         row += 1
         seg_engine_hint = ttk.Label(
@@ -2402,6 +2534,126 @@ class ConfigGui:
             row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0)
         )
 
+        row = 0
+        self._add_bool_switch(
+            tab_whisper,
+            row,
+            "whisper_enabled",
+            self._tr("label.whisper_enabled", "Whisper STT"),
+            False,
+            label_key="label.whisper_enabled",
+        )
+        row += 1
+        whisper_input_candidates = _audio_input_device_candidates()
+        whisper_input_default = _audio_default_input_device()
+        if whisper_input_default not in whisper_input_candidates:
+            whisper_input_candidates.append(whisper_input_default)
+        whisper_input_display_values, self._whisper_input_display_to_raw = _audio_device_display_values(
+            "input", whisper_input_candidates
+        )
+        whisper_input_default_display = next(
+            (k for k, v in self._whisper_input_display_to_raw.items() if v == whisper_input_default),
+            whisper_input_default,
+        )
+        self._add_combo(
+            tab_whisper,
+            row,
+            "whisper_input_device",
+            self._tr("label.whisper_input_device", "Input device"),
+            whisper_input_display_values,
+            whisper_input_default_display,
+            label_key="label.whisper_input_device",
+        )
+        row += 1
+        whisper_input_meter_btn = ttk.Button(
+            tab_whisper,
+            text=self._tr("button.whisper_input_meter", "Whisper input dB meter"),
+            command=self._run_whisper_input_meter,
+        )
+        self._register_localized_widget(whisper_input_meter_btn, "button.whisper_input_meter", "Whisper input dB meter")
+        whisper_input_meter_btn.grid(
+            row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0)
+        )
+        row += 1
+        self._add_combo(
+            tab_whisper,
+            row,
+            "whisper_backend",
+            self._tr("label.whisper_backend", "Whisper backend"),
+            _whisper_backend_options(),
+            _whisper_backend_options()[0],
+            label_key="label.whisper_backend",
+        )
+        row += 1
+        self._add_combo(
+            tab_whisper,
+            row,
+            "whisper_model",
+            self._tr("label.whisper_model", "Whisper model"),
+            _whisper_model_options(),
+            "base",
+            label_key="label.whisper_model",
+        )
+        row += 1
+        self._add_combo(
+            tab_whisper,
+            row,
+            "whisper_language",
+            self._tr("label.whisper_language", "Language"),
+            _whisper_language_options(),
+            "ko",
+            label_key="label.whisper_language",
+        )
+        row += 1
+        self._add_combo(
+            tab_whisper,
+            row,
+            "whisper_task",
+            self._tr("label.whisper_task", "Task"),
+            ["transcribe", "translate"],
+            "transcribe",
+            label_key="label.whisper_task",
+        )
+        row += 1
+        self._add_combo(
+            tab_whisper,
+            row,
+            "whisper_device",
+            self._tr("label.whisper_device", "Device"),
+            ["auto", "cpu", "cuda", "mps"],
+            "auto",
+            label_key="label.whisper_device",
+        )
+        row += 1
+        self._add_combo(
+            tab_whisper,
+            row,
+            "whisper_compute_type",
+            self._tr("label.whisper_compute_type", "Compute type"),
+            ["auto", "int8", "float16", "float32"],
+            "auto",
+            label_key="label.whisper_compute_type",
+        )
+        row += 1
+        self._add_bool_switch(
+            tab_whisper,
+            row,
+            "whisper_vad_filter",
+            self._tr("label.whisper_vad_filter", "VAD filter"),
+            True,
+            label_key="label.whisper_vad_filter",
+        )
+        row += 1
+        reset_whisper_btn = ttk.Button(
+            tab_whisper,
+            text=self._tr("button.reset_whisper_settings", "Restore Whisper defaults"),
+            command=self._reset_whisper_settings,
+        )
+        self._register_localized_widget(reset_whisper_btn, "button.reset_whisper_settings", "Restore Whisper defaults")
+        reset_whisper_btn.grid(
+            row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0)
+        )
+
         action_frame = ttk.Frame(frame)
         action_frame.grid(row=2, column=0, sticky="ew", pady=(10, 0))
         action_frame.columnconfigure(0, weight=1)
@@ -2836,6 +3088,7 @@ class ConfigGui:
             "seg_opt_morph_open": 3,
             "seg_opt_morph_close": 5,
             "seg_opt_mask_gamma": 0.90,
+            "seg_opt_engine_path": _default_tensorrt_engine_path(),
             "bg_mode": "chroma",
             "bg_image": "",
             "bg_r": 0,
@@ -2865,6 +3118,15 @@ class ConfigGui:
             "face_enhance_min_size_ratio": 0.12,
             "face_enhance_edge_dither": 0.25,
             "face_deidentify_enabled": False,
+            "whisper_enabled": False,
+            "whisper_input_device": _audio_default_input_device(),
+            "whisper_backend": "faster-whisper",
+            "whisper_model": "large-v3",
+            "whisper_language": "ko",
+            "whisper_task": "transcribe",
+            "whisper_device": "cuda",
+            "whisper_compute_type": "float16",
+            "whisper_vad_filter": True,
         }
 
     def _create_virtual_camera(self) -> None:
@@ -3151,6 +3413,7 @@ class ConfigGui:
             "seg_opt_morph_open",
             "seg_opt_morph_close",
             "seg_opt_mask_gamma",
+            "seg_opt_engine_path",
         ):
             self._set_var(key, defaults.get(key))
         self._on_seg_backend_changed()
@@ -3201,6 +3464,21 @@ class ConfigGui:
         for key, value in defaults.items():
             self._set_var(key, value)
 
+    def _reset_whisper_settings(self) -> None:
+        defaults = self._build_video_defaults()
+        for key in (
+            "whisper_enabled",
+            "whisper_input_device",
+            "whisper_backend",
+            "whisper_model",
+            "whisper_language",
+            "whisper_task",
+            "whisper_device",
+            "whisper_compute_type",
+            "whisper_vad_filter",
+        ):
+            self._set_var(key, defaults.get(key))
+
     def _load_existing_config(self):
         config_path = Path(self.output_path).expanduser()
         if not config_path.exists():
@@ -3220,6 +3498,7 @@ class ConfigGui:
         lang = str(meta_cfg.get("language", "")).strip().lower()
         if lang in {"ko", "en"}:
             self._language_var.set(lang)
+        self._restore_window_geometry(meta_cfg)
 
         input_cfg = raw.get("inputCamera") or {}
         output_cfg = raw.get("outputCamera") or {}
@@ -3229,6 +3508,7 @@ class ConfigGui:
         crop_cfg = raw.get("crop") or {}
         audio_cfg = raw.get("audio") or {}
         face_cfg = raw.get("faceEnhance") or {}
+        whisper_cfg = raw.get("whisper") or {}
 
         self._set_var("input_device", input_cfg.get("devicePath"))
         self._set_var("input_width", input_cfg.get("width"))
@@ -3289,6 +3569,7 @@ class ConfigGui:
         self._set_var("face_enhance_min_size_ratio", face_cfg.get("minRegionRatio"))
         self._set_var("face_enhance_edge_dither", face_cfg.get("edgeNoise"))
         self._set_var("face_deidentify_enabled", (face_cfg.get("deidentify") or {}).get("enabled"))
+        self._load_whisper_settings_from_config(whisper_cfg)
         self._load_audio_settings_from_config(audio_cfg)
         self._on_input_device_changed()
         self._on_input_width_changed()
@@ -3357,6 +3638,31 @@ class ConfigGui:
         self._set_var("audio_gate_open_gain", gate_cfg.get("openGain", defaults["audio_gate_open_gain"]))
         self._set_var("audio_gate_closed_gain", gate_cfg.get("closedGain", defaults["audio_gate_closed_gain"]))
 
+    def _load_whisper_settings_from_config(self, whisper_cfg: dict) -> None:
+        defaults = self._build_video_defaults()
+        self._set_var("whisper_enabled", whisper_cfg.get("enabled", defaults["whisper_enabled"]))
+        raw_input_device = str(whisper_cfg.get("inputDevice", "")).strip() if isinstance(whisper_cfg.get("inputDevice"), str) else ""
+        resolved_input_device = defaults["whisper_input_device"] if not raw_input_device else raw_input_device
+        self._set_var("whisper_input_device", resolved_input_device)
+        input_widget = self._widgets.get("whisper_input_device")
+        if isinstance(input_widget, ttk.Combobox):
+            input_values = list(input_widget["values"])
+            input_display = next(
+                (k for k, v in getattr(self, "_whisper_input_display_to_raw", {}).items() if v == resolved_input_device),
+                resolved_input_device,
+            )
+            if input_display not in input_values:
+                input_widget["values"] = tuple(input_values + [input_display])
+                getattr(self, "_whisper_input_display_to_raw", {})[input_display] = resolved_input_device
+            self.vars["whisper_input_device"].set(input_display)
+        self._set_var("whisper_backend", whisper_cfg.get("backend", defaults["whisper_backend"]))
+        self._set_var("whisper_model", whisper_cfg.get("model", defaults["whisper_model"]))
+        self._set_var("whisper_language", whisper_cfg.get("language", defaults["whisper_language"]))
+        self._set_var("whisper_task", whisper_cfg.get("task", defaults["whisper_task"]))
+        self._set_var("whisper_device", whisper_cfg.get("device", defaults["whisper_device"]))
+        self._set_var("whisper_compute_type", whisper_cfg.get("computeType", defaults["whisper_compute_type"]))
+        self._set_var("whisper_vad_filter", whisper_cfg.get("vadFilter", defaults["whisper_vad_filter"]))
+
     def _set_var(self, key: str, value):
         if value is None:
             return
@@ -3413,6 +3719,7 @@ class ConfigGui:
         try:
             config = self._build_config()
             config.setdefault("meta", {})["language"] = self._language_var.get().strip().lower() or self._lang
+            self._apply_window_geometry_meta(config)
             write_config(self.output_path, config)
             messagebox.showinfo(
                 self._tr("msg.saved.title", "Saved"),
@@ -4097,18 +4404,60 @@ class ConfigGui:
             return
 
         audio_cfg = config.get("audio") or {}
-        sample_rate = int(audio_cfg.get("sampleRate", 48000))
-        frame_ms = int(audio_cfg.get("frameMs", 20))
-        frame_samples = max(1, int(sample_rate * frame_ms / 1000))
-        channels = max(1, int(audio_cfg.get("channels", 1)))
         input_device_requested = audio_cfg.get("inputDevice")
         if not isinstance(input_device_requested, str) or not input_device_requested.strip():
             input_device_requested = _audio_default_input_device()
+        self._run_input_meter(
+            title_key="title.audio_input_meter",
+            title_default="Microphone input dB meter",
+            error_title_key="title.audio_input_meter_error",
+            error_title_default="Input dB meter error",
+            input_device_requested=input_device_requested,
+            sample_rate=int(audio_cfg.get("sampleRate", 48000)),
+            frame_ms=int(audio_cfg.get("frameMs", 20)),
+            channels=max(1, int(audio_cfg.get("channels", 1))),
+        )
+
+    def _run_whisper_input_meter(self):
+        try:
+            config = self._build_config(validate_audio=False)
+        except Exception as exc:
+            self._show_error(self._tr("title.whisper_input_meter_error", "Whisper input meter error"), str(exc))
+            return
+
+        whisper_cfg = config.get("whisper") or {}
+        input_device_requested = whisper_cfg.get("inputDevice")
+        if not isinstance(input_device_requested, str) or not input_device_requested.strip():
+            input_device_requested = _audio_default_input_device()
+        self._run_input_meter(
+            title_key="title.whisper_input_meter",
+            title_default="Whisper input dB meter",
+            error_title_key="title.whisper_input_meter_error",
+            error_title_default="Whisper input meter error",
+            input_device_requested=input_device_requested,
+            sample_rate=16000,
+            frame_ms=20,
+            channels=1,
+        )
+
+    def _run_input_meter(
+        self,
+        *,
+        title_key: str,
+        title_default: str,
+        error_title_key: str,
+        error_title_default: str,
+        input_device_requested: str,
+        sample_rate: int,
+        frame_ms: int,
+        channels: int,
+    ):
+        frame_samples = max(1, int(sample_rate * frame_ms / 1000))
         input_device = _coerce_audio_input_device_for_sounddevice(input_device_requested)
 
         if sd is None:
             self._show_error(
-                self._tr("title.audio_input_meter_error", "Input dB meter error"),
+                self._tr(error_title_key, error_title_default),
                 self._tr(
                     "msg.audio_input_meter_sounddevice_missing",
                     "sounddevice module is missing. Run ./bin/avc setup and try again.",
@@ -4117,7 +4466,7 @@ class ConfigGui:
             return
 
         window = tk.Toplevel(self.root)
-        window.title(self._tr("title.audio_input_meter", "Microphone input dB meter"))
+        window.title(self._tr(title_key, title_default))
         window.geometry("640x480")
         window.minsize(640, 480)
         window.resizable(True, True)
@@ -4127,7 +4476,7 @@ class ConfigGui:
         content.pack(fill="both", expand=True)
         content.columnconfigure(0, weight=1)
 
-        ttk.Label(content, text=self._tr("title.audio_input_meter", "Microphone input dB meter"), font=("Arial", 12, "bold")).grid(
+        ttk.Label(content, text=self._tr(title_key, title_default), font=("Arial", 12, "bold")).grid(
             row=0, column=0, sticky="ew", pady=(0, 8)
         )
         ttk.Label(
@@ -4203,7 +4552,7 @@ class ConfigGui:
             self._stop_audio_input_meter()
             window.destroy()
             self._show_error(
-                self._tr("title.audio_input_meter_error", "Input dB meter error"),
+                self._tr(error_title_key, error_title_default),
                 self._tr(
                     "msg.audio_input_meter_open_stream_failed",
                     "Failed to open input stream: {error}\nconfigured={configured}\nruntime={runtime}\navailable={available}",
@@ -4648,6 +4997,7 @@ class ConfigGui:
             "seg_opt_morph_open": "morphOpen",
             "seg_opt_morph_close": "morphClose",
             "seg_opt_mask_gamma": "maskGamma",
+            "seg_opt_engine_path": "enginePath",
         }
         for var_key, opt_key in key_map.items():
             widget = self._widgets.get(var_key)
@@ -4675,6 +5025,10 @@ class ConfigGui:
             options["morphClose"] = int(round(float(self.vars["seg_opt_morph_close"].get())))
         if "maskGamma" in allowed:
             options["maskGamma"] = float(self.vars["seg_opt_mask_gamma"].get())
+        if "enginePath" in allowed:
+            engine_path = self.vars["seg_opt_engine_path"].get().strip()
+            if engine_path:
+                options["enginePath"] = engine_path
         return options
 
     def _apply_seg_engine_options_to_form(self, options: dict[str, object]) -> None:
@@ -4685,6 +5039,7 @@ class ConfigGui:
             ("seg_opt_morph_open", "morphOpen"),
             ("seg_opt_morph_close", "morphClose"),
             ("seg_opt_mask_gamma", "maskGamma"),
+            ("seg_opt_engine_path", "enginePath"),
         )
         for var_key, opt_key in mapping:
             value = options.get(opt_key)
@@ -4712,17 +5067,22 @@ class ConfigGui:
         if background["mode"] == "image_chroma":
             background["colorBlendAlpha"] = float(iv["bg_blend_alpha"].get())
 
-        raw_audio_input = _audio_device_raw_from_display(
-            iv["audio_input_device"].get().strip(),
-            getattr(self, "_audio_input_display_to_raw", {}),
-        )
-        raw_audio_output = _audio_device_raw_from_display(
-            iv["audio_output_device"].get().strip(),
-            getattr(self, "_audio_output_display_to_raw", {}),
-        )
         if validate_audio:
-            _validate_pulse_runtime_device("input", raw_audio_input)
-            _validate_pulse_runtime_device("output", raw_audio_output)
+            raw_audio_input, raw_audio_output = _resolve_and_validate_audio_runtime_devices(
+                iv["audio_input_device"].get(),
+                iv["audio_output_device"].get(),
+                getattr(self, "_audio_input_display_to_raw", {}),
+                getattr(self, "_audio_output_display_to_raw", {}),
+            )
+        else:
+            raw_audio_input = _audio_device_raw_from_display(
+                iv["audio_input_device"].get().strip(),
+                getattr(self, "_audio_input_display_to_raw", {}),
+            )
+            raw_audio_output = _audio_device_raw_from_display(
+                iv["audio_output_device"].get().strip(),
+                getattr(self, "_audio_output_display_to_raw", {}),
+            )
         seg_engine_options = self._collect_seg_engine_options_from_form()
 
         return build_config(
@@ -4784,17 +5144,59 @@ class ConfigGui:
             face_enhance_min_size_ratio=float(iv["face_enhance_min_size_ratio"].get()),
             face_enhance_edge_dither=float(iv["face_enhance_edge_dither"].get()),
             face_deidentify_enabled=self._parse_bool(iv["face_deidentify_enabled"].get()),
+            whisper_enabled=self._parse_bool(iv["whisper_enabled"].get()),
+            whisper_input_device=_audio_device_raw_from_display(
+                iv["whisper_input_device"].get().strip(),
+                getattr(self, "_whisper_input_display_to_raw", {}),
+            ),
+            whisper_backend=iv["whisper_backend"].get().strip(),
+            whisper_model=iv["whisper_model"].get().strip(),
+            whisper_language=iv["whisper_language"].get().strip(),
+            whisper_task=iv["whisper_task"].get().strip(),
+            whisper_device=iv["whisper_device"].get().strip(),
+            whisper_compute_type=iv["whisper_compute_type"].get().strip(),
+            whisper_vad_filter=self._parse_bool(iv["whisper_vad_filter"].get()),
         )
 
 
 def parse_args():
+    if len(sys.argv) > 1 and sys.argv[1] == "check":
+        parser = argparse.ArgumentParser(description="Validate ai-virtual-cam config")
+        parser.add_argument("command", choices=["check"])
+        parser.add_argument("--output", "--config", dest="output", default="~/.avc/setting.json")
+        return parser.parse_args()
+
+    if len(sys.argv) > 1 and sys.argv[1] == "gui":
+        sys.argv.pop(1)
+
     parser = argparse.ArgumentParser(description="GUI config generator for ai-virtual-cam")
     parser.add_argument("--output", default="~/.avc/setting.json")
     parser.add_argument("--lang", choices=["ko", "en"], default="ko")
     return parser.parse_args()
 
 
+def _run_check(output_path: str) -> int:
+    from src.domain.config import AppConfig
+
+    config_path = Path(output_path).expanduser()
+    config = AppConfig.load(config_path)
+    print(
+        "[avc] config check ok: "
+        f"path={config_path} "
+        f"whisper.enabled={config.whisper.enabled} "
+        f"whisper.input={config.whisper.inputDevice} "
+        f"whisper.backend={config.whisper.backend} "
+        f"whisper.model={config.whisper.model}",
+        flush=True,
+    )
+    return 0
+
+
 def main() -> int:
+    args = parse_args()
+    if getattr(args, "command", "") == "check":
+        return _run_check(args.output)
+
     if TK_IMPORT_ERROR is not None:
         print(
             "Tkinter is not available in this Python runtime.\n"
@@ -4804,7 +5206,6 @@ def main() -> int:
         )
         return 2
 
-    args = parse_args()
     root = tk.Tk()
     ConfigGui(root, args.output, args.lang)
     root.mainloop()

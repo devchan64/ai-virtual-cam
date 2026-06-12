@@ -27,6 +27,17 @@ Python 의존성만 재동기화:
 - `.venv`를 생성/재사용하고 `requirements.txt` 기준으로 정확히 설치합니다.
 - Linux의 `deepfilternet`는 기본 미설치입니다. 필요하면 `AVC_INSTALL_DEEPFILTERNET=1 ./bin/avc env sync`로 별도 시도하세요.
 
+TensorRT 엔진을 setup 중 내려받으려면 엔진 URL을 지정합니다:
+
+```bash
+AVC_TENSORRT_ENGINE_URL="https://example.com/person-segmentation.engine" ./bin/avc setup
+```
+
+- 기본 저장 위치는 `~/.avc/models/person-segmentation.engine`입니다.
+- 다른 경로는 `AVC_TENSORRT_ENGINE_PATH=/path/to/model.engine`으로 지정합니다.
+- 체크섬 검증은 `AVC_TENSORRT_ENGINE_SHA256=<sha256>`으로 지정합니다.
+- 기존 파일을 다시 받으려면 `AVC_TENSORRT_ENGINE_FORCE=1`을 함께 지정합니다.
+
 ### 2) 설정
 
 ```bash
@@ -414,6 +425,11 @@ Linux Docker 정책:
         "morphOpen": 3,
         "morphClose": 5,
         "maskGamma": 0.9
+      },
+      "tensorrt": {
+        "enginePath": "/path/to/person-segmentation.engine",
+        "inputName": "input",
+        "outputName": "mask"
       }
     }
   },

@@ -8,6 +8,10 @@ OS_KIND=""
 LINUX_DISTRO_ID=""
 INVOKING_USER="${SUDO_USER:-${USER:-}}"
 INVOKING_GROUP=""
+TENSORRT_ENGINE_URL="${AVC_TENSORRT_ENGINE_URL:-}"
+TENSORRT_ENGINE_SHA256="${AVC_TENSORRT_ENGINE_SHA256:-}"
+TENSORRT_ENGINE_FORCE="${AVC_TENSORRT_ENGINE_FORCE:-0}"
+TENSORRT_ENGINE_PATH="${AVC_TENSORRT_ENGINE_PATH:-}"
 
 log() {
   printf '[ai-virtual-cam] %s\n' "$*"
@@ -57,6 +61,12 @@ Linux setup also installs Docker host dependencies for `./bin/avc docker`.
 Options:
   --input-device N         Expected USB camera device number (default: 0)
   --dry-run                Print commands without executing them
+
+Environment:
+  AVC_TENSORRT_ENGINE_URL      Download serialized TensorRT engine during setup
+  AVC_TENSORRT_ENGINE_PATH     Engine output path (default: ~/.avc/models/person-segmentation.engine)
+  AVC_TENSORRT_ENGINE_SHA256   Optional sha256 checksum for downloaded engine
+  AVC_TENSORRT_ENGINE_FORCE    Set 1 to re-download when output path already exists
   -h, --help               Show this help
 EOF
 }
@@ -82,7 +92,12 @@ elevate_linux_with_sudo() {
   fi
 
   log "Linux setup requires administrator privileges; requesting sudo authentication."
-  exec sudo bash "$0" "$@"
+  exec sudo env \
+    AVC_TENSORRT_ENGINE_URL="$TENSORRT_ENGINE_URL" \
+    AVC_TENSORRT_ENGINE_PATH="$TENSORRT_ENGINE_PATH" \
+    AVC_TENSORRT_ENGINE_SHA256="$TENSORRT_ENGINE_SHA256" \
+    AVC_TENSORRT_ENGINE_FORCE="$TENSORRT_ENGINE_FORCE" \
+    bash "$0" "$@"
 }
 
 detect_os() {
@@ -227,6 +242,59 @@ install_python_runtime_packages() {
   run_as_invoking_user "$(pwd)/scripts/bin/avc-env" sync
 }
 
+invoking_home_dir() {
+  if [[ "$OS_KIND" == "linux" && -n "$INVOKING_USER" ]]; then
+    getent passwd "$INVOKING_USER" | cut -d: -f6
+    return 0
+  fi
+  printf '%s\n' "${HOME:-}"
+}
+
+resolve_tensorrt_engine_path() {
+  if [[ -n "$TENSORRT_ENGINE_PATH" ]]; then
+    printf '%s\n' "$TENSORRT_ENGINE_PATH"
+    return 0
+  fi
+  local home_dir
+  home_dir="$(invoking_home_dir)"
+  if [[ -z "$home_dir" ]]; then
+    fail "Cannot determine home directory for TensorRT engine path. Set AVC_TENSORRT_ENGINE_PATH."
+  fi
+  printf '%s\n' "$home_dir/.avc/models/person-segmentation.engine"
+}
+
+download_tensorrt_engine() {
+  if [[ -z "$TENSORRT_ENGINE_URL" ]]; then
+    log "TensorRT engine download skipped (AVC_TENSORRT_ENGINE_URL is not set)"
+    return 0
+  fi
+  if ! command -v curl >/dev/null 2>&1; then
+    fail "curl is required to download TensorRT engine."
+  fi
+  local output_path output_dir tmp_path
+  output_path="$(resolve_tensorrt_engine_path)"
+  output_dir="$(dirname "$output_path")"
+  tmp_path="$output_path.tmp"
+
+  if [[ -f "$output_path" && "$TENSORRT_ENGINE_FORCE" != "1" ]]; then
+    log "TensorRT engine already exists: $output_path"
+    return 0
+  fi
+
+  log "Downloading TensorRT engine to $output_path"
+  run_as_invoking_user mkdir -p "$output_dir"
+  run_as_invoking_user curl -fL --retry 3 --connect-timeout 10 -o "$tmp_path" "$TENSORRT_ENGINE_URL"
+  if [[ -n "$TENSORRT_ENGINE_SHA256" ]]; then
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      printf '[dry-run] %s\n' "verify sha256 $TENSORRT_ENGINE_SHA256 $tmp_path"
+    else
+      printf '%s  %s\n' "$TENSORRT_ENGINE_SHA256" "$tmp_path" | sha256sum -c - >/dev/null
+    fi
+  fi
+  run_as_invoking_user mv "$tmp_path" "$output_path"
+  log "TensorRT engine ready: $output_path"
+}
+
 repair_workspace_permissions() {
   if [[ "$OS_KIND" != "linux" || "$EUID" -ne 0 ]]; then
     return 0
@@ -284,6 +352,7 @@ main() {
   log "Setup now installs dependencies only; create virtual devices in config."
   repair_workspace_permissions
   install_python_runtime_packages
+  download_tensorrt_engine
   verify_host_contract
   log "Host dependency setup completed"
   if [[ "$OS_KIND" == "linux" ]]; then

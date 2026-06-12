@@ -3,3 +3,4 @@ opencv-python==4.10.0.84
 mediapipe==0.10.14
 pyvirtualcam==0.14.0
 sounddevice==0.5.1
+faster-whisper==1.2.1

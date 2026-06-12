@@ -709,6 +709,49 @@ class FaceEnhanceConfig:
 
 
 @dataclass(frozen=True)
+class WhisperConfig:
+    enabled: bool
+    inputDevice: str
+    backend: str
+    model: str
+    language: str
+    task: str
+    device: str
+    computeType: str
+    vadFilter: bool
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> "WhisperConfig":
+        config = cls(
+            enabled=bool(raw.get("enabled", False)),
+            inputDevice=str(raw.get("inputDevice", _default_audio_input_device())).strip(),
+            backend=str(raw.get("backend", "faster-whisper")).strip(),
+            model=str(raw.get("model", "large-v3")).strip(),
+            language=str(raw.get("language", "ko")).strip(),
+            task=str(raw.get("task", "transcribe")).strip(),
+            device=str(raw.get("device", "cuda")).strip(),
+            computeType=str(raw.get("computeType", "float16")).strip(),
+            vadFilter=bool(raw.get("vadFilter", True)),
+        )
+        allowed_backends = {"faster-whisper", "openai-whisper", "whisper.cpp", "mock"}
+        if config.backend not in allowed_backends:
+            raise ValueError("whisper.backend must be one of: faster-whisper, openai-whisper, whisper.cpp, mock")
+        if not config.inputDevice:
+            raise ValueError("whisper.inputDevice is required")
+        if not config.model:
+            raise ValueError("whisper.model is required")
+        if not config.language:
+            raise ValueError("whisper.language is required")
+        if config.task not in {"transcribe", "translate"}:
+            raise ValueError("whisper.task must be one of: transcribe, translate")
+        if not config.device:
+            raise ValueError("whisper.device is required")
+        if not config.computeType:
+            raise ValueError("whisper.computeType is required")
+        return config
+
+
+@dataclass(frozen=True)
 class AppConfig:
     inputCamera: InputCameraConfig
     outputCamera: OutputCameraConfig
@@ -717,6 +760,7 @@ class AppConfig:
     crop: PersonCropConfig
     audio: AudioMixerConfig | None = None
     faceEnhance: FaceEnhanceConfig = field(default_factory=lambda: FaceEnhanceConfig.from_dict({}))
+    whisper: WhisperConfig = field(default_factory=lambda: WhisperConfig.from_dict({}))
 
     @classmethod
     def load(cls, path: Path) -> "AppConfig":
@@ -736,6 +780,7 @@ class AppConfig:
             crop=crop_cfg,
             audio=AudioMixerConfig.from_dict(raw["audio"]) if raw.get("audio") else None,
             faceEnhance=FaceEnhanceConfig.from_dict(raw.get("faceEnhance") or {}),
+            whisper=WhisperConfig.from_dict(raw.get("whisper") or {}),
         )
 
 
