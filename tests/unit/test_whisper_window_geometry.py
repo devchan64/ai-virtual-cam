@@ -142,44 +142,51 @@ class WhisperWindowGeometryTest(unittest.TestCase):
         self.assertFalse(window._transcript_partial_active)
 
 
-    def test_line_numbers_update_separate_from_transcript_text(self) -> None:
+    def test_line_numbers_update_on_display_row_axis(self) -> None:
         class FakeContentText:
-            def get(self, start: str, end: str) -> str:
-                return "첫 줄\n둘째 줄"
-
-            def yview(self):
-                return (0.0, 1.0)
-
-        class FakeLineNumberText:
             def __init__(self) -> None:
-                self.configures = []
+                self.current = "1.0"
+
+            def index(self, index: str) -> str:
+                if index == "@0,0":
+                    return "1.0"
+                if index.endswith("+1line"):
+                    line = int(index.split(".", 1)[0]) + 1
+                    return f"{line}.0"
+                return index
+
+            def dlineinfo(self, index: str):
+                line = int(index.split(".", 1)[0])
+                if line > 102:
+                    return None
+                return (0, (line - 1) * 18, 100, 18, 0)
+
+        class FakeLineNumberCanvas:
+            def __init__(self) -> None:
                 self.deletes = []
-                self.inserts = []
-                self.moves = []
+                self.texts = []
+                self.configures = []
 
             def configure(self, **kwargs) -> None:
                 self.configures.append(kwargs)
 
-            def delete(self, start: str, end: str) -> None:
-                self.deletes.append((start, end))
+            def delete(self, target: str) -> None:
+                self.deletes.append(target)
 
-            def insert(self, index: str, text: str) -> None:
-                self.inserts.append((index, text))
-
-            def yview_moveto(self, fraction: float) -> None:
-                self.moves.append(fraction)
+            def create_text(self, x: int, y: int, **kwargs) -> None:
+                self.texts.append((x, y, kwargs))
 
         content = FakeContentText()
-        line_numbers = FakeLineNumberText()
+        line_numbers = FakeLineNumberCanvas()
         window = WhisperTranscriptWindow.__new__(WhisperTranscriptWindow)
         window._line_number_widgets = {content: line_numbers}
 
         window._update_line_numbers(content)
 
-        self.assertEqual(line_numbers.deletes, [("1.0", "end")])
-        self.assertEqual(line_numbers.inserts, [("1.0", "1\n2")])
-        self.assertIn({"state": "normal"}, line_numbers.configures)
-        self.assertIn({"state": "disabled"}, line_numbers.configures)
+        self.assertEqual(line_numbers.deletes, ["all"])
+        self.assertIn({"width": 43}, line_numbers.configures)
+        self.assertEqual(line_numbers.texts[0], (37, 0, {"anchor": "ne", "text": "1", "fill": "#777777"}))
+        self.assertEqual(line_numbers.texts[101], (37, 1818, {"anchor": "ne", "text": "102", "fill": "#777777"}))
 
     def test_copy_all_uses_transcript_text_without_line_numbers(self) -> None:
         class FakeRoot:

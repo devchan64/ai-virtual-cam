@@ -366,6 +366,12 @@ def _phrase_key(units: list[str]) -> list[str]:
     return _word_units(" ".join(units))
 
 
+def _repeated_phrase_key_matches(left_key: list[str], right_key: list[str]) -> bool:
+    if left_key == right_key:
+        return True
+    return len(left_key) >= 4 and len(left_key) == len(right_key) and left_key[1:] == right_key[1:]
+
+
 def _collapse_near_repeated_phrases(units: list[str]) -> bool:
     for phrase_len in range(min(12, len(units) // 2), 3, -1):
         for left_start in range(0, len(units) - phrase_len):
@@ -373,8 +379,9 @@ def _collapse_near_repeated_phrases(units: list[str]) -> bool:
             if not left_key:
                 continue
             max_right_start = min(len(units) - phrase_len, left_start + phrase_len + 8)
-            for right_start in range(left_start + phrase_len + 1, max_right_start + 1):
-                if _phrase_key(units[right_start : right_start + phrase_len]) == left_key:
+            for right_start in range(left_start + phrase_len, max_right_start + 1):
+                right_key = _phrase_key(units[right_start : right_start + phrase_len])
+                if _repeated_phrase_key_matches(left_key, right_key):
                     delete_len = phrase_len
                     while (
                         left_start + delete_len < right_start
@@ -387,11 +394,23 @@ def _collapse_near_repeated_phrases(units: list[str]) -> bool:
     return False
 
 
+def _collapse_adjacent_repeated_prefix_units(units: list[str]) -> bool:
+    for index in range(1, len(units)):
+        previous_key = _phrase_key([units[index - 1]])
+        current_key = _phrase_key([units[index]])
+        if "-" in units[index] and len(previous_key) == 1 and len(current_key) >= 2 and previous_key[0] == current_key[0]:
+            del units[index - 1]
+            return True
+    return False
+
+
 def _collapse_adjacent_repeated_phrases(text: str) -> str:
     normalized = _normalized_text(text)
     units, separator = _text_units(normalized)
     if separator == "" or len(units) < 6:
         return normalized
+    while _collapse_adjacent_repeated_prefix_units(units):
+        pass
     passes = 0
     changed = True
     while changed and passes < 4:
@@ -563,6 +582,11 @@ def _sentence_output_delta(committed_text: str, sentence: str) -> str:
         if len(suffix_words) >= 3:
             return _sentence_delta_from_words(suffix_words)
         return ""
+    if best_i + best_len == len(committed_words) and 0 < best_j <= 3 and best_len >= 8:
+        suffix_words = sentence_words[best_j + best_len :]
+        if len(suffix_words) >= 3:
+            return _sentence_delta_from_words(suffix_words)
+        return ""
     if best_i + best_len == len(committed_words) and best_j == 1 and best_len >= 4:
         suffix_words = sentence_words[best_j + best_len :]
         if len(suffix_words) >= 3:
@@ -575,14 +599,24 @@ def _sentence_output_delta(committed_text: str, sentence: str) -> str:
     return normalized
 
 
-def _common_word_run(a_words: list[str], b_words: list[str]) -> int:
+def _best_common_word_run(a_words: list[str], b_words: list[str]) -> tuple[int, int, int]:
+    best_i = 0
+    best_j = 0
     best_len = 0
     for i in range(len(a_words)):
         for j in range(len(b_words)):
             length = 0
             while i + length < len(a_words) and j + length < len(b_words) and a_words[i + length] == b_words[j + length]:
                 length += 1
-            best_len = max(best_len, length)
+            if length > best_len:
+                best_i = i
+                best_j = j
+                best_len = length
+    return best_i, best_j, best_len
+
+
+def _common_word_run(a_words: list[str], b_words: list[str]) -> int:
+    _best_i, _best_j, best_len = _best_common_word_run(a_words, b_words)
     return best_len
 
 
@@ -597,7 +631,12 @@ def _sentences_are_revisions(left: str, right: str) -> bool:
         if all(_prefix_words_match(left_word, right_word) for left_word, right_word in zip(left_words, right_words)):
             return True
     shorter = min(len(left_words), len(right_words))
-    common_run = _common_word_run(left_words, right_words)
+    best_i, best_j, common_run = _best_common_word_run(left_words, right_words)
+    prefix_run = _longest_prefix_revision_run(left_words, right_words)
+    if common_run >= 8 and best_i + common_run == len(left_words) and best_j <= 3:
+        return True
+    if prefix_run >= 5 and common_run >= 5 and len(right_words) >= len(left_words):
+        return True
     return common_run >= 4 and common_run / max(shorter, 1) >= 0.6
 
 
@@ -664,6 +703,7 @@ _INCOMPLETE_TAIL_WORDS = {
     "of",
     "on",
     "or",
+    "re",
     "that",
     "the",
     "to",
@@ -1368,9 +1408,8 @@ class WhisperTranscriptWindow:
     def _create_numbered_text(self, parent, row: int):
         tk = self._tk
         ttk = self._ttk
-        line_numbers = tk.Text(parent, width=4, padx=4, takefocus=False, wrap="none", undo=False)
+        line_numbers = tk.Canvas(parent, width=self._line_number_width(1), highlightthickness=0, takefocus=False)
         line_numbers.grid(row=row, column=0, sticky="ns")
-        line_numbers.configure(state="disabled")
         text_widget = tk.Text(parent, wrap="word", undo=False)
         self._configure_transcript_text_tags(text_widget)
         text_widget.grid(row=row, column=1, sticky="nsew")
@@ -1379,42 +1418,57 @@ class WhisperTranscriptWindow:
 
         def yscroll(first: str, last: str) -> None:
             scrollbar.set(first, last)
-            try:
-                line_numbers.yview_moveto(float(first))
-            except Exception:
-                pass
+            self._update_line_numbers(text_widget)
 
         text_widget.configure(yscrollcommand=yscroll)
         text_widget.bind("<Key>", self._on_text_key)
         text_widget.bind("<Button-3>", self._show_context_menu)
         text_widget.bind("<Control-Button-1>", self._show_context_menu)
+        text_widget.bind("<Configure>", lambda _event: self._update_line_numbers(text_widget))
         self._configure_line_number_text(line_numbers)
         self._line_number_widgets[text_widget] = line_numbers
         return text_widget
 
     def _configure_line_number_text(self, line_numbers) -> None:
-        line_numbers.configure(foreground="#777777", background="#f0f0f0", relief="flat")
+        line_numbers.configure(background="#f0f0f0")
+
+    def _line_number_width(self, max_line: int) -> int:
+        digits = max(1, len(str(max_line)))
+        return max(42, (digits * 9) + 16)
+
+    def _line_number_x(self, max_line: int) -> int:
+        return self._line_number_width(max_line) - 6
 
     def _update_line_numbers(self, text_widget) -> None:
         line_numbers = getattr(self, "_line_number_widgets", {}).get(text_widget)
         if line_numbers is None:
             return
-        content = text_widget.get("1.0", "end-1c")
-        if not content:
-            numbers = ""
-        else:
-            line_count = content.count("\n") + 1
-            numbers = "\n".join(str(index) for index in range(1, line_count + 1))
-        line_numbers.configure(state="normal")
-        line_numbers.delete("1.0", "end")
-        if numbers:
-            line_numbers.insert("1.0", numbers)
-        line_numbers.configure(state="disabled")
+        line_numbers.delete("all")
         try:
-            first, _last = text_widget.yview()
-            line_numbers.yview_moveto(first)
+            index = text_widget.index("@0,0")
+            visible_lines: list[tuple[str, int]] = []
+            while True:
+                info = text_widget.dlineinfo(index)
+                if info is None:
+                    break
+                line = index.split(".", 1)[0]
+                visible_lines.append((line, info[1]))
+                next_index = text_widget.index(f"{index}+1line")
+                if next_index == index:
+                    break
+                index = next_index
+            max_line = max((int(line) for line, _y in visible_lines), default=1)
+            line_numbers.configure(width=self._line_number_width(max_line))
+            x = self._line_number_x(max_line)
+            for line, y in visible_lines:
+                line_numbers.create_text(x, y, anchor="ne", text=line, fill="#777777")
         except Exception:
-            pass
+            content = text_widget.get("1.0", "end-1c")
+            line_count = 0 if not content else content.count("\n") + 1
+            line_numbers.configure(width=self._line_number_width(line_count))
+            x = self._line_number_x(line_count)
+            for line in range(1, line_count + 1):
+                line_numbers.create_text(x, (line - 1) * 17, anchor="ne", text=str(line), fill="#777777")
 
     def run(self) -> int:
         self._thread.start()

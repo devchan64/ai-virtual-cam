@@ -77,6 +77,38 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
 
         self.assertFalse(_should_age_staged_sentence(staged, pending))
 
+    def test_staged_sentence_waits_when_pending_reuses_self_driving_tail_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 34-39.
+        staged = "It's also less fatiguing to drive when you're taking more breaks, and then you have the systems like autopilot and full self-driving in tesla vehicles specifically that help to make your drive that much less fatiguing as well"
+        pending = "self-driving and Tesla vehicles specifically that help to make your drive that much less fatiguing as well and make the trade-off worth it for those couple extra minutes spent at chargers."
+
+        self.assertTrue(_sentences_are_revisions(staged, pending))
+        self.assertFalse(_should_age_staged_sentence(staged, pending))
+
+    def test_staged_sentence_waits_when_pending_revises_youre_tail_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 81-82.
+        staged = "If you just bought a Tesla or waiting for delivery or you're"
+        pending = "If you just bought a Tesla are waiting for delivery or you're seriously thinking about"
+
+        self.assertTrue(_sentences_are_revisions(staged, pending))
+        self.assertFalse(_should_age_staged_sentence(staged, pending))
+
+    def test_staged_sentence_waits_when_pending_reuses_outlet_tail_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 34-36.
+        staged = "Tesla's charging cable this would be for home charging and public Chargers and tesla destination chargers not for tesla superchargers But maybe you find yourself at a location where you can park here, but the outlet is all the way over there."
+        pending = "where you can park here, but the outlet is all the way over there, this will ensure that you"
+
+        self.assertTrue(_sentences_are_revisions(staged, pending))
+        self.assertFalse(_should_age_staged_sentence(staged, pending))
+
+    def test_staged_sentence_prefers_later_range_per_hour_revision_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 195-201.
+        staged = "This is the real sweet spot for Tesla ownership because you can typically gain about 25 to 44 miles of range"
+        revised = "This is the real sweet spot for Tesla ownership because you can typically gain about 25 to 44 miles of range per hour."
+
+        self.assertTrue(_sentences_are_revisions(staged, revised))
+        self.assertEqual(_prefer_sentence_revision(staged, revised), revised)
+
     def test_staged_sentence_can_age_without_pending_revision(self) -> None:
         self.assertTrue(_should_age_staged_sentence("Completed sentence.", "Different topic starts here"))
 
@@ -405,6 +437,24 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
             "Just tap on that lightning bolt icon and it will automatically open your charge port and you can tap on it again to close it.",
         )
 
+    def test_collapse_repeated_prefix_before_hyphenated_phrase_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 592-594.
+        text = "EPA estimated ranges are a best best-case scenario, so it's not really the daily reality."
+
+        self.assertEqual(
+            _collapse_adjacent_repeated_phrases(text),
+            "EPA estimated ranges are a best-case scenario, so it's not really the daily reality.",
+        )
+
+    def test_collapse_repeated_phrase_with_variant_leading_word_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 132-143.
+        text = "Right now, Fantech is running some fantic is running some huge discounts where you can get 45% off the X8 Apex"
+
+        self.assertEqual(
+            _collapse_adjacent_repeated_phrases(text),
+            "Right now, Fantech is running some huge discounts where you can get 45% off the X8 Apex",
+        )
+
     def test_sentence_output_delta_collapses_repeated_tap_close_phrase_from_log(self) -> None:
         # Regression from avc-whisper.log chunks 100-102.
         text = "Just tap on that lightning bolt icon and it will automatically open your charge port and you can tap on it again to close You can tap on it again to close it."
@@ -422,6 +472,35 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
         self.assertEqual(
             _sentence_output_delta(committed, sentence),
             "when you enable that it ll automatically turn your turn signal off and normally with that before that setting came when you half press a turn signal it would go on three blinks and then if you fully press the turn signal it stays",
+        )
+
+    def test_sentence_output_delta_trims_self_driving_tail_reuse_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 34-39.
+        committed = "It's also less fatiguing to drive when you're taking more breaks, and then you have the systems like autopilot and full self-driving in tesla vehicles specifically that help to make your drive that much less fatiguing as well"
+        sentence = "self-driving and Tesla vehicles specifically that help to make your drive that much less fatiguing as well and make the trade-off worth it for those couple extra minutes spent at chargers."
+
+        self.assertEqual(
+            _sentence_output_delta(committed, sentence),
+            "and make the trade off worth it for those couple extra minutes spent at chargers",
+        )
+
+    def test_collapse_repeated_charger_status_phrase_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 319-321.
+        text = "location is, how many stalls there are, what the nearby amenities are, and if there's any broken stalls there are what the nearby amenities are and if there's any broken stalls at the current moment if there is a wait time at a particular charger, it will let you know, but a lot of times it will automatically reroute you as well, so you won't have to think about it"
+
+        self.assertEqual(
+            _collapse_adjacent_repeated_phrases(text),
+            "location is, how many stalls there are, what the nearby amenities are, and if there's any broken stalls at the current moment if there is a wait time at a particular charger, it will let you know, but a lot of times it will automatically reroute you as well, so you won't have to think about it",
+        )
+
+    def test_sentence_output_delta_trims_charger_status_tail_reuse_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 319-321.
+        committed = "it gives you a live status But so that you can see how many chargers are available how big that particular charger location is how many stalls there are what the nearby amenities are, and if there's any broken"
+        sentence = "location is, how many stalls there are, what the nearby amenities are, and if there's any broken stalls there are what the nearby amenities are and if there's any broken stalls at the current moment if there is a wait time at a particular charger, it will let you know, but a lot of times it will automatically reroute you as well, so you won't have to think about it but this also may be"
+
+        self.assertEqual(
+            _sentence_output_delta(committed, sentence),
+            "stalls at the current moment if there is a wait time at a particular charger it will let you know but a lot of times it will automatically reroute you as well so you won t have to think about it but this also may be",
         )
 
     def test_sentence_boundary_soft_split_trims_incomplete_if_tail_from_log(self) -> None:
