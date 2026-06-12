@@ -9,6 +9,7 @@ from pathlib import Path
 
 from src.domain.config import WhisperConfig
 from src.app.whisper_window import (
+    DEFAULT_WINDOW_GEOMETRY_META,
     FINAL_TEXT_COLOR,
     FINAL_TEXT_TAG,
     PARTIAL_TEXT_COLOR,
@@ -18,6 +19,8 @@ from src.app.whisper_window import (
     WhisperTranscriptWorker,
     _is_modal_output_event,
     _load_ui_language,
+    _load_window_geometry,
+    _window_manager_geometry,
     _sanitize_window_geometry,
     _save_window_geometry,
     _window_restore_extent,
@@ -26,6 +29,15 @@ from src.app.whisper_window import (
 
 
 class WhisperWindowGeometryTest(unittest.TestCase):
+
+    def test_window_manager_geometry_prefers_wm_geometry_over_widget_geometry(self) -> None:
+        window = SimpleNamespace(
+            geometry=lambda: "780x420+50+119",
+            winfo_geometry=lambda: "780x420+50+156",
+        )
+
+        self.assertEqual(_window_manager_geometry(window), "780x420+50+119")
+
     def test_caches_geometry_by_log_without_writing_config_meta(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "setting.json"
@@ -128,6 +140,54 @@ class WhisperWindowGeometryTest(unittest.TestCase):
         self.assertEqual(widget.deletes, [("end-1c linestart", "end-1c")])
         self.assertEqual(widget.inserts[1], ("end", "확정 문장\n", FINAL_TEXT_TAG))
         self.assertFalse(window._transcript_partial_active)
+
+
+    def test_load_window_geometry_uses_default_when_saved_value_missing(self) -> None:
+        class Root:
+            def winfo_vrootwidth(self) -> int:
+                return 1920
+
+            def winfo_vrootheight(self) -> int:
+                return 1080
+
+            def winfo_screenwidth(self) -> int:
+                return 1920
+
+            def winfo_screenheight(self) -> int:
+                return 1080
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "setting.json"
+            path.write_text(json.dumps({"meta": {}}), encoding="utf-8")
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                geometry = _load_window_geometry(path, "whisperWindowGeometry", Root())
+
+        self.assertEqual(geometry, DEFAULT_WINDOW_GEOMETRY_META["whisperWindowGeometry"])
+        self.assertIn("window geometry defaulted: key=whisperWindowGeometry", stdout.getvalue())
+
+    def test_load_window_geometry_uses_saved_value_before_default(self) -> None:
+        class Root:
+            def winfo_vrootwidth(self) -> int:
+                return 1920
+
+            def winfo_vrootheight(self) -> int:
+                return 1080
+
+            def winfo_screenwidth(self) -> int:
+                return 1920
+
+            def winfo_screenheight(self) -> int:
+                return 1080
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "setting.json"
+            path.write_text(json.dumps({"meta": {"whisperWindowGeometry": "820x460+120+80"}}), encoding="utf-8")
+
+            geometry = _load_window_geometry(path, "whisperWindowGeometry", Root())
+
+        self.assertEqual(geometry, "820x460+120+80")
 
     def test_modal_output_only_allows_transcript_and_translation(self) -> None:
         self.assertTrue(_is_modal_output_event(TranscriptEvent("transcript", "hello")))

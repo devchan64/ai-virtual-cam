@@ -113,7 +113,7 @@ VIRTUAL_CAMERA_LABEL = "ai-virtual-cam"
 LANG_PACK_DIR = ROOT_DIR / "config" / "i18n"
 DEFAULT_WINDOW_GEOMETRY = "780x900"
 DEFAULT_WINDOW_GEOMETRY_META = {
-    "windowGeometry": "780x900+50+50",
+    "windowGeometry": "780x900+0+0",
     "previewWindowGeometry": "640x480+80+80",
     "audioTuneWindowGeometry": "640x480+100+100",
     "audioGateTestWindowGeometry": "640x480+120+120",
@@ -179,6 +179,18 @@ def _window_restore_extent(root) -> tuple[int, int]:
     if height > 0:
         height *= 2
     return width, height
+
+
+def _window_manager_geometry(window) -> str:
+    try:
+        geometry = window.geometry()
+        if isinstance(geometry, str) and geometry.strip():
+            return geometry
+    except TypeError:
+        pass
+    except Exception:
+        pass
+    return window.winfo_geometry()
 
 
 def _sanitize_window_geometry(geometry: object, screen_width: int, screen_height: int) -> str | None:
@@ -751,6 +763,7 @@ class ConfigGui:
         config_path = str(Path(self.output_path).expanduser())
         try:
             config = self._build_config()
+            self._apply_persistent_meta(config)
             write_config(config_path, config)
         except Exception as exc:
             _log(f"Validation error: {exc}")
@@ -876,7 +889,7 @@ class ConfigGui:
             self.root.update_idletasks()
         except Exception:
             pass
-        return self.root.winfo_geometry()
+        return _window_manager_geometry(self.root)
 
     def _current_preview_window_geometry(self) -> str | None:
         window = getattr(self, "_preview_window", None)
@@ -886,7 +899,7 @@ class ConfigGui:
             if not window.winfo_exists():
                 return None
             window.update_idletasks()
-            return window.winfo_geometry()
+            return _window_manager_geometry(window)
         except Exception:
             return None
 
@@ -915,11 +928,12 @@ class ConfigGui:
             *_window_restore_extent(self.root),
         )
         if geometry is None:
-            geometry = DEFAULT_WINDOW_GEOMETRY_META["windowGeometry"]
             _log(
                 "WARN [Window geometry restore] "
-                f"setting.json has no valid meta.windowGeometry. saved={saved!r}; using default={geometry}"
+                f"setting.json has no valid meta.windowGeometry. saved={saved!r}; "
+                "keeping startup geometry until JSON save captures it"
             )
+            return
         self.root.geometry(geometry)
         self._geometry_meta_cache()["windowGeometry"] = geometry
         _log(f"Window geometry restored: key=windowGeometry geometry={geometry}")
@@ -970,7 +984,7 @@ class ConfigGui:
                 return
             window.update_idletasks()
             geometry = _sanitize_window_geometry(
-                window.winfo_geometry(),
+                _window_manager_geometry(window),
                 *_window_restore_extent(window),
             )
             if geometry is not None:
@@ -1026,6 +1040,10 @@ class ConfigGui:
         if missing:
             raise ValueError(f"Window geometry save failed: missing geometry keys={','.join(missing)}")
         _log(f"Window geometry saved to setting.json on JSON save: keys={','.join(keys)}")
+
+    def _apply_persistent_meta(self, config: dict) -> None:
+        config.setdefault("meta", {})["language"] = self._language_var.get().strip().lower() or self._lang
+        self._apply_window_geometry_meta(config)
 
     def _tr(self, key: str, default: str) -> str:
         value = self._i18n.get(key)
@@ -2268,8 +2286,7 @@ class ConfigGui:
     def _save(self):
         try:
             config = self._build_config()
-            config.setdefault("meta", {})["language"] = self._language_var.get().strip().lower() or self._lang
-            self._apply_window_geometry_meta(config)
+            self._apply_persistent_meta(config)
             write_config(self.output_path, config)
             messagebox.showinfo(
                 self._tr("msg.saved.title", "Saved"),

@@ -26,6 +26,10 @@ from src.domain.config import AppConfig, WhisperConfig
 SAMPLE_RATE = 16000
 DEFAULT_CHUNK_SECONDS = float(whisper_default("chunkSeconds"))
 DEFAULT_WINDOW_GEOMETRY = "780x420"
+DEFAULT_WINDOW_GEOMETRY_META = {
+    "whisperWindowGeometry": "780x420+50+119",
+    "whisperTranslationWindowGeometry": "780x420+860+119",
+}
 MIN_WINDOW_WIDTH = 520
 MIN_WINDOW_HEIGHT = 280
 FINAL_TEXT_TAG = "final_text"
@@ -145,6 +149,18 @@ def _window_restore_extent(root) -> tuple[int, int]:
     return width, height
 
 
+def _window_manager_geometry(window) -> str:
+    try:
+        geometry = window.geometry()
+        if isinstance(geometry, str) and geometry.strip():
+            return geometry
+    except TypeError:
+        pass
+    except Exception:
+        pass
+    return window.winfo_geometry()
+
+
 def _sanitize_window_geometry(geometry: object, screen_width: int, screen_height: int) -> str | None:
     parts = _parse_window_geometry(geometry)
     if parts is None:
@@ -166,29 +182,45 @@ def _sanitize_window_geometry(geometry: object, screen_width: int, screen_height
 
 
 def _load_window_geometry(config_path: Path, key: str, root) -> str | None:
+    default_geometry = DEFAULT_WINDOW_GEOMETRY_META.get(key)
     try:
         raw = json.loads(config_path.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
-            return None
+            _log_line(
+                f"[avc] whisper status: window geometry defaulted: key={key} "
+                f"reason=invalid_config default={default_geometry}"
+            )
+            return default_geometry
         meta = raw.get("meta") or {}
         if not isinstance(meta, dict):
-            return None
+            _log_line(
+                f"[avc] whisper status: window geometry defaulted: key={key} "
+                f"reason=invalid_meta default={default_geometry}"
+            )
+            return default_geometry
         screen_width, screen_height = _window_restore_extent(root)
-        restored = _sanitize_window_geometry(meta.get(key), screen_width, screen_height)
+        saved = meta.get(key)
+        restored = _sanitize_window_geometry(saved, screen_width, screen_height)
         if restored:
             _log_line(
                 f"[avc] whisper status: window geometry restored: key={key} geometry={restored} "
                 f"extent={screen_width}x{screen_height}"
             )
-        else:
+            return restored
+        if default_geometry is not None:
             _log_line(
-                f"[avc] whisper status: window geometry restore skipped: key={key} "
-                f"saved={meta.get(key)!r} extent={screen_width}x{screen_height}"
+                f"[avc] whisper status: window geometry defaulted: key={key} "
+                f"saved={saved!r} default={default_geometry} extent={screen_width}x{screen_height}"
             )
-        return restored
+            return default_geometry
+        _log_line(
+            f"[avc] whisper status: window geometry restore skipped: key={key} "
+            f"saved={saved!r} extent={screen_width}x{screen_height}"
+        )
+        return None
     except Exception as exc:
         _log_line(f"[avc] whisper status: window geometry load failed: {exc}")
-        return None
+        return default_geometry
 
 
 def _save_window_geometry(
@@ -1258,7 +1290,7 @@ class WhisperTranscriptWindow:
         _save_window_geometry(
             self._config_path,
             "whisperTranslationWindowGeometry",
-            self._translation_root.winfo_geometry(),
+            _window_manager_geometry(self._translation_root),
             *_window_restore_extent(self._translation_root),
         )
 

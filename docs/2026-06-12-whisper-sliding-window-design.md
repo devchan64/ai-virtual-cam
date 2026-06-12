@@ -117,6 +117,139 @@ new:      "in the United States to take delivery"
 
 정교한 구현이 필요해지면 `word_timestamps=true`를 사용해 시간 기준으로 확정 구간을 계산한다. 초기 구현에서는 비용과 복잡도를 줄이기 위해 문자열 기반으로 시작한다.
 
+## 문장 경계 검출기 개선 계획
+
+최근 운영 로그 기준으로 5~7초 슬라이딩 윈도우는 STT 처리 속도에는 충분하지만, 문장 확정 안정성에는 한계가 있다. `stepSeconds=1.0`으로 같은 오디오 구간이 반복 입력되면 Whisper가 이전 4~6초 문맥을 매번 조금씩 다르게 다시 쓰기 때문이다. 구두점이 늦게 붙거나 누락되는 빠른 발화에서는 `pending`이 길어지고, 결국 `pending_chunks`, `pending_chars`, `slow_pending` 같은 강제 확정으로 긴 발화 덩어리가 확정된다.
+
+문제 신호:
+
+- 확정 이유 중 `replaced` 비율이 높으면 문장 후보가 안정적으로 유지되지 않는다는 뜻이다.
+- `pending_chars` p90 또는 max가 크면 문장 경계를 찾지 못해 여러 문장이 한 덩어리로 묶이고 있다는 뜻이다.
+- `end_marks_stable=0` 상태에서 `forced_by=pending_chunks` 또는 `forced_by=pending_chars`가 반복되면 구두점 기반 분할이 실패한 것이다.
+- 확정 전 녹색 문장이 길게 유지되다가 검은색 확정 문장으로 바뀔 때 이전 문맥이 섞이면 delta 계산만으로는 부족하다.
+
+따라서 다음 단계는 STT 결과를 직접 문장으로 확정하지 않고, 별도 문장 경계 검출기를 통해 안정적인 문장 후보만 추출하는 것이다. 이 기능의 목표는 문장을 새로 고치거나 교정하는 것이 아니라, 원 STT 텍스트 안에서 확정 가능한 경계를 찾는 것이다.
+
+### 후보 도구
+
+1. `wtpsplit` / SaT
+
+   - 구두점이 부족한 텍스트에서도 문장 경계를 예측하는 다국어 sentence segmentation 모델이다.
+   - 한국어, 영어, 중국어를 포함한 다국어 입력에 적용하기 적합하다.
+   - 작은 모델(`sat-3l-sm` 등)부터 테스트하고, CUDA/ONNX 경로를 사용할 수 있는지 확인한다.
+   - Fail-Fast 정책에 따라 `device=cuda`로 설정했는데 CUDA 초기화나 모델 로딩이 실패하면 CPU fallback 없이 중지한다.
+
+2. NeMo punctuation/capitalization
+
+   - ASR 텍스트의 구두점 복원에는 유용하지만 기본 pretrained 경로가 영어 중심이다.
+   - 한국어/중국어 실시간 경로의 기본 후보로 두기에는 적합성이 낮다.
+
+3. LLM 기반 후처리
+
+   - 문장 경계와 문장 교정을 동시에 할 수 있지만, 원음에 없는 문장을 만들어낼 위험이 있다.
+   - 사용한다면 원문 단어를 보존하고 경계 위치만 반환하는 검증기 형태로 제한한다. 기본 경로로는 사용하지 않는다.
+
+### 설계 인터페이스
+
+문장 경계 검출은 Whisper 실행 루프에서 분리한다.
+
+```text
+src/app/sentence_boundary.py
+```
+
+예상 인터페이스:
+
+```python
+@dataclass(frozen=True)
+class SentenceCandidate:
+    text: str
+    complete: bool
+    confidence: float | None = None
+
+class SentenceBoundaryDetector:
+    def split(self, text: str, language: str) -> list[SentenceCandidate]:
+        ...
+```
+
+초기 backend:
+
+- `regex`: 현재 `_split_completed_sentences()` 기반 구현을 이동한다.
+- `sat`: wtpsplit/SaT 기반 구현을 추가한다.
+
+설정 예:
+
+```json
+{
+  "sentenceBoundary": {
+    "backend": "sat",
+    "model": "sat-3l-sm",
+    "device": "cuda",
+    "confirmations": 2
+  }
+}
+```
+
+### 확정 알고리즘 변경
+
+현재 흐름:
+
+```text
+stable_text -> delta 계산 -> regex 문장 분할 -> stage/confirm
+```
+
+개선 흐름:
+
+```text
+stable_text
+  -> committed/pending 기준 단어 정렬
+  -> sentence boundary detector
+  -> complete candidate 추출
+  -> 같은 경계가 confirmations회 반복되면 확정
+  -> 확정 문장만 번역
+```
+
+중요 원칙:
+
+- 문장 끝 구두점이 없어도 boundary detector가 경계를 제안할 수 있어야 한다.
+- 단순히 `pending_chars`가 길어졌다는 이유만으로 확정하지 않는다.
+- `pending_chunks`는 확정 트리거가 아니라 진단 지표로 낮춘다.
+- 확정 전 문장은 녹색 partial 라인으로 계속 업데이트한다.
+- 확정 문장은 검은색 final 라인으로 고정하고, 번역 final 입력은 이 확정 문장만 사용한다.
+- partial 번역은 허용할 수 있으나, final 번역 라인은 확정 문장 갱신과 동기화한다.
+
+### 로그 지표
+
+문장 경계 검출기를 적용하면 기존 `Whisper 문장 진단` 로그에 다음 값을 추가한다.
+
+```text
+boundary_backend=sat
+boundary_latency=0.03s
+boundary_candidates=3
+boundary_complete=2
+boundary_confirmed=1
+boundary_rejected_unstable=1
+boundary_pending_chars=42
+```
+
+성능 판단 기준:
+
+- `replaced` 확정 비율이 줄어야 한다.
+- `forced_by=pending_chunks`, `forced_by=pending_chars`가 줄어야 한다.
+- `pending_chars` p90과 max가 낮아져야 한다.
+- STT `rtf`와 별도로 `boundary_latency`가 실시간 갱신 주기에 부담을 주지 않아야 한다.
+
+### 적용 순서
+
+1. 현재 regex 문장 분할을 `sentence_boundary.py`로 분리한다.
+2. 기존 슬라이딩 윈도우 테스트를 새 인터페이스 기준으로 이전한다.
+3. boundary backend 설정 스키마와 기본값을 추가한다.
+4. `regex` backend로 현재 동작과 동일하게 통과시킨다.
+5. `sat` backend를 추가하고 CUDA Fail-Fast 로딩을 구현한다.
+6. 로그에 boundary 지표를 추가한다.
+7. 같은 로그 조건에서 `regex`와 `sat` 결과를 비교한다.
+8. `sat`의 `replaced`, `forced_by`, `pending_chars` 지표가 개선되면 기본값 전환을 검토한다.
+
+
 ## 번역 정책
 
 번역은 전체 윈도우 결과가 아니라 확정된 새 텍스트만 대상으로 한다.

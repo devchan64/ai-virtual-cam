@@ -69,6 +69,85 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
                     "ai-virtual-cam",
                 )
 
+
+    def test_capture_window_geometry_uses_window_manager_geometry(self) -> None:
+        root = types.SimpleNamespace(
+            update_idletasks=lambda: None,
+            geometry=lambda: "900x700+120+80",
+            winfo_geometry=lambda: "900x700+120+117",
+            winfo_vrootwidth=lambda: 1920,
+            winfo_vrootheight=lambda: 1080,
+            winfo_screenwidth=lambda: 1920,
+            winfo_screenheight=lambda: 1080,
+        )
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        gui.root = root
+        gui._window_geometry_meta_cache = {}
+
+        self.module.ConfigGui._capture_all_window_geometry_meta(gui)
+
+        self.assertEqual(gui._window_geometry_meta_cache["windowGeometry"], "900x700+120+80")
+
+
+
+    def test_start_serve_write_path_preserves_window_geometry_meta(self) -> None:
+        root = types.SimpleNamespace(
+            update_idletasks=lambda: None,
+            geometry=lambda: "900x700+120+80",
+            winfo_geometry=lambda: "900x700+120+117",
+            winfo_vrootwidth=lambda: 1920,
+            winfo_vrootheight=lambda: 1080,
+            winfo_screenwidth=lambda: 1920,
+            winfo_screenheight=lambda: 1080,
+        )
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        gui.root = root
+        gui.output_path = "~/.avc/setting.json"
+        gui._preview_active = False
+        gui._lang = "ko"
+        gui._language_var = types.SimpleNamespace(get=lambda: "ko")
+        gui._window_geometry_meta_cache = {}
+        gui._read_geometry_meta = lambda: {}
+        gui._is_serve_running = lambda: False
+        gui._set_serve_status = lambda *args, **kwargs: None
+        gui._show_error = lambda *args, **kwargs: None
+        gui._tr = lambda key, default: default
+        gui._build_config = lambda: {}
+        gui._build_serve_command = lambda config_path: (_ for _ in ()).throw(RuntimeError("stop after write"))
+        written = {}
+
+        with mock.patch.object(self.module, "write_config", side_effect=lambda path, config: written.update(config)):
+            self.module.ConfigGui._start_serve(gui)
+
+        self.assertEqual(written["meta"]["language"], "ko")
+        self.assertEqual(written["meta"]["windowGeometry"], "900x700+120+80")
+        self.assertIn("whisperWindowGeometry", written["meta"])
+
+    def test_apply_persistent_meta_adds_language_and_geometry_for_all_write_paths(self) -> None:
+        root = types.SimpleNamespace(
+            update_idletasks=lambda: None,
+            geometry=lambda: "900x700+120+80",
+            winfo_geometry=lambda: "900x700+120+117",
+            winfo_vrootwidth=lambda: 1920,
+            winfo_vrootheight=lambda: 1080,
+            winfo_screenwidth=lambda: 1920,
+            winfo_screenheight=lambda: 1080,
+        )
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        gui.root = root
+        gui._lang = "ko"
+        gui._language_var = types.SimpleNamespace(get=lambda: "ko")
+        gui._window_geometry_meta_cache = {}
+        gui._read_geometry_meta = lambda: {}
+        config = {}
+
+        self.module.ConfigGui._apply_persistent_meta(gui, config)
+
+        self.assertEqual(config["meta"]["language"], "ko")
+        self.assertEqual(config["meta"]["windowGeometry"], "900x700+120+80")
+        for key in self.module.DEFAULT_WINDOW_GEOMETRY_META:
+            self.assertIn(key, config["meta"])
+
     def test_apply_window_geometry_meta_preserves_existing_meta(self) -> None:
         root = types.SimpleNamespace(
             update_idletasks=lambda: None,
@@ -90,7 +169,7 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
             self.assertIn(key, config["meta"])
 
 
-    def test_restore_window_geometry_uses_default_when_saved_value_missing(self) -> None:
+    def test_restore_window_geometry_keeps_startup_position_when_saved_value_missing(self) -> None:
         applied = []
         root = types.SimpleNamespace(
             winfo_vrootwidth=lambda: 1920,
@@ -107,9 +186,9 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         with contextlib.redirect_stdout(stdout):
             self.module.ConfigGui._restore_window_geometry(gui, {})
 
-        self.assertEqual(applied, [self.module.DEFAULT_WINDOW_GEOMETRY_META["windowGeometry"]])
-        self.assertIn("WARN [Window geometry restore]", stdout.getvalue())
-        self.assertEqual(gui._window_geometry_meta_cache["windowGeometry"], self.module.DEFAULT_WINDOW_GEOMETRY_META["windowGeometry"])
+        self.assertEqual(applied, [])
+        self.assertIn("keeping startup geometry", stdout.getvalue())
+        self.assertNotIn("windowGeometry", gui._window_geometry_meta_cache)
 
     def test_apply_window_geometry_meta_fills_defaults_when_main_geometry_capture_fails(self) -> None:
         root = types.SimpleNamespace(
