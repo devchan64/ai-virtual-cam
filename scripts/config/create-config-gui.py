@@ -47,6 +47,13 @@ if str(ROOT_DIR) not in sys.path:
 from src.tools.config_builder import build_config
 from src.tools.config_io import discover_camera_mode_options, discover_cameras, write_config
 from src.audio.gate import AudioGateConfig, NoiseGate
+from scripts.config.whisper_tab import build_whisper_tab
+from scripts.config.whisper_options import (
+    whisper_language_display_from_raw as _whisper_language_display_from_raw,
+    whisper_language_raw_from_display as _whisper_language_raw_from_display,
+    whisper_translation_target_display_from_raw as _whisper_translation_target_display_from_raw,
+    whisper_translation_target_raw_from_display as _whisper_translation_target_raw_from_display,
+)
 
 
 def _segmentation_backend_options():
@@ -74,95 +81,6 @@ def _audio_denoise_backend_options():
     if platform.system() == "Darwin":
         return ["none", "rnnoise"]
     return ["none", "rnnoise", "deepfilternet"]
-
-
-def _whisper_backend_options():
-    return ["faster-whisper", "openai-whisper", "whisper.cpp", "mock"]
-
-
-def _whisper_model_options():
-    return ["large-v3", "medium", "small", "base", "tiny"]
-
-
-WHISPER_LANGUAGE_DISPLAY_TO_RAW = {
-    "자동 감지 (auto)": "auto",
-    "한국어 (ko)": "ko",
-    "English (en)": "en",
-    "中文 (zh)": "zh",
-}
-WHISPER_LANGUAGE_RAW_TO_DISPLAY = {value: label for label, value in WHISPER_LANGUAGE_DISPLAY_TO_RAW.items()}
-
-
-def _whisper_language_options():
-    return list(WHISPER_LANGUAGE_DISPLAY_TO_RAW.keys())
-
-
-def _whisper_language_raw_from_display(value: str) -> str:
-    raw = WHISPER_LANGUAGE_DISPLAY_TO_RAW.get(str(value).strip())
-    if raw is not None:
-        return raw
-    normalized = str(value).strip().lower()
-    if normalized in WHISPER_LANGUAGE_RAW_TO_DISPLAY:
-        return normalized
-    return normalized
-
-
-def _whisper_language_display_from_raw(value: object) -> str:
-    raw = str(value).strip().lower()
-    return WHISPER_LANGUAGE_RAW_TO_DISPLAY.get(raw, WHISPER_LANGUAGE_RAW_TO_DISPLAY["ko"])
-
-
-WHISPER_TASK_DISPLAY_TO_RAW = {
-    "원문 전사 (transcribe)": "transcribe",
-    "영어 번역 (translate)": "translate",
-}
-WHISPER_TASK_RAW_TO_DISPLAY = {value: label for label, value in WHISPER_TASK_DISPLAY_TO_RAW.items()}
-
-
-def _whisper_task_options():
-    return list(WHISPER_TASK_DISPLAY_TO_RAW.keys())
-
-
-def _whisper_task_raw_from_display(value: str) -> str:
-    raw = WHISPER_TASK_DISPLAY_TO_RAW.get(str(value).strip())
-    if raw is not None:
-        return raw
-    normalized = str(value).strip().lower()
-    if normalized in WHISPER_TASK_RAW_TO_DISPLAY:
-        return normalized
-    return normalized
-
-
-def _whisper_task_display_from_raw(value: object) -> str:
-    raw = str(value).strip().lower()
-    return WHISPER_TASK_RAW_TO_DISPLAY.get(raw, WHISPER_TASK_RAW_TO_DISPLAY["transcribe"])
-
-
-WHISPER_TRANSLATION_TARGET_DISPLAY_TO_RAW = {
-    "English (en)": "en",
-}
-WHISPER_TRANSLATION_TARGET_RAW_TO_DISPLAY = {
-    value: label for label, value in WHISPER_TRANSLATION_TARGET_DISPLAY_TO_RAW.items()
-}
-
-
-def _whisper_translation_target_options():
-    return list(WHISPER_TRANSLATION_TARGET_DISPLAY_TO_RAW.keys())
-
-
-def _whisper_translation_target_raw_from_display(value: str) -> str:
-    raw = WHISPER_TRANSLATION_TARGET_DISPLAY_TO_RAW.get(str(value).strip())
-    if raw is not None:
-        return raw
-    normalized = str(value).strip().lower()
-    if normalized in WHISPER_TRANSLATION_TARGET_RAW_TO_DISPLAY:
-        return normalized
-    return normalized
-
-
-def _whisper_translation_target_display_from_raw(value: object) -> str:
-    raw = str(value).strip().lower()
-    return WHISPER_TRANSLATION_TARGET_RAW_TO_DISPLAY.get(raw, WHISPER_TRANSLATION_TARGET_RAW_TO_DISPLAY["en"])
 
 
 AUDIO_VIRTUAL_SINK_NAME = "ai-virtual-cam"
@@ -2649,205 +2567,13 @@ class ConfigGui:
             row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0)
         )
 
-        row = 0
-        self._add_bool_switch(
+        build_whisper_tab(
+            self,
             tab_whisper,
-            row,
-            "whisper_enabled",
-            self._tr("label.whisper_enabled", "Whisper STT"),
-            False,
-            label_key="label.whisper_enabled",
-        )
-        row += 1
-        whisper_input_candidates = _audio_input_device_candidates()
-        whisper_input_default = _audio_default_input_device()
-        if whisper_input_default not in whisper_input_candidates:
-            whisper_input_candidates.append(whisper_input_default)
-        whisper_input_display_values, self._whisper_input_display_to_raw = _audio_device_display_values(
-            "input", whisper_input_candidates
-        )
-        whisper_input_default_display = next(
-            (k for k, v in self._whisper_input_display_to_raw.items() if v == whisper_input_default),
-            whisper_input_default,
-        )
-        self._add_combo(
-            tab_whisper,
-            row,
-            "whisper_input_device",
-            self._tr("label.whisper_input_device", "Input device"),
-            whisper_input_display_values,
-            whisper_input_default_display,
-            label_key="label.whisper_input_device",
-        )
-        row += 1
-        whisper_input_meter_btn = ttk.Button(
-            tab_whisper,
-            text=self._tr("button.whisper_input_meter", "Whisper input dB meter"),
-            command=self._run_whisper_input_meter,
-        )
-        self._register_localized_widget(whisper_input_meter_btn, "button.whisper_input_meter", "Whisper input dB meter")
-        whisper_input_meter_btn.grid(
-            row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0)
-        )
-        row += 1
-        self._add_combo(
-            tab_whisper,
-            row,
-            "whisper_backend",
-            self._tr("label.whisper_backend", "Whisper backend"),
-            _whisper_backend_options(),
-            _whisper_backend_options()[0],
-            label_key="label.whisper_backend",
-        )
-        row += 1
-        self._add_combo(
-            tab_whisper,
-            row,
-            "whisper_model",
-            self._tr("label.whisper_model", "Whisper model"),
-            _whisper_model_options(),
-            "base",
-            label_key="label.whisper_model",
-        )
-        row += 1
-        self._add_combo(
-            tab_whisper,
-            row,
-            "whisper_language",
-            self._tr("label.whisper_language", "Recognition language (single choice)"),
-            _whisper_language_options(),
-            _whisper_language_display_from_raw("ko"),
-            label_key="label.whisper_language",
-        )
-        row += 1
-        whisper_language_hint = ttk.Label(
-            tab_whisper,
-            text=self._tr(
-                "hint.whisper_language",
-                "Whisper accepts one recognition language. Use auto detection when Korean, English, and Chinese are mixed.",
-            ),
-            foreground="#666",
-            wraplength=520,
-        )
-        whisper_language_hint.grid(row=row, column=0, columnspan=4, sticky="w", padx=4, pady=(2, 6))
-        self._register_localized_widget(
-            whisper_language_hint,
-            "hint.whisper_language",
-            "Whisper accepts one recognition language. Use auto detection when Korean, English, and Chinese are mixed.",
-        )
-        row += 1
-        self._add_bool_switch(
-            tab_whisper,
-            row,
-            "whisper_translation_enabled",
-            self._tr("label.whisper_translation_enabled", "Translation window"),
-            False,
-            label_key="label.whisper_translation_enabled",
-        )
-        row += 1
-        self._add_combo(
-            tab_whisper,
-            row,
-            "whisper_translation_target_language",
-            self._tr("label.whisper_translation_target_language", "Translation target language"),
-            _whisper_translation_target_options(),
-            _whisper_translation_target_display_from_raw("en"),
-            label_key="label.whisper_translation_target_language",
-        )
-        row += 1
-        whisper_translation_hint = ttk.Label(
-            tab_whisper,
-            text=self._tr(
-                "hint.whisper_translation_target_language",
-                "Whisper translate currently outputs English only. Use transcribe for original-language text.",
-            ),
-            foreground="#666",
-            wraplength=520,
-        )
-        whisper_translation_hint.grid(row=row, column=0, columnspan=4, sticky="w", padx=4, pady=(2, 6))
-        self._register_localized_widget(
-            whisper_translation_hint,
-            "hint.whisper_translation_target_language",
-            "Whisper translate currently outputs English only. Use transcribe for original-language text.",
-        )
-        row += 1
-        self._add_combo(
-            tab_whisper,
-            row,
-            "whisper_device",
-            self._tr("label.whisper_device", "Device"),
-            ["auto", "cpu", "cuda", "mps"],
-            "cuda",
-            label_key="label.whisper_device",
-        )
-        row += 1
-        self._add_combo(
-            tab_whisper,
-            row,
-            "whisper_compute_type",
-            self._tr("label.whisper_compute_type", "Compute type"),
-            ["auto", "int8", "float16", "float32"],
-            "auto",
-            label_key="label.whisper_compute_type",
-        )
-        row += 1
-        self._add_bool_switch(
-            tab_whisper,
-            row,
-            "whisper_vad_filter",
-            self._tr("label.whisper_vad_filter", "VAD filter"),
-            True,
-            label_key="label.whisper_vad_filter",
-        )
-        row += 1
-        self._add_slider(
-            tab_whisper,
-            row,
-            "whisper_chunk_seconds",
-            self._tr("label.whisper_chunk_seconds", "Chunk seconds"),
-            5.0,
-            1.0,
-            10.0,
-            resolution=0.5,
-            label_key="label.whisper_chunk_seconds",
-        )
-        row += 1
-        self._add_slider(
-            tab_whisper,
-            row,
-            "whisper_beam_size",
-            self._tr("label.whisper_beam_size", "Beam size"),
-            5,
-            1,
-            8,
-            resolution=1,
-            label_key="label.whisper_beam_size",
-        )
-        row += 1
-        whisper_speed_hint = ttk.Label(
-            tab_whisper,
-            text=self._tr(
-                "hint.whisper_speed",
-                "Lower chunk seconds and beam size improve response speed, but may reduce accuracy or sentence continuity.",
-            ),
-            foreground="#666",
-            wraplength=520,
-        )
-        whisper_speed_hint.grid(row=row, column=0, columnspan=4, sticky="w", padx=4, pady=(2, 6))
-        self._register_localized_widget(
-            whisper_speed_hint,
-            "hint.whisper_speed",
-            "Lower chunk seconds and beam size improve response speed, but may reduce accuracy or sentence continuity.",
-        )
-        row += 1
-        reset_whisper_btn = ttk.Button(
-            tab_whisper,
-            text=self._tr("button.reset_whisper_settings", "Restore Whisper defaults"),
-            command=self._reset_whisper_settings,
-        )
-        self._register_localized_widget(reset_whisper_btn, "button.reset_whisper_settings", "Restore Whisper defaults")
-        reset_whisper_btn.grid(
-            row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0)
+            ttk,
+            _audio_input_device_candidates,
+            _audio_default_input_device,
+            _audio_device_display_values,
         )
 
         action_frame = ttk.Frame(frame)
@@ -3319,7 +3045,7 @@ class ConfigGui:
             "whisper_backend": "faster-whisper",
             "whisper_model": "large-v3",
             "whisper_language": _whisper_language_display_from_raw("ko"),
-            "whisper_task": _whisper_task_display_from_raw("transcribe"),
+            "whisper_task": "transcribe",
             "whisper_translation_enabled": False,
             "whisper_translation_target_language": _whisper_translation_target_display_from_raw("en"),
             "whisper_device": "cuda",
@@ -3672,10 +3398,13 @@ class ConfigGui:
             "whisper_backend",
             "whisper_model",
             "whisper_language",
-            "whisper_task",
+            "whisper_translation_enabled",
+            "whisper_translation_target_language",
             "whisper_device",
             "whisper_compute_type",
             "whisper_vad_filter",
+            "whisper_chunk_seconds",
+            "whisper_beam_size",
         ):
             self._set_var(key, defaults.get(key))
 
