@@ -17,12 +17,12 @@ WHISPER_DEFAULTS = {
     "device": "cuda",
     "computeType": "float16",
     "vadFilter": True,
-    "chunkSeconds": 4.0,
+    "chunkSeconds": 8.0,
     "stepSeconds": 1.0,
-    "windowSeconds": 4.0,
-    "commitLagSeconds": 1.0,
+    "windowSeconds": 8.0,
+    "commitLagSeconds": 0.5,
     "beamSize": 5,
-    "maxNewTokens": 64,
+    "maxNewTokens": 96,
     "temperature": 0.0,
 }
 

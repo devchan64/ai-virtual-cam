@@ -32,7 +32,11 @@ MIN_SEGMENT_AVG_LOGPROB = -1.0
 MAX_SEGMENT_NO_SPEECH_PROB = 0.75
 RECENT_TRANSCRIPT_WINDOW = 8
 MAX_RECENT_SHORT_TEXT_REPEATS = 2
-_SENTENCE_END_RE = re.compile(r"(.+?[.!?。！？…]+)(?=\s+|$)")
+MAX_PENDING_SENTENCE_CHUNKS = 6
+MAX_PENDING_SENTENCE_CHARS = 90
+_SENTENCE_END_PATTERN = r"(?:(?<!\d)\.(?!\d)|[!?。！？…]+)"
+_SENTENCE_END_RE = re.compile(rf"(.+?{_SENTENCE_END_PATTERN})(?=\s+|$)")
+_SENTENCE_END_MARK_RE = re.compile(_SENTENCE_END_PATTERN)
 _WINDOW_TITLES = {
     "en": {
         "transcript": "ai-virtual-cam Whisper Transcript",
@@ -243,6 +247,57 @@ def _new_text_delta(committed_text: str, stable_text: str) -> str:
     return stable
 
 
+def _word_units(text: str) -> list[str]:
+    return re.findall(r"[0-9A-Za-z가-힣]+", _normalized_text(text).lower())
+
+
+def _is_subsequence_at(words: list[str], candidate: list[str], start: int) -> bool:
+    return words[start : start + len(candidate)] == candidate
+
+
+def _sentence_output_delta(committed_text: str, sentence: str) -> str:
+    normalized = _normalized_text(sentence)
+    if not normalized:
+        return ""
+    committed_words = _word_units(committed_text)
+    sentence_words = _word_units(normalized)
+    if not committed_words or not sentence_words:
+        return normalized
+    if len(sentence_words) <= len(committed_words):
+        for start in range(0, len(committed_words) - len(sentence_words) + 1):
+            if _is_subsequence_at(committed_words, sentence_words, start):
+                return ""
+
+    best_i = 0
+    best_j = 0
+    best_len = 0
+    for i in range(len(committed_words)):
+        for j in range(len(sentence_words)):
+            length = 0
+            while (
+                i + length < len(committed_words)
+                and j + length < len(sentence_words)
+                and committed_words[i + length] == sentence_words[j + length]
+            ):
+                length += 1
+            if length > best_len:
+                best_i = i
+                best_j = j
+                best_len = length
+    coverage = best_len / max(len(sentence_words), 1)
+    if coverage >= 0.85:
+        return ""
+    if best_j == 0 and best_len >= 4:
+        suffix_words = sentence_words[best_len:]
+        if len(suffix_words) >= 3:
+            return " ".join(suffix_words)
+        return ""
+    if best_i + best_len == len(committed_words) and best_j == 0 and best_len >= 3:
+        suffix_words = sentence_words[best_len:]
+        return " ".join(suffix_words).strip()
+    return normalized
+
+
 def _append_committed_text(committed_text: str, new_text: str) -> str:
     combined = _normalized_text(f"{committed_text} {new_text}")
     if len(combined) <= 4000:
@@ -264,6 +319,28 @@ def _split_completed_sentences(pending_text: str, new_text: str) -> tuple[list[s
     if consumed_end <= 0:
         return [], combined
     return completed, combined[consumed_end:].strip()
+
+
+def _sentence_end_count(text: str) -> int:
+    return len(_SENTENCE_END_MARK_RE.findall(text or ""))
+
+
+def _forced_sentence_reason(pending_text: str, pending_chunks: int) -> str:
+    normalized = _normalized_text(pending_text)
+    if not normalized:
+        return ""
+    if pending_chunks >= MAX_PENDING_SENTENCE_CHUNKS:
+        return "pending_chunks"
+    if len(normalized) >= MAX_PENDING_SENTENCE_CHARS:
+        return "pending_chars"
+    return ""
+
+
+def _diagnostic_tail(text: str, limit: int = 90) -> str:
+    normalized = _normalized_text(text)
+    if len(normalized) > limit:
+        normalized = "..." + normalized[-limit:]
+    return repr(normalized)
 
 
 class WhisperTranscriptWorker:
@@ -503,6 +580,7 @@ class WhisperTranscriptWorker:
         committed_text = ""
         committed_translation_text = ""
         pending_transcript_text = ""
+        pending_chunks = 0
         self._emit(
             "status",
             f"Whisper 전사 루프 시작: step_seconds={step_seconds} window_seconds={window_seconds} "
@@ -579,15 +657,36 @@ class WhisperTranscriptWorker:
                         display=False,
                     )
                 completed_sentences: list[str] = []
+                forced_by = ""
                 if text and self._is_repeated_hallucination(text):
                     self._emit("status", f"Whisper 반복 전사 무시: chunk={chunks} text={text!r}", display=False)
                     text = ""
                 if text:
                     completed_sentences, pending_transcript_text = _split_completed_sentences("", text)
+                    if completed_sentences:
+                        pending_chunks = 0
+                    elif pending_transcript_text:
+                        pending_chunks += 1
+                        forced_by = _forced_sentence_reason(pending_transcript_text, pending_chunks)
+                        if forced_by:
+                            completed_sentences = [pending_transcript_text]
+                            pending_transcript_text = ""
+                            pending_chunks = 0
+                    output_sentences: list[str] = []
                     for sentence in completed_sentences:
-                        committed_text = _append_committed_text(committed_text, sentence)
-                        self._remember_transcript(sentence)
-                        self._emit("transcript", sentence, log_text=f"[{detected}] {sentence}", final=True)
+                        output_sentence = _sentence_output_delta(committed_text, sentence)
+                        if not output_sentence:
+                            self._emit(
+                                "status",
+                                f"Whisper 중복 문장 무시: chunk={chunks} text={sentence!r}",
+                                display=False,
+                            )
+                            continue
+                        committed_text = _append_committed_text(committed_text, output_sentence)
+                        self._remember_transcript(output_sentence)
+                        output_sentences.append(output_sentence)
+                        self._emit("transcript", output_sentence, log_text=f"[{detected}] {output_sentence}", final=True)
+                    completed_sentences = output_sentences
                     if pending_transcript_text:
                         self._emit(
                             "transcript",
@@ -602,6 +701,41 @@ class WhisperTranscriptWorker:
                         f"Whisper 전사 결과 없음: chunk={chunks} preview_chars={preview_chars}",
                         display=False,
                     )
+                    if pending_transcript_text:
+                        pending_chunks += 1
+                        forced_by = _forced_sentence_reason(pending_transcript_text, pending_chunks)
+                        if forced_by:
+                            completed_sentences = [pending_transcript_text]
+                            pending_transcript_text = ""
+                            pending_chunks = 0
+                            output_sentences: list[str] = []
+                            for sentence in completed_sentences:
+                                output_sentence = _sentence_output_delta(committed_text, sentence)
+                                if not output_sentence:
+                                    self._emit(
+                                        "status",
+                                        f"Whisper 중복 문장 무시: chunk={chunks} text={sentence!r}",
+                                        display=False,
+                                    )
+                                    continue
+                                committed_text = _append_committed_text(committed_text, output_sentence)
+                                self._remember_transcript(output_sentence)
+                                output_sentences.append(output_sentence)
+                                self._emit("transcript", output_sentence, log_text=f"[{detected}] {output_sentence}", final=True)
+                            completed_sentences = output_sentences
+                self._emit(
+                    "status",
+                    "Whisper 문장 진단: "
+                    f"chunk={chunks} completed={len(completed_sentences)} forced_by={forced_by or 'none'} "
+                    f"pending_chars={len(pending_transcript_text)} pending_chunks={pending_chunks} "
+                    f"window_chars={len(_normalized_text(window_text))} stable_chars={len(_normalized_text(stable_text))} "
+                    f"delta_chars={len(_normalized_text(text))} "
+                    f"end_marks_window={_sentence_end_count(window_text)} end_marks_stable={_sentence_end_count(stable_text)} "
+                    f"end_marks_delta={_sentence_end_count(text)} "
+                    f"stable_tail={_diagnostic_tail(stable_text)} delta_tail={_diagnostic_tail(text)} "
+                    f"pending_tail={_diagnostic_tail(pending_transcript_text)}",
+                    display=False,
+                )
                 if self._cfg.translationEnabled and not translation_failed and completed_sentences:
                     try:
                         translation_attempted = True

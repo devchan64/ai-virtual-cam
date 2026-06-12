@@ -1,6 +1,6 @@
 import unittest
 
-from src.app.whisper_window import _new_text_delta, _split_completed_sentences, _stable_window_text
+from src.app.whisper_window import _diagnostic_tail, _forced_sentence_reason, _new_text_delta, _sentence_output_delta, _sentence_end_count, _split_completed_sentences, _stable_window_text
 
 
 class WhisperSlidingWindowTextTest(unittest.TestCase):
@@ -28,6 +28,45 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
 
         self.assertEqual(completed, ["안녕하세요."])
         self.assertEqual(pending, "다음 문장")
+
+
+    def test_sentence_diagnostics_count_end_marks(self) -> None:
+        self.assertEqual(_sentence_end_count("Hello. What? Done!"), 3)
+
+    def test_sentence_diagnostic_tail_is_bounded(self) -> None:
+        self.assertEqual(_diagnostic_tail("short text"), "'short text'")
+        self.assertTrue(_diagnostic_tail("a" * 120).startswith("'..."))
+
+
+    def test_sentence_split_ignores_decimal_periods(self) -> None:
+        completed, pending = _split_completed_sentences("", "It costs $9.99 per month. Next")
+
+        self.assertEqual(completed, ["It costs $9.99 per month."])
+        self.assertEqual(pending, "Next")
+        self.assertEqual(_sentence_end_count("It costs $9.99 per month."), 1)
+
+    def test_forced_sentence_reason_uses_pending_limits(self) -> None:
+        self.assertEqual(_forced_sentence_reason("still pending", 6), "pending_chunks")
+        self.assertEqual(_forced_sentence_reason("x" * 90, 1), "pending_chars")
+        self.assertEqual(_forced_sentence_reason("short", 1), "")
+
+
+    def test_sentence_output_delta_ignores_committed_sentence_with_punctuation_changes(self) -> None:
+        committed = "one of my favorite floor mat sets for this purpose is from today's sponsor last fit"
+        sentence = "One of my favorite floor mat sets for this purpose is from today's sponsor, Last Fit."
+
+        self.assertEqual(_sentence_output_delta(committed, sentence), "")
+
+    def test_sentence_output_delta_keeps_new_suffix_after_overlap(self) -> None:
+        committed = "i've had these mats for a while now and they have done an excellent job of protecting"
+        sentence = "I've had these mats for a while now, and they have done an excellent job of protecting the carpet underneath them."
+
+        self.assertEqual(_sentence_output_delta(committed, sentence), "the carpet underneath them")
+
+    def test_sentence_output_delta_keeps_distinct_sentence(self) -> None:
+        sentence = "Here they are after not vacuuming for a couple weeks."
+
+        self.assertEqual(_sentence_output_delta("already committed text", sentence), sentence)
 
     def test_delta_outputs_only_new_overlap_suffix(self) -> None:
         committed = "Folks I was one of the first people"
