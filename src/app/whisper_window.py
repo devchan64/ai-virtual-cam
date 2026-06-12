@@ -18,6 +18,7 @@ from pathlib import Path
 
 
 from src.app.rotating_log import install_rotating_stdout_log
+from src.app.sentence_boundary import RegexSentenceBoundaryDetector, sentence_end_count as _boundary_sentence_end_count, split_completed_sentences as _boundary_split_completed_sentences
 from src.app.translation_model import TranslationRequest, build_text_translator
 from src.domain.whisper_defaults import whisper_default
 from src.domain.config import AppConfig, WhisperConfig
@@ -47,6 +48,7 @@ SLOW_PENDING_SENTENCE_CHARS = 45
 SLOW_PENDING_MAX_CHARS_PER_CHUNK = 18.0
 SENTENCE_CONFIRM_CHUNKS = 2
 SENTENCE_CONFIRM_MAX_AGE_CHUNKS = 2
+MIN_PROVISIONAL_TRANSLATION_WORDS = 6
 _SENTENCE_END_PATTERN = r"(?:(?<!\d)\.(?!\d)|[!?。！？…]+)"
 _SENTENCE_END_RE = re.compile(rf"(.+?{_SENTENCE_END_PATTERN})(?=\s+|$)")
 _SENTENCE_END_MARK_RE = re.compile(_SENTENCE_END_PATTERN)
@@ -363,6 +365,27 @@ def _phrase_key(units: list[str]) -> list[str]:
     return _word_units(" ".join(units))
 
 
+def _collapse_near_repeated_phrases(units: list[str]) -> bool:
+    for phrase_len in range(min(12, len(units) // 2), 3, -1):
+        for left_start in range(0, len(units) - phrase_len):
+            left_key = _phrase_key(units[left_start : left_start + phrase_len])
+            if not left_key:
+                continue
+            max_right_start = min(len(units) - phrase_len, left_start + phrase_len + 8)
+            for right_start in range(left_start + phrase_len + 1, max_right_start + 1):
+                if _phrase_key(units[right_start : right_start + phrase_len]) == left_key:
+                    delete_len = phrase_len
+                    while (
+                        left_start + delete_len < right_start
+                        and right_start + delete_len < len(units)
+                        and _phrase_key([units[left_start + delete_len]]) == _phrase_key([units[right_start + delete_len]])
+                    ):
+                        delete_len += 1
+                    del units[right_start : right_start + delete_len]
+                    return True
+    return False
+
+
 def _collapse_adjacent_repeated_phrases(text: str) -> str:
     normalized = _normalized_text(text)
     units, separator = _text_units(normalized)
@@ -387,11 +410,73 @@ def _collapse_adjacent_repeated_phrases(text: str) -> str:
                     break
             if not collapsed:
                 index += 1
+        if _collapse_near_repeated_phrases(units):
+            changed = True
     return _join_text_units(units, separator)
 
 
 def _is_subsequence_at(words: list[str], candidate: list[str], start: int) -> bool:
     return words[start : start + len(candidate)] == candidate
+
+
+def _collapse_adjacent_words(words: list[str]) -> list[str]:
+    collapsed: list[str] = []
+    for word in words:
+        if collapsed and collapsed[-1] == word:
+            continue
+        collapsed.append(word)
+    return collapsed
+
+
+def _duplicate_key_words(words: list[str]) -> list[str]:
+    key_words = _collapse_adjacent_words(words)
+    while len(key_words) >= 3 and key_words[:2] in (["not", "just"], ["no", "not"]):
+        key_words = key_words[2:]
+    return key_words
+
+
+def _contains_word_sequence(words: list[str], candidate: list[str]) -> bool:
+    if not candidate or len(candidate) > len(words):
+        return False
+    for start in range(0, len(words) - len(candidate) + 1):
+        if _is_subsequence_at(words, candidate, start):
+            return True
+    return False
+
+
+def _longest_prefix_run_in_words(words: list[str], candidate: list[str]) -> int:
+    best = 0
+    for start in range(len(words)):
+        length = 0
+        while start + length < len(words) and length < len(candidate) and words[start + length] == candidate[length]:
+            length += 1
+        best = max(best, length)
+    return best
+
+
+def _longest_suffix_run_in_words(words: list[str], candidate: list[str]) -> int:
+    best = 0
+    for end in range(len(words), 0, -1):
+        length = 0
+        while end - 1 - length >= 0 and len(candidate) - 1 - length >= 0 and words[end - 1 - length] == candidate[len(candidate) - 1 - length]:
+            length += 1
+        best = max(best, length)
+    return best
+
+
+def _prefix_words_match(left: str, right: str) -> bool:
+    if left == right:
+        return True
+    return {left, right} <= {"a", "an", "the"}
+
+
+def _longest_prefix_revision_run(left_words: list[str], right_words: list[str]) -> int:
+    length = 0
+    while length < len(left_words) and length < len(right_words):
+        if not _prefix_words_match(left_words[length], right_words[length]):
+            break
+        length += 1
+    return length
 
 
 def _sentence_output_delta(committed_text: str, sentence: str) -> str:
@@ -406,6 +491,39 @@ def _sentence_output_delta(committed_text: str, sentence: str) -> str:
         for start in range(0, len(committed_words) - len(sentence_words) + 1):
             if _is_subsequence_at(committed_words, sentence_words, start):
                 return ""
+
+    if 1 <= len(committed_words) <= 4:
+        for start in range(0, len(sentence_words) - len(committed_words) + 1):
+            if _is_subsequence_at(sentence_words, committed_words, start):
+                suffix_words = sentence_words[start + len(committed_words) :]
+                if len(suffix_words) >= 3:
+                    return " ".join(suffix_words).strip()
+
+    committed_key_words = _duplicate_key_words(committed_words)
+    sentence_key_words = _duplicate_key_words(sentence_words)
+    if len(sentence_key_words) >= 5 and (
+        _contains_word_sequence(committed_key_words, sentence_key_words)
+        or _contains_word_sequence(sentence_key_words, committed_key_words)
+    ):
+        length_ratio = min(len(committed_key_words), len(sentence_key_words)) / max(len(committed_key_words), len(sentence_key_words), 1)
+        if length_ratio >= 0.9:
+            return ""
+
+    prefix_len = max(
+        _longest_prefix_run_in_words(committed_words, sentence_words),
+        _longest_prefix_revision_run(committed_words, sentence_words),
+    )
+    suffix_len = _longest_suffix_run_in_words(committed_words, sentence_words)
+    if prefix_len >= 3 or suffix_len >= 3:
+        start = prefix_len if prefix_len >= 3 else 0
+        end = len(sentence_words) - suffix_len if suffix_len >= 3 else len(sentence_words)
+        if start >= end:
+            return ""
+        middle_words = sentence_words[start:end]
+        if prefix_len >= 5 and len(committed_words) <= 10:
+            return " ".join(middle_words).strip()
+        if len(middle_words) <= max(2, len(sentence_words) // 2):
+            return " ".join(middle_words).strip()
 
     best_i = 0
     best_j = 0
@@ -431,6 +549,11 @@ def _sentence_output_delta(committed_text: str, sentence: str) -> str:
         if len(suffix_words) >= 3:
             return " ".join(suffix_words)
         return ""
+    if best_i + best_len == len(committed_words) and best_j == 1 and best_len >= 4:
+        suffix_words = sentence_words[best_j + best_len :]
+        if len(suffix_words) >= 3:
+            return " ".join(suffix_words).strip()
+        return ""
     if best_i + best_len == len(committed_words) and best_j == 0 and best_len >= 3:
         suffix_words = sentence_words[best_len:]
         return " ".join(suffix_words).strip()
@@ -455,9 +578,26 @@ def _sentences_are_revisions(left: str, right: str) -> bool:
         return False
     if left_words == right_words:
         return True
+    if 1 <= len(left_words) <= 4 and len(right_words) > len(left_words):
+        if all(_prefix_words_match(left_word, right_word) for left_word, right_word in zip(left_words, right_words)):
+            return True
     shorter = min(len(left_words), len(right_words))
     common_run = _common_word_run(left_words, right_words)
     return common_run >= 4 and common_run / max(shorter, 1) >= 0.6
+
+
+def _should_translate_staged_sentence(staged_sentence: str, staged_confirmations: int) -> bool:
+    if staged_confirmations >= SENTENCE_CONFIRM_CHUNKS:
+        return True
+    return len(_word_units(staged_sentence)) >= MIN_PROVISIONAL_TRANSLATION_WORDS
+
+
+def _should_age_staged_sentence(staged_sentence: str, pending_text: str) -> bool:
+    if not staged_sentence:
+        return False
+    if pending_text and _sentences_are_revisions(staged_sentence, pending_text):
+        return False
+    return True
 
 
 def _prefer_sentence_revision(left: str, right: str) -> str:
@@ -478,48 +618,52 @@ def _append_committed_text(committed_text: str, new_text: str) -> str:
 
 
 def _pending_new_text_combined(pending_text: str, new_text: str) -> str:
-    pending = _normalized_text(pending_text)
-    new = _normalized_text(new_text)
-    if not pending:
-        return new
-    if not new:
-        return pending
-    pending_words = _word_units(pending)
-    new_words = _word_units(new)
-    if pending_words and new_words[: len(pending_words)] == pending_words:
-        return new
-    connective_words = {"and", "but", "because", "so", "or"}
-    if pending_words and new_words and len(pending_words) <= 2 and pending_words[0] in connective_words and new_words[0] in connective_words:
-        return new
-    pending_units, pending_separator = _text_units(pending)
-    new_units, new_separator = _text_units(new)
-    if pending_separator != new_separator:
-        return _normalized_text(f"{pending} {new}")
-    max_overlap = min(len(pending_units), len(new_units))
-    for overlap in range(max_overlap, 0, -1):
-        if pending_units[-overlap:] == new_units[:overlap]:
-            return _join_text_units(pending_units + new_units[overlap:], pending_separator)
-    return _normalized_text(f"{pending} {new}")
+    from src.app.sentence_boundary import pending_new_text_combined
+
+    return pending_new_text_combined(pending_text, new_text)
 
 
 def _split_completed_sentences(pending_text: str, new_text: str) -> tuple[list[str], str]:
-    combined = _pending_new_text_combined(pending_text, new_text)
-    if not combined:
-        return [], ""
-    completed: list[str] = []
-    consumed_end = 0
-    for match in _SENTENCE_END_RE.finditer(combined):
-        sentence = match.group(1).strip()
-        if sentence:
-            completed.append(sentence)
-        consumed_end = match.end(1)
-    if consumed_end <= 0:
-        return [], combined
-    return completed, combined[consumed_end:].strip()
+    return _boundary_split_completed_sentences(pending_text, new_text)
 
 
 def _sentence_end_count(text: str) -> int:
-    return len(_SENTENCE_END_MARK_RE.findall(text or ""))
+    return _boundary_sentence_end_count(text)
+
+
+_INCOMPLETE_TAIL_WORDS = {
+    "a",
+    "an",
+    "and",
+    "at",
+    "because",
+    "but",
+    "can",
+    "for",
+    "from",
+    "if",
+    "in",
+    "it",
+    "of",
+    "on",
+    "or",
+    "that",
+    "the",
+    "to",
+    "which",
+    "with",
+}
+
+
+def _has_incomplete_sentence_tail(text: str) -> bool:
+    words = _word_units(text)
+    if not words:
+        return False
+    if words[-1] in _INCOMPLETE_TAIL_WORDS:
+        return True
+    if len(words) >= 2 and words[-1].isdigit() and words[-2] in {"from", "to"}:
+        return True
+    return False
 
 
 def _forced_sentence_reason(pending_text: str, pending_chunks: int) -> str:
@@ -528,7 +672,7 @@ def _forced_sentence_reason(pending_text: str, pending_chunks: int) -> str:
         return ""
     pending_chars = len(normalized)
     chars_per_chunk = pending_chars / max(pending_chunks, 1)
-    if pending_chunks >= MAX_PENDING_SENTENCE_CHUNKS:
+    if pending_chunks >= MAX_PENDING_SENTENCE_CHUNKS and not _has_incomplete_sentence_tail(normalized):
         return "pending_chunks"
     if pending_chars >= MAX_PENDING_SENTENCE_CHARS and _sentence_end_count(normalized) > 0:
         return "pending_chars"
@@ -536,6 +680,7 @@ def _forced_sentence_reason(pending_text: str, pending_chunks: int) -> str:
         pending_chunks >= SLOW_PENDING_SENTENCE_CHUNKS
         and pending_chars >= SLOW_PENDING_SENTENCE_CHARS
         and chars_per_chunk <= SLOW_PENDING_MAX_CHARS_PER_CHUNK
+        and not _has_incomplete_sentence_tail(normalized)
     ):
         return "slow_pending"
     return ""
@@ -557,6 +702,7 @@ class WhisperTranscriptWorker:
         self._capture_process: subprocess.Popen[bytes] | None = None
         self._capture_thread: threading.Thread | None = None
         self._recent_transcripts: deque[str] = deque(maxlen=RECENT_TRANSCRIPT_WINDOW)
+        self._sentence_boundary_detector = RegexSentenceBoundaryDetector()
 
     def _emit(
         self,
@@ -872,9 +1018,17 @@ class WhisperTranscriptWorker:
             self._emit("transcript", staged_sentence, log_text=f"[{detected}] {staged_sentence}", final=False)
             return finalized
 
-        def age_staged_sentence(detected: str) -> list[str]:
+        def age_staged_sentence(detected: str, pending_text: str = "") -> list[str]:
             nonlocal staged_age
             if not staged_sentence:
+                return []
+            if not _should_age_staged_sentence(staged_sentence, pending_text):
+                staged_age = 0
+                self._emit(
+                    "status",
+                    f"Whisper staged aging 보류: chunk={chunks} staged={staged_sentence!r} pending={pending_text!r}",
+                    display=False,
+                )
                 return []
             staged_age += 1
             if staged_age >= SENTENCE_CONFIRM_MAX_AGE_CHUNKS:
@@ -936,11 +1090,17 @@ class WhisperTranscriptWorker:
                 completed_sentences: list[str] = []
                 final_sentences: list[str] = []
                 forced_by = ""
+                boundary_complete = 0
+                boundary_soft = 0
                 if text and self._is_repeated_hallucination(text):
                     self._emit("status", f"Whisper 반복 전사 무시: chunk={chunks} text={text!r}", display=False)
                     text = ""
                 if text:
-                    completed_sentences, pending_transcript_text = _split_completed_sentences(pending_transcript_text, text)
+                    boundary_result = self._sentence_boundary_detector.split(pending_transcript_text, text, detected)
+                    completed_sentences = boundary_result.completed
+                    pending_transcript_text = boundary_result.pending
+                    boundary_complete = boundary_result.boundary_count
+                    boundary_soft = boundary_result.soft_boundary_count
                     if completed_sentences:
                         pending_chunks = 0
                     elif pending_transcript_text:
@@ -960,7 +1120,7 @@ class WhisperTranscriptWorker:
                             final=False,
                         )
                     elif not completed_sentences:
-                        final_sentences.extend(age_staged_sentence(detected))
+                        final_sentences.extend(age_staged_sentence(detected, pending_transcript_text))
                 else:
                     preview_chars = max(0, len(_normalized_text(window_text)) - len(_normalized_text(stable_text)))
                     self._emit(
@@ -978,13 +1138,15 @@ class WhisperTranscriptWorker:
                             for sentence in completed_sentences:
                                 final_sentences.extend(stage_completed_sentence(sentence, detected))
                         else:
-                            final_sentences.extend(age_staged_sentence(detected))
+                            final_sentences.extend(age_staged_sentence(detected, pending_transcript_text))
                     else:
-                        final_sentences.extend(age_staged_sentence(detected))
+                        final_sentences.extend(age_staged_sentence(detected, pending_transcript_text))
                 self._emit(
                     "status",
                     "Whisper 문장 진단: "
                     f"chunk={chunks} completed={len(completed_sentences)} final={len(final_sentences)} forced_by={forced_by or 'none'} "
+                    f"boundary_backend={self._sentence_boundary_detector.backend} "
+                    f"boundary_complete={boundary_complete} boundary_soft={boundary_soft} "
                     f"pending_chars={len(pending_transcript_text)} pending_chunks={pending_chunks} "
                     f"pending_chars_per_chunk={len(pending_transcript_text) / max(pending_chunks, 1):.1f} "
                     f"window_chars={len(_normalized_text(window_text))} stable_chars={len(_normalized_text(stable_text))} "
@@ -999,7 +1161,12 @@ class WhisperTranscriptWorker:
                     display=False,
                 )
                 translation_jobs: list[tuple[str, bool]] = []
-                if text_translator is not None and staged_translation_pending and staged_sentence:
+                if (
+                    text_translator is not None
+                    and staged_translation_pending
+                    and staged_sentence
+                    and _should_translate_staged_sentence(staged_sentence, staged_confirmations)
+                ):
                     translation_jobs.append((staged_sentence, False))
                 translation_jobs.extend((sentence, True) for sentence in final_sentences)
                 if self._cfg.translationEnabled and not translation_failed and translation_jobs:
