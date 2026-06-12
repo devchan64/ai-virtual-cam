@@ -83,26 +83,30 @@ def main() -> int:
     config = AppConfig.load(config_path)
     _log(
         "[avc] config loaded: "
+        f"camera_server={config.cameraServer.enabled} "
         f"input={config.inputCamera.devicePath} "
         f"output_backend={config.outputCamera.backend} "
         f"output={config.outputCamera.width}x{config.outputCamera.height}@{config.outputCamera.fps}"
     )
 
-    _log("[avc] opening input capture...")
-    capture = OpenCVCapture(config.inputCamera)
-    _log("[avc] creating output sink...")
-    output = build_output(config.outputCamera)
-    _log("[avc] pipeline starting")
-    if config.outputCamera.backend == "pyvirtualcam":
-        _log(
-            "[avc] macOS OBS 경로 안내: serve 실행 중 Chrome/Meet가 이미 열려 있었다면 브라우저를 완전히 재시작하세요."
+    runner: PipelineRunner | None = None
+    if config.cameraServer.enabled:
+        _log("[avc] opening input capture...")
+        capture = OpenCVCapture(config.inputCamera)
+        _log("[avc] creating output sink...")
+        output = build_output(config.outputCamera)
+        _log("[avc] camera pipeline starting")
+        if config.outputCamera.backend == "pyvirtualcam":
+            _log(
+                "[avc] macOS OBS 경로 안내: serve 실행 중 Chrome/Meet가 이미 열려 있었다면 브라우저를 완전히 재시작하세요."
+            )
+        runner = PipelineRunner(
+            config=config,
+            capture=capture,
+            output=output,
         )
-
-    runner = PipelineRunner(
-        config=config,
-        capture=capture,
-        output=output,
-    )
+    else:
+        _log("[avc] camera pipeline disabled by config (cameraServer.enabled=false)")
     whisper_process: subprocess.Popen | None = None
     if args.with_whisper_window and config.whisper.enabled:
         whisper_cmd = [sys.executable, "-m", "src.app.whisper_window", "--config", str(config_path)]
@@ -136,9 +140,13 @@ def main() -> int:
     else:
         _log("[avc] audio mixer disabled by config (audio.enabled=false)")
 
+    shutdown_requested = threading.Event()
+
     def _request_shutdown(signum: int, frame_obj) -> None:
         _log(f"[avc] received signal {signum}, stopping pipeline...")
-        runner.stop()
+        shutdown_requested.set()
+        if runner is not None:
+            runner.stop()
         if audio_mixer is not None:
             audio_mixer.stop()
         if whisper_process is not None and whisper_process.poll() is None:
@@ -148,9 +156,18 @@ def main() -> int:
     signal.signal(signal.SIGTERM, _request_shutdown)
 
     try:
-        runner.run(max_frames=args.max_frames)
+        if runner is not None:
+            runner.run(max_frames=args.max_frames)
+        else:
+            _log("[avc] camera pipeline skipped; keeping serve process alive for enabled non-camera services")
+            while not shutdown_requested.is_set():
+                if audio_thread is None and (whisper_process is None or whisper_process.poll() is not None):
+                    break
+                time.sleep(0.2)
     except KeyboardInterrupt:
-        runner.stop()
+        shutdown_requested.set()
+        if runner is not None:
+            runner.stop()
         if audio_mixer is not None:
             audio_mixer.stop()
         raise

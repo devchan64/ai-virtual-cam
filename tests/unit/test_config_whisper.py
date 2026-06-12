@@ -8,6 +8,57 @@ from src.domain.whisper_defaults import whisper_default
 from src.tools.config_builder import build_config
 
 
+class CameraServerConfigTest(unittest.TestCase):
+    @staticmethod
+    def _build_base_config(**overrides):
+        params = {
+            "input_device": "0",
+            "input_width": 1280,
+            "input_height": 720,
+            "input_fps": 30,
+            "output_device": "output.mp4",
+            "output_width": 1280,
+            "output_height": 720,
+            "output_fps": 30,
+            "output_backend": "opencv",
+            "segmentation_backend": "mock",
+            "segmentation_threshold": 0.5,
+            "background": {"mode": "chroma", "chromaColor": [0, 0, 0]},
+            "crop_margin": 0.25,
+            "crop_pan_smoothing": 0.85,
+            "audio_input_device": "default",
+            "audio_output_device": "default",
+        }
+        params.update(overrides)
+        return build_config(**params)
+
+    def test_build_config_includes_camera_server_enabled_by_default(self) -> None:
+        config = self._build_base_config()
+
+        self.assertEqual(config["cameraServer"], {"enabled": True})
+
+    def test_app_config_loads_camera_server_enabled_false(self) -> None:
+        config = self._build_base_config(camera_server_enabled=False)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "setting.json"
+            path.write_text(json.dumps(config), encoding="utf-8")
+
+            loaded = AppConfig.load(path)
+
+        self.assertFalse(loaded.cameraServer.enabled)
+
+    def test_app_config_defaults_camera_server_enabled_when_missing(self) -> None:
+        config = self._build_base_config()
+        config.pop("cameraServer")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "setting.json"
+            path.write_text(json.dumps(config), encoding="utf-8")
+
+            loaded = AppConfig.load(path)
+
+        self.assertTrue(loaded.cameraServer.enabled)
+
+
 class WhisperConfigTest(unittest.TestCase):
     def test_build_config_includes_whisper_settings(self) -> None:
         config = build_config(

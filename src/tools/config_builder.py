@@ -394,6 +394,7 @@ def build_config(
     output_height: int,
     output_fps: int,
     output_backend: str = "opencv",
+    camera_server_enabled: bool = True,
     segmentation_backend: str,
     segmentation_threshold: float,
     segmentation_selfie_model_selection: int = 1,
@@ -495,6 +496,7 @@ def build_config(
     tilt_kd = float(crop_pan_pid_kd if crop_tilt_pid_kd is None else crop_tilt_pid_kd)
     seg_engine_options = dict(segmentation_engine_options or {})
     return {
+        "cameraServer": {"enabled": bool(camera_server_enabled)},
         "inputCamera": {
             "devicePath": input_device,
             "width": input_width,

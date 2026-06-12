@@ -16,6 +16,15 @@ def build_io_tab(
     camera_values = [c["devicePath"] for c in cameras] or (["0"] if is_macos else ["/dev/video0"])
 
     row = 0
+    gui._add_bool_switch(
+        tab_io,
+        row,
+        "camera_server_enabled",
+        gui._tr("label.camera_server_enabled", "Camera server"),
+        True,
+        label_key="label.camera_server_enabled",
+    )
+    row += 1
     gui._input_device_label = gui._add_combo(
         tab_io,
         row,

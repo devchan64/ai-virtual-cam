@@ -363,6 +363,16 @@ class Rect:
 
 
 @dataclass(frozen=True)
+class CameraServerConfig:
+    enabled: bool = True
+
+    @classmethod
+    def from_dict(cls, raw: dict | None) -> "CameraServerConfig":
+        raw = raw or {}
+        return cls(enabled=bool(raw.get("enabled", True)))
+
+
+@dataclass(frozen=True)
 class InputCameraConfig:
     devicePath: str
     width: int
@@ -829,6 +839,7 @@ class AppConfig:
     segmentation: SegmentationConfig
     background: BackgroundConfig
     crop: PersonCropConfig
+    cameraServer: CameraServerConfig = field(default_factory=lambda: CameraServerConfig.from_dict({}))
     audio: AudioMixerConfig | None = None
     faceEnhance: FaceEnhanceConfig = field(default_factory=lambda: FaceEnhanceConfig.from_dict({}))
     whisper: WhisperConfig = field(default_factory=lambda: WhisperConfig.from_dict({}))
@@ -849,6 +860,7 @@ class AppConfig:
             segmentation=SegmentationConfig.from_dict(raw["segmentation"]),
             background=BackgroundConfig.from_dict(raw["background"]),
             crop=crop_cfg,
+            cameraServer=CameraServerConfig.from_dict(raw.get("cameraServer") or raw.get("camera")),
             audio=AudioMixerConfig.from_dict(raw["audio"]) if raw.get("audio") else None,
             faceEnhance=FaceEnhanceConfig.from_dict(raw.get("faceEnhance") or {}),
             whisper=WhisperConfig.from_dict(raw.get("whisper") or {}),

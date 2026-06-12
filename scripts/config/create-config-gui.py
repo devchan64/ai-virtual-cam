@@ -820,8 +820,25 @@ class ConfigGui:
             pass
         return self.root.winfo_geometry()
 
+    def _current_preview_window_geometry(self) -> str | None:
+        window = getattr(self, "_preview_window", None)
+        if window is None:
+            return None
+        try:
+            if not window.winfo_exists():
+                return None
+            window.update_idletasks()
+            return window.winfo_geometry()
+        except Exception:
+            return None
+
     def _on_root_configure(self, event) -> None:
         if event.widget != self.root:
+            return
+        self._schedule_save_window_geometry_meta()
+
+    def _on_preview_configure(self, event) -> None:
+        if self._preview_window is None or event.widget != self._preview_window:
             return
         self._schedule_save_window_geometry_meta()
 
@@ -843,8 +860,70 @@ class ConfigGui:
             return
         self.root.geometry(geometry)
 
+    def _restore_preview_window_geometry(self, window: tk.Toplevel, meta_cfg: dict) -> None:
+        self._restore_named_window_geometry(window, "previewWindowGeometry", meta_cfg)
+
+    def _restore_named_window_geometry(self, window: tk.Toplevel, key: str, meta_cfg: dict | None = None) -> None:
+        if meta_cfg is None:
+            meta_cfg = self._read_geometry_meta()
+        geometry = _sanitize_window_geometry(
+            meta_cfg.get(key),
+            window.winfo_screenwidth(),
+            window.winfo_screenheight(),
+        )
+        if geometry is None:
+            return
+        window.geometry(geometry)
+
+    def _read_geometry_meta(self) -> dict:
+        config_path = Path(self.output_path).expanduser()
+        if not config_path.exists():
+            return {}
+        try:
+            raw = json.loads(config_path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                return {}
+            meta = raw.get("meta") or {}
+            return meta if isinstance(meta, dict) else {}
+        except Exception as exc:
+            _log(f"Window geometry meta load failed: {exc}")
+            return {}
+
+    def _save_named_window_geometry(self, key: str, window: tk.Toplevel | None) -> None:
+        if window is None:
+            return
+        try:
+            if not window.winfo_exists():
+                return
+            window.update_idletasks()
+            geometry = _sanitize_window_geometry(
+                window.winfo_geometry(),
+                window.winfo_screenwidth(),
+                window.winfo_screenheight(),
+            )
+            if geometry is None:
+                return
+            config_path = Path(self.output_path).expanduser()
+            if not config_path.exists():
+                return
+            raw = json.loads(config_path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                return
+            meta = raw.get("meta")
+            if not isinstance(meta, dict):
+                meta = {}
+                raw["meta"] = meta
+            meta[key] = geometry
+            write_config(str(config_path), raw)
+        except Exception as exc:
+            _log(f"Window geometry save failed: key={key} error={exc}")
+
     def _apply_window_geometry_meta(self, config: dict) -> None:
-        config.setdefault("meta", {})["windowGeometry"] = self._current_window_geometry()
+        meta = config.setdefault("meta", {})
+        meta["windowGeometry"] = self._current_window_geometry()
+        preview_geometry = self._current_preview_window_geometry()
+        if preview_geometry:
+            meta["previewWindowGeometry"] = preview_geometry
 
     def _save_window_geometry_meta(self) -> None:
         self._window_geometry_save_after_id = None
@@ -1376,6 +1455,7 @@ class ConfigGui:
         output_fps = int(float(output_modes[0][2]))
 
         return {
+            "camera_server_enabled": True,
             "input_device": input_device,
             "input_width": input_width,
             "input_height": input_height,
@@ -1840,6 +1920,7 @@ class ConfigGui:
             self._language_var.set(lang)
         self._restore_window_geometry(meta_cfg)
 
+        camera_server_cfg = raw.get("cameraServer") or raw.get("camera") or {}
         input_cfg = raw.get("inputCamera") or {}
         output_cfg = raw.get("outputCamera") or {}
         seg_cfg = raw.get("segmentation") or {}
@@ -1850,6 +1931,7 @@ class ConfigGui:
         face_cfg = raw.get("faceEnhance") or {}
         whisper_cfg = raw.get("whisper") or {}
 
+        self._set_var("camera_server_enabled", camera_server_cfg.get("enabled", True))
         self._set_var("input_device", input_cfg.get("devicePath"))
         self._set_var("input_width", input_cfg.get("width"))
         self._set_var("input_height", input_cfg.get("height"))
@@ -2131,6 +2213,7 @@ class ConfigGui:
             self._audio_tune_window = tk.Toplevel(self.root)
             self._audio_tune_window.title(self._tr("title.audio_tune", "Audio gate auto tuning"))
             self._audio_tune_window.geometry("560x260")
+            self._restore_named_window_geometry(self._audio_tune_window, "audioTuneWindowGeometry")
             self._audio_tune_window.resizable(False, False)
             self._audio_tune_window.grab_set()
 
@@ -2470,6 +2553,7 @@ class ConfigGui:
             self._audio_tune_after_id = None
         self._audio_tune_action_btn = None
         if self._audio_tune_window is not None:
+            self._save_named_window_geometry("audioTuneWindowGeometry", self._audio_tune_window)
             try:
                 self._audio_tune_window.destroy()
             except Exception:
@@ -2531,6 +2615,7 @@ class ConfigGui:
         window = tk.Toplevel(self.root)
         window.title(self._tr("title.audio_gate_test", "Audio gate test"))
         window.geometry("640x480")
+        self._restore_named_window_geometry(window, "audioGateTestWindowGeometry")
         window.minsize(640, 480)
         window.resizable(True, True)
         window.grab_set()
@@ -2625,6 +2710,7 @@ class ConfigGui:
         self._audio_gate_test_started_at = time.time()
 
         def close_window():
+            self._save_named_window_geometry("audioGateTestWindowGeometry", window)
             self._stop_audio_gate_test()
             if window.winfo_exists():
                 window.destroy()
@@ -2871,6 +2957,7 @@ class ConfigGui:
         window = tk.Toplevel(self.root)
         window.title(self._tr(title_key, title_default))
         window.geometry("640x480")
+        self._restore_named_window_geometry(window, "inputMeterWindowGeometry")
         window.minsize(640, 480)
         window.resizable(True, True)
         window.grab_set()
@@ -2924,6 +3011,7 @@ class ConfigGui:
         self._audio_input_meter_started_at = time.time()
 
         def close_window():
+            self._save_named_window_geometry("inputMeterWindowGeometry", window)
             self._stop_audio_input_meter()
             if window.winfo_exists():
                 window.destroy()
@@ -3285,7 +3373,16 @@ class ConfigGui:
         window = tk.Toplevel(self.root)
         window.title(self._preview_window_name)
         window.geometry("640x400")
+        try:
+            config_path = Path(self.output_path).expanduser()
+            if config_path.exists():
+                raw = json.loads(config_path.read_text(encoding="utf-8"))
+                if isinstance(raw, dict):
+                    self._restore_preview_window_geometry(window, raw.get("meta") or {})
+        except Exception as exc:
+            _log(f"Preview window geometry restore failed: {exc}")
         window.protocol("WM_DELETE_WINDOW", self._stop_preview)
+        window.bind("<Configure>", self._on_preview_configure)
         canvas = tk.Canvas(window, bg="#111111", highlightthickness=0)
         canvas.pack(fill="both", expand=True)
         self._preview_window = window
@@ -3294,6 +3391,7 @@ class ConfigGui:
         self._preview_tk_image = None
 
     def _destroy_preview_window(self) -> None:
+        self._save_window_geometry_meta()
         window = self._preview_window
         self._preview_window = None
         self._preview_canvas = None
@@ -3634,6 +3732,7 @@ class ConfigGui:
             output_height=output_h,
             output_fps=int(iv["output_fps"].get()),
             output_backend=iv["output_backend"].get(),
+            camera_server_enabled=self._parse_bool(iv["camera_server_enabled"].get()),
             segmentation_backend=iv["seg_backend"].get(),
             segmentation_threshold=float(iv["seg_threshold"].get()),
             segmentation_edge_smoothness=float(iv["seg_edge_smoothness"].get()),
