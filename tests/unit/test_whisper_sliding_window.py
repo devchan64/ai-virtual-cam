@@ -1,7 +1,7 @@
 import unittest
 
 from src.app.sentence_boundary import RegexSentenceBoundaryDetector
-from src.app.whisper_window import _collapse_adjacent_repeated_phrases, _diagnostic_tail, _forced_sentence_reason, _new_text_delta, _pending_new_text_combined, _sentence_output_delta, _sentences_are_revisions, _should_age_staged_sentence, _should_translate_staged_sentence, _prefer_sentence_revision, _sentence_end_count, _split_completed_sentences, _stable_window_text
+from src.app.whisper_window import _collapse_adjacent_repeated_phrase_details, _collapse_adjacent_repeated_phrases, _consume_committed_prefix, _revision_lifecycle_context, _diagnostic_tail, _forced_sentence_reason, _new_text_delta, _pending_new_text_combined, _sentence_max_age_chunks, _sentence_output_delta, _sentence_required_confirmations, _sentences_are_revisions, _should_age_staged_sentence, _should_translate_staged_sentence, _prefer_sentence_revision, _sentence_end_count, _split_completed_sentences, _stable_window_text
 
 
 class WhisperSlidingWindowTextTest(unittest.TestCase):
@@ -51,6 +51,35 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
                 "again awesome the location tab shows your car's live location at any time which is awesome.",
             ),
             "again awesome the location tab shows your car's live location at any time which is awesome.",
+        )
+
+    def test_sentence_revision_detects_short_one_that_suits_revisions_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 154-158.
+        self.assertTrue(
+            _sentences_are_revisions(
+                "It's me, not one that suits Joe.",
+                "Yeah, it's one that it suits Joe.",
+            )
+        )
+        self.assertEqual(
+            _prefer_sentence_revision(
+                "It's me, not one that suits Joe.",
+                "Yeah, it's one that it suits Joe.",
+            ),
+            "Yeah, it's one that it suits Joe.",
+        )
+        self.assertTrue(
+            _sentences_are_revisions(
+                "Yeah, it's one that it suits Joe.",
+                "Yes, one that suits mom.",
+            )
+        )
+        self.assertEqual(
+            _prefer_sentence_revision(
+                "Yeah, it's one that it suits Joe.",
+                "Yes, one that suits mom.",
+            ),
+            "Yes, one that suits mom.",
         )
 
     def test_sentence_revision_rejects_distinct_sentences(self) -> None:
@@ -112,6 +141,14 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
     def test_staged_sentence_can_age_without_pending_revision(self) -> None:
         self.assertTrue(_should_age_staged_sentence("Completed sentence.", "Different topic starts here"))
 
+    def test_staged_sentence_ages_when_pending_is_short_suffix_repeat_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 360-368.
+        staged = "The GPS doesn't always take us on the best route because we could have taken the highway and just gotten off here at the exit but instead we're taking a side road to get"
+        pending = "taking a side road to get"
+
+        self.assertTrue(_sentences_are_revisions(staged, pending))
+        self.assertTrue(_should_age_staged_sentence(staged, pending))
+
 
     def test_sentence_split_keeps_incomplete_tail_pending(self) -> None:
         completed, pending = _split_completed_sentences("", "Hello there. This is still")
@@ -142,6 +179,30 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
             _pending_new_text_combined("Because if you", "if you didn't know,"),
             "Because if you didn't know,",
         )
+
+    def test_pending_new_text_drops_incomplete_tail_before_ack_revision_from_log(self) -> None:
+        # Regression from avc-whisper.log.1 chunks 847-848.
+        self.assertEqual(
+            _pending_new_text_combined(
+                "It will take him probably a",
+                "Okay. It will take them probably a month.",
+            ),
+            "Okay. It will take them probably a month.",
+        )
+
+    def test_sentence_boundary_does_not_complete_incomplete_tail_before_ack_revision_from_log(self) -> None:
+        # Regression from avc-whisper.log.1 chunks 847-848.
+        detector = RegexSentenceBoundaryDetector()
+
+        result = detector.split(
+            "It will take him probably a",
+            "Okay. It will take them probably a month.",
+            "en",
+        )
+
+        self.assertEqual(result.completed, ["Okay.", "It will take them probably a month."])
+        self.assertEqual(result.pending, "")
+        self.assertNotIn("It will take him probably a Okay.", result.completed)
 
 
     def test_sentence_boundary_soft_splits_long_english_restart_without_punctuation(self) -> None:
@@ -420,6 +481,32 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
             "the location tab shows your car s live location at any time which is awesome",
         )
 
+    def test_sentence_output_delta_trims_long_coffee_overlap_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 42-52.
+        committed = "once you get used to it it's actually very freeing and it is a wonderful experience especially for me in the morning to have a cup of coffee and just sit here"
+        sentence = "cup of coffee and just sit here and enjoy my cup of coffee while I'm an observer of this thing driving"
+
+        self.assertEqual(
+            _sentence_output_delta(committed, sentence),
+            "and enjoy my cup of coffee while i m an observer of this thing driving",
+        )
+
+    def test_sentence_boundary_splits_long_driver_seat_sentence_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 23-33.
+        detector = RegexSentenceBoundaryDetector()
+
+        result = detector.split(
+            "",
+            "It is a very strange sensation to be a passenger in the car while you're in the driver's seat and having no interaction with the road whatsoever but once you get used to it it's",
+            "en",
+        )
+
+        self.assertEqual(
+            result.completed,
+            ["It is a very strange sensation to be a passenger in the car while you're in the driver's seat and having no interaction with the road whatsoever"],
+        )
+        self.assertEqual(result.pending, "once you get used to it it's")
+
     def test_collapse_repeated_like_lets_say_phrase_from_log(self) -> None:
         self.assertEqual(
             _collapse_adjacent_repeated_phrases(
@@ -454,6 +541,36 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
             _collapse_adjacent_repeated_phrases(text),
             "Right now, Fantech is running some huge discounts where you can get 45% off the X8 Apex",
         )
+
+    def test_collapse_numeric_value_revision_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 29-30.
+        text = "Tesla's cars is the fact that these are over one thousand dollars worth These are over $1,000 worth of Tesla accessories."
+
+        self.assertEqual(
+            _collapse_adjacent_repeated_phrases(text),
+            "Tesla's cars is the fact that these are over $1,000 worth of Tesla accessories.",
+        )
+
+    def test_collapse_adjacent_duplicate_determiner_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 35-36.
+        text = "Half of them are from tesla and the The Tesla Model"
+
+        self.assertEqual(
+            _collapse_adjacent_repeated_phrases(text),
+            "Half of them are from tesla and The Tesla Model",
+        )
+
+    def test_collapse_details_report_applied_rules(self) -> None:
+        text = "EPA estimated ranges are a best best-case scenario."
+
+        collapsed, rules = _collapse_adjacent_repeated_phrase_details(text)
+
+        self.assertEqual(collapsed, "EPA estimated ranges are a best-case scenario.")
+        self.assertEqual(rules, ["hyphen_prefix"])
+
+    def test_forced_sentence_requires_extra_confirmation_and_age(self) -> None:
+        self.assertGreater(_sentence_required_confirmations(True), _sentence_required_confirmations(False))
+        self.assertGreater(_sentence_max_age_chunks(True), _sentence_max_age_chunks(False))
 
     def test_sentence_output_delta_collapses_repeated_tap_close_phrase_from_log(self) -> None:
         # Regression from avc-whisper.log chunks 100-102.
@@ -561,6 +678,80 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
         stable = "52 second. Oh my goodness. Is it true?"
 
         self.assertEqual(_new_text_delta(committed, stable), "")
+
+
+    def test_forced_candidate_consumes_pending_only_after_final_commit(self) -> None:
+        pending = "So we have to go somewhere else to go to the bathroom which takes even more time i have had to take it off"
+        self.assertEqual(
+            _consume_committed_prefix(pending, "So we have to go somewhere else to go to the bathroom"),
+            "which takes even more time i have had to take it off",
+        )
+        self.assertEqual(_consume_committed_prefix(pending, pending), "")
+
+    def test_revision_lifecycle_context_keeps_staged_and_pending_visible(self) -> None:
+        context = _revision_lifecycle_context(
+            "already committed",
+            "forced staged candidate",
+            "pending revision tail",
+        )
+
+        self.assertEqual(context, "already committed forced staged candidate pending revision tail")
+
+
+    def test_sentence_output_delta_suppresses_suffix_duplicate_from_unplug_log(self) -> None:
+        # Regression from avc-whisper.log chunks 438-440.
+        self.assertEqual(_sentence_output_delta("Let's do it now.", "do it now."), "")
+
+    def test_sentence_output_delta_suppresses_hi_after_high_from_cost_log(self) -> None:
+        # Regression from avc-whisper.log chunks 491-497.
+        committed = "And we're in California, so it would be high."
+
+        self.assertEqual(_sentence_output_delta(committed, "Hi."), "")
+        self.assertEqual(_sentence_output_delta(committed, "$16.24"), "$16.24")
+
+    def test_sentence_revision_prefers_take_care_completion_from_charge_log(self) -> None:
+        # Regression from avc-whisper.log chunks 567-570.
+        noisy = "Do you want to connect it or sure i'll take care me to go?"
+        corrected = "Sure, I'll take care of it."
+
+        self.assertTrue(_sentences_are_revisions(noisy, corrected))
+        self.assertEqual(_prefer_sentence_revision(noisy, corrected), corrected)
+        self.assertEqual(_sentence_output_delta(corrected, "of it."), "")
+
+    def test_sentence_revision_keeps_charge_of_day_context_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 571-578.
+        first = "We're at our fourth charge of the day it is currently"
+        revised = "charge of the day it is currently 7 30 p.m."
+
+        self.assertTrue(_sentences_are_revisions(first, revised))
+        self.assertEqual(_prefer_sentence_revision(first, revised), revised)
+
+    def test_sentence_output_delta_keeps_on_ramp_tail_from_bathroom_log(self) -> None:
+        # Regression from avc-whisper.log chunks 641-653.
+        committed = "I have had to take it off of self-driving twice because it continues to have a problem finding the correct on-ramp"
+        sentence = "of self driving twice because it continues to have a problem finding the correct on ramp for a freeway"
+
+        self.assertTrue(_sentences_are_revisions(committed, sentence))
+        self.assertEqual(_sentence_output_delta(committed, sentence), "for a freeway")
+
+    def test_sentence_boundary_soft_splits_the_missing_navigation_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 700-703.
+        detector = RegexSentenceBoundaryDetector()
+        result = detector.split(
+            "",
+            "Another thing is I think the Achilles heel of the system right now is the navigation The missing on-ramps, issues with going into the right driveway or other things",
+            "en",
+        )
+
+        self.assertEqual(
+            result.completed,
+            ["Another thing is I think the Achilles heel of the system right now is the navigation"],
+        )
+        self.assertEqual(
+            result.pending,
+            "The missing on-ramps, issues with going into the right driveway or other things",
+        )
+        self.assertEqual(result.soft_boundary_count, 1)
 
 
 if __name__ == "__main__":

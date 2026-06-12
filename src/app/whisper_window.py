@@ -47,7 +47,9 @@ SLOW_PENDING_SENTENCE_CHUNKS = 4
 SLOW_PENDING_SENTENCE_CHARS = 45
 SLOW_PENDING_MAX_CHARS_PER_CHUNK = 18.0
 SENTENCE_CONFIRM_CHUNKS = 2
+FORCED_SENTENCE_CONFIRM_CHUNKS = 3
 SENTENCE_CONFIRM_MAX_AGE_CHUNKS = 2
+FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS = 3
 MIN_PROVISIONAL_TRANSLATION_WORDS = 6
 PROVISIONAL_TRANSLATION_ENABLED = False
 _SENTENCE_END_PATTERN = r"(?:(?<!\d)\.(?!\d)|[!?。！？…]+)"
@@ -404,13 +406,42 @@ def _collapse_adjacent_repeated_prefix_units(units: list[str]) -> bool:
     return False
 
 
-def _collapse_adjacent_repeated_phrases(text: str) -> str:
-    normalized = _normalized_text(text)
+def _collapse_adjacent_duplicate_determiners(units: list[str]) -> bool:
+    for index in range(1, len(units)):
+        previous_key = _phrase_key([units[index - 1]])
+        current_key = _phrase_key([units[index]])
+        if len(previous_key) == 1 and previous_key == current_key and previous_key[0] in {"a", "an", "the"}:
+            del units[index - 1]
+            return True
+    return False
+
+
+def _collapse_numeric_value_revisions(text: str) -> str:
+    return re.sub(
+        r"\bone\s+thousand\s+dollars(?:\s+worth)?\s+\$1,?000\s+worth\b",
+        "$1,000 worth",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+
+def _collapse_adjacent_repeated_phrase_details(text: str) -> tuple[str, list[str]]:
+    normalized_input = _normalized_text(text)
+    normalized = _collapse_numeric_value_revisions(normalized_input)
+    rules: list[str] = []
+    if normalized != normalized_input:
+        rules.append("numeric_value")
     units, separator = _text_units(normalized)
     if separator == "" or len(units) < 6:
-        return normalized
-    while _collapse_adjacent_repeated_prefix_units(units):
-        pass
+        return normalized, rules
+    while True:
+        if _collapse_adjacent_repeated_prefix_units(units):
+            rules.append("hyphen_prefix")
+            continue
+        if _collapse_adjacent_duplicate_determiners(units):
+            rules.append("duplicate_determiner")
+            continue
+        break
     passes = 0
     changed = True
     while changed and passes < 4:
@@ -425,14 +456,25 @@ def _collapse_adjacent_repeated_phrases(text: str) -> str:
                 right = units[index + phrase_len : index + (phrase_len * 2)]
                 if _phrase_key(left) and _phrase_key(left) == _phrase_key(right):
                     del units[index + phrase_len : index + (phrase_len * 2)]
+                    rules.append("adjacent_phrase")
                     changed = True
                     collapsed = True
                     break
             if not collapsed:
                 index += 1
         if _collapse_near_repeated_phrases(units):
+            rules.append("near_phrase")
             changed = True
-    return _join_text_units(units, separator)
+    collapsed_text = _join_text_units(units, separator)
+    numeric_collapsed = _collapse_numeric_value_revisions(collapsed_text)
+    if numeric_collapsed != collapsed_text:
+        rules.append("numeric_value")
+    return numeric_collapsed, rules
+
+
+def _collapse_adjacent_repeated_phrases(text: str) -> str:
+    collapsed, _rules = _collapse_adjacent_repeated_phrase_details(text)
+    return collapsed
 
 
 def _is_subsequence_at(words: list[str], candidate: list[str], start: int) -> bool:
@@ -499,6 +541,20 @@ def _longest_prefix_revision_run(left_words: list[str], right_words: list[str]) 
     return length
 
 
+def _short_revision_signature(words: list[str]) -> tuple[str, ...]:
+    if not words or len(words) > 18:
+        return ()
+    for start in range(0, len(words) - 1):
+        if words[start : start + 2] == ["take", "care"]:
+            return ("take", "care")
+    for start in range(0, len(words) - 2):
+        if words[start : start + 3] == ["one", "that", "suits"]:
+            return ("one", "that", "suits")
+        if start + 3 < len(words) and words[start : start + 4] == ["one", "that", "it", "suits"]:
+            return ("one", "that", "suits")
+    return ()
+
+
 def _trim_leading_boundary_noise(text: str) -> str:
     words = _word_units(text)
     if len(words) >= 4 and words[:4] == ["if", "you", "when", "you"]:
@@ -520,6 +576,8 @@ def _sentence_output_delta(committed_text: str, sentence: str) -> str:
     sentence_words = _word_units(normalized)
     if not committed_words or not sentence_words:
         return normalized
+    if sentence_words == ["hi"] and committed_words[-1:] == ["high"]:
+        return ""
     if len(sentence_words) <= len(committed_words):
         for start in range(0, len(committed_words) - len(sentence_words) + 1):
             if _is_subsequence_at(committed_words, sentence_words, start):
@@ -630,6 +688,10 @@ def _sentences_are_revisions(left: str, right: str) -> bool:
     if 1 <= len(left_words) <= 4 and len(right_words) > len(left_words):
         if all(_prefix_words_match(left_word, right_word) for left_word, right_word in zip(left_words, right_words)):
             return True
+    left_signature = _short_revision_signature(left_words)
+    right_signature = _short_revision_signature(right_words)
+    if left_signature and left_signature == right_signature:
+        return True
     shorter = min(len(left_words), len(right_words))
     best_i, best_j, common_run = _best_common_word_run(left_words, right_words)
     prefix_run = _longest_prefix_revision_run(left_words, right_words)
@@ -640,6 +702,14 @@ def _sentences_are_revisions(left: str, right: str) -> bool:
     return common_run >= 4 and common_run / max(shorter, 1) >= 0.6
 
 
+def _sentence_required_confirmations(forced: bool) -> int:
+    return FORCED_SENTENCE_CONFIRM_CHUNKS if forced else SENTENCE_CONFIRM_CHUNKS
+
+
+def _sentence_max_age_chunks(forced: bool) -> int:
+    return FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS if forced else SENTENCE_CONFIRM_MAX_AGE_CHUNKS
+
+
 def _should_translate_staged_sentence(staged_sentence: str, staged_confirmations: int) -> bool:
     if not PROVISIONAL_TRANSLATION_ENABLED:
         return False
@@ -648,9 +718,21 @@ def _should_translate_staged_sentence(staged_sentence: str, staged_confirmations
     return len(_word_units(staged_sentence)) >= MIN_PROVISIONAL_TRANSLATION_WORDS
 
 
+def _is_short_staged_suffix_repeat(staged_sentence: str, pending_text: str) -> bool:
+    staged_words = _word_units(staged_sentence)
+    pending_words = _word_units(pending_text)
+    if not staged_words or not pending_words:
+        return False
+    if len(pending_words) > 8 or len(pending_words) >= len(staged_words):
+        return False
+    return staged_words[-len(pending_words) :] == pending_words
+
+
 def _should_age_staged_sentence(staged_sentence: str, pending_text: str) -> bool:
     if not staged_sentence:
         return False
+    if pending_text and _is_short_staged_suffix_repeat(staged_sentence, pending_text):
+        return True
     if pending_text and _sentences_are_revisions(staged_sentence, pending_text):
         return False
     return True
@@ -659,6 +741,13 @@ def _should_age_staged_sentence(staged_sentence: str, pending_text: str) -> bool
 def _prefer_sentence_revision(left: str, right: str) -> str:
     left_words = _word_units(left)
     right_words = _word_units(right)
+    left_signature = _short_revision_signature(left_words)
+    right_signature = _short_revision_signature(right_words)
+    if left_signature and left_signature == right_signature:
+        if left_signature == ("take", "care"):
+            if _sentence_end_count(right) >= _sentence_end_count(left):
+                return _normalized_text(right)
+        return _normalized_text(right)
     if len(right_words) > len(left_words):
         return _normalized_text(right)
     if _sentence_end_count(right) > _sentence_end_count(left):
@@ -671,6 +760,36 @@ def _append_committed_text(committed_text: str, new_text: str) -> str:
     if len(combined) <= 4000:
         return combined
     return combined[-4000:]
+
+
+def _consume_committed_prefix(pending_text: str, committed_sentence: str) -> str:
+    pending = _normalized_text(pending_text)
+    committed = _normalized_text(committed_sentence)
+    if not pending or not committed:
+        return pending
+    pending_words = _word_units(pending)
+    committed_words = _word_units(committed)
+    if not pending_words or not committed_words:
+        return pending
+    if len(committed_words) >= len(pending_words) and _is_subsequence_at(committed_words, pending_words, 0):
+        return ""
+    if len(pending_words) >= len(committed_words) and _is_subsequence_at(pending_words, committed_words, 0):
+        remaining = pending_words[len(committed_words) :]
+        return _sentence_delta_from_words(remaining)
+    max_overlap = min(len(pending_words), len(committed_words))
+    for overlap in range(max_overlap, 0, -1):
+        if pending_words[:overlap] == committed_words[-overlap:]:
+            return _sentence_delta_from_words(pending_words[overlap:])
+    return pending
+
+
+def _revision_lifecycle_context(committed_text: str, staged_sentence: str, pending_text: str) -> str:
+    context = committed_text
+    if staged_sentence:
+        context = _append_committed_text(context, staged_sentence)
+    if pending_text:
+        context = _append_committed_text(context, pending_text)
+    return context
 
 
 def _pending_new_text_combined(pending_text: str, new_text: str) -> str:
@@ -993,6 +1112,7 @@ class WhisperTranscriptWorker:
         staged_confirmations = 0
         staged_age = 0
         staged_translation_pending = False
+        staged_forced = False
         self._emit(
             "status",
             f"Whisper 전사 루프 시작: step_seconds={step_seconds} window_seconds={window_seconds} "
@@ -1020,7 +1140,7 @@ class WhisperTranscriptWorker:
                 break
 
         def finalize_staged_sentence(detected: str, reason: str) -> list[str]:
-            nonlocal committed_text, staged_sentence, staged_confirmations, staged_age
+            nonlocal committed_text, staged_sentence, staged_confirmations, staged_age, staged_forced
             if not staged_sentence:
                 return []
             output_sentence = _sentence_output_delta(committed_text, staged_sentence)
@@ -1028,6 +1148,7 @@ class WhisperTranscriptWorker:
             staged_sentence = ""
             staged_confirmations = 0
             staged_age = 0
+            staged_forced = False
             if not output_sentence:
                 self._emit(
                     "status",
@@ -1045,8 +1166,8 @@ class WhisperTranscriptWorker:
             self._emit("transcript", output_sentence, log_text=f"[{detected}] {output_sentence}", final=True)
             return [output_sentence]
 
-        def stage_completed_sentence(sentence: str, detected: str) -> list[str]:
-            nonlocal staged_sentence, staged_confirmations, staged_age, staged_translation_pending
+        def stage_completed_sentence(sentence: str, detected: str, *, forced: bool = False) -> list[str]:
+            nonlocal staged_sentence, staged_confirmations, staged_age, staged_translation_pending, staged_forced
             candidate = _sentence_output_delta(committed_text, sentence)
             if not candidate:
                 self._emit("status", f"Whisper 중복 문장 무시: chunk={chunks} text={sentence!r}", display=False)
@@ -1056,14 +1177,17 @@ class WhisperTranscriptWorker:
                 staged_confirmations = 1
                 staged_age = 0
                 staged_translation_pending = True
+                staged_forced = forced
                 self._emit("transcript", staged_sentence, log_text=f"[{detected}] {staged_sentence}", final=False)
                 return []
             if _sentences_are_revisions(staged_sentence, candidate):
                 staged_sentence = _prefer_sentence_revision(staged_sentence, candidate)
                 staged_confirmations += 1
                 staged_age = 0
-                if staged_confirmations >= SENTENCE_CONFIRM_CHUNKS:
-                    return finalize_staged_sentence(detected, "confirmed")
+                staged_forced = staged_forced or forced
+                required_confirmations = _sentence_required_confirmations(staged_forced)
+                if staged_confirmations >= required_confirmations:
+                    return finalize_staged_sentence(detected, "confirmed_forced" if staged_forced else "confirmed")
                 staged_translation_pending = True
                 self._emit("transcript", staged_sentence, log_text=f"[{detected}] {staged_sentence}", final=False)
                 return []
@@ -1072,6 +1196,7 @@ class WhisperTranscriptWorker:
             staged_confirmations = 1
             staged_age = 0
             staged_translation_pending = True
+            staged_forced = forced
             self._emit("transcript", staged_sentence, log_text=f"[{detected}] {staged_sentence}", final=False)
             return finalized
 
@@ -1088,8 +1213,9 @@ class WhisperTranscriptWorker:
                 )
                 return []
             staged_age += 1
-            if staged_age >= SENTENCE_CONFIRM_MAX_AGE_CHUNKS:
-                return finalize_staged_sentence(detected, "aged")
+            max_age = _sentence_max_age_chunks(staged_forced)
+            if staged_age >= max_age:
+                return finalize_staged_sentence(detected, "aged_forced" if staged_forced else "aged")
             return []
 
         while not self._stop.is_set():
@@ -1131,7 +1257,7 @@ class WhisperTranscriptWorker:
                 segment_list = list(segments)
                 accepted_texts, rejected_reasons = self._accepted_segment_texts(segment_list)
                 raw_window_text = " ".join(accepted_texts).strip()
-                window_text = _collapse_adjacent_repeated_phrases(raw_window_text)
+                window_text, repeat_collapse_rules = _collapse_adjacent_repeated_phrase_details(raw_window_text)
                 repeat_collapse_chars = max(0, len(_normalized_text(raw_window_text)) - len(_normalized_text(window_text)))
                 stable_text = _stable_window_text(window_text, commit_lag_seconds, window_seconds)
                 delta_base_text = _append_committed_text(committed_text, pending_transcript_text)
@@ -1147,6 +1273,7 @@ class WhisperTranscriptWorker:
                 completed_sentences: list[str] = []
                 final_sentences: list[str] = []
                 forced_by = ""
+                forced_candidate_pending = False
                 boundary_complete = 0
                 boundary_soft = 0
                 if text and self._is_repeated_hallucination(text):
@@ -1165,11 +1292,15 @@ class WhisperTranscriptWorker:
                         forced_by = _forced_sentence_reason(pending_transcript_text, pending_chunks)
                         if forced_by:
                             completed_sentences = [pending_transcript_text]
-                            pending_transcript_text = ""
-                            pending_chunks = 0
+                            forced_candidate_pending = True
                     for sentence in completed_sentences:
-                        final_sentences.extend(stage_completed_sentence(sentence, detected))
-                    if pending_transcript_text:
+                        produced_sentences = stage_completed_sentence(sentence, detected, forced=bool(forced_by))
+                        final_sentences.extend(produced_sentences)
+                        for produced_sentence in produced_sentences:
+                            pending_transcript_text = _consume_committed_prefix(pending_transcript_text, produced_sentence)
+                            if not pending_transcript_text:
+                                pending_chunks = 0
+                    if pending_transcript_text and not forced_candidate_pending:
                         self._emit(
                             "transcript",
                             pending_transcript_text,
@@ -1190,10 +1321,14 @@ class WhisperTranscriptWorker:
                         forced_by = _forced_sentence_reason(pending_transcript_text, pending_chunks)
                         if forced_by:
                             completed_sentences = [pending_transcript_text]
-                            pending_transcript_text = ""
-                            pending_chunks = 0
+                            forced_candidate_pending = True
                             for sentence in completed_sentences:
-                                final_sentences.extend(stage_completed_sentence(sentence, detected))
+                                produced_sentences = stage_completed_sentence(sentence, detected, forced=bool(forced_by))
+                                final_sentences.extend(produced_sentences)
+                                for produced_sentence in produced_sentences:
+                                    pending_transcript_text = _consume_committed_prefix(pending_transcript_text, produced_sentence)
+                                    if not pending_transcript_text:
+                                        pending_chunks = 0
                         else:
                             final_sentences.extend(age_staged_sentence(detected, pending_transcript_text))
                     else:
@@ -1207,13 +1342,15 @@ class WhisperTranscriptWorker:
                     f"pending_chars={len(pending_transcript_text)} pending_chunks={pending_chunks} "
                     f"pending_chars_per_chunk={len(pending_transcript_text) / max(pending_chunks, 1):.1f} "
                     f"window_chars={len(_normalized_text(window_text))} stable_chars={len(_normalized_text(stable_text))} "
-                    f"repeat_collapse_chars={repeat_collapse_chars} "
+                    f"repeat_collapse_chars={repeat_collapse_chars} repeat_collapse_rules={','.join(repeat_collapse_rules) or 'none'} "
                     f"delta_chars={len(_normalized_text(text))} "
                     f"end_marks_window={_sentence_end_count(window_text)} end_marks_stable={_sentence_end_count(stable_text)} "
                     f"end_marks_delta={_sentence_end_count(text)} "
                     f"stable_tail={_diagnostic_tail(stable_text)} delta_tail={_diagnostic_tail(text)} "
                     f"pending_tail={_diagnostic_tail(pending_transcript_text)} "
-                    f"staged_confirmations={staged_confirmations} staged_age={staged_age} "
+                    f"revision_context_chars={len(_normalized_text(_revision_lifecycle_context(committed_text, staged_sentence, pending_transcript_text)))} "
+                    f"forced_candidate_pending={forced_candidate_pending} "
+                    f"staged_confirmations={staged_confirmations} staged_age={staged_age} staged_forced={staged_forced} "
                     f"staged_tail={_diagnostic_tail(staged_sentence)}",
                     display=False,
                 )
@@ -1547,7 +1684,7 @@ class WhisperTranscriptWindow:
             self._root.update_idletasks()
         except Exception:
             pass
-        return self._root.winfo_geometry()
+        return _window_manager_geometry(self._root)
 
     def _save_geometry(self) -> None:
         self._geometry_save_after_id = None

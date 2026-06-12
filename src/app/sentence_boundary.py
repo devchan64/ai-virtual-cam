@@ -8,7 +8,7 @@ SENTENCE_END_PATTERN = r"(?:(?<!\d)\.(?!\d)|[!?。！？…]+)"
 SENTENCE_END_RE = re.compile(rf"(.+?{SENTENCE_END_PATTERN})(?=\s+|$)")
 SENTENCE_END_MARK_RE = re.compile(SENTENCE_END_PATTERN)
 SOFT_BOUNDARY_RE = re.compile(
-    r"\s+(?=(?:But now|But if|And the|And you|So if|So it|So really|Here is|here is|Once you|once you|Now|Then|This|That|When|If|I like|You can|We can|They can)\b)"
+    r"\s+(?=(?:But now|But if|And the|And you|So if|So it|So really|Here is|here is|Once you|once you|Now|Then|The|This|That|When|If|I like|You can|We can|They can)\b)"
 )
 MIN_SOFT_BOUNDARY_PREFIX_CHARS = 80
 MIN_SOFT_BOUNDARY_SUFFIX_CHARS = 24
@@ -25,6 +25,14 @@ SOFT_BOUNDARY_INCOMPLETE_TAIL_WORDS = {
     "to",
     "which",
     "with",
+}
+ACK_SENTENCE_WORDS = {
+    "okay",
+    "ok",
+    "right",
+    "yeah",
+    "yes",
+    "no",
 }
 
 
@@ -76,6 +84,20 @@ def strip_incomplete_tail(text: str) -> str:
     return normalized
 
 
+def has_incomplete_tail(text: str) -> bool:
+    words = word_units(text)
+    return bool(words and words[-1] in SOFT_BOUNDARY_INCOMPLETE_TAIL_WORDS)
+
+
+def starts_with_ack_sentence(text: str) -> bool:
+    normalized = normalized_text(text)
+    match = SENTENCE_END_RE.match(normalized)
+    if not match:
+        return False
+    words = word_units(match.group(1))
+    return len(words) == 1 and words[0] in ACK_SENTENCE_WORDS
+
+
 def pending_new_text_combined(pending_text: str, new_text: str) -> str:
     pending = normalized_text(pending_text)
     new = normalized_text(new_text)
@@ -95,6 +117,8 @@ def pending_new_text_combined(pending_text: str, new_text: str) -> str:
         for start in range(1, max_start + 1):
             if new_words[start : start + len(pending_words)] == pending_words:
                 return new
+    if has_incomplete_tail(pending) and starts_with_ack_sentence(new):
+        return new
     connective_words = {"and", "but", "because", "so", "or"}
     if pending_words and new_words and len(pending_words) <= 2 and pending_words[0] in connective_words and new_words[0] in connective_words:
         return new

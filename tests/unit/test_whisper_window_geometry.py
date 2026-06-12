@@ -38,6 +38,17 @@ class WhisperWindowGeometryTest(unittest.TestCase):
 
         self.assertEqual(_window_manager_geometry(window), "780x420+50+119")
 
+    def test_transcript_current_geometry_uses_window_manager_geometry(self) -> None:
+        root = SimpleNamespace(
+            update_idletasks=lambda: None,
+            geometry=lambda: "886x608+2538+510",
+            winfo_geometry=lambda: "886x608+2538+547",
+        )
+        window = WhisperTranscriptWindow.__new__(WhisperTranscriptWindow)
+        window._root = root
+
+        self.assertEqual(window._current_geometry(), "886x608+2538+510")
+
     def test_caches_geometry_by_log_without_writing_config_meta(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "setting.json"
