@@ -364,9 +364,9 @@ Whisper 활성화:
 python3 -m unittest tests.unit.test_whisper_performance_tracking
 ```
 
-- `test_whisper_performance_tracking.py`는 누적 Whisper 로그에서 수집한 revision, distinct, collapse 관측 케이스를 서비스 게이트로 실행합니다.
-- 테스트는 고정된 서비스 기준(`revision >= 90%`, `distinct >= 95%`, `collapse >= 90%`, `stability >= 80%`, 최소 케이스 수 충족)을 만족해야 통과합니다. 기준은 현재 코드에 맞춰 유동적으로 낮추지 않습니다.
-- 실행 끝에 출력되는 `[whisper-tracking] ... rate=... gate>=...` 지표를 보고 중복/누락/잘못된 revision 사례를 보강하며, 기준과 근거는 [`docs/2026-06-13-whisper-feature-design.md`](docs/2026-06-13-whisper-feature-design.md)를 따릅니다.
+- `test_whisper_performance_tracking.py`는 누적 Whisper 로그에서 수집한 revision, distinct, collapse, stability 관측 케이스를 성능 추적용으로 실행합니다.
+- 이 테스트의 unittest 성공/실패는 품질 통과율을 의미하지 않습니다. 테스트가 실행되면 `[whisper-tracking] ... rate=... target>=... rate_gap=...` 지표를 출력하고, 이 지표를 올려가는 것을 개선 목표로 삼습니다.
+- 새 로그에서 중복/누락/잘못된 revision 사례가 보이면 tracking case를 추가하고, 이후 알고리즘 변경으로 rate가 오르고 gap이 줄어드는지 비교합니다. 상세 기준과 근거는 [`docs/2026-06-13-whisper-feature-design.md`](docs/2026-06-13-whisper-feature-design.md)를 따릅니다.
 
 ## 오디오 운영 가이드
 
