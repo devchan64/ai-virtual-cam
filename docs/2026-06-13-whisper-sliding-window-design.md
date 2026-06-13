@@ -12,6 +12,11 @@
 
 ## 1) 왜 이 문서가 필요한가 (개편 목적)
 
+이 문서는 위스퍼 기반 스트리밍 STT를 영상회의 지원 도구로 운영하기 위한 문서입니다.
+
+- 1차 목표: 영상회의에서 발생하는 음성 텍스트를 수집해 실시간 번역(회의 지원)으로 제공
+- 2차 목표: 자막이 지원되지 않는 영상 스트리밍 환경에서 실시간 스크립트를 생성해 화면 자막을 보완
+
 이 문서는 위스퍼 스트리밍 전사에서 생기는 **중복/리비전(문장 덮어쓰기)**를 줄이고, 정확도·지연·안정성(안정적 출력)을 동시에 개선하기 위한 구현 정책을 정리한다.
 
 ## 2) 현재 운영 문제
@@ -27,16 +32,24 @@
 - `sentenceBoundaryBackend` 기본값 및 실패 경로가 정책(폴백 없음)에 맞는지 확인.
 - 다국어(특히 KO/ZH) 스트림에서 반복 경계/중복률이 증가하는 구간 존재 여부 확인.
 
-## 2.2 원본 설계 상태 보존 항목(개정판에서 유지)
+### 2.2 원본 설계 상태 보존 항목(개정판에서 유지)
 
 원본 설계에서 누락 없이 유지해야 할 기본 방침은 다음과 같다.
 
 - 중복 제어/리비전 감소는 `confirmed-only` 출력 + 재확인된 확정 구간만 누적 출력.
 - 경계 안정화는 `pending` 기반 강제 확정 패턴(`pending_chunks`, `pending_chars`)을 지표화하고 이를 낮추는 방향으로 단계적 개선.
 - 번역은 기본적으로 `final-only`; 중간 상태 번역은 동일 revision 기준 점진 갱신으로만 제한.
-- 다국어 장기운영 품질 관점에서 `regex`는 최종 운영 백엔드가 아님.
+- 다국어 환경에서는 `regex`는 최종 운영 백엔드가 아님.
 - 설정 유효성 실패 시 자동 폴백 없이 즉시 실패 노출(Fail-Fast).
 
+
+### 2.3 문헌 반영 상태(2026-06-13)
+
+- confirmed-only 출력 + 재확인된 확정 구간만 누적 출력.
+- 경계 안정화는 `pending_chunks`, `pending_chars` 기반 지표를 낮추는 방식으로 단계적 강화.
+- 번역은 `final-only`를 우선 유지하고 partial/staged 번역은 same revision 갱신으로 제한.
+- 다국어 환경에서 `regex`는 최종 운영 백엔드로 채택하지 않음.
+- `sentence_boundary.py`와 `split_completed_sentences` 시그니처 정합은 구현이 진행 중이므로 계속 보강.
 ## 3) 설계 목표 (문헌 기반)
 
 - **속도**: step 기반 갱신 주기(`stepSeconds`)는 유지.
@@ -59,7 +72,7 @@
 ## 4) 기본 처리 파이프라인
 
 ```text
-오디오 입력
+audio 입력
   -> ring buffer 누적
   -> 매 stepSeconds 마다 windowSeconds 구간 채택
   -> Whisper STT 실행
@@ -93,6 +106,31 @@
 0.0s ~ 3.0s -> 전사 -> 출력
 3.0s ~ 6.0s -> 전사 -> 출력
 ```
+
+### 4.2 확정/임시 텍스트 분리의 핵심 규칙
+
+WhisperKit/Streaming 경험을 반영해, 모달은 항상 `confirmed`만 노출한다.
+
+- `hypothesis_text`: 최신 청크에서 즉시 생성되는 임시 텍스트(내부 비교 전용)
+- `confirmed_text`: LCP/경계 기반으로 확정된 텍스트만 노출
+- 확정 후보는 이전 결과와의 겹침(`candidate_text`) 제거 후 비교한다.
+- 같은 chunk 반복 처리에서도 확정 구간만 누적하고, 미확정 구간은 계속 갱신한다.
+- 출력은 `append-only`로 유지한다.
+
+예:
+
+```text
+previous: "Folks, I was one of the first people"
+current:  "the first people in the United States to take delivery"
+new:      "in the United States to take delivery"
+```
+
+초기 구현 원칙:
+- 이전/현재 결과의 최장 공통 접두사를 찾아 겹친 부분을 고정 문맥으로 본다.
+- 겹치지 않는 신규 부분만 `candidate_text`로 계산한다.
+- `commitLagSeconds` 구간은 즉시 확정하지 않는다.
+- 동일 후보 재확인 횟수(`staged_confirmations`)를 만족할 때만 `confirmed`를 확장한다.
+- 정교화 단계에서는 `word_timestamps=true` 기반 시간 정합 후보를 도입한다.
 
 개선 방식:
 
@@ -136,7 +174,7 @@
 
 - 사용자 화면에는 `confirmed_text`만 출력되어야 함.
 - 같은 입력 구간이 같은 창 안에서 서로 다른 최종 문장으로 잦은 전환되지 않아야 함.
-- 번역은 `confirmed_text` 기준으로만 발생해야 함.
+- 번역은 `confirmed`만 큐에 들어가는지 확인.
 
 ## 7) 안정성 판단(코드 정합 용어)
 
@@ -146,7 +184,7 @@
 - `staged_age`: 후보가 보류 상태로 남은 chunk 수
 - `pending_chunks`, `pending_chars`: 강제 확정 트리거 판단 보조값
 - `forced_by=pending_chunks|pending_chars|slow_pending`: 예외 확정 근거
-- `forced_by=pending_chars`는 진단 신호로 먼저 해석, 즉시 확정보다 우선은 완만한 확인 정책 유지.
+- `forced_by=pending_chars`는 진단 신호로 먼저 해석, 즉시 확정보다 완만한 확인 정책 유지.
 
 ### 7.1 개정 배포에서의 용어 정합
 
@@ -170,18 +208,23 @@
 ### 8.3 후보 도구 검토 목록
 
 - `wtpsplit` / SaT
-  - 구두점이 부족한 텍스트에서도 문장 경계를 예측.
-  - KO/EN/ZH 다국어 적용 적합성 실험 대상.
-  - `sat-3l-sm`류 경량 모델부터 검증 권장.
-  - CUDA/ONNX 경로 가능 시도, 실패 시 폴백 금지(Fail-Fast).
+  - `Segment Any Text` 기반 다국어 분절로 구두점이 부족한 텍스트에서도 문장 경계를 제안.
+  - `sat-3l-sm` 류 경량 모델부터 KO/EN/ZH 적합성 실험.
+  - `device=cuda`, `compute=float16` 경로 우선, 로딩/실행 실패 시 regex/CPU로 폴백 없이 Fail-Fast.
+- PySBD
+  - 다국어 분절 라이브러리이나 Golden Rule 기반 규칙 확장 비용이 높아 운영 기본값으로 사용하지 않음.
+  - 참고 또는 비교군으로만 제한.
 - NeMo punctuation/capitalization
-  - 구두점 복원 참고 가치 있음.
-  - 영어 중심 경향이 강해 KO/ZH 기본 백엔드로는 부적합.
+  - ASR 텍스트 구두점 복원용 참고 가치.
+  - 영어 중심 편향으로 KO/ZH 기본 백엔드로 부적합.
 - LLM 기반 후처리
-  - 경계·교정 동시 수행 위험이 있어 기본 경로로 사용 불가.
-  - 필요한 경우 경계 위치만 반환하는 검증기 형태의 제한적 활용만 허용.
+  - 경계와 교정을 동시에 수행하면 원문 보존 위험이 큼.
+  - 사용 시 경계 위치 반환만 허용되는 검증기 형태 제한.
 - LocalAgreement 기반 경계 스무딩
-  - whisper-stable prefix 기반 경계 결합 방식은 병행 검토.
+  - whisper-stable prefix 기반 경계 결합 방식으로 확장 검토.
+- 적용 원칙
+  - 후보 경로는 STT 텍스트를 재작성하지 않고 경계만 제안.
+  - 특정 문구 기반 예외 규칙 추가 확장은 다국어/멀티도메인에서 재발 위험.
 
 ### 8.4 경계 인터페이스(코드 기준)
 
@@ -252,46 +295,132 @@ class SentenceBoundaryDetector:
 - 안전: `confirmed_delta`만 번역
 - 권고: 동일 revision id 갱신(append-only 라인 사용 금지)
 
-### 10.2 배포 체크리스트
+### 10.2 번역 배포 체크리스트
 
 - 다국어 `confirmed`만 큐에 들어가는지 확인
 - 번역 엔진이 pending 구간 재전송으로 재계산을 반복하는지 추적
 - 번역 결과 표시 지연이 `rtf` 기준 허용 범위를 벗어나지 않는지 확인
 
-## 11) 안정성·성능 지표
+## 11) 근거논문 기반 KPI 리포트 프레임(개정판)
 
-- `UPWR`(Unstable Partial Word Ratio)
-- `UPSR`(Unstable Partial Segment Ratio)
-- `replaced ratio`
-- `forced_by=pending_chunks`, `forced_by=pending_chars`
-- `pending_chars` p90 / max
-- `rtf`, `boundary_latency`
-- `UPWR`/`UPSR`는 로그로 수집해 리비전 추적 관측성을 확보한다.
+운영 판단은 “지표가 좋아졌는가”가 아니라, “개정 목표(중복 감소·지연 제어·번역 안정성)가 달성되었는지”를 문헌 근거 지표로 판정한다.
 
-### 11.1 권고 목표(안정성 우선 단계)
+### 11.1 문헌-지표 정합
 
-- `UPSR`: 20% 하향
-- `UPWR`: 15~25% 하향
-- `replaced ratio`: 단계별 지속 감소
-- `pending_chars p90`: 현재 대비 20% 이상 감소
+- **Turning Whisper into Real-Time Transcription System (2023)**: 실시간 디코딩에서 `confirmed`와 `hypothesis` 분리의 정합성이 핵심.
+- **Streaming ASR Stability (Interspeech 2020)**: 사용자 체감 안정성 지표로 `UPWR/UPSR`를 제시, 리비전 품질의 직접 측정치로 사용.
+- **Simul-Whisper (InterSpeech 2024)**: 경계 시점의 과도 지연과 안정성 간 트레이드오프를 측정해야 함.
+- **WhisperKit (2025)**: confirmed/hypothesis 분리 설계의 운영 적용성은 번역 지연 및 중복 전파 감소에 직접적 반영.
+- **Adapting Whisper for Streaming ASR via Two-Pass Decoding (2025)**: 리비전이 줄더라도 지연이 과도하게 늘면 사용자 체감이 저하됨을 전제.
 
-### 11.2 성능 판단 기준
+위 근거를 반영해 KPI를 아래 3개 축으로 묶는다.
 
-- `replaced` 확정 비율이 감소해야 함.
-- `forced_by` 관련 수치가 하락해야 함.
-- `pending_chars p90`과 max 감소.
-- STT `rtf`와 분리해 `boundary_latency`가 실시간 갱신 주기에 과도 부담을 주지 않아야 함.
-- `UPWR`, `UPSR`은 비교군 대비 하향, 번역 품질은 WER/BLEU/CHRF와 같이 추적.
+1. **안정성 축**: 리비전 빈도·규모 감소 (`UPWR`, `UPSR`, `replaced ratio`, `rollback_rate`)
+2. **경계 축**: 문장 경계 추정 품질 (`pending_chars`, `forced_by`, `boundary_latency`, `end_marks_stable`)
+3. **지연/번역 축**: 실시간성 (`stt_rtf`, `total_rtf`), 번역 부하 (`confirmed_only_delta`, `translation_redundant_ratio`)
 
-### 11.3 배포 판정 문턱(권고)
+### 11.2 실험 설계(동작/동일 조건)
 
-- `UPSR` 및 `UPWR`은 이전 릴리스 대비 하향해야 함.
-- `pending_chars p90`은 급증(Regression)하지 않아야 함.
-- 동일 구간 재번역률이 유의미하게 감소해야 함.
+#### A. 비교군 정의
+
+- **Baseline(현행)**: `sentenceBoundaryBackend=regex` (과도기 기준선)
+- **Candidate A**: `sentenceBoundaryBackend=sat` 기본값(실험군)
+- **Candidate B(옵션)**: `sat + pending/강제 확정 임계치 조정`(후속 실험)
+
+#### B. 데이터 분할
+
+- 언어군: `KO`, `EN`, `ZH`를 동일 비율로 운영 동일 조건 재생
+- 사용 시나리오:  
+  - 일반 회의 발화
+  - 연속 낭독/긴 문장
+  - 빠른 발화 전환/문장 경계 희박 구간
+  - 무음/잡음이 섞인 구간
+- 고정 변수: step/window/commitLag, 샘플링 레이트, 모델 크기, 디바이스, 번역 백엔드, UI 렌더링 옵션
+
+#### C. 실행 절차(권장)
+
+1. `baseline`/`candidate`를 동일 오디오 세션 2회 반복 수행(시드 고정).
+2. 각 세션당 12~20분, 최소 30분/언어권.
+3. 로그 레벨 `INFO`에서 이벤트 텍스트/타임스탬프 저장.
+4. 로그 수집 → KPI 집계 스크립트 실행.
+5. 주단위로 KPI 시트 생성, 릴리스 문턱과 비교.
+
+### 11.3 지표 정의(수집식)
+
+#### 11.3.1 로그 입력(필수 필드)
+
+- `split event`: `chunk`, `completed`, `final`, `pending_text`, `forced_by`, `boundary_backend`, `pending_chars`, `pending_chunks`, `pending_chars_per_chunk`
+- `commit event`: `stt_elapsed`, `stt_rtf`, `total_elapsed`, `total_rtf`
+- `transcript fragment`: `delta_text`, `state(confirmed|pending|partial)`, `revision_id`(있으면)
+
+#### 11.3.2 핵심 KPI 공식
+
+- `UPWR = unstable_word_count / emitted_word_count`
+  - 같은 오디오 구간에서 확정 전/후로 **삭제/교체된 단어 수 / 누적 출력 단어 수**
+- `UPSR = unstable_segment_count / emitted_segment_count`
+  - 확정 세그먼트 기준 교체/삭제 비율
+- `ReplacedRatio = replaced_count / emitted_segment_count`
+  - `forced_by` 유무와 무관하게 순수 재작성 비율
+- `ForcedByRate = (forced_by=pending_chars or pending_chunks count) / split_count`
+- `PendingOverrun = pending_chars_p90`, `pending_chars_max`, `slow_pending_count`
+- `DupAmplification = total_output_chars / canonical_committed_chars`
+  - 1.0에 가까울수록 이상 없음
+- `BoundaryLatencyP95 = p95(boundary_detect_end - chunk_end)`(로그에서 경계 처리 구간으로 대체 계산)
+- `Latency = p95(stt_rtf)` 및 `p95(total_rtf)`
+
+#### 11.3.3 번역 영향 지표
+
+- `confirmed_only_ratio = confirmed_delta_bytes / total_transcript_bytes`
+- `translation_redundant_ratio = duplicated_translation_chars / total_translation_chars`
+- `translation_delay_p95 = p95(translation_submit_ts - confirmed_commit_ts)`
+- 번역 품질 `WER/BLEU/CHRF`는 오디오 정답 대비 오프라인 점검군에서 별도 계산
+  - **번역은 보정용 KPI가 아니라 배포 리스크 지표로 사용**
+
+### 11.4 보고서 생성 워크플로우
+
+#### 리포트 산출물(권장 형식)
+
+- `summary`: config 요약, 실험군/대조군 식별자, 총 세션수, 오디오 길이
+- `kpi_by_lang`: 언어별 `UPWR`, `UPSR`, `pending_chars_p90`, `forced_by_rate`, `p95 rtf`, `p95 boundary_latency`
+- `kpi_diff`: baseline 대비 Delta 및 상대 개선률
+- `risk_flags`: 규정 위반 항목 자동 라벨링
+- `go_no_go`: 항목별 자동 판정(정량)
+
+#### 판정 규칙(Go / No-Go / Ramp)
+
+- **Go**
+  - `UPWR`, `UPSR`가 baseline 대비 각각 15% 이상 개선
+  - `pending_chars_p90`이 baseline 대비 10% 개선
+  - `confirmed_only_ratio >= 0.9`
+  - `p95(total_rtf)`가 목표값(예: 0.5) 이내
+- **No-Go**
+- 임의 1개 이상 중대한 회귀(정량 기준):
+  - `p95(total_rtf)`가 baseline 대비 +20% 이상 악화
+  - `UPWR` 또는 `UPSR`이 baseline 대비 +15% 이상 악화
+  - `DupAmplification > 1.3` 지속
+- **Ramp**
+  - Go/No-Go 임계 미만이지만 품질 회복 여지가 있는 경우
+  - 규칙: `pending_chars`와 `forced_by`가 개선되고 `rtf` 악화가 5% 이하일 때
+
+### 11.5 최소 수집 템플릿(예시)
+
+- 파일: `docs/reports/whisper-sliding-window-kpi-{{date}}.md`
+- 기본 항목:
+  - 실행 식별자 / 실험군
+  - 조건(모델, step/window/commitLag, backend)
+  - 언어별 KPI 표
+  - 회귀 요약 Top 5 로그 예시
+  - 다음 액션(해결/유보/전환) 체크리스트
+
+### 11.6 운영 주기 및 반영 절차
+
+- **일간**: 1회 자동 KPI 수집, 지표 급변 감시(`forced_by`, `UPSR`, `rtf`)
+- **주간**: 후보군 비교 리포트 배포 리뷰
+- **릴리스 직전 2주**: 동일 세션셋으로 재현성 검증, 최종 판정
 
 ## 12) 점진적 적용 순서
 
-1. 경계 모듈 분리 정리 및 상태/로깅 정리
+1. 경계 모듈 분리 정리 및 상태/로깅 정합화
 2. 기존 슬라이딩 윈도우 테스트를 새 인터페이스 기준으로 정합화
 3. 설정 스키마/기본값 정합(현재 값은 `sentenceBoundaryBackend` 동작/실패 처리 포함)
 4. 다국어 실험 백엔드(`sat`) 정합성 통합
@@ -336,3 +465,7 @@ class SentenceBoundaryDetector:
 - [Conformer: Convolution-augmented Transformer for Speech Recognition](https://arxiv.org/abs/2005.08100)
 - [wav2vec 2.0: A Framework for Self-Supervised Learning of Speech Representations](https://arxiv.org/abs/2006.11477)
 - [RNN-Transducer: Sequence Modeling with RNN-T for Streaming ASR](https://arxiv.org/abs/1211.3711)
+- [Segment Any Text: A Universal Approach for Robust, Efficient and Adaptable Sentence Segmentation](https://arxiv.org/abs/2406.16678)
+- [wtpsplit GitHub README](https://github.com/segment-any-text/wtpsplit)
+- [Where’s the Point? Self-Supervised Multilingual Punctuation-Agnostic Sentence Segmentation](https://aclanthology.org/2023.acl-long.398/)
+- [PySBD: Pragmatic Sentence Boundary Disambiguation](https://arxiv.org/abs/2010.09657)

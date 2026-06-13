@@ -169,33 +169,39 @@ new:      "in the United States to take delivery"
 - `end_marks_stable=0` 상태에서 `forced_by=pending_chunks` 또는 `forced_by=pending_chars`가 반복되면 구두점 기반 분할이 실패한 것이다.
 - 확정 전 녹색 문장이 길게 유지되다가 검은색 확정 문장으로 바뀔 때 이전 문맥이 섞이면 delta 계산만으로는 부족하다.
 
-따라서 다음 단계는 STT 결과를 직접 문장으로 확정하지 않고, 별도 문장 경계 검출기를 통해 안정적인 문장 후보만 추출하는 것이다. 이 기능의 목표는 문장을 새로 고치거나 교정하는 것이 아니라, 원 STT 텍스트 안에서 확정 가능한 경계를 찾는 것이다.
+따라서 다음 단계는 STT 결과를 직접 문장으로 확정하지 않고, 별도 문장 경계 검출기를 통해 안정적인 문장 후보만 추출하는 것이다. 이 기능의 목표는 문장을 새로 고치거나 교정하는 것이 아니라, 원 STT 텍스트 안에서 확정 가능한 경계를 찾는 것이다. 운영 중 발견된 특정 문구마다 정규식 규칙을 추가하는 방식은 한국어, 영어, 중국어가 섞이는 실시간 경로에서 유지보수성과 정확도를 동시에 악화시키므로 금지한다.
 
-Simul-Whisper의 `cross-attention 기반 정렬 + truncation-detection`은 이 레이어의 핵심 동작과 정합성이 높아, 경계 검출 백엔드 후보의 우선순위 1순위로 둔다.
+Simul-Whisper의 `cross-attention 기반 정렬 + truncation-detection`은 이 레이어의 핵심 동작과 정합성이 높다. 텍스트 레벨 문장 경계는 `SaT/wtpsplit`을 우선 적용하고, 이후 오디오 정렬 신호를 결합하는 순서로 확장한다.
 
 ### 후보 도구
 
 1. `wtpsplit` / SaT
 
-   - 구두점이 부족한 텍스트에서도 문장 경계를 예측하는 다국어 sentence segmentation 모델이다.
-   - 한국어, 영어, 중국어를 포함한 다국어 입력에 적용하기 적합하다.
-   - 작은 모델(`sat-3l-sm` 등)부터 테스트하고, CUDA/ONNX 경로를 사용할 수 있는지 확인한다.
-   - Fail-Fast 정책에 따라 `device=cuda`로 설정했는데 CUDA 초기화나 모델 로딩이 실패하면 CPU fallback 없이 중지한다.
+   - `Segment Any Text` 논문과 구현은 구두점 의존도를 낮춘 다국어 sentence segmentation을 목표로 한다.
+   - 프로젝트 README 기준 `sat-3l-sm`은 일반 문장 분할용 작은 모델이며, 한국어(`ko`), 영어(`en`), 중국어(`zh`)를 포함한 85개 언어를 지원한다.
+   - PyTorch CUDA와 ONNX CUDA 경로를 제공하므로 실시간 STT 후처리 지연을 줄일 여지가 있다.
+   - 기본 runtime backend는 `sat`로 둔다. `device=cuda`, `compute=float16` 설정에서 모델 로딩 또는 CUDA 실행이 실패하면 regex나 CPU로 자동 전환하지 않고 Fail-Fast 한다.
 
-2. NeMo punctuation/capitalization
+2. PySBD
+
+   - 다국어 sentence boundary disambiguation 라이브러리지만 Golden Rule 기반이다.
+   - 이번 문제처럼 구두점이 부족하고 중첩 revision이 생기는 ASR 출력에는 케이스별 규칙 증가 문제를 다시 만들 가능성이 높다.
+   - 운영 기본값으로 사용하지 않고 참고 또는 비교 대상으로만 둔다.
+
+3. NeMo punctuation/capitalization
 
    - ASR 텍스트의 구두점 복원에는 유용하지만 기본 pretrained 경로가 영어 중심이다.
    - 한국어/중국어 실시간 경로의 기본 후보로 두기에는 적합성이 낮다.
 
-3. LLM 기반 후처리
+4. LLM 기반 후처리
 
    - 문장 경계와 문장 교정을 동시에 할 수 있지만, 원음에 없는 문장을 만들어낼 위험이 있다.
-   - 사용한다면 원문 단어를 보존하고 경계 위치만 반환하는 검증기 형태로 제한한다. 기본 경로로는 사용하지 않는다.
+   - 사용한다면 원문 토큰 보존과 경계 위치 반환만 허용하는 검증기 형태로 제한한다. 기본 경로로는 사용하지 않는다.
 
-4. LocalAgreement 기반 경계 스무딩(검토 항목)
+5. LocalAgreement 기반 경계 스무딩
 
-- Whisper-Streaming의 핵심 정책을 바탕으로, `stable_prefix`를 계산해 문장 경계 후보와 결합하는 방식.
-- 문장 경계 자체를 새로 생성하지 않고, 경계 후보의 안정성 점수만 보강한다.
+   - Whisper-Streaming의 핵심 정책을 바탕으로 `stable_prefix`를 계산해 모델 경계 후보와 결합한다.
+   - 문장 경계 자체를 새로 생성하지 않고, 경계 후보의 revision 안정성만 보강한다.
 
 ### 설계 인터페이스(현재 구현 반영)
 
@@ -231,8 +237,9 @@ class SentenceBoundaryDetector:
 
 초기 backend:
 
-- `regex`: 과도기 동작 백엔드(현재 유지되는 폴백 계층). 다국어 안정성 관점에서 장기 운영 백엔드로는 사용하지 않는다.
-- `sat`: wtpsplit/SaT 기반 구현을 다국어 실험 백엔드로 우선 후보화.
+- `sat`: wtpsplit/SaT 기반 운영 기본값이다.
+- `mock`: 단위 테스트와 UI 보조 경로용이다.
+- `regex`: legacy regression 비교용이다. 새 언어별 규칙을 추가하지 않는다.
 
 ### 확정 알고리즘 변경
 
@@ -262,6 +269,30 @@ stable_text
 - 확정 문장은 검은색 final 라인으로 고정하고, 번역 final 입력은 이 확정 문장만 사용한다.
 - 기본 번역 정책은 final-only이다. partial/staged 번역은 중복 번역과 premature translation을 만들기 쉬우므로 기본값에서 비활성화한다.
 - partial 번역을 다시 허용하는 경우에도 source revision id 기반으로 같은 라인을 갱신해야 하며, append-only 번역 라인으로 처리하지 않는다.
+
+## 운영 관측: 한국어 중복 확정
+
+2026-06-13 운영 로그에서 다음 유형의 중복 확정이 관측되었다.
+
+```text
+금리를 좀 내렸으면 좋겠는데 지금 내릴 수가 없는 상황이잖아요 물가가 계속 올라가고 있다 보니까 거기에다가 일본이 엔캐리 청산을 하고 거기에다가 일본이 엔케리 청산을 하고 있는 지금
+하고 있는 상황 때문에 이제 중장기
+
+브이코스피라고 하는 공포지수가 있죠 미국에서 시작된 30년 만기 9호째 국고째 금리가 5%를 뚫고 만기 지나가면서 V코스피가 82까지 이제 뚫고 지나가면서 V 코스피가 82까지 올라갔어요
+```
+
+해석:
+
+- 같은 sliding window 안에서 Whisper가 이전 발화를 다른 표기로 재작성한다. 예: `엔캐리`와 `엔케리`, `V코스피`와 `브이코스피`.
+- 현재 revision lifecycle이 의미상 같은 발화의 재작성인지, 새 문장인지 판단하기 전에 일부 fragment를 확정한다.
+- regex나 특정 문구 필터를 추가하면 이 케이스는 줄일 수 있지만 언어와 주제가 바뀌는 즉시 같은 문제가 재발한다.
+
+개선 방향:
+
+- sentence boundary는 `sat` 모델 후보만 사용하고, 확정은 revision lifecycle에서 같은 후보가 여러 step 동안 안정화된 뒤 수행한다.
+- 중복 억제는 surface form 문자열 일치가 아니라 normalized token overlap, stable prefix, staged revision id 기준으로 처리한다.
+- 긴 한국어 발화에서는 `pending` 제거 전에 최소 1회 이상의 revision 검증 기회를 부여한다.
+- 로그에는 `boundary_backend`, `pending_chars`, `staged_age`, `replaced`, `forced_by`, `stable_tail`, `pending_tail`을 남겨 경계 모델 오류와 lifecycle 오류를 분리한다.
 
 ## 안정성 지표(운영 기준)
 
@@ -311,7 +342,7 @@ UPWR/UPSR를 로그로 추가해 리비전 관측성을 확보한다.
 ## 구현 우선순위(요약)
 
 1. 문자열 LCP + 재확인 카운트 기반 stable 확정(현재 구조 최소 변경)
-2. 문장 경계 detector 분리 및 `sat` 백엔드 실험
+2. 문장 경계 detector의 `sat` 기본 경로 안정화
 3. UPWR/UPSR/forced 지표 수집
 4. 안정성 기준 통과 시 `replacements-trimming` 계층(경계 불안정 토큰 제거) 도입
 5. Two-Pass/causal fine-tune 검토(모델 계층 변경 단계)
@@ -324,3 +355,7 @@ UPWR/UPSR를 로그로 추가해 리비전 관측성을 확보한다.
 - [WhisperKit](https://openreview.net/pdf?id=6lC3MPFbVg)
 - [Adapting Whisper for Streaming Speech Recognition via Two-Pass Decoding](https://arxiv.org/abs/2506.12154)
 - [WhisperRT](https://arxiv.org/abs/2508.12301)
+- [Segment Any Text: A Universal Approach for Robust, Efficient and Adaptable Sentence Segmentation](https://arxiv.org/abs/2406.16678)
+- [wtpsplit GitHub README](https://github.com/segment-any-text/wtpsplit)
+- [Where’s the Point? Self-Supervised Multilingual Punctuation-Agnostic Sentence Segmentation](https://aclanthology.org/2023.acl-long.398/)
+- [PySBD: Pragmatic Sentence Boundary Disambiguation](https://arxiv.org/abs/2010.09657)
