@@ -698,6 +698,28 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
         self.assertEqual(_sentence_output_delta(committed, "Hi."), "")
         self.assertEqual(_sentence_output_delta(committed, "$16.24"), "$16.24")
 
+    def test_sentence_revision_detects_korean_tail_extension(self) -> None:
+        # Regression-style Korean case: short committed tail extended by the next stable chunk.
+        staged = "다음은 가장 저렴한 부분입니다."
+        revised = "다음은 가장 저렴한 부분입니다. 액셀러를 누릅니다."
+
+        self.assertTrue(_sentences_are_revisions(staged, revised))
+        self.assertEqual(_prefer_sentence_revision(staged, revised), revised)
+        self.assertEqual(_new_text_delta(staged, revised), "액셀러를 누릅니다.")
+
+    def test_sentence_output_delta_suppresses_korean_exact_repeat(self) -> None:
+        # Regression from ongoing Korean stream where the same sentence is emitted repeatedly.
+        self.assertEqual(_sentence_output_delta("다음 영상에서 만나요.", "다음 영상에서 만나요."), "")
+        self.assertEqual(_sentence_output_delta("다음 영상에서 만나요", "다음 영상에서 만나요."), "")
+
+    def test_staged_sentence_does_not_age_on_korean_revision_candidate(self) -> None:
+        # Ensure Korean staged text waits for stabilized revision rather than aging prematurely.
+        staged = "우리는 맥북을 통신으로 사용할 수 있을 것입니다"
+        pending = "이는 맥북을 통신으로 사용할 수 있을 것입니다"
+
+        self.assertTrue(_sentences_are_revisions(staged, pending))
+        self.assertFalse(_should_age_staged_sentence(staged, pending))
+
     def test_sentence_revision_prefers_take_care_completion_from_charge_log(self) -> None:
         # Regression from avc-whisper.log chunks 567-570.
         noisy = "Do you want to connect it or sure i'll take care me to go?"
