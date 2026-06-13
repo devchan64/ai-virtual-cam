@@ -67,6 +67,11 @@ from scripts.config.audio_devices import (
     _resolve_and_validate_audio_runtime_devices,
 )
 from scripts.config.components import add_numeric_slider
+from scripts.config.i18n import (
+    LANG_PACK_DIR,
+    load_language_pack as _load_language_pack,
+    read_flat_yaml as _read_flat_yaml,
+)
 from scripts.config.audio_tab import build_audio_tab
 from scripts.config.background_tab import build_background_tab
 from scripts.config.crop_tab import build_crop_tab
@@ -110,7 +115,6 @@ def _audio_denoise_backend_options():
 
 
 VIRTUAL_CAMERA_LABEL = "ai-virtual-cam"
-LANG_PACK_DIR = ROOT_DIR / "config" / "i18n"
 DEFAULT_WINDOW_GEOMETRY = "780x900"
 DEFAULT_WINDOW_GEOMETRY_META = {
     "windowGeometry": "780x900+0+0",
@@ -238,34 +242,6 @@ def _parse_window_geometry_cache_log(line: str) -> tuple[str, str] | None:
     if parts is None:
         return None
     return key, _format_window_geometry(parts)
-
-
-def _read_flat_yaml(path: Path) -> dict[str, str]:
-    data: dict[str, str] = {}
-    if not path.exists():
-        return data
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or ":" not in line:
-            continue
-        key, value = line.split(":", 1)
-        key = key.strip()
-        value = value.strip()
-        if value.startswith(("'", '"')) and value.endswith(("'", '"')) and len(value) >= 2:
-            value = value[1:-1]
-        data[key] = value
-    return data
-
-
-def _load_language_pack(language: str) -> dict[str, str]:
-    normalized = (language or "ko").strip().lower()
-    if normalized not in {"ko", "en"}:
-        normalized = "ko"
-    fallback = _read_flat_yaml(LANG_PACK_DIR / "config-gui.en.yaml")
-    selected = _read_flat_yaml(LANG_PACK_DIR / f"config-gui.{normalized}.yaml")
-    merged = dict(fallback)
-    merged.update(selected)
-    return merged
 
 
 def _run_cmd(cmd: list[str], *, check: bool = False, timeout: float | None = 1.5) -> subprocess.CompletedProcess:

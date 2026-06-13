@@ -253,11 +253,21 @@ class FunasrCtPuncSentenceBoundaryDetector:
         self.model = str(model or DEFAULT_FUNASR_CT_PUNC_MODEL).strip() or DEFAULT_FUNASR_CT_PUNC_MODEL
         self.device = str(device or "cuda").strip().lower()
         try:
-            from funasr import AutoModel
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=SyntaxWarning)
+                from funasr import AutoModel
+        except ModuleNotFoundError as exc:
+            missing = getattr(exc, "name", None) or str(exc)
+            raise ImportError(
+                "sentence boundary backend 'funasr-ct-punc' requires FunASR runtime dependencies. "
+                f"missing={missing}. Run ./bin/avc setup to install FunASR/torchaudio; "
+                "fallback is intentionally disabled."
+            ) from exc
         except Exception as exc:
             raise ImportError(
-                "sentence boundary backend 'funasr-ct-punc' requires funasr. "
-                "Run ./bin/avc setup or install funasr; fallback is intentionally disabled."
+                "sentence boundary backend 'funasr-ct-punc' failed while importing FunASR. "
+                f"cause={type(exc).__name__}: {exc}. Run ./bin/avc setup; "
+                "fallback is intentionally disabled."
             ) from exc
         try:
             self._model = AutoModel(model=self.model, device=self.device)

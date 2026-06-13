@@ -272,8 +272,8 @@ install_translation_torch_packages() {
     fi
   fi
 
-  log "Installing PyTorch for Whisper translation from $torch_index_url"
-  run_as_invoking_user "$venv_py" -m pip install --upgrade torch --index-url "$torch_index_url"
+  log "Installing PyTorch/Torchaudio for Whisper translation and FunASR post-processing from $torch_index_url"
+  run_as_invoking_user "$venv_py" -m pip install --upgrade torch torchaudio --index-url "$torch_index_url"
 }
 
 install_whisper_cuda_runtime_packages() {
@@ -311,11 +311,11 @@ verify_whisper_runtime_contract() {
   if ! run_as_invoking_user "$venv_py" -c "import faster_whisper" >/dev/null 2>&1; then
     fail "faster-whisper is not importable in .venv. Run ./bin/avc setup again."
   fi
-  if ! run_as_invoking_user "$venv_py" -c "import funasr" >/dev/null 2>&1; then
-    fail "FunASR is not importable in .venv. Run ./bin/avc setup again to install Chinese Whisper post-processing dependencies."
+  if ! run_as_invoking_user "$venv_py" -c "import transformers, sentencepiece, torch, torchaudio" >/dev/null 2>&1; then
+    fail "Whisper translation dependencies are not importable in .venv. Run ./bin/avc setup again to install transformers, sentencepiece, torch, and torchaudio."
   fi
-  if ! run_as_invoking_user "$venv_py" -c "import transformers, sentencepiece, torch" >/dev/null 2>&1; then
-    fail "Whisper translation dependencies are not importable in .venv. Run ./bin/avc setup again to install transformers, sentencepiece, and torch."
+  if ! run_as_invoking_user "$venv_py" -c "import funasr" >/dev/null 2>&1; then
+    fail "FunASR is not importable in .venv. Run ./bin/avc setup again to install Chinese Whisper post-processing dependencies, including torchaudio."
   fi
   if [[ "$OS_KIND" == "linux" && "$INSTALL_TRANSLATION_TORCH" == "1" ]]; then
     run_as_invoking_user "$venv_py" - <<'PYVERIFY'

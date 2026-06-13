@@ -29,6 +29,18 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         cls.module = _load_config_gui_module()
         cls.audio_devices = importlib.import_module("scripts.config.audio_devices")
 
+
+    def test_whisper_tab_i18n_keys_exist_for_korean_and_english(self) -> None:
+        source = (REPO_ROOT / "scripts" / "config" / "whisper_tab.py").read_text(encoding="utf-8")
+        import re
+        keys = set(re.findall(r'"((?:label|hint|button)\.whisper[^"]+)"', source))
+        self.assertGreater(len(keys), 20)
+
+        for lang in ("ko", "en"):
+            pack = self.module._read_flat_yaml(self.module.LANG_PACK_DIR / f"config-gui.{lang}.yaml")
+            missing = sorted(key for key in keys if key not in pack)
+            self.assertEqual(missing, [], f"missing Whisper i18n keys for {lang}")
+
     def test_resolve_and_validate_audio_runtime_devices_maps_display_values(self) -> None:
         with mock.patch.object(self.audio_devices.platform, "system", return_value="Linux"), mock.patch.object(
             self.audio_devices,
