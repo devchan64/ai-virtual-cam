@@ -715,6 +715,47 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
         self.assertTrue(_sentences_are_revisions(first, revised))
         self.assertEqual(_prefer_sentence_revision(first, revised), revised)
 
+
+    def test_revision_lifecycle_simulates_revised_tail_extension(self) -> None:
+        # Regression-like sequence: pending sentence tail gets expanded, then confirmed.
+        completed, pending = _split_completed_sentences("", "It's like a shark now")
+        self.assertEqual(completed, [])
+        self.assertEqual(pending, "It's like a shark now")
+
+        # Later revision candidate from Whisper is considered a revision of staged text.
+        revised = "It's hunting like a shark Now, it's hunting."
+        staged = pending
+        self.assertTrue(_sentences_are_revisions(staged, revised))
+
+        finalized = _prefer_sentence_revision(staged, revised)
+        self.assertEqual(finalized, revised)
+
+        # Sliding delta behavior for the same segment should remain minimal after confirmation.
+        self.assertEqual(_new_text_delta(staged, finalized), "it's hunting.")
+
+    def test_revision_lifecycle_simulates_connective_and_numeric_fragment_block(self) -> None:
+        # sequence observed with tail fragments like numeric and connective artifacts.
+        self.assertEqual(
+            _sentence_output_delta(
+                "charge of the day it is currently",
+                "charge of the day it is currently 7 30 p.m.",
+            ),
+            "7 30 p m",
+        )
+
+        self.assertEqual(
+            _sentence_output_delta(
+                "saying dry weight is around 5,800 pounds and it has a GBWR of 6,800",
+                "are 6,800 pounds.",
+            ),
+            "",
+        )
+
+        self.assertEqual(
+            _sentence_output_delta("Let's do it now.", "do it now."),
+            "",
+        )
+
     def test_sentence_output_delta_keeps_on_ramp_tail_from_bathroom_log(self) -> None:
         # Regression from avc-whisper.log chunks 641-653.
         committed = "I have had to take it off of self-driving twice because it continues to have a problem finding the correct on-ramp"
