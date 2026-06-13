@@ -15,6 +15,7 @@ TENSORRT_ENGINE_PATH="${AVC_TENSORRT_ENGINE_PATH:-}"
 INSTALL_WHISPER_CUDA="${AVC_INSTALL_WHISPER_CUDA:-1}"
 INSTALL_TRANSLATION_TORCH="${AVC_INSTALL_TRANSLATION_TORCH:-1}"
 TORCH_INDEX_URL="${AVC_TORCH_INDEX_URL:-}"
+DOWNLOAD_WHISPER_MODELS="${AVC_DOWNLOAD_WHISPER_MODELS:-ask}"
 
 log() {
   printf '[ai-virtual-cam] %s\n' "$*"
@@ -63,6 +64,8 @@ Linux setup also installs Docker host dependencies for `./bin/avc docker`.
 
 Options:
   --input-device N         Expected USB camera device number (default: 0)
+  --download-whisper-models Pre-download default Whisper/STT models during setup
+  --skip-whisper-models    Skip Whisper/STT model pre-download prompt
   --dry-run                Print commands without executing them
 
 Environment:
@@ -73,6 +76,7 @@ Environment:
   AVC_INSTALL_WHISPER_CUDA     Linux only: install CUDA runtime libs for faster-whisper (default: 1)
   AVC_INSTALL_TRANSLATION_TORCH Install PyTorch for NLLB translation (default: 1)
   AVC_TORCH_INDEX_URL           PyTorch wheel index URL (Linux default: CUDA 12.8)
+  AVC_DOWNLOAD_WHISPER_MODELS    Pre-download Whisper/STT models: ask, 1, or 0 (default: ask)
   -h, --help               Show this help
 EOF
 }
@@ -106,6 +110,7 @@ elevate_linux_with_sudo() {
     AVC_INSTALL_WHISPER_CUDA="$INSTALL_WHISPER_CUDA" \
     AVC_INSTALL_TRANSLATION_TORCH="$INSTALL_TRANSLATION_TORCH" \
     AVC_TORCH_INDEX_URL="$TORCH_INDEX_URL" \
+    AVC_DOWNLOAD_WHISPER_MODELS="$DOWNLOAD_WHISPER_MODELS" \
     bash "$0" "$@"
 }
 
@@ -378,6 +383,44 @@ resolve_tensorrt_engine_path() {
   printf '%s\n' "$home_dir/.avc/models/person-segmentation.engine"
 }
 
+should_download_whisper_models() {
+  local normalized
+  normalized="$(printf '%s' "$DOWNLOAD_WHISPER_MODELS" | tr '[:upper:]' '[:lower:]')"
+  case "$normalized" in
+    1|yes|y|true|on) return 0 ;;
+    0|no|n|false|off|skip) return 1 ;;
+    ask|"") ;;
+    *) fail "AVC_DOWNLOAD_WHISPER_MODELS must be ask, 1, or 0. Current: $DOWNLOAD_WHISPER_MODELS" ;;
+  esac
+
+  if [[ ! -t 0 ]]; then
+    log "Whisper model pre-download skipped: non-interactive setup (set AVC_DOWNLOAD_WHISPER_MODELS=1 to enable)"
+    return 1
+  fi
+
+  local answer
+  printf '[ai-virtual-cam] Whisper/STT 모델을 지금 미리 다운로드할까요? [y/N] '
+  read -r answer
+  answer="$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]')"
+  [[ "$answer" == "y" || "$answer" == "yes" ]]
+}
+
+download_whisper_models() {
+  if ! should_download_whisper_models; then
+    return 0
+  fi
+
+  local venv_py
+  venv_py="$(pwd)/.venv/bin/python3"
+  if [[ ! -x "$venv_py" ]]; then
+    fail ".venv python not found for Whisper model pre-download: $venv_py"
+  fi
+
+  log "Whisper/STT model pre-download starting. This may download from Hugging Face, FunASR, or ModelScope."
+  run_as_invoking_user "$venv_py" "$(pwd)/scripts/setup/download-whisper-models.py"
+  log "Whisper/STT model pre-download finished"
+}
+
 download_tensorrt_engine() {
   if [[ -z "$TENSORRT_ENGINE_URL" ]]; then
     log "TensorRT engine download skipped (AVC_TENSORRT_ENGINE_URL is not set)"
@@ -435,6 +478,14 @@ parse_args() {
         DRY_RUN=1
         shift
         ;;
+      --download-whisper-models)
+        DOWNLOAD_WHISPER_MODELS=1
+        shift
+        ;;
+      --skip-whisper-models)
+        DOWNLOAD_WHISPER_MODELS=0
+        shift
+        ;;
       -h|--help)
         usage
         exit 0
@@ -472,6 +523,7 @@ main() {
   download_tensorrt_engine
   verify_host_contract
   verify_whisper_runtime_contract
+  download_whisper_models
   log "Host dependency setup completed"
   if [[ "$OS_KIND" == "linux" ]]; then
     log "Linux Docker host deps installed: docker, docker compose, xauth, xhost"

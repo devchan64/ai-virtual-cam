@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 import queue
+from unittest import mock
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -304,6 +305,28 @@ class WhisperWindowGeometryTest(unittest.TestCase):
             _sanitize_window_geometry("780x420+2912+627", width, height),
             "780x420+2912+627",
         )
+
+    def test_preloads_sentence_boundary_model_before_transcribe_loop_for_configured_language(self) -> None:
+        worker = WhisperTranscriptWorker(
+            WhisperConfig.from_dict({"inputDevice": "default", "language": "zh"}),
+            queue.Queue(),
+        )
+
+        with mock.patch.object(worker, "_sync_sentence_boundary_detector") as sync_detector:
+            worker._preload_sentence_boundary_detector()
+
+        sync_detector.assert_called_once_with("zh")
+
+    def test_preloads_sentence_boundary_model_before_transcribe_loop_for_auto_language(self) -> None:
+        worker = WhisperTranscriptWorker(
+            WhisperConfig.from_dict({"inputDevice": "default", "language": "auto"}),
+            queue.Queue(),
+        )
+
+        with mock.patch.object(worker, "_sync_sentence_boundary_detector") as sync_detector:
+            worker._preload_sentence_boundary_detector()
+
+        sync_detector.assert_called_once_with("en")
 
     def test_filters_low_confidence_segments(self) -> None:
         worker = WhisperTranscriptWorker(WhisperConfig.from_dict({"inputDevice": "default"}), queue.Queue())

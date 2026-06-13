@@ -311,6 +311,12 @@ class WhisperTranscriptWorker:
         model = getattr(self._cfg, f"sentenceBoundaryModel{suffix}", self._sentence_boundary_model)
         return backend or self._sentence_boundary_backend, str(model).strip() if model is not None else None
 
+    def _preload_sentence_boundary_detector(self) -> None:
+        language = str(getattr(self._cfg, "language", "en")).strip().lower()
+        if language == "auto":
+            language = self._boundary_detector_language or "en"
+        self._sync_sentence_boundary_detector(language)
+
     def _build_sentence_boundary_detector(self, detected_language: str) -> object:
         device = str(getattr(self._cfg, "sentenceBoundaryDevice", "cuda"))
         compute_type = str(getattr(self._cfg, "sentenceBoundaryComputeType", "float16"))
@@ -482,6 +488,7 @@ class WhisperTranscriptWorker:
                 ) from exc
             self._emit("status", "Whisper 모델 로딩 완료")
             text_translator = None
+            self._emit("status", "Whisper 전처리 모델 준비 시작: 전사/번역은 모든 모델 로딩이 끝난 뒤 시작됩니다.")
             if self._cfg.translationEnabled:
                 translation_status = (
                     "Whisper 내장 영어 번역 창 사용"
@@ -504,6 +511,8 @@ class WhisperTranscriptWorker:
                     self._cfg.translationBeamSize,
                     self._cfg.translationMaxNewTokens,
                 )
+            self._preload_sentence_boundary_detector()
+            self._emit("status", "Whisper 전처리 모델 준비 완료: 입력 캡처와 전사를 시작합니다.")
             self._emit("status", f"입력 장치 열기: {self._cfg.inputDevice}")
 
             if _is_exact_pulse_source(self._cfg.inputDevice):
