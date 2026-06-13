@@ -49,7 +49,7 @@
 - 경계 안정화는 `pending_chunks`, `pending_chars` 기반 지표를 낮추는 방식으로 단계적 강화.
 - 번역은 `final-only`를 우선 유지하고 partial/staged 번역은 same revision 갱신으로 제한.
 - 다국어 환경에서 `regex` 운영 시나리오는 폐기함.
-- `sentence_boundary.py`와 `split_completed_sentences` 시그니처 정합은 구현이 진행 중이므로 계속 보강.
+- `sentence_boundary.py`는 런타임 factory(`create_sentence_boundary_detector`) 기준으로 정합 완료. `split_completed_sentences`는 legacy 회귀 테스트 helper로만 유지.
 ## 3) 설계 목표 (문헌 기반)
 
 - **속도**: step 기반 갱신 주기(`stepSeconds`)는 유지.
@@ -89,7 +89,12 @@ audio 입력
   "windowSeconds": 7.5,
   "commitLagSeconds": 1.5,
   "beamSize": 3,
-  "maxNewTokens": 96
+  "maxNewTokens": 96,
+  "temperature": 0.0,
+  "sentenceBoundaryBackend": "sat",
+  "sentenceBoundaryModel": "sat-3l-sm",
+  "sentenceBoundaryDevice": "cuda",
+  "sentenceBoundaryComputeType": "float16"
 }
 ```
 
@@ -97,6 +102,8 @@ audio 입력
 - `0.5 <= stepSeconds <= 5.0`
 - `stepSeconds <= windowSeconds`
 - `0.0 <= commitLagSeconds < windowSeconds`
+- `sentenceBoundaryBackend` 운영값은 `sat`, 테스트/격리값은 `mock`만 허용
+- `sentenceBoundaryDevice=cuda`, `sentenceBoundaryComputeType=float16`은 운영 기본 경로이며 실패 시 CPU/regex로 자동 전환하지 않음
 
 ### 4.1 배포 전 시나리오 예시
 
@@ -149,7 +156,9 @@ new:      "in the United States to take delivery"
 - `pending_text`: 아직 확정되지 않은 누적 후보
 - `committed_text`: 이미 모달 출력된 확정 누적 텍스트
 - `recent_committed_fragments`: 반복/중복 억제를 위한 최근 출력 조각(현재 정책에서는 보조 참조)
-- `staged_sentence`, `staged_confirmations`, `staged_age`: 문장별 안정성 판단 보조 상태
+- `sentence_boundary_detector`: `create_sentence_boundary_detector`로 생성되는 런타임 경계 검출기
+- `boundary_detector_language`: `language=auto`일 때 감지 언어 변경에 따라 `sat` detector를 재생성하기 위한 현재 detector 언어
+- `staged_sentence`, `staged_confirmations`, `staged_age`, `staged_forced`: 문장별 안정성 판단 보조 상태
 - `replacement_decision`: staged 후보 교체 시 판단 사유(`finalize`, `open_korean_clause`, `partial_revision`, `partial_preserve`, `duplicate_or_suffix`, `aged`)
 - `lifecycle_metrics`: 세션 누적 전사 라이프사이클 카운터
 - `chunk_metrics`: 현재 chunk에서 발생한 라이프사이클 카운터
@@ -261,11 +270,17 @@ class SentenceBoundaryDetector:
         ...
 ```
 
-`split_completed_sentences` 래퍼는 현재 구현에서 경계 모듈 호출 진입점으로 간주한다.
+런타임 호출 진입점은 `create_sentence_boundary_detector`로 생성한 detector의 `split()`이다. `split_completed_sentences` 래퍼는 과거 회귀 테스트와 legacy helper 용도로만 유지하며, 운영 루프에서 사용하지 않는다.
 
 초기/실험 backend 정렬:
-- `legacy-regex`: 과거 회귀 테스트 보존용 helper. 운영 backend와 기준선 비교용으로 사용하지 않음.
-- `sat`: 다국어 실험 후보 1순위(최종 채택 전 검증 단계).
+- `sat`: 현재 운영 기본 backend. `wtpsplit.SaT` 모델을 로드하며 `device=cuda`, `compute=float16` 경로를 기본으로 한다.
+- `mock`: 테스트/격리용 backend. 실제 운영 품질 비교군으로 사용하지 않는다.
+- `legacy-regex`: 과거 회귀 테스트 보존용 helper. 운영 backend와 기준선 비교용으로 사용하지 않으며 `WhisperConfig`에서도 허용하지 않는다.
+
+현재 런타임 제약:
+- `sat` 로딩 시작/완료 로그에는 backend, model, device, compute, language를 출력한다. 캐시에 모델이 없으면 Hugging Face 다운로드가 발생할 수 있음을 stdout 로그로 남긴다.
+- `sat` 로딩/분절 실패는 Fail-Fast다. legacy regex나 CPU로 자동 전환하지 않는다.
+- `language=auto`일 때 감지 언어가 바뀌면 `sat` detector를 해당 언어 기준으로 다시 로드한다. 고정 언어 설정에서는 detector 언어를 실행 중 암묵 변경하지 않는다.
 
 ### 8.5 경계 진단 신호(운영 지표)
 
@@ -364,7 +379,7 @@ class SentenceBoundaryDetector:
 #### 11.3.1 로그 입력(필수 필드)
 
 - `split event`: `chunk`, `completed`, `final`, `pending_text`, `forced_by`, `boundary_backend`, `pending_chars`, `pending_chunks`, `pending_chars_per_chunk`
-- `commit event`: `stt_elapsed`, `stt_rtf`, `total_elapsed`, `total_rtf`
+- `commit event`: `step`, `window`, `commit_lag`, `stt_elapsed`, `stt_rtf`, `translation_elapsed`, `total_elapsed`, `total_rtf`, `beam`, `max_tokens`, `text_chars`
 - `transcript fragment`: `delta_text`, `state(confirmed|pending|partial)`, `revision_id`(있으면)
 
 #### 11.3.2 핵심 KPI 공식
@@ -408,10 +423,10 @@ class SentenceBoundaryDetector:
   - `confirmed_only_ratio >= 0.9`
   - `p95(total_rtf)`가 목표값(예: 0.5) 이내
 - **No-Go**
-- 임의 1개 이상 중대한 회귀(정량 기준):
-  - `p95(total_rtf)`가 baseline 대비 +20% 이상 악화
-  - `UPWR` 또는 `UPSR`이 baseline 대비 +15% 이상 악화
-  - `DupAmplification > 1.3` 지속
+  - 임의 1개 이상 중대한 회귀(정량 기준):
+    - `p95(total_rtf)`가 baseline 대비 +20% 이상 악화
+    - `UPWR` 또는 `UPSR`이 baseline 대비 +15% 이상 악화
+    - `DupAmplification > 1.3` 지속
 - **Ramp**
   - Go/No-Go 임계 미만이지만 품질 회복 여지가 있는 경우
   - 규칙: `pending_chars`와 `forced_by`가 개선되고 `rtf` 악화가 5% 이하일 때
@@ -461,6 +476,7 @@ unittest 성공은 테스트 코드가 실행되어 지표가 수집되었다는
 정답 전사 코퍼스가 준비되면 다음 지표를 추가한다.
 
 - `WER` 또는 한국어/중국어에 적합한 `CER`: 정답 전사 대비 전사 오류율.
+- `UPWR`/`UPSR`: 이미 표시된 partial/hypothesis가 확정 전까지 얼마나 흔들리는지 측정한다.
 - `deletion rate`: 사용자가 관측한 문장 손실 문제를 직접 측정한다.
 - `duplicate insertion rate`: 반복 문장 확정 문제를 직접 측정한다.
 - `RTF`: `처리 시간 / 오디오 길이`로 실시간 가능성을 확인한다.
@@ -485,6 +501,7 @@ unittest 성공은 테스트 코드가 실행되어 지표가 수집되었다는
 - 일반 후보 확정 기준을 2회에서 3회 재확인으로 조정했다.
 - forced 후보 확정 기준은 4회 재확인을 유지한다.
 - `commitLagSeconds` 기본/운영값은 1.5초로 정렬한다.
+- VAD 기반 필터링은 현재 슬라이딩 윈도우 확정 정책과 충돌해 운영 경로에서 제거한다.
 - `chunk_metrics`를 추가해 해당 chunk에서 발생한 `stage_start`, `stage_revision`, `stage_replace`, `stage_discard`, `finalized` 등을 즉시 확인한다.
 - `replacement` 추적 테스트를 추가해 staged 교체 결정의 보존/폐기/확정 품질을 별도 관리한다.
 - 열린 한글 절은 반복 관측만으로 확정하지 않는다.
@@ -513,9 +530,9 @@ stability=10/10 rate=1.000 target>=0.80
 1. 경계 모듈 분리 정리 및 상태/로깅 정합화
 2. 기존 슬라이딩 윈도우 테스트를 새 인터페이스 기준으로 정합화
 3. 설정 스키마/기본값 정합(현재 값은 `sentenceBoundaryBackend` 동작/실패 처리 포함)
-4. 다국어 실험 백엔드(`sat`) 정합성 통합
+4. 다국어 기본 백엔드(`sat`)의 CUDA/float16 로딩 및 분절 실패 케이스를 Fail-Fast 기준으로 안정화
 5. 로그 지표 수집 추가 및 통제군 대비 비교
-6. 지표 개선 시 기본 backend 전환 결정
+6. 지표 개선 시 `sat` 운영 기본값 유지 여부를 재확인
 7. 동일 환경/동일 로그 조건에서 `sat` 결과를 이전 운영 로그와 비교하되 `regex`를 재도입하지 않음
 8. 전환 후 1~2주 관측 기간 동안 안정성 회귀 모니터링
 
@@ -528,7 +545,7 @@ stability=10/10 rate=1.000 target>=0.80
 ### 13.2 구현 우선순위(요약)
 
 1. 문자열 LCP + 재확인 카운트 기반 stable 확정(현재 구조 최소 변경)
-2. 문장 경계 detector 분리 및 `sat` 백엔드 실험
+2. 문장 경계 detector 분리 및 `sat` 백엔드 운영 정합화
 3. UPWR/UPSR/forced 지표 수집
 4. 안정성 기준 통과 시 `replacements-trimming` 계층(경계 불안정 토큰 제거) 도입
 5. Two-Pass/causal fine-tune 검토(모델 계층 변경 단계)
@@ -536,7 +553,8 @@ stability=10/10 rate=1.000 target>=0.80
 ## 14) 실패 시 대응(간단 규칙)
 
 - 임계 지표 악화 시 자동 rollback 정책은 문서화하지 않되, 실시간 실행은 즉시 경고 및 운영자 개입 필요.
-- 백엔드 초기화/로딩 실패는 조건부 CPU fallback 대신 즉시 실패 노출.
+- 백엔드 초기화/로딩/분절 실패는 조건부 CPU fallback 또는 legacy regex fallback 대신 즉시 실패 노출.
+- 모델 다운로드가 필요한 경로는 다운로드 가능성을 사전에 로그로 출력한다.
 
 ### 14.1 개정 배포 운영 절차
 
