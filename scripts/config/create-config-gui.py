@@ -82,6 +82,8 @@ from scripts.config.whisper_tab import build_whisper_tab
 from scripts.config.whisper_options import (
     whisper_language_display_from_raw as _whisper_language_display_from_raw,
     whisper_language_raw_from_display as _whisper_language_raw_from_display,
+    whisper_sentence_boundary_model_options as _whisper_sentence_boundary_model_options,
+    whisper_stt_model_options as _whisper_stt_model_options,
     whisper_translation_target_display_from_raw as _whisper_translation_target_display_from_raw,
     whisper_translation_target_raw_from_display as _whisper_translation_target_raw_from_display,
 )
@@ -1211,7 +1213,23 @@ class ConfigGui:
         whisper_translation_backend_widget = self._widgets.get("whisper_translation_backend")
         if whisper_translation_backend_widget is not None:
             whisper_translation_backend_widget.bind("<<ComboboxSelected>>", self._on_whisper_translation_backend_changed)
+        for key in (
+            "whisper_language",
+            "whisper_post_processing_profile",
+            "whisper_backend",
+            "whisper_stt_backend_en",
+            "whisper_stt_backend_ko",
+            "whisper_stt_backend_zh",
+            "whisper_sentence_boundary_backend",
+            "whisper_sentence_boundary_backend_en",
+            "whisper_sentence_boundary_backend_ko",
+            "whisper_sentence_boundary_backend_zh",
+        ):
+            widget = self._widgets.get(key)
+            if widget is not None:
+                widget.bind("<<ComboboxSelected>>", self._on_whisper_runtime_selection_changed)
         self._on_seg_backend_changed()
+        self._sync_whisper_runtime_options()
         self._sync_whisper_translation_backend_options()
         self._refresh_localized_texts()
         self._schedule_update_scrollbar_state()
@@ -2254,6 +2272,7 @@ class ConfigGui:
         self._set_var("whisper_sentence_boundary_model_zh", whisper_cfg.get("sentenceBoundaryModelZh", defaults["whisper_sentence_boundary_model_zh"]))
         self._set_var("whisper_sentence_boundary_device", whisper_cfg.get("sentenceBoundaryDevice", defaults["whisper_sentence_boundary_device"]))
         self._set_var("whisper_sentence_boundary_compute_type", whisper_cfg.get("sentenceBoundaryComputeType", defaults["whisper_sentence_boundary_compute_type"]))
+        self._sync_whisper_runtime_options()
         self._sync_whisper_translation_backend_options()
 
     def _set_var(self, key: str, value):
@@ -3760,6 +3779,91 @@ class ConfigGui:
                 widget.state(["!disabled"])
             else:
                 widget.state(["disabled"])
+
+    def _on_whisper_runtime_selection_changed(self, _event=None) -> None:
+        self._sync_whisper_runtime_options()
+
+    def _grid_rows(self, parent, rows: list[int], visible: bool) -> None:
+        if parent is None:
+            return
+        target_rows = set(rows)
+        for child in parent.grid_slaves():
+            try:
+                row = int(child.grid_info().get("row", -1))
+            except Exception:
+                continue
+            if row not in target_rows:
+                continue
+            if visible:
+                child.grid()
+            else:
+                child.grid_remove()
+
+    def _set_combobox_values_for_backend(self, key: str, values: list[str]) -> None:
+        widget = self._widgets.get(key)
+        var = self.vars.get(key)
+        if widget is not None:
+            widget["values"] = tuple(values)
+        if var is not None and values and var.get().strip() not in values:
+            var.set(values[0])
+
+    def _sync_whisper_runtime_options(self) -> None:
+        language_var = self.vars.get("whisper_language")
+        selected_language = _whisper_language_raw_from_display(language_var.get()) if language_var is not None else "en"
+        if selected_language not in {"en", "ko", "zh"}:
+            selected_language = "en"
+        profile_var = self.vars.get("whisper_post_processing_profile")
+        profile = profile_var.get().strip() if profile_var is not None else "auto-by-language"
+        language_driven = profile == "auto-by-language"
+
+        for row in getattr(self, "_whisper_global_stt_rows", []):
+            self._grid_rows(getattr(self, "_whisper_tab", None), [row], not language_driven)
+
+        stt_frame = getattr(self, "_whisper_stt_frame", None)
+        if stt_frame is not None:
+            if language_driven:
+                stt_frame.grid()
+            else:
+                stt_frame.grid_remove()
+        for lang, rows in getattr(self, "_whisper_stt_language_rows", {}).items():
+            self._grid_rows(stt_frame, rows, language_driven and lang == selected_language)
+
+        post_frame = getattr(self, "_whisper_post_frame", None)
+        if post_frame is not None:
+            if language_driven:
+                post_frame.grid()
+            else:
+                post_frame.grid_remove()
+        for lang, rows in getattr(self, "_whisper_post_language_rows", {}).items():
+            self._grid_rows(post_frame, rows, language_driven and lang == selected_language)
+
+        for row in getattr(self, "_whisper_manual_boundary_rows", []):
+            self._grid_rows(getattr(self, "_whisper_tab", None), [row], not language_driven)
+
+        active_stt_backend_key = f"whisper_stt_backend_{selected_language}" if language_driven else "whisper_backend"
+        active_stt_model_key = f"whisper_stt_model_{selected_language}" if language_driven else "whisper_model"
+        active_stt_backend_var = self.vars.get(active_stt_backend_key)
+        active_stt_backend = active_stt_backend_var.get().strip() if active_stt_backend_var is not None else "faster-whisper"
+        self._set_combobox_values_for_backend(active_stt_model_key, _whisper_stt_model_options(active_stt_backend))
+
+        if language_driven:
+            active_boundary_backend_key = f"whisper_sentence_boundary_backend_{selected_language}"
+            active_boundary_model_key = f"whisper_sentence_boundary_model_{selected_language}"
+        else:
+            active_boundary_backend_key = "whisper_sentence_boundary_backend"
+            active_boundary_model_key = "whisper_sentence_boundary_model"
+        active_boundary_backend_var = self.vars.get(active_boundary_backend_key)
+        active_boundary_backend = active_boundary_backend_var.get().strip() if active_boundary_backend_var is not None else "sat"
+        self._set_combobox_values_for_backend(
+            active_boundary_model_key,
+            _whisper_sentence_boundary_model_options(active_boundary_backend),
+        )
+
+        faster_whisper_selected = active_stt_backend == "faster-whisper"
+        for row in getattr(self, "_whisper_backend_specific_rows", []):
+            self._grid_rows(getattr(self, "_whisper_tab", None), [row], faster_whisper_selected)
+
+        self._schedule_update_scrollbar_state()
 
     def _on_whisper_translation_backend_changed(self, _event=None) -> None:
         self._sync_whisper_translation_backend_options()

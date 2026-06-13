@@ -269,6 +269,8 @@ class WhisperConfigTest(unittest.TestCase):
     def test_whisper_rejects_invalid_language(self) -> None:
         with self.assertRaisesRegex(ValueError, "whisper.language"):
             WhisperConfig.from_dict({"language": "ja"})
+        with self.assertRaisesRegex(ValueError, "whisper.language"):
+            WhisperConfig.from_dict({"language": "auto"})
 
     def test_whisper_treats_legacy_translate_task_as_translation_enabled(self) -> None:
         loaded = WhisperConfig.from_dict({"task": "translate"})

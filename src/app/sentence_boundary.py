@@ -67,7 +67,7 @@ class SentenceBoundaryDetector(Protocol):
         self,
         pending_text: str,
         new_text: str,
-        language: str = "auto",
+        language: str = "en",
         *,
         boundary_confidence: float | None = None,
     ) -> SentenceBoundaryResult:
@@ -196,7 +196,7 @@ class SatSentenceBoundaryDetector:
         self,
         pending_text: str,
         new_text: str,
-        language: str = "auto",
+        language: str = "en",
         *,
         boundary_confidence: float | None = None,
     ) -> SentenceBoundaryResult:
@@ -284,7 +284,7 @@ class FunasrCtPuncSentenceBoundaryDetector:
         self,
         pending_text: str,
         new_text: str,
-        language: str = "auto",
+        language: str = "en",
         *,
         boundary_confidence: float | None = None,
     ) -> SentenceBoundaryResult:
@@ -335,7 +335,7 @@ class LegacyRegexSentenceBoundaryDetector:
         self,
         pending_text: str,
         new_text: str,
-        language: str = "auto",
+        language: str = "en",
         *,
         boundary_confidence: float | None = None,
     ) -> SentenceBoundaryResult:
@@ -364,7 +364,7 @@ class LegacyRegexSentenceBoundaryDetector:
         language: str,
         boundary_confidence: float | None = None,
     ) -> tuple[list[str], str]:
-        if language not in {"en", "auto"}:
+        if language != "en":
             return [], text
         if boundary_confidence is not None and boundary_confidence < MIN_SOFT_BOUNDARY_CONFIDENCE:
             return [], text
@@ -402,7 +402,7 @@ class MockSentenceBoundaryDetector:
         self,
         pending_text: str,
         new_text: str,
-        language: str = "auto",
+        language: str = "en",
         *,
         boundary_confidence: float | None = None,
     ) -> SentenceBoundaryResult:
@@ -437,7 +437,7 @@ def create_sentence_boundary_detector(
 def split_completed_sentences(
     pending_text: str,
     new_text: str,
-    language: str = "auto",
+    language: str = "en",
     *,
     boundary_confidence: float | None = None,
 ) -> tuple[list[str], str]:

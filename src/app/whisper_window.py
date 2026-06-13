@@ -292,15 +292,13 @@ class WhisperTranscriptWorker:
         self._sentence_boundary_backend = str(getattr(config, "sentenceBoundaryBackend", "sat")).strip() or "sat"
         self._sentence_boundary_model = getattr(config, "sentenceBoundaryModel", None)
         self._boundary_detector_language = str(getattr(config, "language", "en")).strip().lower()
-        if self._boundary_detector_language == "auto":
-            self._boundary_detector_language = "en"
         self._boundary_detector_backend = self._sentence_boundary_backend
         self._boundary_detector_model = self._sentence_boundary_model
         self._sentence_boundary_detector = None
 
     def _stt_settings_for_language(self) -> tuple[str, str]:
         language = str(getattr(self._cfg, "language", "en")).strip().lower()
-        if language == "auto" or str(getattr(self._cfg, "postProcessingProfile", "manual")).strip() != "auto-by-language":
+        if str(getattr(self._cfg, "postProcessingProfile", "manual")).strip() != "auto-by-language":
             return str(self._cfg.backend).strip(), str(self._cfg.model).strip()
         suffix_by_language = {"en": "En", "ko": "Ko", "zh": "Zh"}
         suffix = suffix_by_language.get(language)
@@ -312,8 +310,6 @@ class WhisperTranscriptWorker:
 
     def _sentence_boundary_settings_for_language(self, detected_language: str) -> tuple[str, str | None]:
         normalized = str(detected_language or "en").strip().lower()
-        if normalized == "auto":
-            normalized = "en"
         if str(getattr(self._cfg, "postProcessingProfile", "manual")).strip() != "auto-by-language":
             return self._sentence_boundary_backend, self._sentence_boundary_model
         suffix_by_language = {"en": "En", "ko": "Ko", "zh": "Zh"}
@@ -326,8 +322,6 @@ class WhisperTranscriptWorker:
 
     def _preload_sentence_boundary_detector(self) -> None:
         language = str(getattr(self._cfg, "language", "en")).strip().lower()
-        if language == "auto":
-            language = self._boundary_detector_language or "en"
         self._sync_sentence_boundary_detector(language)
 
     def _build_sentence_boundary_detector(self, detected_language: str) -> object:
@@ -375,8 +369,6 @@ class WhisperTranscriptWorker:
 
     def _sync_sentence_boundary_detector(self, detected_language: str) -> None:
         normalized = str(detected_language or "en").strip().lower()
-        if normalized == "auto":
-            normalized = "en"
         backend, model = self._sentence_boundary_settings_for_language(normalized)
         if self._sentence_boundary_detector is None:
             self._sentence_boundary_detector = self._build_sentence_boundary_detector(normalized)
@@ -388,7 +380,7 @@ class WhisperTranscriptWorker:
             and self._boundary_detector_model == model
         ):
             return
-        if self._cfg.language != "auto" and str(getattr(self._cfg, "postProcessingProfile", "manual")).strip() != "auto-by-language":
+        if str(getattr(self._cfg, "postProcessingProfile", "manual")).strip() != "auto-by-language":
             return
         self._sentence_boundary_detector = self._build_sentence_boundary_detector(normalized)
         self._boundary_detector_language = normalized
@@ -615,7 +607,7 @@ class WhisperTranscriptWorker:
         commit_lag_seconds = float(self._cfg.commitLagSeconds)
         step_samples = int(SAMPLE_RATE * step_seconds)
         window_samples = int(SAMPLE_RATE * window_seconds)
-        language = None if self._cfg.language == "auto" else self._cfg.language
+        language = self._cfg.language
         chunks = 0
         translation_failed = False
         committed_text = ""

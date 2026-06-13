@@ -25,7 +25,6 @@ def whisper_model_options() -> list[str]:
 
 
 WHISPER_LANGUAGE_DISPLAY_TO_RAW = {
-    "자동 감지 (auto)": "auto",
     "한국어 (ko)": "ko",
     "English (en)": "en",
     "中文 (zh)": "zh",

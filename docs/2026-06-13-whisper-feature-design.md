@@ -157,7 +157,7 @@ new:      "in the United States to take delivery"
 - `committed_text`: 이미 모달 출력된 확정 누적 텍스트
 - `recent_committed_fragments`: 반복/중복 억제를 위한 최근 출력 조각(현재 정책에서는 보조 참조)
 - `sentence_boundary_detector`: `create_sentence_boundary_detector`로 생성되는 런타임 경계 검출기
-- `boundary_detector_language`: `language=auto`일 때 감지 언어 변경에 따라 `sat` detector를 재생성하기 위한 현재 detector 언어
+- `boundary_detector_language`: 명시된 STT 언어에 맞춰 detector를 재생성하기 위한 현재 detector 언어
 - `staged_sentence`, `staged_confirmations`, `staged_age`, `staged_forced`: 문장별 안정성 판단 보조 상태
 - `replacement_decision`: staged 후보 교체 시 판단 사유(`finalize`, `open_korean_clause`, `partial_revision`, `partial_preserve`, `duplicate_or_suffix`, `aged`)
 - `lifecycle_metrics`: 세션 누적 전사 라이프사이클 카운터
@@ -270,7 +270,7 @@ class SentenceBoundaryDetector:
         self,
         pending_text: str,
         new_text: str,
-        language: str = "auto",
+        language: str = "en",
         *,
         boundary_confidence: float | None = None,
     ) -> SentenceBoundaryResult:
@@ -286,7 +286,7 @@ class SentenceBoundaryDetector:
 - `legacy-regex`: 과거 회귀 테스트 보존용 helper. 운영 backend와 기준선 비교용으로 사용하지 않으며 `WhisperConfig`에서도 허용하지 않는다.
 
 언어별 후처리 프로필:
-- `postProcessingProfile=auto-by-language`: STT 언어에 따라 후처리 backend/model을 선택한다. 기본값이다.
+- `postProcessingProfile=auto-by-language`: 명시된 STT 언어에 따라 후처리 backend/model을 선택한다. 기본값이다. 언어 자동 감지는 수행하지 않는다.
 - 영어 `en`: `sentenceBoundaryBackendEn=sat`, `sentenceBoundaryModelEn=sat-3l-sm`.
 - 한국어 `ko`: `sentenceBoundaryBackendKo=sat`, `sentenceBoundaryModelKo=sat-3l-sm`.
 - 중국어 `zh`: `sentenceBoundaryBackendZh=funasr-ct-punc`, `sentenceBoundaryModelZh=ct-punc-c`.
@@ -300,7 +300,7 @@ class SentenceBoundaryDetector:
 - setup은 `AVC_DOWNLOAD_WHISPER_MODELS=ask|1|0`, `--download-whisper-models`, `--skip-whisper-models`를 지원한다. 비대화형 setup은 기본적으로 모델 다운로드를 건너뛰며, 강제 다운로드는 명시 옵션/환경변수로만 수행한다.
 - 문장 경계 모델 로딩 시작/완료 로그에는 profile, backend, model, device, compute, language를 출력한다. 캐시에 모델이 없으면 Hugging Face 또는 FunASR/ModelScope 다운로드가 발생할 수 있음을 stdout 로그로 남긴다.
 - 문장 경계 모델 로딩/분절 실패는 Fail-Fast다. legacy regex나 CPU로 자동 전환하지 않는다.
-- `language=auto` 또는 `postProcessingProfile=auto-by-language`에서 감지/설정 언어에 따른 backend/model이 바뀌면 detector를 다시 로드한다. 수동 프로필에서는 실행 중 암묵 변경하지 않는다.
+- `postProcessingProfile=auto-by-language`에서 명시 언어에 따른 backend/model이 바뀌면 detector를 다시 로드한다. 수동 프로필에서는 실행 중 암묵 변경하지 않는다.
 
 ### 8.5 경계 진단 신호(운영 지표)
 
@@ -412,13 +412,14 @@ STT 모델과 문장 경계 모델의 책임을 분리해 검증한다.
 - `backend=faster-whisper` 전역값에 중국어를 묶지 않는다. STT backend도 후처리 backend처럼 언어별 설정을 둔다.
 - 예: `sttBackendEn=faster-whisper`, `sttBackendKo=faster-whisper`, `sttBackendZh=funasr-paraformer`.
 - 중국어 backend 로딩 실패는 Fail-Fast다. CPU fallback, Whisper fallback, 다른 FunASR 모델 fallback은 자동 수행하지 않는다.
+- Whisper 언어 자동 감지는 폐기한다. `language`는 `ko`, `en`, `zh` 중 하나로 명시해야 한다.
 - 모델 준비 순서는 `STT 모델 -> 번역 모델 -> 문장 경계/후처리 모델 -> 입력 장치 열기 -> 전사 루프`를 유지한다.
 - setup 사전 다운로드 대상에는 중국어 STT 후보 모델도 포함한다.
 
 2026-06-13 구현 상태:
 
 - `WhisperConfig`/`setting.json`에 `sttBackendEn`, `sttModelEn`, `sttBackendKo`, `sttModelKo`, `sttBackendZh`, `sttModelZh`를 추가했다.
-- `postProcessingProfile=auto-by-language`이고 인식 언어가 `zh`이면 `sttBackendZh=funasr-paraformer`, `sttModelZh=paraformer-zh`를 사용한다.
+- `postProcessingProfile=auto-by-language`이고 명시 인식 언어가 `zh`이면 `sttBackendZh=funasr-paraformer`, `sttModelZh=paraformer-zh`를 사용한다.
 - 영어/한국어 기본 STT는 `faster-whisper` + `large-v3`를 유지한다.
 - `src/app/stt_model.py`가 faster-whisper와 FunASR STT를 동일한 `transcribe()` 인터페이스로 감싼다.
 - FunASR STT 로딩/생성 중 stdout/stderr 진행 출력은 캡처해 status 로그로 제한하며, 모델 다운로드 가능성은 로딩 로그에 명시한다.

@@ -39,6 +39,7 @@ def build_whisper_tab(
     audio_default_input_device,
     audio_device_display_values,
 ) -> None:
+    gui._whisper_tab = tab_whisper
     row = 0
     gui._add_bool_switch(
         tab_whisper,
@@ -81,6 +82,7 @@ def build_whisper_tab(
     whisper_input_meter_btn.grid(row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0))
     row += 1
 
+    global_backend_row = row
     gui._add_combo(
         tab_whisper,
         row,
@@ -91,6 +93,7 @@ def build_whisper_tab(
         label_key="label.whisper_backend",
     )
     row += 1
+    global_model_row = row
     gui._add_combo(
         tab_whisper,
         row,
@@ -101,6 +104,7 @@ def build_whisper_tab(
         label_key="label.whisper_model",
     )
     row += 1
+    gui._whisper_global_stt_rows = [global_backend_row, global_model_row]
     gui._add_combo(
         tab_whisper,
         row,
@@ -117,7 +121,7 @@ def build_whisper_tab(
         tab_whisper,
         row,
         "hint.whisper_language",
-        "Whisper는 한 번에 하나의 인식 언어를 사용합니다. 한국어, 영어, 중국어가 섞이면 자동 감지를 사용하세요.",
+        "Whisper는 한 번에 하나의 인식 언어를 사용합니다. 자동 감지는 사용하지 않으며, 현재 입력 언어를 한국어/영어/중국어 중 하나로 명시하세요.",
     )
 
     stt_frame = ttk.LabelFrame(
@@ -129,11 +133,14 @@ def build_whisper_tab(
     for col in range(4):
         stt_frame.columnconfigure(col, weight=1 if col in (1, 3) else 0)
     stt_row = 0
+    stt_language_rows = {}
     for lang_code, lang_label in (("en", "영어"), ("ko", "한국어"), ("zh", "중국어")):
+        lang_rows = []
         backend_key = f"whisper_stt_backend_{lang_code}"
         model_key = f"whisper_stt_model_{lang_code}"
         backend_default = whisper_default(f"sttBackend{lang_code.title()}")
         model_default = whisper_default(f"sttModel{lang_code.title()}")
+        lang_rows.append(stt_row)
         gui._add_combo(
             stt_frame,
             stt_row,
@@ -144,6 +151,7 @@ def build_whisper_tab(
             label_key=f"label.{backend_key}",
         )
         stt_row += 1
+        lang_rows.append(stt_row)
         gui._add_combo(
             stt_frame,
             stt_row,
@@ -154,6 +162,9 @@ def build_whisper_tab(
             label_key=f"label.{model_key}",
         )
         stt_row += 1
+        stt_language_rows[lang_code] = lang_rows
+    gui._whisper_stt_frame = stt_frame
+    gui._whisper_stt_language_rows = stt_language_rows
     _add_hint(
         gui,
         ttk,
@@ -174,6 +185,7 @@ def build_whisper_tab(
         label_key="label.whisper_device",
     )
     row += 1
+    whisper_compute_type_row = row
     gui._add_combo(
         tab_whisper,
         row,
@@ -220,6 +232,7 @@ def build_whisper_tab(
         label_key="label.whisper_commit_lag_seconds",
     )
     row += 1
+    whisper_beam_size_row = row
     gui._add_slider(
         tab_whisper,
         row,
@@ -232,6 +245,7 @@ def build_whisper_tab(
         label_key="label.whisper_beam_size",
     )
     row += 1
+    whisper_max_new_tokens_row = row
     gui._add_slider(
         tab_whisper,
         row,
@@ -244,6 +258,7 @@ def build_whisper_tab(
         label_key="label.whisper_max_new_tokens",
     )
     row += 1
+    whisper_temperature_row = row
     gui._add_slider(
         tab_whisper,
         row,
@@ -264,6 +279,12 @@ def build_whisper_tab(
         "hint.whisper_speed",
         "업데이트 간격을 줄이면 응답성이 좋아집니다. 컨텍스트 윈도우와 확정 지연을 늘리면 보통 STT 정확도와 문장 연속성이 좋아집니다.",
     )
+    gui._whisper_backend_specific_rows = [
+        whisper_compute_type_row,
+        whisper_beam_size_row,
+        whisper_max_new_tokens_row,
+        whisper_temperature_row,
+    ]
 
     gui._add_combo(
         tab_whisper,
@@ -293,11 +314,14 @@ def build_whisper_tab(
     for col in range(4):
         post_frame.columnconfigure(col, weight=1 if col in (1, 3) else 0)
     post_row = 0
+    post_language_rows = {}
     for lang_code, lang_label in (("en", "영어"), ("ko", "한국어"), ("zh", "중국어")):
+        lang_rows = []
         backend_key = f"whisper_sentence_boundary_backend_{lang_code}"
         model_key = f"whisper_sentence_boundary_model_{lang_code}"
         backend_default = whisper_default(f"sentenceBoundaryBackend{lang_code.title()}")
         model_default = whisper_default(f"sentenceBoundaryModel{lang_code.title()}")
+        lang_rows.append(post_row)
         gui._add_combo(
             post_frame,
             post_row,
@@ -308,6 +332,7 @@ def build_whisper_tab(
             label_key=f"label.{backend_key}",
         )
         post_row += 1
+        lang_rows.append(post_row)
         gui._add_combo(
             post_frame,
             post_row,
@@ -318,6 +343,9 @@ def build_whisper_tab(
             label_key=f"label.{model_key}",
         )
         post_row += 1
+        post_language_rows[lang_code] = lang_rows
+    gui._whisper_post_frame = post_frame
+    gui._whisper_post_language_rows = post_language_rows
     _add_hint(
         gui,
         ttk,
@@ -328,6 +356,7 @@ def build_whisper_tab(
     )
     row += 1
 
+    manual_boundary_backend_row = row
     gui._add_combo(
         tab_whisper,
         row,
@@ -338,6 +367,7 @@ def build_whisper_tab(
         label_key="label.whisper_sentence_boundary_backend",
     )
     row += 1
+    manual_boundary_model_row = row
     gui._add_combo(
         tab_whisper,
         row,
@@ -348,6 +378,7 @@ def build_whisper_tab(
         label_key="label.whisper_sentence_boundary_model",
     )
     row += 1
+    manual_boundary_hint_row = row
     row = _add_hint(
         gui,
         ttk,
@@ -356,6 +387,7 @@ def build_whisper_tab(
         "hint.whisper_sentence_boundary_manual",
         "수동 문장 경계 백엔드/모델은 후처리 프로필이 manual일 때만 사용됩니다.",
     )
+    gui._whisper_manual_boundary_rows = [manual_boundary_backend_row, manual_boundary_model_row, manual_boundary_hint_row]
 
     gui._add_bool_switch(
         tab_whisper,

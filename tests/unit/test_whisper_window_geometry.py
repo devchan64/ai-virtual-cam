@@ -317,17 +317,6 @@ class WhisperWindowGeometryTest(unittest.TestCase):
 
         sync_detector.assert_called_once_with("zh")
 
-    def test_preloads_sentence_boundary_model_before_transcribe_loop_for_auto_language(self) -> None:
-        worker = WhisperTranscriptWorker(
-            WhisperConfig.from_dict({"inputDevice": "default", "language": "auto"}),
-            queue.Queue(),
-        )
-
-        with mock.patch.object(worker, "_sync_sentence_boundary_detector") as sync_detector:
-            worker._preload_sentence_boundary_detector()
-
-        sync_detector.assert_called_once_with("en")
-
     def test_filters_low_confidence_segments(self) -> None:
         worker = WhisperTranscriptWorker(WhisperConfig.from_dict({"inputDevice": "default"}), queue.Queue())
         segments = [

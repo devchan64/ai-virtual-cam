@@ -829,8 +829,8 @@ class WhisperConfig:
             raise ValueError("whisper.inputDevice is required")
         if not config.model:
             raise ValueError("whisper.model is required")
-        if config.language not in {"auto", "ko", "en", "zh"}:
-            raise ValueError("whisper.language must be one of: auto, ko, en, zh")
+        if config.language not in {"ko", "en", "zh"}:
+            raise ValueError("whisper.language must be one of: ko, en, zh")
         if config.task not in {"transcribe", "translate"}:
             raise ValueError("whisper.task must be one of: transcribe, translate")
         if config.translationTargetLanguage not in {"en", "ko", "zh"}:
