@@ -311,7 +311,8 @@ class SentenceBoundaryDetector:
 - 속도: `stt_rtf avg=0.075`, `p95=0.100`; 계산 성능은 병목이 아님.
 - STT 신뢰도: `low_logprob` 후보 무시 12회. STT 자체 품질 문제도 일부 존재한다.
 - 경계 품질: `boundary_complete=0`이 82/125, `slow_pending=19`, `stage_discard_reason_empty`가 53회. 이는 문장 경계/리비전 생명주기가 중국어 스트림을 충분히 다루지 못한다는 신호다.
-- 결론: 현재 관측만으로 Whisper large-v3의 중국어 STT가 주 병목이라고 단정하지 않는다. 우선 raw STT, boundary output, committed output을 분리해 STT 오류와 경계 오류를 독립 평가한다.
+- 2026-06-13 추가 관측: `language=zh` 고정 상태에서도 `Hey guys`, `read ok ready`, `OK,Ready` 같은 영어/중국어 혼합 출력이 발생했다. 이는 후처리 이전의 raw STT 품질 저하 신호다.
+- 결론: 중국어 품질 문제는 STT와 경계 처리 양쪽에서 발생한다. raw STT, boundary output, committed output을 분리 평가하되, 중국어는 Whisper large-v3 고정이 아니라 언어별 STT backend 교체 실험을 포함한다.
 
 운영 진단 기준:
 
@@ -353,6 +354,77 @@ STT 모델과 문장 경계 모델의 책임을 분리해 검증한다.
 5. 같은 raw STT 입력에 대해 `sat`, Mandarin punctuation restoration, streaming punctuation scoring 모델을 오프라인 replay로 비교한다. 운영 코드는 특정 언어별 regex 보강이 아니라 이 비교 결과로 모델을 교체한다.
 
 중국어/만다린의 1차 후보는 공백 없는 텍스트를 직접 처리하거나 Jieba/Chinese tokenizer 기반 경계 단위를 지원하는 punctuation restoration 모델이다. SaT는 일반 텍스트 segmentation 강점은 있으나, streaming ASR partial hypothesis 안정성은 별도 검증 전까지 가정하지 않는다.
+
+
+### 9.3 중국어 STT backend 교체 검토
+
+2026-06-13 중국어 운영 로그는 후처리 이전의 raw STT 품질 저하를 보여준다. `language=zh` 고정 상태에서도 영어 조각이 섞이고, `low_logprob`/`no_speech` 폐기가 반복되었다. 따라서 중국어 품질 개선은 문장 경계 모델 교체만으로 판단하지 않고, STT backend 자체를 언어별로 분기하는 실험을 포함한다.
+
+#### 후보 1: FunASR Paraformer-zh
+
+- FunASR 논문은 Paraformer를 60,000시간 Mandarin 데이터로 학습한 핵심 모델로 설명하며, timestamp, hotword customization, FSMN-VAD, CT-Transformer punctuation을 함께 제공한다.
+- 논문 보고 기준으로 Paraformer-large는 AISHELL test CER 1.95, AISHELL-2 test_ios CER 2.85, WenetSpeech test_meeting CER 6.97을 기록했다.
+- FunASR 공식 repo는 `paraformer-zh`, `paraformer-zh-streaming`, `ct-punc`, `fsmn-vad` 모델군과 CUDA 실행 예시를 제공한다.
+- 중국어 고정 전사와 실시간성 요구에는 `paraformer-zh` 또는 `paraformer-zh-streaming`이 1차 실험 후보이다.
+
+권장 실험값:
+
+```json
+{
+  "sttBackendZh": "funasr-paraformer",
+  "sttModelZh": "paraformer-zh",
+  "sttStreamingModelZh": "paraformer-zh-streaming",
+  "sentenceBoundaryBackendZh": "funasr-ct-punc",
+  "sentenceBoundaryModelZh": "ct-punc-c"
+}
+```
+
+#### 후보 2: SenseVoiceSmall
+
+- SenseVoice는 ASR, language identification, speech emotion recognition, audio event detection을 포함하는 speech foundation model이다.
+- 공식 문서와 모델 카드는 Mandarin, Cantonese, English, Japanese, Korean을 지원하며, 중국어/광둥어 benchmark에서 Whisper 대비 장점이 있다고 설명한다.
+- SenseVoiceSmall은 non-autoregressive 구조로 낮은 지연을 목표로 하므로, 중국어/한국어/영어를 모두 다루는 통합 후보로 실험 가치가 있다.
+- 다만 현재 문제는 중국어 고정 전사이므로, 1차 후보는 Paraformer-zh로 두고 SenseVoiceSmall은 2차 비교군으로 둔다.
+
+권장 실험값:
+
+```json
+{
+  "sttBackendZh": "funasr-sensevoice",
+  "sttModelZh": "iic/SenseVoiceSmall",
+  "sttLanguageZh": "zh"
+}
+```
+
+#### 후보 3: WeNet
+
+- WeNet은 streaming/non-streaming E2E ASR을 production-oriented 구조로 제공하며, chunk size로 latency를 제어하는 장점이 있다.
+- 다만 현재 프로젝트에는 FunASR 의존성이 이미 들어와 있고, setup/model download 경로도 FunASR 중심으로 확장 중이므로 통합 비용이 상대적으로 높다.
+- WeNet은 장기 비교군으로 보류한다.
+
+#### 보류 후보
+
+- LLM decoder 기반 Fun-ASR-Nano, Qwen3-ASR, GLM-ASR-Nano는 정확도 후보로는 가치가 있으나 vLLM/대형 decoder/VRAM 정책이 추가되어 실시간 UI 경로의 1차 후보로 두지 않는다.
+- Whisper large-v3는 영어/한국어 기본 STT로 유지 가능하지만, 중국어는 현재 로그 기준 운영 기본값으로 고정하지 않는다.
+
+#### 언어별 STT backend 설계 원칙
+
+- `backend=faster-whisper` 전역값에 중국어를 묶지 않는다. STT backend도 후처리 backend처럼 언어별 설정을 둔다.
+- 예: `sttBackendEn=faster-whisper`, `sttBackendKo=faster-whisper`, `sttBackendZh=funasr-paraformer`.
+- 중국어 backend 로딩 실패는 Fail-Fast다. CPU fallback, Whisper fallback, 다른 FunASR 모델 fallback은 자동 수행하지 않는다.
+- 모델 준비 순서는 `STT 모델 -> 번역 모델 -> 문장 경계/후처리 모델 -> 입력 장치 열기 -> 전사 루프`를 유지한다.
+- setup 사전 다운로드 대상에는 중국어 STT 후보 모델도 포함한다.
+
+#### 검증 지표
+
+중국어 backend 교체 평가는 다음 지표를 기존 lifecycle 지표와 함께 본다.
+
+- `CER`: 정답 전사 대비 문자 오류율. 중국어는 WER보다 CER을 우선한다.
+- `mixed_script_ratio`: `language=zh`일 때 Latin token이 과도하게 섞이는 비율.
+- `low_logprob_reject_rate`, `no_speech_reject_rate`: STT 후보 폐기율.
+- `raw_stt_to_committed_deletion_rate`: raw STT에 있던 의미 단위가 committed output에서 사라진 비율.
+- `stage_replace_ratio`, `stage_drop_ratio`, `pending_overrun_rate`: 후처리 생명주기 안정성.
+- `stt_rtf`, `total_rtf`: 실시간성. 중국어 backend 교체 후에도 p95 total RTF가 1.0 미만이어야 한다.
 
 ## 10) 번역 정책
 
@@ -630,6 +702,13 @@ stability=10/10 rate=1.000 target>=0.80
 - [A Small and Fast BERT for Chinese Medical Punctuation Restoration](https://arxiv.org/abs/2308.12568)
 - [M2R-Whisper: Multi-stage and Multi-scale Retrieval Augmentation for Enhancing Whisper](https://arxiv.org/abs/2409.11889)
 - [Investigating Zero-Shot Generalizability on Mandarin-English Code-Switched ASR and Speech-to-text Translation](https://arxiv.org/abs/2401.00273)
+- [FunASR: A Fundamental End-to-End Speech Recognition Toolkit](https://arxiv.org/abs/2305.11013)
+- [FunASR GitHub README](https://github.com/modelscope/FunASR)
+- [FunAudioLLM: Voice Understanding and Generation Foundation Models for Natural Interaction Between Humans and LLMs](https://arxiv.org/abs/2407.04051)
+- [SenseVoice GitHub README](https://github.com/FunAudioLLM/SenseVoice)
+- [SenseVoiceSmall Hugging Face Model Card](https://huggingface.co/FunAudioLLM/SenseVoiceSmall)
+- [WeNet: Production oriented Streaming and Non-streaming End-to-End Speech Recognition Toolkit](https://arxiv.org/abs/2102.01547)
+- [A Comparative Study of LLM-based ASR and Whisper in Low Resource and Code Switching Scenario](https://arxiv.org/abs/2412.00721)
 - [PySBD: Pragmatic Sentence Boundary Disambiguation](https://arxiv.org/abs/2010.09657)
 - [NIST SCTK, the NIST Scoring Toolkit](https://github.com/usnistgov/SCTK)
 - [Assessing Latency in ASR Systems: A Methodological Perspective for Real-Time Use](https://arxiv.org/abs/2409.05674)

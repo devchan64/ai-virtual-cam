@@ -442,5 +442,52 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         )
 
 
+    def test_chinese_revision_uses_cjk_character_units_from_log(self) -> None:
+        # Regression from 2026-06-13 zh monitoring chunks 89-91. Chinese text has
+        # no spaces, so lifecycle decisions must not collapse to an empty token set.
+        staged = "他给出了两个拒绝绑匪要求。"
+        revised = "他给出了两个拒绝绑匪要求的理由，从。"
+
+        self.assertTrue(_sentences_are_revisions(staged, revised))
+        self.assertEqual(_prefer_sentence_revision(staged, revised), revised)
+        self.assertNotEqual(_replacement_decision_reason(staged, revised, 1, False, 0), "empty")
+
+    def test_chinese_unconfirmed_stage_does_not_age_finalize_from_no_speech_gap(self) -> None:
+        # Regression from 2026-06-13 zh monitoring chunk 94. Repeated no_speech
+        # gaps must not finalize a single-observation Chinese fragment.
+        staged = "他给出了两个拒绝绑匪要求的理由，从。"
+
+        self.assertFalse(_should_age_staged_sentence(staged, ""))
+        self.assertEqual(
+            _replacement_decision_reason(staged, "保羅蓋蒂的這個說法是對的從古到今。", 1, False, 2),
+            "unconfirmed_cjk",
+        )
+        self.assertFalse(
+            _should_finalize_replaced_sentence(staged, "保羅蓋蒂的這個說法是對的從古到今。", 1, False, 2)
+        )
+
+
+    def test_chinese_short_fragments_do_not_finalize_on_replacement_from_log(self) -> None:
+        # Regressions from 2026-06-13 zh monitoring chunks 81, 84, 85, and 100.
+        # These fragments were model/punctuation boundary artifacts, not stable final sentences.
+        cases = [
+            ("为什。", "这个桥段在电影里非常重要，为什么呢？"),
+            ("为什么呢？", "是因为绑匪呢？"),
+            ("提出要170.为什么呢？", "是因为绑匪呢提出要1700万美金的。"),
+            ("所以世。", "保羅蓋蒂的這個說法是對的從古到今。"),
+        ]
+        for staged, candidate in cases:
+            with self.subTest(staged=staged, candidate=candidate):
+                self.assertEqual(_replacement_decision_reason(staged, candidate, 1, False, 0), "unconfirmed_cjk")
+                self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
+
+    def test_chinese_confirmed_stage_can_finalize_on_replacement(self) -> None:
+        staged = "如果你跟绑匪妥协的话，就会导致第二例案情的发生。"
+        candidate = "所以世。"
+
+        self.assertEqual(_replacement_decision_reason(staged, candidate, 3, False, 0), "confirmed")
+        self.assertTrue(_should_finalize_replaced_sentence(staged, candidate, 3, False, 0))
+
+
 if __name__ == "__main__":
     unittest.main()

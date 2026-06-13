@@ -84,7 +84,8 @@ def _new_text_delta(committed_text: str, stable_text: str) -> str:
 _WORD_UNIT_RE = re.compile(
     r"\d{1,3}(?:,\d{3})+(?:\.\d+)?[A-Za-z가-힣]*|"
     r"\d+(?:\.\d+)?[A-Za-z가-힣]*|"
-    r"[A-Za-z가-힣]+"
+    r"[A-Za-z가-힣]+|"
+    r"[\u3400-\u4dbf\u4e00-\u9fff]"
 )
 
 
@@ -723,6 +724,14 @@ def _looks_like_open_latin_clause(text: str, words: list[str]) -> bool:
     return True
 
 
+def _has_cjk_words(words: list[str]) -> bool:
+    return any(any("\u3400" <= ch <= "\u9fff" for ch in word) for word in words)
+
+
+def _is_cjk_text(text: str) -> bool:
+    return _has_cjk_words(_word_units(text))
+
+
 def _should_confirm_staged_sentence(staged_sentence: str, staged_confirmations: int, staged_forced: bool) -> bool:
     if _is_open_korean_clause(staged_sentence):
         return False
@@ -762,6 +771,8 @@ def _replacement_decision_reason(
         return "open_latin_clause"
     if staged_confirmations >= _sentence_required_confirmations(staged_forced):
         return "confirmed"
+    if _has_cjk_words(staged_words):
+        return "unconfirmed_cjk"
     if staged_age > 0:
         return "aged"
 
@@ -816,6 +827,8 @@ def _is_short_staged_suffix_repeat(staged_sentence: str, pending_text: str) -> b
 
 def _should_age_staged_sentence(staged_sentence: str, pending_text: str) -> bool:
     if not staged_sentence:
+        return False
+    if _is_cjk_text(staged_sentence):
         return False
     if pending_text and _is_short_staged_suffix_repeat(staged_sentence, pending_text):
         return True

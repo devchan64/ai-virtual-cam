@@ -1,3 +1,5 @@
+import contextlib
+import io
 import unittest
 from unittest import mock
 
@@ -27,6 +29,25 @@ class WhisperFunasrBoundaryTest(unittest.TestCase):
         with mock.patch("builtins.__import__", side_effect=fake_import):
             with self.assertRaisesRegex(ImportError, "missing=torchaudio"):
                 FunasrCtPuncSentenceBoundaryDetector(model="ct-punc-c", device="cuda")
+
+
+    def test_funasr_split_captures_model_progress_output(self) -> None:
+        class NoisyModel:
+            def generate(self, input):
+                print("0%| funasr progress should not leak")
+                return [{"text": "台湾便当很好吃。"}]
+
+        detector = FunasrCtPuncSentenceBoundaryDetector.__new__(FunasrCtPuncSentenceBoundaryDetector)
+        detector.model = "ct-punc-c"
+        detector.device = "cuda"
+        detector._model = NoisyModel()
+
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            result = detector.split("", "台湾便当很好吃", "zh")
+
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertEqual(result.completed, ["台湾便当很好吃。"])
 
 
 class WhisperSentenceBoundaryTest(unittest.TestCase):

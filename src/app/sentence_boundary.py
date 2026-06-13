@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import re
 import warnings
 from dataclasses import dataclass
@@ -292,7 +294,10 @@ class FunasrCtPuncSentenceBoundaryDetector:
             return SentenceBoundaryResult([], "", self.backend, 0, 0)
         normalized = normalized_text(combined)
         try:
-            result = self._model.generate(input=normalized)
+            stdout_buffer = io.StringIO()
+            stderr_buffer = io.StringIO()
+            with contextlib.redirect_stdout(stdout_buffer), contextlib.redirect_stderr(stderr_buffer):
+                result = self._model.generate(input=normalized)
         except Exception as exc:
             raise RuntimeError(
                 f"funasr ct-punc sentence segmentation failed: model={self.model} device={self.device} "
