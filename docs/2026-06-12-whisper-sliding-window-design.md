@@ -24,6 +24,20 @@ chunkSeconds 수집 -> Whisper STT -> 전사 결과 출력 -> 번역
 - 모달에는 중복 없이 확정된 새 텍스트만 출력한다.
 - 번역은 확정된 새 텍스트만 수행한다.
 - 설정값이 유효하지 않으면 자동 폴백 없이 실패한다.
+- 업계 기준으로 검증 가능한 형태로 `정확도/지연/리비전`을 동시에 추적한다.
+
+### 논문 기반 목표 정렬
+
+- [Whisper-Streaming, 2023](https://arxiv.org/abs/2307.14743): LocalAgreement 기반으로 partial 결과를 안정 구간만 확정해 flicker 완화.
+- [Simul-Whisper, Interspeech 2024](https://www.isca-archive.org/interspeech_2024/wang24ea_interspeech.pdf): cross-attention 정렬 + truncation-detection으로 청크 경계 오차 저감.
+- [Stability metrics for streaming ASR, Interspeech 2020](https://www.isca-archive.org/interspeech_2020/shangguan20_interspeech.pdf): UPWR/UPSR로 사용자가 체감하는 리비전 안정성을 정량화.
+- [WhisperKit, ICML 2025](https://openreview.net/pdf?id=6lC3MPFbVg): 가설 텍스트(hypothesis)와 확정 텍스트(confirmed text)를 분리해 latency와 정확도 균형.
+
+문서의 구현은 위 4개 논문 축을 따르며, 다음 1차 목표를 둔다.
+
+- **정합성 우선**: confirmed 텍스트만 모달·번역으로 전달.
+- **리비전 수치 우선**: pending 기반 강제 확정 감소.
+- **처리량 보존**: stepSeconds 갱신 주기 자체를 유지하되 내부 확정 정책만 강화.
 
 ## 제안 구조
 
@@ -80,6 +94,15 @@ chunkSeconds 수집 -> Whisper STT -> 전사 결과 출력 -> 번역
 2.0s ~ 6.0s -> 전사 -> 새 확정분 출력
 ```
 
+### 확정/임시 텍스트 분리의 핵심 규칙
+
+WhisperKit과 Whisper-Streaming 구현의 경험을 반영하면, 실제 모달 출력은 항상 `confirmed`만 사용해야 한다.
+
+- `hypothesis_text`: 최신 청크에서 즉시 생성되는 임시 텍스트(내부 비교 전용).
+- `confirmed_text`: LocalAgreement(최장 공통 접두사) 또는 경계 탐지 기반으로 확정된 텍스트만 노출.
+- 같은 청크를 반복 처리할수록 확정 구간만 누적하고, 미확정 구간은 재작성 대상.
+- 최종 출력은 `confirmed_text` 기준 `append-only`로 유지.
+
 ## 내부 상태
 
 작업자는 다음 상태를 유지한다.
@@ -98,7 +121,7 @@ recent_committed_fragments
 
 ## 확정 텍스트 계산
 
-초기 구현은 문자열 overlap 기반으로 한다.
+초기 구현은 문자열 overlap 기반으로 하되, 논문 기반 지표를 추가해 단계적으로 강화한다.
 
 예:
 
@@ -114,8 +137,13 @@ new:      "in the United States to take delivery"
 - 겹치는 앞부분은 이미 처리된 문맥으로 본다.
 - 겹치지 않는 새 부분만 `candidate_text`로 만든다.
 - `commitLagSeconds`에 해당하는 끝부분은 즉시 확정하지 않는다.
+- 새 확정 구간은 **동일 접두사 기준 재확인 횟수(confirmed_count)**를 채워야만 출력한다.
 
-정교한 구현이 필요해지면 `word_timestamps=true`를 사용해 시간 기준으로 확정 구간을 계산한다. 초기 구현에서는 비용과 복잡도를 줄이기 위해 문자열 기반으로 시작한다.
+정교한 구현이 필요해지면 `word_timestamps=true`를 사용해 시간 기준으로 확정 구간을 계산한다.
+
+- 1단계(현재): 문자열 LCP 기반 + `confirmed_count`
+- 2단계: Simul-Whisper식 truncation signal(경계 토큰 불안정 감지) 도입
+- 3단계: word-timestamps 정렬 기준에서의 오디오 기반 확정 영역 계산
 
 ## 문장 경계 검출기 개선 계획
 
@@ -129,6 +157,8 @@ new:      "in the United States to take delivery"
 - 확정 전 녹색 문장이 길게 유지되다가 검은색 확정 문장으로 바뀔 때 이전 문맥이 섞이면 delta 계산만으로는 부족하다.
 
 따라서 다음 단계는 STT 결과를 직접 문장으로 확정하지 않고, 별도 문장 경계 검출기를 통해 안정적인 문장 후보만 추출하는 것이다. 이 기능의 목표는 문장을 새로 고치거나 교정하는 것이 아니라, 원 STT 텍스트 안에서 확정 가능한 경계를 찾는 것이다.
+
+Simul-Whisper의 `cross-attention 기반 정렬 + truncation 검출`은 이 레이어의 핵심 동작과 정합성이 높아, 경계 검출 백엔드 후보의 우선순위 1순위로 둔다.
 
 ### 후보 도구
 
@@ -148,6 +178,11 @@ new:      "in the United States to take delivery"
 
    - 문장 경계와 문장 교정을 동시에 할 수 있지만, 원음에 없는 문장을 만들어낼 위험이 있다.
    - 사용한다면 원문 단어를 보존하고 경계 위치만 반환하는 검증기 형태로 제한한다. 기본 경로로는 사용하지 않는다.
+
+4. LocalAgreement 기반 경계 스무딩(검토 항목)
+
+- Whisper-Streaming의 핵심 정책을 바탕으로, `stable_prefix`를 계산해 문장 경계 후보와 결합하는 방식.
+- 문장 경계 자체를 새로 생성하지 않고, 경계 후보의 안정성 점수만 보강한다.
 
 ### 설계 인터페이스
 
@@ -218,26 +253,28 @@ stable_text
 - 기본 번역 정책은 final-only이다. partial/staged 번역은 중복 번역과 premature translation을 만들기 쉬우므로 기본값에서 비활성화한다.
 - partial 번역을 다시 허용하는 경우에도 source revision id 기반으로 같은 라인을 갱신해야 하며, append-only 번역 라인으로 처리하지 않는다.
 
-### 로그 지표
+## 안정성 지표(운영 기준)
 
-문장 경계 검출기를 적용하면 기존 `Whisper 문장 진단` 로그에 다음 값을 추가한다.
+UPWR/UPSR를 로그로 추가해 리비전 관측성을 확보한다.
 
-```text
-boundary_backend=sat
-boundary_latency=0.03s
-boundary_candidates=3
-boundary_complete=2
-boundary_confirmed=1
-boundary_rejected_unstable=1
-boundary_pending_chars=42
-```
+- `UPWR`: Unstable Partial Word Ratio(불안정 단어 비율)
+- `UPSR`: Unstable Partial Segment Ratio(불안정 세그먼트 비율)
+- 후보 개선 지표: `replaced ratio`, `forced_by=pending_chunks`, `forced_by=pending_chars`, `pending_chars p90`, `pending_chars max`
 
-성능 판단 기준:
+기준 목표(안정성 우선 단계):
+
+- `UPSR`: 20% 하향
+- `UPWR`: 15~25% 하향
+- `replaced ratio`: 단계별 지속 감소
+- `pending_chars p90`: 현재 대비 20% 이상 감소
+
+### 성능 판단 기준:
 
 - `replaced` 확정 비율이 줄어야 한다.
 - `forced_by=pending_chunks`, `forced_by=pending_chars`가 줄어야 한다.
 - `pending_chars` p90과 max가 낮아져야 한다.
 - STT `rtf`와 별도로 `boundary_latency`가 실시간 갱신 주기에 부담을 주지 않아야 한다.
+- `UPWR`, `UPSR`은 비교군 대비 하향해야 하며, 번역 품질은 WER 또는 BLEU/CHRF 성능과 함께 추적한다.
 
 ### 적용 순서
 
@@ -250,7 +287,6 @@ boundary_pending_chars=42
 7. 같은 로그 조건에서 `regex`와 `sat` 결과를 비교한다.
 8. `sat`의 `replaced`, `forced_by`, `pending_chars` 지표가 개선되면 기본값 전환을 검토한다.
 
-
 ## 번역 정책
 
 번역은 전체 윈도우 결과가 아니라 확정된 새 텍스트만 대상으로 한다. 현재 기본 정책은 final-only translation이다.
@@ -258,188 +294,23 @@ boundary_pending_chars=42
 ```text
 잘못된 방식: current_window_text 전체 번역
 위험한 방식: staged/partial 문장을 append-only 번역
-권장 방식: final sentence delta만 번역
+안전한 방식: confirmed_delta만 번역
+권고 방식: 번역 대상은 `confirmed_text`에서만 갱신, 같은 revision id 재사용
 ```
 
-이유:
+## 구현 우선순위(요약)
 
-- 슬라이딩 윈도우는 같은 문맥을 여러 번 포함한다.
-- Whisper partial hypothesis는 뒤 청크에서 자주 수정되므로, partial을 바로 번역하면 같은 의미가 여러 줄로 중복 출력된다.
-- NLLB 번역 모델은 긴 반복 입력에서 반복 생성이 발생할 수 있다.
-- 실시간 번역 연구는 지연을 줄이는 것보다 충분한 source 정보를 읽은 뒤 output을 내는 read/write policy를 중요하게 다룬다. 따라서 source 문장 안정성이 낮을 때는 번역을 기다리는 편이 낫다.
+1. 문자열 LCP + confirmed_count 기반 stable 확정(현재 구조 최소 변경)
+2. 문장 경계 detector 분리 및 `sat` 백엔드 실험
+3. UPWR/UPSR/forced 지표 수집
+4. 안정성 기준 통과 시 `replacements-trimming` 계층(경계 불안정 토큰 제거) 도입
+5. Two-Pass/causal fine-tune 검토(모델 계층 변경 단계)
 
-현재 구현 정책:
+## 참고 논문
 
-- STT 출력은 `partial -> staged -> final` 단계를 가진다.
-- 전사 창은 partial/staged를 갱신할 수 있지만, 번역 입력은 final 문장만 사용한다.
-- `PROVISIONAL_TRANSLATION_ENABLED` 기본값은 `False`다.
-- staged 번역을 다시 켜려면 source revision id를 부여하고, 번역 창에서 같은 id 라인을 갱신해야 한다. 이 조건 없이 staged 번역을 append하면 중복 번역이 재발한다.
-
-향후 검토할 선택지:
-
-- Local agreement: 여러 STT 윈도우에서 공통으로 반복 확인된 stable prefix만 final 후보로 승격한다.
-- Adaptive latency: 리비전/교체가 많으면 confirm threshold 또는 commit lag를 늘리고, 안정적이면 줄인다.
-- Segment trimming 우선: sentence segmenter에만 의존하지 않고 Whisper segment 또는 안정 prefix 기준으로 버퍼를 자른다.
-- Sentence segmenter 보강: regex backend 이후 wtpsplit 같은 다국어 문장 경계 모델을 실험하되, GPU/CUDA 요구 시 Fail-Fast를 유지한다.
-
-## 설정 스키마
-
-`whisper` 블록에 다음 키를 추가한다.
-
-```json
-{
-  "stepSeconds": 1.0,
-  "windowSeconds": 4.0,
-  "commitLagSeconds": 1.0
-}
-```
-
-검증 규칙:
-
-- `stepSeconds`: `0.5 <= value <= 5.0`
-- `windowSeconds`: `1.0 <= value <= 15.0`
-- `commitLagSeconds`: `0.0 <= value < windowSeconds`
-- `stepSeconds <= windowSeconds`
-
-기존 `chunkSeconds`는 호환성을 위해 유지한다.
-
-- 새 설정이 없으면 `windowSeconds = chunkSeconds`로 읽는다.
-- 새 설정 저장 시에는 `stepSeconds`, `windowSeconds`, `commitLagSeconds`를 명시한다.
-- `chunkSeconds`는 당분간 README와 config check에서 legacy key로 설명한다.
-
-## GUI 변경
-
-Whisper 탭에 다음 슬라이더를 추가한다.
-
-- `갱신 주기(초)` -> `stepSeconds`
-- `문맥 길이(초)` -> `windowSeconds`
-- `확정 지연(초)` -> `commitLagSeconds`
-
-기존 `청크 길이(초)`는 다음 중 하나로 정리한다.
-
-1. `문맥 길이(초)`로 이름을 바꾸고 내부 키를 `windowSeconds`로 연결한다.
-2. legacy 호환을 위해 한동안 표시하되 비권장 설명을 붙인다.
-
-초기 구현에서는 혼란을 줄이기 위해 1번을 권장한다.
-
-## 로그
-
-기존 성능 로그는 다음 정보를 포함하도록 확장한다.
-
-```text
-Whisper 성능: step=1.0s window=4.0s audio=4.00s stt=0.62s stt_rtf=0.16 committed_chars=32 preview_chars=18 beam=3 max_tokens=96
-```
-
-필드:
-
-- `step`: 갱신 주기
-- `window`: STT 입력 문맥 길이
-- `audio`: 실제 Whisper 입력 오디오 길이
-- `stt`: STT 처리 시간
-- `stt_rtf`: real-time factor
-- `committed_chars`: 이번 턴에 확정 출력한 글자 수
-- `preview_chars`: 보류 중인 미확정 글자 수
-
-## 실패 정책
-
-- 설정값 범위가 유효하지 않으면 실행 단계에서 즉시 실패한다.
-- `stepSeconds > windowSeconds`는 자동 보정하지 않는다.
-- `commitLagSeconds >= windowSeconds`는 자동 보정하지 않는다.
-- 설정 오류에는 설정값, 실패 원인, 권장 조치를 함께 출력한다.
-
-## 구현 단계
-
-1. `WhisperConfig`에 `stepSeconds`, `windowSeconds`, `commitLagSeconds` 추가
-2. `src/domain/whisper_defaults.py`에 기본값 추가
-3. `config_builder`와 config GUI 저장/로드 경로 연결
-4. GUI Whisper 탭 슬라이더 추가
-5. `_transcribe_loop`를 ring buffer 기반으로 변경
-6. 문자열 overlap 기반 delta 계산 함수 추가
-7. 번역 입력을 `new_committed_text`로 제한
-8. staged 번역 기본 비활성화와 final-only 번역 정책 적용
-9. 성능 로그 확장
-10. 단위 테스트 추가
-11. README에 운영 가이드 업데이트
-
-## 테스트 계획
-
-단위 테스트:
-
-- 설정 기본값 로드
-- 설정 범위 검증
-- `chunkSeconds` legacy 호환
-- 문자열 overlap delta 계산
-- 중복 출력 억제
-- 빈 delta에서는 번역 미실행
-
-수동 테스트:
-
-- `stepSeconds=1.0`, `windowSeconds=4.0`, `commitLagSeconds=1.0`
-- `beamSize=3`, `maxNewTokens=96`
-- 영어 STT + 한국어 NLLB 번역
-- 한국어 STT + 영어 NLLB 번역
-- 무음 구간에서 이전 문장 반복 여부 확인
-- 로그의 `stt_rtf`가 1.0보다 충분히 낮은지 확인
-
-## 기대 효과
-
-- 1초 단위 갱신으로 체감 응답성을 유지한다.
-- 4초 문맥 입력으로 짧은 청크보다 STT 정확도를 높인다.
-- 확정 delta만 출력해 모달 중복을 줄인다.
-- 확정 delta만 번역해 NLLB 반복 생성 가능성을 낮춘다.
-
-## 논문 근거와 설계 원칙
-
-### 근거 자료
-
-- [Turning Whisper into Real-Time Transcription System](https://arxiv.org/abs/2307.14743): Whisper-Streaming 논문. Whisper가 기본적으로 실시간용이 아니며, local agreement policy와 self-adaptive latency로 안정 prefix를 확정하는 접근을 제안한다.
-- [Learning When to Translate for Streaming Speech](https://arxiv.org/abs/2109.07368): 고정 시간 대기 후 번역하는 방식은 음성의 acoustic unit 경계를 깨기 쉽고, 긴 입력에서 정보를 누적하면서 적절한 speech unit boundary를 찾아야 한다고 설명한다.
-- [Segmentation-Free Streaming Machine Translation](https://arxiv.org/abs/2309.14823): ASR+MT cascade에서 중간 sentence-like segmentation은 MT에 제약을 만들고 오류원이 될 수 있다고 지적한다.
-- [Streaming Simultaneous Speech Translation with Augmented Memory Transformer](https://arxiv.org/abs/2011.00033): streaming 시스템은 partial input을 처리하면서도 매우 길거나 연속적인 입력을 다룰 수 있어야 하며, segment/context/memory size가 품질과 지연에 영향을 준다.
-- [End-to-End Simultaneous Speech Translation with Differentiable Segmentation](https://arxiv.org/abs/2305.16093): 고정 길이 분할이나 외부 경계 모델이 번역에 불리한 시점에서 speech를 자를 수 있다는 문제의식을 제시한다.
-- [SimulEval: An Evaluation Toolkit for Simultaneous Translation](https://arxiv.org/abs/2007.16193): 실시간 번역은 품질과 지연을 함께 평가해야 하며, read/write 정책이 핵심이라는 점을 제시한다.
-- [ufal/whisper_streaming](https://github.com/ufal/whisper_streaming): `faster-whisper` GPU 백엔드, `min-chunk-size`, `buffer_trimming`, segment/sentence trimming 전략을 참고한다.
-
-### 설계 원칙
-
-- STT window 결과는 final text가 아니라 수정 가능한 partial hypothesis로 취급한다.
-- 고정 길이 청크나 hard sentence segmentation 직후 버퍼를 제거하지 않는다.
-- `pending -> staged -> final commit -> pending consume` 순서로만 문장 상태를 이동한다.
-- final commit 전에는 다음 STT window가 같은 문장을 확장하거나 수정할 기회를 유지한다.
-- 번역 입력은 기본적으로 final sentence delta만 사용한다.
-- 진단 로그는 `pending`, `staged`, `committed`가 함께 유지되는지 확인할 수 있어야 한다.
-
-## 2026-06-12 리비전 라이프사이클 보강
-
-운영 로그에서 관측된 문장 손실은 STT 윈도우마다 생성되는 부분 가설을 즉시 delta로 자르고, 문장 후보를 만들면서 `pending` 버퍼를 너무 빨리 비우는 구조에서 발생했다. 슬라이딩 윈도우 STT는 같은 오디오 구간을 매번 다시 해석하므로, 이전 window의 결과는 최종 문장이 아니라 수정 가능한 partial hypothesis로 보아야 한다.
-
-현재 구현 규칙:
-
-- `pending_chunks`, `pending_chars`, `slow_pending`으로 만들어진 강제 후보는 final commit 전까지 `pending`에서 제거하지 않는다.
-- 강제 후보는 `staged`로 올려 순차 검증을 받지만, 다음 STT window가 같은 문장을 확장하거나 수정할 기회를 유지한다.
-- `pending`은 final commit이 실제로 발생한 뒤 `consume_committed_prefix()`로 해당 prefix만 소비한다.
-- 진단 로그에 `revision_context_chars`와 `forced_candidate_pending`을 추가해 committed/staged/pending이 함께 유지되는지 추적한다.
-- 이 구조는 임시 후보를 바로 삭제하지 않고 `pending -> staged -> final commit -> pending consume` 순서로 이동시키는 최소 라이프사이클이다.
-
-이 패치는 아직 완전한 revision graph는 아니다. 다만 문장 경계가 늦게 잡히는 빠른 발화에서 pending 버퍼가 먼저 사라져 다음 window의 수정 기회를 잃는 문제를 줄이는 첫 단계다.
-
-### 코드 구조
-
-리비전 라이프사이클 헬퍼는 Whisper 창/모달 구현과 분리한다.
-
-```text
-src/app/transcript_revision.py
-```
-
-역할:
-
-- committed/staged/pending을 하나의 revision context로 결합한다.
-- final commit 이후 pending prefix만 소비한다.
-- 문장 lifecycle 테스트가 UI 구현에 의존하지 않도록 한다.
-
-### 다음 단계
-
-- `pending`, `staged`, `final`을 단일 상태 객체로 묶어 revision id를 부여한다.
-- final 문장과 번역 라인은 같은 revision id를 공유하고, staged 갱신 시 번역 라인도 append가 아니라 update할 수 있게 한다.
-- 강제 후보의 final 조건을 `N회 관측`, `다음 boundary 관측`, `문장 종료부 안정성`으로 분리한다.
-- sentence boundary backend가 `regex`를 넘어 SaT/wtpsplit 같은 모델 기반 경계 검출기를 사용할 때도 동일 라이프사이클을 유지한다.
+- [Turning Whisper into Real-Time Transcription System](https://arxiv.org/abs/2307.14743)
+- [Simul-Whisper](https://www.isca-archive.org/interspeech_2024/wang24ea_interspeech.pdf)
+- [Analyzing the Quality and Stability of a Streaming End-to-End On-Device Speech Recognizer](https://www.isca-archive.org/interspeech_2020/shangguan20_interspeech.pdf)
+- [WhisperKit](https://openreview.net/pdf?id=6lC3MPFbVg)
+- [Adapting Whisper for Streaming Speech Recognition via Two-Pass Decoding](https://arxiv.org/abs/2506.12154)
+- [WhisperRT](https://arxiv.org/abs/2508.12301)
