@@ -6,6 +6,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from src.domain.contracts.whisper import whisper_spec
 from src.domain.whisper_defaults import whisper_default
 
 
@@ -810,89 +811,95 @@ class WhisperConfig:
             sentenceBoundaryDevice=str(raw.get("sentenceBoundaryDevice", whisper_default("sentenceBoundaryDevice"))).strip(),
             sentenceBoundaryComputeType=str(raw.get("sentenceBoundaryComputeType", whisper_default("sentenceBoundaryComputeType"))).strip(),
         )
-        allowed_backends = {"faster-whisper", "openai-whisper", "whisper.cpp", "mock"}
-        if config.backend not in allowed_backends:
-            raise ValueError("whisper.backend must be one of: faster-whisper, openai-whisper, whisper.cpp, mock")
-        allowed_stt_backends = {"faster-whisper", "funasr-paraformer", "funasr-sensevoice", "mock"}
-        for lang, backend, model in (
-            ("en", config.sttBackendEn, config.sttModelEn),
-            ("ko", config.sttBackendKo, config.sttModelKo),
-            ("zh", config.sttBackendZh, config.sttModelZh),
+        whisper_spec("backend").validate_allowed(config.backend, path="whisper.backend")
+        for lang, backend_key, model_key, backend, model in (
+            ("en", "sttBackendEn", "sttModelEn", config.sttBackendEn, config.sttModelEn),
+            ("ko", "sttBackendKo", "sttModelKo", config.sttBackendKo, config.sttModelKo),
+            ("zh", "sttBackendZh", "sttModelZh", config.sttBackendZh, config.sttModelZh),
         ):
-            if backend not in allowed_stt_backends:
-                raise ValueError(
-                    f"whisper.sttBackend{lang.title()} must be one of: faster-whisper, funasr-paraformer, funasr-sensevoice, mock"
-                )
+            del lang
+            whisper_spec(backend_key).validate_allowed(backend, path=f"whisper.{backend_key}")
             if not model:
-                raise ValueError(f"whisper.sttModel{lang.title()} is required")
+                raise ValueError(f"whisper.{model_key} is required")
         if not config.inputDevice:
             raise ValueError("whisper.inputDevice is required")
         if not config.model:
             raise ValueError("whisper.model is required")
-        if config.language not in {"ko", "en", "zh"}:
-            raise ValueError("whisper.language must be one of: ko, en, zh")
-        if config.task not in {"transcribe", "translate"}:
-            raise ValueError("whisper.task must be one of: transcribe, translate")
-        if config.translationTargetLanguage not in {"en", "ko", "zh"}:
-            raise ValueError("whisper.translationTargetLanguage must be one of: en, ko, zh")
-        if config.translationBackend not in {"whisper", "nllb-transformers", "mock"}:
-            raise ValueError("whisper.translationBackend must be one of: whisper, nllb-transformers, mock")
+        whisper_spec("language").validate_allowed(config.language, path="whisper.language")
+        whisper_spec("task").validate_allowed(config.task, path="whisper.task")
+        whisper_spec("translationTargetLanguage").validate_allowed(
+            config.translationTargetLanguage, path="whisper.translationTargetLanguage"
+        )
+        whisper_spec("translationBackend").validate_allowed(config.translationBackend, path="whisper.translationBackend")
         if config.translationEnabled and config.translationBackend == "whisper" and config.translationTargetLanguage != "en":
             raise ValueError("whisper.translationTargetLanguage must be en when whisper.translationBackend=whisper")
         if config.translationEnabled and config.translationBackend != "whisper" and config.task == "translate":
             raise ValueError("whisper.task must be transcribe when whisper.translationBackend is not whisper")
         if config.translationEnabled and config.translationBackend == "nllb-transformers" and not config.translationModel:
             raise ValueError("whisper.translationModel is required when whisper.translationBackend=nllb-transformers")
-        if config.translationDevice not in {"cuda", "cpu"}:
-            raise ValueError("whisper.translationDevice must be one of: cuda, cpu")
-        if config.translationComputeType not in {"float16", "float32"}:
-            raise ValueError("whisper.translationComputeType must be one of: float16, float32")
-        if not 1 <= config.translationBeamSize <= 8:
-            raise ValueError("whisper.translationBeamSize must be between 1 and 8")
-        if not 16 <= config.translationMaxNewTokens <= 512:
-            raise ValueError("whisper.translationMaxNewTokens must be between 16 and 512")
+        whisper_spec("translationDevice").validate_allowed(config.translationDevice, path="whisper.translationDevice")
+        whisper_spec("translationComputeType").validate_allowed(config.translationComputeType, path="whisper.translationComputeType")
+        whisper_spec("translationBeamSize").validate_range(config.translationBeamSize, path="whisper.translationBeamSize")
+        whisper_spec("translationMaxNewTokens").validate_range(
+            config.translationMaxNewTokens, path="whisper.translationMaxNewTokens"
+        )
         if config.translationEnabled and config.translationBackend == "nllb-transformers" and config.translationDevice != "cuda":
             raise ValueError("whisper.translationDevice must be cuda when whisper.translationBackend=nllb-transformers")
         if not config.device:
             raise ValueError("whisper.device is required")
         if not config.computeType:
             raise ValueError("whisper.computeType is required")
-        if not 1.0 <= config.chunkSeconds <= 15.0:
-            raise ValueError("whisper.chunkSeconds must be between 1.0 and 15.0")
-        if not 0.5 <= config.stepSeconds <= 5.0:
-            raise ValueError("whisper.stepSeconds must be between 0.5 and 5.0")
-        if not 1.0 <= config.windowSeconds <= 15.0:
-            raise ValueError("whisper.windowSeconds must be between 1.0 and 15.0")
+        whisper_spec("chunkSeconds").validate_range(config.chunkSeconds, path="whisper.chunkSeconds")
+        whisper_spec("stepSeconds").validate_range(config.stepSeconds, path="whisper.stepSeconds")
+        whisper_spec("windowSeconds").validate_range(config.windowSeconds, path="whisper.windowSeconds")
         if config.stepSeconds > config.windowSeconds:
             raise ValueError("whisper.stepSeconds must be less than or equal to whisper.windowSeconds")
         if not 0.0 <= config.commitLagSeconds < config.windowSeconds:
             raise ValueError("whisper.commitLagSeconds must be between 0.0 and less than whisper.windowSeconds")
-        if not 1 <= config.beamSize <= 8:
-            raise ValueError("whisper.beamSize must be between 1 and 8")
-        if not 16 <= config.maxNewTokens <= 512:
-            raise ValueError("whisper.maxNewTokens must be between 16 and 512")
-        if not 0.0 <= config.temperature <= 1.0:
-            raise ValueError("whisper.temperature must be between 0.0 and 1.0")
-        if config.postProcessingProfile not in {"manual", "auto-by-language"}:
-            raise ValueError("whisper.postProcessingProfile must be one of: manual, auto-by-language")
-        allowed_sentence_boundary_backends = {"sat", "funasr-ct-punc", "mock"}
-        if config.sentenceBoundaryBackend not in allowed_sentence_boundary_backends:
-            raise ValueError("whisper.sentenceBoundaryBackend must be one of: sat, funasr-ct-punc, mock")
+        whisper_spec("beamSize").validate_range(config.beamSize, path="whisper.beamSize")
+        whisper_spec("maxNewTokens").validate_range(config.maxNewTokens, path="whisper.maxNewTokens")
+        whisper_spec("temperature").validate_range(config.temperature, path="whisper.temperature")
+        whisper_spec("postProcessingProfile").validate_allowed(
+            config.postProcessingProfile, path="whisper.postProcessingProfile"
+        )
+        whisper_spec("sentenceBoundaryBackend").validate_allowed(
+            config.sentenceBoundaryBackend, path="whisper.sentenceBoundaryBackend"
+        )
         if not config.sentenceBoundaryModel:
             raise ValueError("whisper.sentenceBoundaryModel is required")
-        for lang, backend, model in (
-            ("en", config.sentenceBoundaryBackendEn, config.sentenceBoundaryModelEn),
-            ("ko", config.sentenceBoundaryBackendKo, config.sentenceBoundaryModelKo),
-            ("zh", config.sentenceBoundaryBackendZh, config.sentenceBoundaryModelZh),
+        for lang, backend_key, model_key, backend, model in (
+            (
+                "en",
+                "sentenceBoundaryBackendEn",
+                "sentenceBoundaryModelEn",
+                config.sentenceBoundaryBackendEn,
+                config.sentenceBoundaryModelEn,
+            ),
+            (
+                "ko",
+                "sentenceBoundaryBackendKo",
+                "sentenceBoundaryModelKo",
+                config.sentenceBoundaryBackendKo,
+                config.sentenceBoundaryModelKo,
+            ),
+            (
+                "zh",
+                "sentenceBoundaryBackendZh",
+                "sentenceBoundaryModelZh",
+                config.sentenceBoundaryBackendZh,
+                config.sentenceBoundaryModelZh,
+            ),
         ):
-            if backend not in allowed_sentence_boundary_backends:
-                raise ValueError(f"whisper.sentenceBoundaryBackend{lang.title()} must be one of: sat, funasr-ct-punc, mock")
+            del lang
+            whisper_spec(backend_key).validate_allowed(backend, path=f"whisper.{backend_key}")
             if not model:
-                raise ValueError(f"whisper.sentenceBoundaryModel{lang.title()} is required")
-        if config.sentenceBoundaryDevice not in {"cuda", "cpu"}:
-            raise ValueError("whisper.sentenceBoundaryDevice must be one of: cuda, cpu")
-        if config.sentenceBoundaryComputeType not in {"float16", "float32"}:
-            raise ValueError("whisper.sentenceBoundaryComputeType must be one of: float16, float32")
+                raise ValueError(f"whisper.{model_key} is required")
+        whisper_spec("sentenceBoundaryDevice").validate_allowed(
+            config.sentenceBoundaryDevice, path="whisper.sentenceBoundaryDevice"
+        )
+        whisper_spec("sentenceBoundaryComputeType").validate_allowed(
+            config.sentenceBoundaryComputeType, path="whisper.sentenceBoundaryComputeType"
+        )
         return config
 
 
