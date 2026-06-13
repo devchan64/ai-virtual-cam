@@ -19,10 +19,11 @@ chunkSeconds 수집 -> Whisper STT -> 전사 결과 출력 -> 번역
 
 ## 문헌 반영 상태(2026-06-13)
 
-- 중복 제어/리비전 감소: confirmed-only 출력 + `confirmed_count` 기반 재확인을 현재 설계의 기본 축으로 확정함.
+- 중복 제어/리비전 감소: confirmed-only 출력 + 재확인된 확정 구간만 누적 출력.
 - 경계 안정화: `pending` 기반 강제 확정 패턴(`pending_chunks`, `pending_chars`)을 지표화하고, 이를 낮추는 방식으로 단계별 전환 계획을 세움.
 - 번역 정책: `final-only`를 기본값으로 유지하고, 중간 상태 번역은 동일 revision 기준 점진 갱신으로만 제한.
-- 구현 적합도: `sentence_boundary.py` 분리와 다중 backend(`regex`→`sat`) 실험 체계를 문서에 우선순위로 반영.
+- 다국어 안정성과 장기 운영 품질 관점에서 `regex`는 최종 운영 백엔드로 채택하지 않는다.
+- `sentence_boundary.py`/`split_completed_sentences`의 현재 공개 시그니처와 문헌의 `sentenceBoundary` 실험 스키마 정합성은 추가 정리가 필요함.
 
 ## 목표
 
@@ -110,6 +111,11 @@ WhisperKit과 Whisper-Streaming 구현의 경험을 반영하면, 실제 모달 
 - 같은 청크를 반복 처리할수록 확정 구간만 누적하고, 미확정 구간은 재작성 대상.
 - 최종 출력은 `confirmed_text` 기준 `append-only`로 유지.
 
+용어 정합성(문서 ↔ 코드):
+
+- `confirmed_count`(문서): 코드의 실질 대응은 `staged_confirmations`, `staged_age` 조합이며, 확정 후보의 안정성 판단 축으로 해석한다.
+- `pending_*` 지표: 코드의 `pending_transcript_text`, `pending_chunks`, `forced_by`와 동일한 의도에서 사용한다.
+
 ## 내부 상태
 
 작업자는 다음 상태를 유지한다.
@@ -144,11 +150,11 @@ new:      "in the United States to take delivery"
 - 겹치는 앞부분은 이미 처리된 문맥으로 본다.
 - 겹치지 않는 새 부분만 `candidate_text`로 만든다.
 - `commitLagSeconds`에 해당하는 끝부분은 즉시 확정하지 않는다.
-- 새 확정 구간은 **동일 접두사 기준 재확인 횟수(confirmed_count)**를 채워야만 출력한다.
+- 새 확정 구간은 동일 접두사 기준 재확인 횟수를 채워야만 출력한다.
 
 정교한 구현이 필요해지면 `word_timestamps=true`를 사용해 시간 기준으로 확정 구간을 계산한다.
 
-- 1단계(현재): 문자열 LCP 기반 + `confirmed_count`
+- 1단계(현재): 문자열 LCP 기반 + 재확인 카운트 기반 안정성 판단
 - 2단계: Simul-Whisper식 truncation signal(경계 토큰 불안정 감지) 도입
 - 3단계: word-timestamps 정렬 기준에서의 오디오 기반 확정 영역 계산
 
@@ -165,7 +171,7 @@ new:      "in the United States to take delivery"
 
 따라서 다음 단계는 STT 결과를 직접 문장으로 확정하지 않고, 별도 문장 경계 검출기를 통해 안정적인 문장 후보만 추출하는 것이다. 이 기능의 목표는 문장을 새로 고치거나 교정하는 것이 아니라, 원 STT 텍스트 안에서 확정 가능한 경계를 찾는 것이다.
 
-Simul-Whisper의 `cross-attention 기반 정렬 + truncation 검출`은 이 레이어의 핵심 동작과 정합성이 높아, 경계 검출 백엔드 후보의 우선순위 1순위로 둔다.
+Simul-Whisper의 `cross-attention 기반 정렬 + truncation-detection`은 이 레이어의 핵심 동작과 정합성이 높아, 경계 검출 백엔드 후보의 우선순위 1순위로 둔다.
 
 ### 후보 도구
 
@@ -191,7 +197,7 @@ Simul-Whisper의 `cross-attention 기반 정렬 + truncation 검출`은 이 레�
 - Whisper-Streaming의 핵심 정책을 바탕으로, `stable_prefix`를 계산해 문장 경계 후보와 결합하는 방식.
 - 문장 경계 자체를 새로 생성하지 않고, 경계 후보의 안정성 점수만 보강한다.
 
-### 설계 인터페이스
+### 설계 인터페이스(현재 구현 반영)
 
 문장 경계 검출은 Whisper 실행 루프에서 분리한다.
 
@@ -199,44 +205,41 @@ Simul-Whisper의 `cross-attention 기반 정렬 + truncation 검출`은 이 레�
 src/app/sentence_boundary.py
 ```
 
-예상 인터페이스:
+예상/현재 인터페이스:
 
 ```python
 @dataclass(frozen=True)
-class SentenceCandidate:
-    text: str
-    complete: bool
-    confidence: float | None = None
+class SentenceBoundaryResult:
+    completed: list[str]
+    pending: str
+    backend: str
+    boundary_count: int
+    soft_boundary_count: int = 0
+
 
 class SentenceBoundaryDetector:
-    def split(self, text: str, language: str) -> list[SentenceCandidate]:
+    def split(
+        self,
+        pending_text: str,
+        new_text: str,
+        language: str = "auto",
+        *,
+        boundary_confidence: float | None = None,
+    ) -> SentenceBoundaryResult:
         ...
 ```
 
 초기 backend:
 
-- `regex`: 현재 `_split_completed_sentences()` 기반 구현을 이동한다.
-- `sat`: wtpsplit/SaT 기반 구현을 추가한다.
-
-설정 예:
-
-```json
-{
-  "sentenceBoundary": {
-    "backend": "sat",
-    "model": "sat-3l-sm",
-    "device": "cuda",
-    "confirmations": 2
-  }
-}
-```
+- `regex`: 과도기 동작 백엔드(현재 유지되는 폴백 계층). 다국어 안정성 관점에서 장기 운영 백엔드로는 사용하지 않는다.
+- `sat`: wtpsplit/SaT 기반 구현을 다국어 실험 백엔드로 우선 후보화.
 
 ### 확정 알고리즘 변경
 
 현재 흐름:
 
 ```text
-stable_text -> delta 계산 -> regex 문장 분할 -> stage/confirm
+stable_text -> boundary_candidate 생성 -> stage/confirm
 ```
 
 개선 흐름:
@@ -285,13 +288,13 @@ UPWR/UPSR를 로그로 추가해 리비전 관측성을 확보한다.
 
 ### 적용 순서
 
-1. 현재 regex 문장 분할을 `sentence_boundary.py`로 분리한다.
+1. 현재 과도기 `regex` 동작을 `sentence_boundary.py`로 분리 정리한다(최종 전략 판별 대상, 운영 최종 백엔드 아님).
 2. 기존 슬라이딩 윈도우 테스트를 새 인터페이스 기준으로 이전한다.
-3. boundary backend 설정 스키마와 기본값을 추가한다.
-4. `regex` backend로 현재 동작과 동일하게 통과시킨다.
-5. `sat` backend를 추가하고 CUDA Fail-Fast 로딩을 구현한다.
-6. 로그에 boundary 지표를 추가한다.
-7. 같은 로그 조건에서 `regex`와 `sat` 결과를 비교한다.
+3. boundary backend 설정 스키마 정합성(현재: `sentenceBoundaryBackend` 기본값/실패 처리)과 기본값을 완료한다.
+4. 다국어 적합성 중심 `sat` 실험을 구성하고, 동일 로그 조건에서 regex 대비 지표를 산출한다.
+5. `sat` backend 실험을 추가하고 CUDA Fail-Fast 로딩 정책을 검토한다.
+6. 로그에 boundary 지표 수집을 추가한다.
+7. 같은 로그 조건에서 과도기 `regex`와 실험 후보 `sat` 결과를 비교한다.
 8. `sat`의 `replaced`, `forced_by`, `pending_chars` 지표가 개선되면 기본값 전환을 검토한다.
 
 ## 번역 정책
@@ -307,7 +310,7 @@ UPWR/UPSR를 로그로 추가해 리비전 관측성을 확보한다.
 
 ## 구현 우선순위(요약)
 
-1. 문자열 LCP + confirmed_count 기반 stable 확정(현재 구조 최소 변경)
+1. 문자열 LCP + 재확인 카운트 기반 stable 확정(현재 구조 최소 변경)
 2. 문장 경계 detector 분리 및 `sat` 백엔드 실험
 3. UPWR/UPSR/forced 지표 수집
 4. 안정성 기준 통과 시 `replacements-trimming` 계층(경계 불안정 토큰 제거) 도입
