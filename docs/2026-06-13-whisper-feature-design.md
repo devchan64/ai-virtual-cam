@@ -286,11 +286,10 @@ class SentenceBoundaryDetector:
 - `legacy-regex`: 과거 회귀 테스트 보존용 helper. 운영 backend와 기준선 비교용으로 사용하지 않으며 `WhisperConfig`에서도 허용하지 않는다.
 
 언어별 후처리 프로필:
-- `postProcessingProfile=auto-by-language`: 명시된 STT 언어에 따라 후처리 backend/model을 선택한다. 기본값이다. 언어 자동 감지는 수행하지 않는다.
-- 영어 `en`: `sentenceBoundaryBackendEn=sat`, `sentenceBoundaryModelEn=sat-3l-sm`.
-- 한국어 `ko`: `sentenceBoundaryBackendKo=sat`, `sentenceBoundaryModelKo=sat-3l-sm`.
-- 중국어 `zh`: `sentenceBoundaryBackendZh=funasr-ct-punc`, `sentenceBoundaryModelZh=ct-punc-c`.
-- `postProcessingProfile=manual`: 언어별 선택을 사용하지 않고 `sentenceBoundaryBackend`/`sentenceBoundaryModel`을 그대로 사용한다.
+- `postProcessingProfile=manual`: 유일하게 지원하는 후처리 프로필이다. 언어별 후처리 선택을 사용하지 않고 `sentenceBoundaryBackend`/`sentenceBoundaryModel`을 모든 언어에 그대로 사용한다.
+- STT backend/model은 후처리 프로필과 분리한다. 영어/한국어/중국어는 각각 `sttBackendEn`, `sttBackendKo`, `sttBackendZh`와 대응 모델 설정으로 교체 가능하다.
+- 현재 영어/한국어의 STT 모델 타입은 `faster-whisper`와 테스트용 `mock`만 제공한다. 영어/한국어용 추가 모델이 검증되면 언어별 backend 후보에 추가한다.
+- 중국어는 `faster-whisper`, `funasr-paraformer`, `funasr-sensevoice`, `mock` 후보를 제공한다.
 - config GUI는 자동 프로필, 언어별 backend/model 그룹, 수동 backend/model을 분리해 표시한다. 중국어 그룹은 다른 언어와 별도 모델군으로 운영한다.
 - 중국어 처리는 문자 단위 CJK 토큰화, suffix overlap 같은 언어별 휴리스틱을 운영 로직에 추가하지 않는다. 공백 없는 텍스트의 경계와 구두점은 후처리 모델의 책임으로 둔다.
 
@@ -300,7 +299,7 @@ class SentenceBoundaryDetector:
 - setup은 `AVC_DOWNLOAD_WHISPER_MODELS=ask|1|0`, `--download-whisper-models`, `--skip-whisper-models`를 지원한다. 비대화형 setup은 기본적으로 모델 다운로드를 건너뛰며, 강제 다운로드는 명시 옵션/환경변수로만 수행한다.
 - 문장 경계 모델 로딩 시작/완료 로그에는 profile, backend, model, device, compute, language를 출력한다. 캐시에 모델이 없으면 Hugging Face 또는 FunASR/ModelScope 다운로드가 발생할 수 있음을 stdout 로그로 남긴다.
 - 문장 경계 모델 로딩/분절 실패는 Fail-Fast다. legacy regex나 CPU로 자동 전환하지 않는다.
-- `postProcessingProfile=auto-by-language`에서 명시 언어에 따른 backend/model이 바뀌면 detector를 다시 로드한다. 수동 프로필에서는 실행 중 암묵 변경하지 않는다.
+- 후처리 backend/model은 manual 설정만 사용한다. 실행 중 명시 언어가 바뀌어도 후처리 backend/model을 언어별로 암묵 변경하지 않는다.
 
 ### 8.5 경계 진단 신호(운영 지표)
 
@@ -410,7 +409,7 @@ STT 모델과 문장 경계 모델의 책임을 분리해 검증한다.
 #### 언어별 STT backend 설계 원칙
 
 - `backend=faster-whisper` 전역값에 중국어를 묶지 않는다. STT backend도 후처리 backend처럼 언어별 설정을 둔다.
-- 예: `sttBackendEn=faster-whisper`, `sttBackendKo=faster-whisper`, `sttBackendZh=funasr-paraformer`.
+- 예: `sttBackendEn=faster-whisper`, `sttBackendKo=faster-whisper`, `sttBackendZh=funasr-paraformer`. 영어/한국어는 현재 Whisper 계열만 운영 후보로 둔다.
 - 중국어 backend 로딩 실패는 Fail-Fast다. CPU fallback, Whisper fallback, 다른 FunASR 모델 fallback은 자동 수행하지 않는다.
 - Whisper 언어 자동 감지는 폐기한다. `language`는 `ko`, `en`, `zh` 중 하나로 명시해야 한다.
 - 모델 준비 순서는 `STT 모델 -> 번역 모델 -> 문장 경계/후처리 모델 -> 입력 장치 열기 -> 전사 루프`를 유지한다.
@@ -418,8 +417,8 @@ STT 모델과 문장 경계 모델의 책임을 분리해 검증한다.
 
 2026-06-13 구현 상태:
 
-- `WhisperConfig`/`setting.json`에 `sttBackendEn`, `sttModelEn`, `sttBackendKo`, `sttModelKo`, `sttBackendZh`, `sttModelZh`를 추가했다.
-- `postProcessingProfile=auto-by-language`이고 명시 인식 언어가 `zh`이면 `sttBackendZh=funasr-paraformer`, `sttModelZh=paraformer-zh`를 사용한다.
+- `WhisperConfig`/`setting.json`에 `sttBackendEn`, `sttModelEn`, `sttBackendKo`, `sttModelKo`, `sttBackendZh`, `sttModelZh`를 추가했다. 후처리는 manual만 지원한다.
+- 명시 인식 언어가 `zh`이면 `sttBackendZh=funasr-paraformer`, `sttModelZh=paraformer-zh`를 사용한다. 이 선택은 후처리 프로필과 무관하다.
 - 영어/한국어 기본 STT는 `faster-whisper` + `large-v3`를 유지한다.
 - `src/app/stt_model.py`가 faster-whisper와 FunASR STT를 동일한 `transcribe()` 인터페이스로 감싼다.
 - FunASR STT 로딩/생성 중 stdout/stderr 진행 출력은 캡처해 status 로그로 제한하며, 모델 다운로드 가능성은 로딩 로그에 명시한다.

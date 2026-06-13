@@ -6,7 +6,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from src.domain.contracts.whisper import whisper_spec
+from src.domain.contracts.whisper import whisper_spec, whisper_stt_backends_for_language
 from src.domain.whisper_defaults import whisper_default
 
 
@@ -817,8 +817,10 @@ class WhisperConfig:
             ("ko", "sttBackendKo", "sttModelKo", config.sttBackendKo, config.sttModelKo),
             ("zh", "sttBackendZh", "sttModelZh", config.sttBackendZh, config.sttModelZh),
         ):
-            del lang
-            whisper_spec(backend_key).validate_allowed(backend, path=f"whisper.{backend_key}")
+            allowed_stt_backends = whisper_stt_backends_for_language(lang)
+            if backend not in allowed_stt_backends:
+                allowed_values = ", ".join(allowed_stt_backends)
+                raise ValueError(f"whisper.{backend_key} must be one of: {allowed_values}")
             if not model:
                 raise ValueError(f"whisper.{model_key} is required")
         if not config.inputDevice:

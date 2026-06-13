@@ -5,16 +5,22 @@ def whisper_backend_options() -> list[str]:
     return ["faster-whisper", "openai-whisper", "whisper.cpp", "mock"]
 
 
-def whisper_stt_backend_options() -> list[str]:
-    return ["faster-whisper", "funasr-paraformer", "funasr-sensevoice", "mock"]
+def whisper_stt_backend_options(language: str | None = None) -> list[str]:
+    normalized_language = str(language or "").strip().lower()
+    if normalized_language in {"en", "ko"}:
+        return ["faster-whisper", "mock"]
+    if normalized_language == "zh":
+        return ["faster-whisper", "funasr-paraformer", "funasr-sensevoice", "mock"]
+    return ["faster-whisper", "mock"]
 
 
-def whisper_stt_model_options(backend: str | None = None) -> list[str]:
+def whisper_stt_model_options(backend: str | None = None, language: str | None = None) -> list[str]:
     normalized = str(backend or "").strip().lower()
+    normalized_language = str(language or "").strip().lower()
     if normalized == "funasr-paraformer":
-        return ["paraformer-zh", "paraformer-zh-streaming"]
+        return ["paraformer-zh", "paraformer-zh-streaming"] if normalized_language == "zh" else []
     if normalized == "funasr-sensevoice":
-        return ["iic/SenseVoiceSmall"]
+        return ["iic/SenseVoiceSmall"] if normalized_language == "zh" else []
     if normalized == "mock":
         return ["mock"]
     return whisper_model_options()
@@ -88,7 +94,7 @@ def whisper_translation_model_options() -> list[str]:
     return ["facebook/nllb-200-distilled-600M"]
 
 def whisper_post_processing_profile_options() -> list[str]:
-    return ["auto-by-language", "manual"]
+    return ["manual"]
 
 
 def whisper_sentence_boundary_backend_options() -> list[str]:

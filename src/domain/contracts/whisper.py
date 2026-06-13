@@ -10,8 +10,19 @@ WHISPER_TRANSLATION_TARGET_LANGUAGES = ("en", "ko", "zh")
 WHISPER_TRANSLATION_BACKENDS = ("whisper", "nllb-transformers", "mock")
 WHISPER_RUNTIME_DEVICES = ("cuda", "cpu")
 WHISPER_COMPUTE_TYPES = ("float16", "float32")
-WHISPER_POST_PROCESSING_PROFILES = ("manual", "auto-by-language")
+WHISPER_POST_PROCESSING_PROFILES = ("manual",)
 WHISPER_SENTENCE_BOUNDARY_BACKENDS = ("sat", "funasr-ct-punc", "mock")
+
+WHISPER_STT_BACKENDS_BY_LANGUAGE = {
+    "en": ("faster-whisper", "mock"),
+    "ko": ("faster-whisper", "mock"),
+    "zh": WHISPER_STT_BACKENDS,
+}
+
+
+def whisper_stt_backends_for_language(language: str) -> tuple[str, ...]:
+    normalized = str(language or "").strip().lower()
+    return WHISPER_STT_BACKENDS_BY_LANGUAGE.get(normalized, ("faster-whisper", "mock"))
 
 WHISPER_CONTRACT: dict[str, ConfigFieldSpec] = {
     "enabled": ConfigFieldSpec("enabled", False, bool),
@@ -47,7 +58,7 @@ WHISPER_CONTRACT: dict[str, ConfigFieldSpec] = {
     "maxNewTokens": ConfigFieldSpec("maxNewTokens", 96, int, min_value=16, max_value=512),
     "temperature": ConfigFieldSpec("temperature", 0.0, float, min_value=0.0, max_value=1.0),
     "postProcessingProfile": ConfigFieldSpec(
-        "postProcessingProfile", "auto-by-language", str, allowed=WHISPER_POST_PROCESSING_PROFILES
+        "postProcessingProfile", "manual", str, allowed=WHISPER_POST_PROCESSING_PROFILES
     ),
     "sentenceBoundaryBackend": ConfigFieldSpec(
         "sentenceBoundaryBackend", "sat", str, allowed=WHISPER_SENTENCE_BOUNDARY_BACKENDS, ui_group="boundary.manual"
@@ -68,6 +79,17 @@ WHISPER_CONTRACT: dict[str, ConfigFieldSpec] = {
     "sentenceBoundaryDevice": ConfigFieldSpec("sentenceBoundaryDevice", "cuda", str, allowed=WHISPER_RUNTIME_DEVICES),
     "sentenceBoundaryComputeType": ConfigFieldSpec("sentenceBoundaryComputeType", "float16", str, allowed=WHISPER_COMPUTE_TYPES),
 }
+
+FUNASR_MODEL_ALIASES = {
+    "paraformer-zh": "iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+    "paraformer-zh-streaming": "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online",
+    "ct-punc-c": "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
+}
+
+
+def resolve_funasr_model_name(model_name: str) -> str:
+    normalized = str(model_name or "").strip()
+    return FUNASR_MODEL_ALIASES.get(normalized, normalized)
 
 
 def whisper_default(key: str):

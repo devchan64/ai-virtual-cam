@@ -83,6 +83,7 @@ from scripts.config.whisper_options import (
     whisper_language_display_from_raw as _whisper_language_display_from_raw,
     whisper_language_raw_from_display as _whisper_language_raw_from_display,
     whisper_sentence_boundary_model_options as _whisper_sentence_boundary_model_options,
+    whisper_stt_backend_options as _whisper_stt_backend_options,
     whisper_stt_model_options as _whisper_stt_model_options,
     whisper_translation_target_display_from_raw as _whisper_translation_target_display_from_raw,
     whisper_translation_target_raw_from_display as _whisper_translation_target_raw_from_display,
@@ -3813,45 +3814,42 @@ class ConfigGui:
         if selected_language not in {"en", "ko", "zh"}:
             selected_language = "en"
         profile_var = self.vars.get("whisper_post_processing_profile")
-        profile = profile_var.get().strip() if profile_var is not None else "auto-by-language"
-        language_driven = profile == "auto-by-language"
+        if profile_var is not None and profile_var.get().strip() != "manual":
+            profile_var.set("manual")
 
         for row in getattr(self, "_whisper_global_stt_rows", []):
-            self._grid_rows(getattr(self, "_whisper_tab", None), [row], not language_driven)
+            self._grid_rows(getattr(self, "_whisper_tab", None), [row], False)
 
         stt_frame = getattr(self, "_whisper_stt_frame", None)
         if stt_frame is not None:
-            if language_driven:
-                stt_frame.grid()
-            else:
-                stt_frame.grid_remove()
+            stt_frame.grid()
         for lang, rows in getattr(self, "_whisper_stt_language_rows", {}).items():
-            self._grid_rows(stt_frame, rows, language_driven and lang == selected_language)
+            self._grid_rows(stt_frame, rows, lang == selected_language)
 
         post_frame = getattr(self, "_whisper_post_frame", None)
         if post_frame is not None:
-            if language_driven:
-                post_frame.grid()
-            else:
-                post_frame.grid_remove()
-        for lang, rows in getattr(self, "_whisper_post_language_rows", {}).items():
-            self._grid_rows(post_frame, rows, language_driven and lang == selected_language)
+            post_frame.grid_remove()
 
         for row in getattr(self, "_whisper_manual_boundary_rows", []):
-            self._grid_rows(getattr(self, "_whisper_tab", None), [row], not language_driven)
+            self._grid_rows(getattr(self, "_whisper_tab", None), [row], True)
 
-        active_stt_backend_key = f"whisper_stt_backend_{selected_language}" if language_driven else "whisper_backend"
-        active_stt_model_key = f"whisper_stt_model_{selected_language}" if language_driven else "whisper_model"
+        active_stt_backend_key = f"whisper_stt_backend_{selected_language}"
+        active_stt_model_key = f"whisper_stt_model_{selected_language}"
+        active_stt_backend_widget = self._widgets.get(active_stt_backend_key)
         active_stt_backend_var = self.vars.get(active_stt_backend_key)
+        active_stt_backend_values = _whisper_stt_backend_options(selected_language)
+        if active_stt_backend_widget is not None:
+            active_stt_backend_widget["values"] = tuple(active_stt_backend_values)
+        if active_stt_backend_var is not None and active_stt_backend_var.get().strip() not in active_stt_backend_values:
+            active_stt_backend_var.set(active_stt_backend_values[0])
         active_stt_backend = active_stt_backend_var.get().strip() if active_stt_backend_var is not None else "faster-whisper"
-        self._set_combobox_values_for_backend(active_stt_model_key, _whisper_stt_model_options(active_stt_backend))
+        self._set_combobox_values_for_backend(
+            active_stt_model_key,
+            _whisper_stt_model_options(active_stt_backend, selected_language),
+        )
 
-        if language_driven:
-            active_boundary_backend_key = f"whisper_sentence_boundary_backend_{selected_language}"
-            active_boundary_model_key = f"whisper_sentence_boundary_model_{selected_language}"
-        else:
-            active_boundary_backend_key = "whisper_sentence_boundary_backend"
-            active_boundary_model_key = "whisper_sentence_boundary_model"
+        active_boundary_backend_key = "whisper_sentence_boundary_backend"
+        active_boundary_model_key = "whisper_sentence_boundary_model"
         active_boundary_backend_var = self.vars.get(active_boundary_backend_key)
         active_boundary_backend = active_boundary_backend_var.get().strip() if active_boundary_backend_var is not None else "sat"
         self._set_combobox_values_for_backend(

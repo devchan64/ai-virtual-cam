@@ -298,8 +298,6 @@ class WhisperTranscriptWorker:
 
     def _stt_settings_for_language(self) -> tuple[str, str]:
         language = str(getattr(self._cfg, "language", "en")).strip().lower()
-        if str(getattr(self._cfg, "postProcessingProfile", "manual")).strip() != "auto-by-language":
-            return str(self._cfg.backend).strip(), str(self._cfg.model).strip()
         suffix_by_language = {"en": "En", "ko": "Ko", "zh": "Zh"}
         suffix = suffix_by_language.get(language)
         if suffix is None:
@@ -309,16 +307,8 @@ class WhisperTranscriptWorker:
         return backend or str(self._cfg.backend).strip(), model or str(self._cfg.model).strip()
 
     def _sentence_boundary_settings_for_language(self, detected_language: str) -> tuple[str, str | None]:
-        normalized = str(detected_language or "en").strip().lower()
-        if str(getattr(self._cfg, "postProcessingProfile", "manual")).strip() != "auto-by-language":
-            return self._sentence_boundary_backend, self._sentence_boundary_model
-        suffix_by_language = {"en": "En", "ko": "Ko", "zh": "Zh"}
-        suffix = suffix_by_language.get(normalized)
-        if suffix is None:
-            return self._sentence_boundary_backend, self._sentence_boundary_model
-        backend = str(getattr(self._cfg, f"sentenceBoundaryBackend{suffix}", self._sentence_boundary_backend)).strip()
-        model = getattr(self._cfg, f"sentenceBoundaryModel{suffix}", self._sentence_boundary_model)
-        return backend or self._sentence_boundary_backend, str(model).strip() if model is not None else None
+        del detected_language
+        return self._sentence_boundary_backend, self._sentence_boundary_model
 
     def _preload_sentence_boundary_detector(self) -> None:
         language = str(getattr(self._cfg, "language", "en")).strip().lower()
@@ -379,8 +369,6 @@ class WhisperTranscriptWorker:
             and self._boundary_detector_backend == backend
             and self._boundary_detector_model == model
         ):
-            return
-        if str(getattr(self._cfg, "postProcessingProfile", "manual")).strip() != "auto-by-language":
             return
         self._sentence_boundary_detector = self._build_sentence_boundary_detector(normalized)
         self._boundary_detector_language = normalized

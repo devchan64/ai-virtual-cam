@@ -145,8 +145,8 @@ def build_whisper_tab(
             stt_frame,
             stt_row,
             backend_key,
-            gui._tr(f"label.{backend_key}", f"{lang_label} STT 백엔드"),
-            whisper_stt_backend_options(),
+            gui._tr(f"label.{backend_key}", f"{lang_label} STT 모델 타입"),
+            whisper_stt_backend_options(lang_code),
             backend_default,
             label_key=f"label.{backend_key}",
         )
@@ -157,7 +157,7 @@ def build_whisper_tab(
             stt_row,
             model_key,
             gui._tr(f"label.{model_key}", f"{lang_label} STT 모델"),
-            whisper_stt_model_options(backend_default),
+            whisper_stt_model_options(backend_default, lang_code),
             model_default,
             label_key=f"label.{model_key}",
         )
@@ -171,7 +171,7 @@ def build_whisper_tab(
         stt_frame,
         stt_row,
         "hint.whisper_stt_models",
-        "auto-by-language 운영에서는 인식 언어별 STT backend를 사용합니다. 중국어 기본 후보는 FunASR Paraformer이며 실패 시 자동 폴백하지 않습니다.",
+        "STT 모델 타입과 모델은 인식 언어별로 선택합니다. 영어/한국어는 현재 Whisper 계열을 사용하며, 중국어는 FunASR 후보를 추가로 선택할 수 있습니다.",
     )
     row += 1
 
@@ -302,7 +302,7 @@ def build_whisper_tab(
         tab_whisper,
         row,
         "hint.whisper_post_processing_profile",
-        "auto-by-language는 STT 언어에 따라 후처리 모델을 선택합니다. 영어/한국어는 SaT, 중국어는 FunASR CT-Transformer 구두점 복원을 사용합니다.",
+        "후처리 프로필은 manual만 지원합니다. 문장 경계 backend/model은 아래 수동 설정을 사용합니다.",
     )
 
     post_frame = ttk.LabelFrame(
@@ -385,7 +385,7 @@ def build_whisper_tab(
         tab_whisper,
         row,
         "hint.whisper_sentence_boundary_manual",
-        "수동 문장 경계 백엔드/모델은 후처리 프로필이 manual일 때만 사용됩니다.",
+        "문장 경계 backend/model은 모든 언어에서 이 수동 설정을 사용합니다.",
     )
     gui._whisper_manual_boundary_rows = [manual_boundary_backend_row, manual_boundary_model_row, manual_boundary_hint_row]
 

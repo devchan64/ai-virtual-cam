@@ -140,7 +140,7 @@ class WhisperConfigTest(unittest.TestCase):
                 "beamSize": 1,
                 "maxNewTokens": 128,
                 "temperature": 0.2,
-                "postProcessingProfile": "auto-by-language",
+                "postProcessingProfile": "manual",
                 "sentenceBoundaryBackend": "sat",
                 "sentenceBoundaryModel": "sat-3l-sm",
                 "sentenceBoundaryBackendEn": "sat",
@@ -242,7 +242,7 @@ class WhisperConfigTest(unittest.TestCase):
     def test_whisper_allows_chinese_funasr_stt_backend(self) -> None:
         loaded = WhisperConfig.from_dict({
             "language": "zh",
-            "postProcessingProfile": "auto-by-language",
+            "postProcessingProfile": "manual",
             "sttBackendZh": "funasr-paraformer",
             "sttModelZh": "paraformer-zh",
         })
@@ -250,17 +250,19 @@ class WhisperConfigTest(unittest.TestCase):
         self.assertEqual(loaded.sttBackendZh, "funasr-paraformer")
         self.assertEqual(loaded.sttModelZh, "paraformer-zh")
 
-    def test_whisper_allows_chinese_funasr_post_processing_backend(self) -> None:
+    def test_whisper_supports_manual_post_processing_only(self) -> None:
         loaded = WhisperConfig.from_dict({
             "language": "zh",
-            "postProcessingProfile": "auto-by-language",
-            "sentenceBoundaryBackendZh": "funasr-ct-punc",
-            "sentenceBoundaryModelZh": "ct-punc-c",
+            "postProcessingProfile": "manual",
+            "sentenceBoundaryBackend": "funasr-ct-punc",
+            "sentenceBoundaryModel": "ct-punc-c",
         })
 
-        self.assertEqual(loaded.postProcessingProfile, "auto-by-language")
-        self.assertEqual(loaded.sentenceBoundaryBackendZh, "funasr-ct-punc")
-        self.assertEqual(loaded.sentenceBoundaryModelZh, "ct-punc-c")
+        self.assertEqual(loaded.postProcessingProfile, "manual")
+        self.assertEqual(loaded.sentenceBoundaryBackend, "funasr-ct-punc")
+        self.assertEqual(loaded.sentenceBoundaryModel, "ct-punc-c")
+        with self.assertRaisesRegex(ValueError, "whisper.postProcessingProfile"):
+            WhisperConfig.from_dict({"postProcessingProfile": "auto-by-language"})
 
     def test_whisper_rejects_invalid_backend(self) -> None:
         with self.assertRaisesRegex(ValueError, "whisper.backend"):
@@ -357,6 +359,10 @@ class WhisperConfigTest(unittest.TestCase):
             WhisperConfig.from_dict({"postProcessingProfile": "invalid"})
         with self.assertRaisesRegex(ValueError, "whisper.sttBackendZh"):
             WhisperConfig.from_dict({"sttBackendZh": "invalid"})
+        with self.assertRaisesRegex(ValueError, "whisper.sttBackendEn"):
+            WhisperConfig.from_dict({"sttBackendEn": "funasr-paraformer"})
+        with self.assertRaisesRegex(ValueError, "whisper.sttBackendKo"):
+            WhisperConfig.from_dict({"sttBackendKo": "funasr-sensevoice"})
         with self.assertRaisesRegex(ValueError, "whisper.sttModelZh"):
             WhisperConfig.from_dict({"sttModelZh": ""})
         with self.assertRaisesRegex(ValueError, "whisper.sentenceBoundaryBackend"):

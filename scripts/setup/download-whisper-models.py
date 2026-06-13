@@ -10,6 +10,7 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from src.domain.contracts.whisper import resolve_funasr_model_name
 from src.domain.whisper_defaults import whisper_default
 
 
@@ -56,8 +57,11 @@ def download_funasr_model(model_name: str) -> None:
         warnings.filterwarnings("ignore", category=SyntaxWarning)
         from funasr import AutoModel
 
-    AutoModel(model=model_name, device="cpu")
-    _log(f"FunASR punctuation model ready: {model_name}")
+    resolved = resolve_funasr_model_name(model_name)
+    if resolved != model_name:
+        _log(f"Resolved FunASR punctuation model alias: {model_name} -> {resolved}")
+    AutoModel(model=resolved, device="cpu", disable_update=True)
+    _log(f"FunASR punctuation model ready: {model_name} resolved={resolved}")
 
 
 def download_funasr_stt_model(model_name: str) -> None:
@@ -66,8 +70,11 @@ def download_funasr_stt_model(model_name: str) -> None:
         warnings.filterwarnings("ignore", category=SyntaxWarning)
         from funasr import AutoModel
 
-    AutoModel(model=model_name, device="cpu")
-    _log(f"FunASR STT model ready: {model_name}")
+    resolved = resolve_funasr_model_name(model_name)
+    if resolved != model_name:
+        _log(f"Resolved FunASR STT model alias: {model_name} -> {resolved}")
+    AutoModel(model=resolved, device="cpu", disable_update=True)
+    _log(f"FunASR STT model ready: {model_name} resolved={resolved}")
 
 
 def download_nllb_model(model_name: str) -> None:

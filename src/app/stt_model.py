@@ -5,6 +5,8 @@ import io
 from dataclasses import dataclass
 from typing import Iterable
 
+from src.domain.contracts.whisper import resolve_funasr_model_name
+
 
 STT_BACKENDS = {"faster-whisper", "funasr-paraformer", "funasr-sensevoice", "mock"}
 
@@ -59,6 +61,7 @@ class FunasrSttModel:
     def __init__(self, backend: str, model_name: str, device: str, language: str, *, status_callback=None) -> None:
         self.backend = backend
         self.model_name = model_name
+        self.resolved_model_name = resolve_funasr_model_name(model_name)
         self.device = device
         self.language = language if language in {"ko", "en", "zh"} else "zh"
         self._status_callback = status_callback
@@ -78,10 +81,10 @@ class FunasrSttModel:
         _emit_captured_output(status_callback, "FunASR STT import", captured.getvalue())
         try:
             with _capture_model_output() as captured:
-                self._model = AutoModel(model=model_name, device=device)
+                self._model = AutoModel(model=self.resolved_model_name, device=device, disable_update=True)
         except Exception as exc:
             raise RuntimeError(
-                f"FunASR STT 모델 로딩 실패: backend={backend} model={model_name} device={device}. "
+                f"FunASR STT 모델 로딩 실패: backend={backend} model={model_name} resolvedModel={self.resolved_model_name} device={device}. "
                 f"원인: {exc}"
             ) from exc
         _emit_captured_output(status_callback, "FunASR STT load", captured.getvalue())
@@ -93,7 +96,7 @@ class FunasrSttModel:
         except Exception as exc:
             raise RuntimeError(
                 f"FunASR STT 전사 실패: backend={self.backend} model={self.model_name} "
-                f"device={self.device}. 원인: {exc}"
+                f"resolvedModel={self.resolved_model_name} device={self.device}. 원인: {exc}"
             ) from exc
         _emit_captured_output(self._status_callback, "FunASR STT generate", captured.getvalue())
         text = funasr_generated_text(result)

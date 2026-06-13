@@ -272,7 +272,7 @@ class FunasrCtPuncSentenceBoundaryDetector:
                 "fallback is intentionally disabled."
             ) from exc
         try:
-            self._model = AutoModel(model=self.model, device=self.device)
+            self._model = AutoModel(model=resolve_funasr_model_name(self.model), device=self.device, disable_update=True)
         except Exception as exc:
             raise RuntimeError(
                 "sentence boundary backend 'funasr-ct-punc' initialization failed: "
