@@ -452,9 +452,19 @@ def _collapse_adjacent_compact_korean_revisions(units: list[str]) -> bool:
                 if right_end > len(units):
                     break
                 right_key = _compact_hangul_phrase_key(units[right_start:right_end])
-                if left_key != right_key:
+                if left_key == right_key:
+                    del units[left_start:right_start]
+                    return True
+                shorter_key_len = min(len(left_key), len(right_key))
+                length_delta = abs(len(left_key) - len(right_key))
+                if shorter_key_len < 7 or length_delta > 2 or left_key[0] != right_key[0]:
                     continue
-                del units[left_start:right_start]
+                if SequenceMatcher(None, left_key, right_key).ratio() < 0.88:
+                    continue
+                if len(left_key) >= len(right_key):
+                    del units[right_start:right_end]
+                else:
+                    del units[left_start:right_start]
                 return True
     return False
 

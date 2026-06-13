@@ -1,0 +1,266 @@
+import unittest
+
+from src.app.sentence_boundary import LegacyRegexSentenceBoundaryDetector
+from src.app.whisper_window import _collapse_adjacent_repeated_phrase_details, _collapse_adjacent_repeated_phrases, _diagnostic_tail, _forced_sentence_reason, _new_text_delta, _pending_new_text_combined, _sentence_max_age_chunks, _sentence_output_delta, _sentence_required_confirmations, _sentences_are_revisions, _should_age_staged_sentence, _should_translate_staged_sentence, _prefer_sentence_revision, _sentence_end_count, _split_completed_sentences, _stable_window_text
+
+
+class WhisperSentenceRevisionTest(unittest.TestCase):
+    def test_sentence_revision_detects_updated_completed_sentence(self) -> None:
+        self.assertTrue(
+            _sentences_are_revisions(
+                "Now it is telling me.",
+                "Now it is telling me 52 second.",
+            )
+        )
+        self.assertEqual(
+            _prefer_sentence_revision("Now it is telling me.", "Now it is telling me 52 second."),
+            "Now it is telling me 52 second.",
+        )
+
+    def test_sentence_revision_detects_short_prefix_expansion_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 283-295.
+        self.assertTrue(
+            _sentences_are_revisions(
+                "Again awesome.",
+                "again awesome the location tab shows your car's live location at any time which is awesome.",
+            )
+        )
+        self.assertEqual(
+            _prefer_sentence_revision(
+                "Again awesome.",
+                "again awesome the location tab shows your car's live location at any time which is awesome.",
+            ),
+            "again awesome the location tab shows your car's live location at any time which is awesome.",
+        )
+
+    def test_sentence_revision_detects_short_one_that_suits_revisions_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 154-158.
+        self.assertTrue(
+            _sentences_are_revisions(
+                "It's me, not one that suits Joe.",
+                "Yeah, it's one that it suits Joe.",
+            )
+        )
+        self.assertEqual(
+            _prefer_sentence_revision(
+                "It's me, not one that suits Joe.",
+                "Yeah, it's one that it suits Joe.",
+            ),
+            "Yeah, it's one that it suits Joe.",
+        )
+        self.assertTrue(
+            _sentences_are_revisions(
+                "Yeah, it's one that it suits Joe.",
+                "Yes, one that suits mom.",
+            )
+        )
+        self.assertEqual(
+            _prefer_sentence_revision(
+                "Yeah, it's one that it suits Joe.",
+                "Yes, one that suits mom.",
+            ),
+            "Yes, one that suits mom.",
+        )
+
+    def test_sentence_revision_rejects_distinct_sentences(self) -> None:
+        self.assertFalse(_sentences_are_revisions("Tesla app.", "It was going a little fast."))
+
+    def test_staged_sentence_is_not_translated_before_final_by_default(self) -> None:
+        self.assertFalse(_should_translate_staged_sentence("Again awesome.", 1))
+        self.assertFalse(_should_translate_staged_sentence("Again awesome the location tab shows", 1))
+        self.assertFalse(_should_translate_staged_sentence("Again awesome.", 2))
+
+    def test_staged_sentence_waits_when_pending_extends_it_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 642-648.
+        staged = "It just resets the screen in case like i said it freezes or gets a little slow."
+        pending = "just resets the screen in case like I said it freezes or gets a little slow and lastly the fourth advanced feature I want to talk about the software updates As you may or"
+
+        self.assertFalse(_should_age_staged_sentence(staged, pending))
+
+    def test_staged_sentence_waits_when_fast_boundary_reuses_blind_spot_tail_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 226-230.
+        staged = "If I want to quickly change over to the left lane without looking at my blind spot, in my blind spot I could turn on certain I can turn on certain turn signal and when that setting is enabled it automatically shows a visual of my blind spot camera and now I can easily see that nobody's in my blind spot and I"
+        pending = "And now I can easily see that nobody's in my blind spot and I can easily change lanes while"
+
+        self.assertFalse(_should_age_staged_sentence(staged, pending))
+
+    def test_staged_sentence_waits_when_pending_reuses_self_driving_tail_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 34-39.
+        staged = "It's also less fatiguing to drive when you're taking more breaks, and then you have the systems like autopilot and full self-driving in tesla vehicles specifically that help to make your drive that much less fatiguing as well"
+        pending = "self-driving and Tesla vehicles specifically that help to make your drive that much less fatiguing as well and make the trade-off worth it for those couple extra minutes spent at chargers."
+
+        self.assertTrue(_sentences_are_revisions(staged, pending))
+        self.assertFalse(_should_age_staged_sentence(staged, pending))
+
+    def test_staged_sentence_waits_when_pending_revises_youre_tail_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 81-82.
+        staged = "If you just bought a Tesla or waiting for delivery or you're"
+        pending = "If you just bought a Tesla are waiting for delivery or you're seriously thinking about"
+
+        self.assertTrue(_sentences_are_revisions(staged, pending))
+        self.assertFalse(_should_age_staged_sentence(staged, pending))
+
+    def test_staged_sentence_waits_when_pending_reuses_outlet_tail_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 34-36.
+        staged = "Tesla's charging cable this would be for home charging and public Chargers and tesla destination chargers not for tesla superchargers But maybe you find yourself at a location where you can park here, but the outlet is all the way over there."
+        pending = "where you can park here, but the outlet is all the way over there, this will ensure that you"
+
+        self.assertTrue(_sentences_are_revisions(staged, pending))
+        self.assertFalse(_should_age_staged_sentence(staged, pending))
+
+    def test_staged_sentence_prefers_later_range_per_hour_revision_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 195-201.
+        staged = "This is the real sweet spot for Tesla ownership because you can typically gain about 25 to 44 miles of range"
+        revised = "This is the real sweet spot for Tesla ownership because you can typically gain about 25 to 44 miles of range per hour."
+
+        self.assertTrue(_sentences_are_revisions(staged, revised))
+        self.assertEqual(_prefer_sentence_revision(staged, revised), revised)
+
+    def test_staged_sentence_can_age_without_pending_revision(self) -> None:
+        self.assertTrue(_should_age_staged_sentence("Completed sentence.", "Different topic starts here"))
+
+    def test_staged_sentence_ages_when_pending_is_short_suffix_repeat_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 360-368.
+        staged = "The GPS doesn't always take us on the best route because we could have taken the highway and just gotten off here at the exit but instead we're taking a side road to get"
+        pending = "taking a side road to get"
+
+        self.assertTrue(_sentences_are_revisions(staged, pending))
+        self.assertTrue(_should_age_staged_sentence(staged, pending))
+
+    def test_sentence_pending_can_accumulate_long_fast_speech(self) -> None:
+        pending = "this is a quick sentence fragment that keeps going without punctuation and should not be forced too early"
+
+        self.assertEqual(_forced_sentence_reason(pending, 4), "")
+
+    def test_sentence_revision_detects_korean_tail_extension(self) -> None:
+        # Regression-style Korean case: short committed tail extended by the next stable chunk.
+        staged = "다음은 가장 저렴한 부분입니다."
+        revised = "다음은 가장 저렴한 부분입니다. 액셀러를 누릅니다."
+
+        self.assertTrue(_sentences_are_revisions(staged, revised))
+        self.assertEqual(_prefer_sentence_revision(staged, revised), revised)
+        self.assertEqual(_new_text_delta(staged, revised), "액셀러를 누릅니다.")
+
+    def test_sentence_revision_detects_korean_comma_number_revision_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 8-12: 1400원 and 1,400원 are the same numeric value.
+        staged = "1400원, 1220원, 이래 올라오잖아요."
+        revised = "1,400원, 1,220원, 이러러 나오잖아요"
+
+        self.assertTrue(_sentences_are_revisions(staged, revised))
+        self.assertEqual(_prefer_sentence_revision(staged, revised), staged)
+
+    def test_sentence_revision_detects_korean_compact_abenomics_revision_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 60-63.
+        staged = "아베 신조가 에나를 들이붓던 아베노믹스 라는게 있었어요"
+        revised = "아베 신조가 엔화를 들이붓던 에나를 들이붓던 거였거든요."
+
+        self.assertTrue(_sentences_are_revisions(staged, revised))
+        self.assertEqual(_prefer_sentence_revision(staged, revised), revised)
+
+    def test_sentence_revision_keeps_longer_korean_revision_when_short_tail_reappears_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 62-63.
+        staged = "아베 신조가 엔화를 들이붓던 에나를 들이붓던 거였거든요."
+        revised = "아베 신조 거였거든요."
+
+        self.assertTrue(_sentences_are_revisions(staged, revised))
+        self.assertEqual(_prefer_sentence_revision(staged, revised), staged)
+
+    def test_sentence_revision_detects_korean_spacing_revision_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 220-223.
+        staged = "그래서 아베가 엔화약세를 만들고 싶어"
+        revised = "그래서 아베가 엔화 약세를 만들고 싶어 했어요"
+
+        self.assertTrue(_sentences_are_revisions(staged, revised))
+        self.assertEqual(_prefer_sentence_revision(staged, revised), revised)
+
+    def test_sentence_revision_detects_korean_latin_n_revision_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 223-225 and 249-252.
+        self.assertTrue(_sentences_are_revisions("그래서 엔을 뿌렸거든요.", "그래서 n을 뿌렸거든요."))
+        self.assertEqual(_prefer_sentence_revision("그래서 엔을 뿌렸거든요.", "그래서 n을 뿌렸거든요."), "그래서 엔을 뿌렸거든요.")
+        self.assertTrue(_sentences_are_revisions("엔화가 너무너무 약세가 되지 수 있지 않을까요", "N화가 너무너무 약세가 되지 않을까요?"))
+        self.assertEqual(_prefer_sentence_revision("엔화가 너무너무 약세가 되지 수 있지 않을까요", "N화가 너무너무 약세가 되지 않을까요?"), "N화가 너무너무 약세가 되지 않을까요?")
+
+    def test_sentence_revision_detects_korean_second_plan_extension_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 97-100.
+        staged = "근데 두 번째는 뭐냐면 웃는"
+        revised = "근데 두 번째 안은 뭐냐면 웃는 그날까지 던지겠습니다"
+
+        self.assertTrue(_sentences_are_revisions(staged, revised))
+        self.assertEqual(_prefer_sentence_revision(staged, revised), revised)
+
+    def test_sentence_revision_detects_korean_rate_cut_revision_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 93-96 on 2026-06-13.
+        staged = "본인이 당선되니까 금리 이 얘기 하고 있거든요"
+        revised = "본인이 당선되니까 금리에 나와라고 그렇게 금리 인하라고 그렇게 하더라고요."
+
+        self.assertTrue(_sentences_are_revisions(staged, revised))
+        self.assertEqual(_prefer_sentence_revision(staged, revised), revised)
+
+    def test_staged_sentence_does_not_age_on_korean_revision_candidate(self) -> None:
+        # Ensure Korean staged text waits for stabilized revision rather than aging prematurely.
+        staged = "우리는 맥북을 통신으로 사용할 수 있을 것입니다"
+        pending = "이는 맥북을 통신으로 사용할 수 있을 것입니다"
+
+        self.assertTrue(_sentences_are_revisions(staged, pending))
+        self.assertFalse(_should_age_staged_sentence(staged, pending))
+
+    def test_sentence_revision_prefers_take_care_completion_from_charge_log(self) -> None:
+        # Regression from avc-whisper.log chunks 567-570.
+        noisy = "Do you want to connect it or sure i'll take care me to go?"
+        corrected = "Sure, I'll take care of it."
+
+        self.assertTrue(_sentences_are_revisions(noisy, corrected))
+        self.assertEqual(_prefer_sentence_revision(noisy, corrected), corrected)
+        self.assertEqual(_sentence_output_delta(corrected, "of it."), "")
+
+    def test_sentence_revision_keeps_charge_of_day_context_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 571-578.
+        first = "We're at our fourth charge of the day it is currently"
+        revised = "charge of the day it is currently 7 30 p.m."
+
+        self.assertTrue(_sentences_are_revisions(first, revised))
+        self.assertEqual(_prefer_sentence_revision(first, revised), revised)
+
+    def test_revision_lifecycle_simulates_revised_tail_extension(self) -> None:
+        # Regression-like sequence: pending sentence tail gets expanded, then confirmed.
+        completed, pending = _split_completed_sentences("", "It's like a shark now")
+        self.assertEqual(completed, [])
+        self.assertEqual(pending, "It's like a shark now")
+
+        # Later revision candidate from Whisper is considered a revision of staged text.
+        revised = "It's hunting like a shark Now, it's hunting."
+        staged = pending
+        self.assertTrue(_sentences_are_revisions(staged, revised))
+
+        finalized = _prefer_sentence_revision(staged, revised)
+        self.assertEqual(finalized, revised)
+
+        # Sliding delta behavior for the same segment should remain minimal after confirmation.
+        self.assertEqual(_new_text_delta(staged, finalized), "it's hunting.")
+
+    def test_revision_lifecycle_simulates_connective_and_numeric_fragment_block(self) -> None:
+        # sequence observed with tail fragments like numeric and connective artifacts.
+        self.assertEqual(
+            _sentence_output_delta(
+                "charge of the day it is currently",
+                "charge of the day it is currently 7 30 p.m.",
+            ),
+            "7 30 p m",
+        )
+
+        self.assertEqual(
+            _sentence_output_delta(
+                "saying dry weight is around 5,800 pounds and it has a GBWR of 6,800",
+                "are 6,800 pounds.",
+            ),
+            "",
+        )
+
+        self.assertEqual(
+            _sentence_output_delta("Let's do it now.", "do it now."),
+            "",
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
