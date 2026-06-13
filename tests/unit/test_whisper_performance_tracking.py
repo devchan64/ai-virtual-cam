@@ -4,6 +4,7 @@ import unittest
 from src.app.whisper_window import (
     _collapse_adjacent_repeated_phrase_details,
     _normalized_text,
+    _pending_overrun_reason,
     _replacement_decision_reason,
     _sentence_output_delta,
     _sentences_are_revisions,
@@ -19,6 +20,7 @@ TRACKING_TARGETS = {
     "collapse": {"target_cases": 45, "target_rate": 0.90},
     "stability": {"target_cases": 10, "target_rate": 0.80},
     "replacement": {"target_cases": 9, "target_rate": 0.90},
+    "pending": {"target_cases": 9, "target_rate": 0.90},
 }
 
 REVISION_TRACKING_CASES = [
@@ -409,6 +411,64 @@ REPLACEMENT_TRACKING_CASES = [
     },
 ]
 
+
+PENDING_TRACKING_CASES = [
+    {
+        "pending": "so as far as SpaceX the reason that there hasn't been a huge number of a big improvement in in the space industry because it is there's such a significant amount of capital that's needed to start a rocket company, and it's a very difficult technical challenge and the number of people that really understand rocketry in",
+        "chunks": 13,
+        "expected": "long_no_boundary",
+        "source": "avc-whisper.log chunk 118",
+    },
+    {
+        "pending": "He has thrived in Silicon Valley, one of the co-founders of PayPal, the online payments company that eBay bought for $1.5",
+        "chunks": 4,
+        "expected": "",
+        "source": "avc-whisper.log chunk 24",
+    },
+    {
+        "pending": "So even though it's only 2.5 two and a half gallons gasoline, of energy content of gasoline, energy content goes really far compared with, you know, if that was, I think it's taken a while for the industry to come around to this point, but I think it's largely, at this point, it's almost become conventional wisdom that",
+        "chunks": 10,
+        "expected": "long_no_boundary",
+        "source": "whisper-monitor-20260613-4 chunk 249",
+    },
+    {
+        "pending": "And there's just no way that we could afford a billion dollars to make a giant car plant that would make hundreds of thousands of cars a year, because that's the kind of volume you have to get to",
+        "chunks": 8,
+        "expected": "long_no_boundary",
+        "source": "whisper-monitor-20260613-4 chunk 310",
+    },
+    {
+        "pending": "Okay, so how's that going, reaching scale and being able to create a marketing, business plan that will enable you to reach a large audience and create and continue the development of the technology that will",
+        "chunks": 9,
+        "expected": "long_no_boundary",
+        "source": "whisper-monitor-20260613-4 chunk 331",
+    },
+    {
+        "pending": "Now, for the first time in Korea, to be able to legally drive a friend of mine happened to drive a Tesla for the car on the street, and coincidentally, a close friend was riding a Tesla, so the day he downloaded the software on the day it was allowed so they allowed me to use the software and they let me ride for about an hour",
+        "chunks": 6,
+        "expected": "long_no_boundary",
+        "source": "whisper-monitor-20260613-4 chunk 733 language-mismatch risk",
+    },
+    {
+        "pending": "But if you do it with self-driving, by self-driving, you can fold it with a side into a side mirror and enter it yourself, so you can mirror and put it in by yourself, you a 1cm gap, It's almost 1cm in diameter, so you can put a lot of cars in it, so and when I say that I will make a self-driving",
+        "chunks": 6,
+        "expected": "long_no_boundary",
+        "source": "whisper-monitor-20260613-4 chunk 993 language-mismatch risk",
+    },
+    {
+        "pending": "Then, as the atomic bomb came out, science and science and technology always make us feel aware of the fact that it's there was a sense of awareness that science and technology are not always the only thing that makes us good, and there's an environmental pollution story, and ultimately, in",
+        "chunks": 4,
+        "expected": "long_no_boundary",
+        "source": "whisper-monitor-20260613-4 chunk 1203 language-mismatch risk",
+    },
+    {
+        "pending": "this pending text has grown beyond the normal pending size and now it finally has a sentence ending marker that can be committed safely enough for real-time translation while still preserving enough context for downstream translation quality checks.",
+        "chunks": 8,
+        "expected": "with_end_mark",
+        "source": "synthetic completed overrun",
+    },
+]
+
 STABILITY_TRACKING_SEQUENCES = [
     [
         "이자 비용 줄어들면서 얘는 자동적으로 또 떨어지는 시스템이 구축이 된다는 거죠 지금과는",
@@ -580,6 +640,14 @@ def _make_collapse_tracking_test(index: int, case: dict[str, object]):
     return test
 
 
+
+def _make_pending_tracking_test(index: int, case: dict[str, object]):
+    def test(self: WhisperPerformanceTrackingTest) -> None:
+        actual = _pending_overrun_reason(str(case["pending"]), int(case["chunks"]))
+        matched = actual == str(case["expected"])
+        self._record("pending", f"pending_{index:03d}", matched)
+    return test
+
 def _make_replacement_tracking_test(index: int, case: dict[str, object]):
     def test(self: WhisperPerformanceTrackingTest) -> None:
         actual = _replacement_decision_reason(
@@ -625,6 +693,14 @@ for _index, _case in enumerate(COLLAPSE_TRACKING_CASES, 1):
         WhisperPerformanceTrackingTest,
         f"test_tracking_collapse_{_index:03d}",
         _make_collapse_tracking_test(_index, _case),
+    )
+
+
+for _index, _case in enumerate(PENDING_TRACKING_CASES, 1):
+    setattr(
+        WhisperPerformanceTrackingTest,
+        f"test_tracking_pending_{_index:03d}",
+        _make_pending_tracking_test(_index, _case),
     )
 
 for _index, _case in enumerate(REPLACEMENT_TRACKING_CASES, 1):

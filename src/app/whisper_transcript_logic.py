@@ -10,6 +10,9 @@ from src.app.sentence_boundary import (
 )
 
 MAX_PENDING_SENTENCE_CHARS = 180
+PENDING_OVERRUN_CHUNKS = 8
+FAST_PENDING_OVERRUN_CHARS = 240
+FAST_PENDING_OVERRUN_CHUNKS = 4
 SLOW_PENDING_SENTENCE_CHUNKS = 4
 SLOW_PENDING_SENTENCE_CHARS = 45
 SLOW_PENDING_MAX_SENTENCE_CHARS = 120
@@ -848,6 +851,22 @@ def _sentence_end_count(text: str) -> int:
 def _has_unstable_numeric_tail(text: str) -> bool:
     words = _word_units(text)
     return bool(len(words) >= 2 and words[-1].isdigit() and words[-2] in {"from", "to"})
+
+
+def _pending_overrun_reason(pending_text: str, pending_chunks: int) -> str:
+    normalized = _normalized_text(pending_text)
+    if not normalized:
+        return ""
+    pending_chars = len(normalized)
+    standard_overrun = pending_chunks >= PENDING_OVERRUN_CHUNKS and pending_chars >= MAX_PENDING_SENTENCE_CHARS
+    fast_overrun = pending_chunks >= FAST_PENDING_OVERRUN_CHUNKS and pending_chars >= FAST_PENDING_OVERRUN_CHARS
+    if not standard_overrun and not fast_overrun:
+        return ""
+    if _sentence_end_count(normalized) > 0:
+        return "with_end_mark"
+    if _has_unstable_numeric_tail(normalized):
+        return "unstable_numeric_tail"
+    return "long_no_boundary"
 
 
 def _forced_sentence_reason(pending_text: str, pending_chunks: int) -> str:

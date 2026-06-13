@@ -1,7 +1,7 @@
 import unittest
 
 from src.app.sentence_boundary import LegacyRegexSentenceBoundaryDetector
-from src.app.whisper_window import _collapse_adjacent_repeated_phrase_details, _collapse_adjacent_repeated_phrases, _diagnostic_tail, _forced_sentence_reason, _new_text_delta, _pending_new_text_combined, _sentence_max_age_chunks, _sentence_output_delta, _sentence_required_confirmations, _sentences_are_revisions, _should_age_staged_sentence, _should_translate_staged_sentence, _prefer_sentence_revision, _sentence_end_count, _split_completed_sentences, _stable_window_text
+from src.app.whisper_window import _collapse_adjacent_repeated_phrase_details, _collapse_adjacent_repeated_phrases, _diagnostic_tail, _forced_sentence_reason, _pending_overrun_reason, _new_text_delta, _pending_new_text_combined, _sentence_max_age_chunks, _sentence_output_delta, _sentence_required_confirmations, _sentences_are_revisions, _should_age_staged_sentence, _should_translate_staged_sentence, _prefer_sentence_revision, _sentence_end_count, _split_completed_sentences, _stable_window_text
 
 
 class WhisperSentenceForcingTest(unittest.TestCase):
@@ -46,6 +46,28 @@ class WhisperSentenceForcingTest(unittest.TestCase):
         pending = "charge at a supercharger quite honestly you can get from 0"
 
         self.assertEqual(_forced_sentence_reason(pending, 4), "")
+
+
+    def test_pending_overrun_tracks_long_unpunctuated_english_from_log(self) -> None:
+        pending = (
+            "so as far as SpaceX the reason that there hasn't been a huge number of a big improvement "
+            "in in the space industry because it is there's such a significant amount of capital that's "
+            "needed to start a rocket company, and it's a very difficult technical challenge and the number "
+            "of people that really understand rocketry in"
+        )
+
+        self.assertEqual(_forced_sentence_reason(pending, 13), "")
+        self.assertEqual(_pending_overrun_reason(pending, 13), "long_no_boundary")
+
+    def test_pending_overrun_reports_completed_text_that_should_force(self) -> None:
+        pending = (
+            "this pending text has grown beyond the normal pending size and now it finally has a sentence "
+            "ending marker that can be committed safely enough for real-time translation while still "
+            "preserving enough context for downstream translation quality checks."
+        )
+
+        self.assertEqual(_forced_sentence_reason(pending, 8), "pending_chars")
+        self.assertEqual(_pending_overrun_reason(pending, 8), "with_end_mark")
 
     def test_forced_sentence_requires_extra_confirmation_and_age(self) -> None:
         self.assertGreater(_sentence_required_confirmations(True), _sentence_required_confirmations(False))

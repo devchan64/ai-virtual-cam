@@ -29,6 +29,7 @@ from src.app.whisper_transcript_logic import (
     _new_text_delta,
     _normalized_text,
     _pending_new_text_combined,
+    _pending_overrun_reason,
     _format_transcript_metrics,
     _prefer_sentence_revision,
     _sentence_end_count,
@@ -933,10 +934,15 @@ class WhisperTranscriptWorker:
                             final_sentences.extend(age_staged_sentence(detected, pending_transcript_text))
                     else:
                         final_sentences.extend(age_staged_sentence(detected, pending_transcript_text))
+                pending_overrun_reason = _pending_overrun_reason(pending_transcript_text, pending_chunks)
+                if pending_overrun_reason:
+                    count_metric("pending_overrun")
+                    count_metric(f"pending_overrun_reason_{pending_overrun_reason}")
                 self._emit(
                     "status",
                     "Whisper 문장 진단: "
                     f"chunk={chunks} completed={len(completed_sentences)} final={len(final_sentences)} forced_by={forced_by or 'none'} "
+                    f"pending_overrun={pending_overrun_reason or 'none'} "
                     f"boundary_backend={self._sentence_boundary_detector.backend} "
                     f"boundary_complete={boundary_complete} boundary_soft={boundary_soft} boundary_conf={boundary_confidence_display} "
                     f"pending_chars={len(pending_transcript_text)} pending_chunks={pending_chunks} "

@@ -291,6 +291,7 @@ class SentenceBoundaryDetector:
 - `lifecycle_metrics`는 세션 누적 추세를, `chunk_metrics`는 해당 chunk의 이벤트를 추적한다.
 - `stage_replace_decision_finalize`가 많으면 staged 후보가 너무 쉽게 교체 확정되는지 확인한다.
 - `stage_discard_reason_open_korean_clause`가 많으면 열린 한글 절을 과도하게 폐기하고 있는지 확인한다.
+- `pending_overrun`은 pending이 길이/관측 횟수 임계치를 넘었지만 확정되지 않은 상태를 나타낸다. `long_no_boundary`는 경계 모델이 문장 경계를 찾지 못해 번역 지연이 커질 수 있는 신호다. 일반 overrun은 180자/8 chunks 이상, 빠른 overrun은 240자/4 chunks 이상을 기준으로 추적한다.
 - `finalize_duplicate_suppressed`가 증가하면 중복 출력은 막고 있지만 앞단 경계/리비전이 불안정하다는 신호로 본다.
 
 ## 9) 단계별 확정 규칙
@@ -378,7 +379,7 @@ class SentenceBoundaryDetector:
 
 #### 11.3.1 로그 입력(필수 필드)
 
-- `split event`: `chunk`, `completed`, `final`, `pending_text`, `forced_by`, `boundary_backend`, `pending_chars`, `pending_chunks`, `pending_chars_per_chunk`
+- `split event`: `chunk`, `completed`, `final`, `pending_text`, `forced_by`, `pending_overrun`, `boundary_backend`, `pending_chars`, `pending_chunks`, `pending_chars_per_chunk`
 - `commit event`: `step`, `window`, `commit_lag`, `stt_elapsed`, `stt_rtf`, `translation_elapsed`, `total_elapsed`, `total_rtf`, `beam`, `max_tokens`, `text_chars`
 - `transcript fragment`: `delta_text`, `state(confirmed|pending|partial)`, `revision_id`(있으면)
 
@@ -460,8 +461,9 @@ unittest 성공은 테스트 코드가 실행되어 지표가 수집되었다는
 | `collapse` | 같은 의미의 인접 반복 문구를 줄일 수 있는지 | 45 | 90% 이상 |
 | `stability` | 연속 partial 전사가 전체 재출력 없이 안정적으로 revision되는지 | 10 | 80% 이상 |
 | `replacement` | staged 후보 교체 시 보존/폐기/확정 결정이 의도와 맞는지 | 9 | 90% 이상 |
+| `pending` | 긴 pending이 확정되지 않는 사유를 지표화해 번역 지연 위험을 추적하는지 | 9 | 90% 이상 |
 
-`distinct` 목표율을 더 높게 둔 이유는 서로 다른 문장을 병합하면 원문 손실이 발생하고, 이후 번역도 복구할 수 없기 때문이다. `revision`과 `collapse`는 중복을 줄이는 방향의 품질 지표지만, 과도한 병합보다 손실 위험이 낮으므로 초기 목표율을 90%로 둔다. `stability`는 incremental ASR의 partial hypothesis instability와 revokes 문제를 현재 코드의 revision lifecycle에 맞춘 프록시 지표다. `replacement`는 2026-06-13 30분 운영 로그에서 관측된 staged 교체 손실을 직접 추적하기 위해 추가한 지표이며, `open_korean_clause`와 `partial_preserve` 결정의 회귀를 막는다.
+`distinct` 목표율을 더 높게 둔 이유는 서로 다른 문장을 병합하면 원문 손실이 발생하고, 이후 번역도 복구할 수 없기 때문이다. `revision`과 `collapse`는 중복을 줄이는 방향의 품질 지표지만, 과도한 병합보다 손실 위험이 낮으므로 초기 목표율을 90%로 둔다. `stability`는 incremental ASR의 partial hypothesis instability와 revokes 문제를 현재 코드의 revision lifecycle에 맞춘 프록시 지표다. `replacement`는 2026-06-13 30분 운영 로그에서 관측된 staged 교체 손실을 직접 추적하기 위해 추가한 지표이며, `open_korean_clause`와 `partial_preserve` 결정의 회귀를 막는다. `pending`은 영어 장문처럼 경계가 늦게 나오는 구간에서 번역 지연 위험을 추적하기 위한 지표다.
 
 ### 12.1 운영 규칙
 
@@ -503,6 +505,7 @@ unittest 성공은 테스트 코드가 실행되어 지표가 수집되었다는
 - `commitLagSeconds` 기본/운영값은 1.5초로 정렬한다.
 - VAD 기반 필터링은 현재 슬라이딩 윈도우 확정 정책과 충돌해 운영 경로에서 제거한다.
 - `chunk_metrics`를 추가해 해당 chunk에서 발생한 `stage_start`, `stage_revision`, `stage_replace`, `stage_discard`, `finalized` 등을 즉시 확인한다.
+- `pending_overrun`을 추가해 긴 pending이 `long_no_boundary`, `with_end_mark`, `unstable_numeric_tail` 중 어떤 상태인지 추적한다.
 - `replacement` 추적 테스트를 추가해 staged 교체 결정의 보존/폐기/확정 품질을 별도 관리한다.
 - 열린 한글 절은 반복 관측만으로 확정하지 않는다.
 - replacement 판단에서도 `open_korean_clause`가 `confirmed`보다 우선한다. 재확인 횟수를 만족해도 열린 절이면 확정하지 않는다.
@@ -518,6 +521,7 @@ unittest 성공은 테스트 코드가 실행되어 지표가 수집되었다는
 현재 추적 지표 예시:
 
 ```text
+pending=9/9 rate=1.000 target>=0.90
 replacement=9/9 rate=1.000 target>=0.90
 revision=97/107 rate=0.907 target>=0.90
 distinct=38/38 rate=1.000 target>=0.95

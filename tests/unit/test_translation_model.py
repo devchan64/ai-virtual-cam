@@ -96,7 +96,7 @@ class TranslationModelTest(unittest.TestCase):
         self.assertEqual(kwargs["max_new_tokens"], 128)
         self.assertEqual(kwargs["no_repeat_ngram_size"], 3)
         self.assertGreater(kwargs["repetition_penalty"], 1.0)
-        self.assertTrue(kwargs["early_stopping"])
+        self.assertNotIn("early_stopping", kwargs)
 
     def test_translation_generation_options_are_validated(self) -> None:
         self.assertEqual(_validate_generation_int("test.option", 1, 1, 8), 1)

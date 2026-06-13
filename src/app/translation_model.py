@@ -131,7 +131,6 @@ def _nllb_generation_kwargs(beam_size: int, max_new_tokens: int) -> dict:
         "num_beams": int(beam_size),
         "no_repeat_ngram_size": 3,
         "repetition_penalty": 1.15,
-        "early_stopping": True,
     }
 
 
