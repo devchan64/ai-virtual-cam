@@ -31,6 +31,14 @@ class WhisperFunasrBoundaryTest(unittest.TestCase):
                 FunasrCtPuncSentenceBoundaryDetector(model="ct-punc-c", device="cuda")
 
 
+
+    def test_funasr_initialization_error_reports_cause_and_resolved_model(self) -> None:
+        automodel = mock.Mock(side_effect=RuntimeError("cuda kernel unavailable"))
+        fake_module = type("FakeFunasr", (), {"AutoModel": automodel})()
+        with mock.patch.dict("sys.modules", {"funasr": fake_module}):
+            with self.assertRaisesRegex(RuntimeError, "resolvedModel=.*cause=RuntimeError: cuda kernel unavailable"):
+                FunasrCtPuncSentenceBoundaryDetector(model="ct-punc-c", device="cuda")
+
     def test_funasr_split_captures_model_progress_output(self) -> None:
         class NoisyModel:
             def generate(self, input):

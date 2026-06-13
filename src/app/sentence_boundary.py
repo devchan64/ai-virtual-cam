@@ -7,6 +7,8 @@ import warnings
 from dataclasses import dataclass
 from typing import Protocol
 
+from src.domain.contracts.whisper import resolve_funasr_model_name
+
 
 SENTENCE_END_PATTERN = r"(?:(?<!\d)\.(?!\d)|[!?。！？…]+)"
 SENTENCE_END_RE = re.compile(rf"(.+?{SENTENCE_END_PATTERN})(?=\s+|$)")
@@ -271,12 +273,14 @@ class FunasrCtPuncSentenceBoundaryDetector:
                 f"cause={type(exc).__name__}: {exc}. Run ./bin/avc setup; "
                 "fallback is intentionally disabled."
             ) from exc
+        self.resolved_model = resolve_funasr_model_name(self.model)
         try:
-            self._model = AutoModel(model=resolve_funasr_model_name(self.model), device=self.device, disable_update=True)
+            self._model = AutoModel(model=self.resolved_model, device=self.device, disable_update=True)
         except Exception as exc:
             raise RuntimeError(
                 "sentence boundary backend 'funasr-ct-punc' initialization failed: "
-                f"model={self.model} device={self.device}. "
+                f"model={self.model} resolvedModel={self.resolved_model} device={self.device}. "
+                f"cause={type(exc).__name__}: {exc}. "
                 "Fail-Fast: fix the model/device/runtime instead of falling back."
             ) from exc
 

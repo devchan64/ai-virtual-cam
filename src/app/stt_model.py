@@ -98,7 +98,6 @@ class FunasrSttModel:
                 f"FunASR STT 전사 실패: backend={self.backend} model={self.model_name} "
                 f"resolvedModel={self.resolved_model_name} device={self.device}. 원인: {exc}"
             ) from exc
-        _emit_captured_output(self._status_callback, "FunASR STT generate", captured.getvalue())
         text = funasr_generated_text(result)
         segments: Iterable[SttSegment] = [SttSegment(text=text)] if text else []
         return segments, SttInfo(language=self.language)
