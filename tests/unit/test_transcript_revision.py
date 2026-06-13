@@ -1,6 +1,6 @@
 import unittest
 
-from src.app.transcript_revision import consume_committed_prefix, revision_lifecycle_context
+from src.app.transcript_revision import append_context, consume_committed_prefix, revision_lifecycle_context
 
 
 class TranscriptRevisionLifecycleTest(unittest.TestCase):
@@ -33,6 +33,34 @@ class TranscriptRevisionLifecycleTest(unittest.TestCase):
         )
 
         self.assertEqual(context, "already committed forced staged candidate pending revision tail")
+
+    def test_revision_context_keeps_recent_text_when_overflow(self) -> None:
+        base = " ".join(["committed"] * 200)
+        staged = " ".join(["staged"] * 200)
+        pending = " ".join(["pending"] * 200)
+
+        context = revision_lifecycle_context(base, staged, pending)
+
+        self.assertTrue(len(context) <= 4000)
+        self.assertIn("pending", context)
+        self.assertIn("staged", context)
+
+    def test_append_context_truncates_oldest_prefix(self) -> None:
+        self.assertTrue(
+            len(append_context(" ".join(["a"] * 100), " ".join(["b"] * 100), max_chars=80)) <= 80
+        )
+
+    def test_consume_committed_prefix_handles_exact_connective_repetition(self) -> None:
+        self.assertEqual(
+            consume_committed_prefix("And let's do it now.", "let's do it now."),
+            "",
+        )
+
+    def test_consume_committed_prefix_with_connective_and_remaining(self) -> None:
+        self.assertEqual(
+            consume_committed_prefix("And let's do it now", "let's do it"),
+            "and now",
+        )
 
 
 if __name__ == "__main__":
