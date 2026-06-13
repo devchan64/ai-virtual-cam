@@ -17,6 +17,13 @@ chunkSeconds 수집 -> Whisper STT -> 전사 결과 출력 -> 번역
 - 청크 경계에서 문장이 잘리면 전사/번역 결과가 불안정해진다.
 - 번역까지 매번 전체 문장에 연결하면 중복 번역이나 반복 생성이 발생할 수 있다.
 
+## 문헌 반영 상태(2026-06-13)
+
+- 중복 제어/리비전 감소: confirmed-only 출력 + `confirmed_count` 기반 재확인을 현재 설계의 기본 축으로 확정함.
+- 경계 안정화: `pending` 기반 강제 확정 패턴(`pending_chunks`, `pending_chars`)을 지표화하고, 이를 낮추는 방식으로 단계별 전환 계획을 세움.
+- 번역 정책: `final-only`를 기본값으로 유지하고, 중간 상태 번역은 동일 revision 기준 점진 갱신으로만 제한.
+- 구현 적합도: `sentence_boundary.py` 분리와 다중 backend(`regex`→`sat`) 실험 체계를 문서에 우선순위로 반영.
+
 ## 목표
 
 - STT 갱신 주기는 짧게 유지한다.
