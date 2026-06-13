@@ -19,6 +19,7 @@ from pathlib import Path
 
 from src.app.rotating_log import install_rotating_stdout_log
 from src.app.sentence_boundary import create_sentence_boundary_detector
+from src.app.stt_model import build_stt_model
 from src.app.translation_model import TranslationRequest, build_text_translator
 from src.app.transcript_revision import append_context as _append_committed_text, consume_committed_prefix as _consume_committed_prefix, revision_lifecycle_context as _revision_lifecycle_context
 from src.app.whisper_transcript_logic import (
@@ -297,6 +298,18 @@ class WhisperTranscriptWorker:
         self._boundary_detector_model = self._sentence_boundary_model
         self._sentence_boundary_detector = None
 
+    def _stt_settings_for_language(self) -> tuple[str, str]:
+        language = str(getattr(self._cfg, "language", "en")).strip().lower()
+        if language == "auto" or str(getattr(self._cfg, "postProcessingProfile", "manual")).strip() != "auto-by-language":
+            return str(self._cfg.backend).strip(), str(self._cfg.model).strip()
+        suffix_by_language = {"en": "En", "ko": "Ko", "zh": "Zh"}
+        suffix = suffix_by_language.get(language)
+        if suffix is None:
+            return str(self._cfg.backend).strip(), str(self._cfg.model).strip()
+        backend = str(getattr(self._cfg, f"sttBackend{suffix}", self._cfg.backend)).strip()
+        model = str(getattr(self._cfg, f"sttModel{suffix}", self._cfg.model)).strip()
+        return backend or str(self._cfg.backend).strip(), model or str(self._cfg.model).strip()
+
     def _sentence_boundary_settings_for_language(self, detected_language: str) -> tuple[str, str | None]:
         normalized = str(detected_language or "en").strip().lower()
         if normalized == "auto":
@@ -438,13 +451,14 @@ class WhisperTranscriptWorker:
 
     def run(self) -> None:
         try:
-            if self._cfg.backend == "mock":
+            stt_backend, stt_model = self._stt_settings_for_language()
+            if stt_backend == "mock":
                 self._run_mock()
                 return
-            if self._cfg.backend != "faster-whisper":
+            if self._cfg.translationEnabled and self._cfg.translationBackend == "whisper" and stt_backend != "faster-whisper":
                 raise RuntimeError(
-                    "지원하지 않는 whisper.backend입니다: "
-                    f"{self._cfg.backend}. 현재 창 출력은 faster-whisper 또는 mock만 지원합니다."
+                    "whisper.translationBackend=whisper는 faster-whisper STT backend에서만 지원됩니다. "
+                    f"현재 STT backend={stt_backend}. NLLB 번역을 사용하거나 언어별 STT backend를 faster-whisper로 변경하세요."
                 )
 
             try:
@@ -457,36 +471,32 @@ class WhisperTranscriptWorker:
                     import sounddevice as sd
                 except ModuleNotFoundError as exc:
                     raise RuntimeError("sounddevice 모듈이 없습니다. ./bin/avc setup 실행 후 재시도하세요.") from exc
-            try:
-                from faster_whisper import WhisperModel
-            except ModuleNotFoundError as exc:
-                raise RuntimeError(
-                    "faster-whisper 모듈이 없습니다. 로컬 Whisper를 사용하려면 faster-whisper와 CUDA 런타임을 설치하세요."
-                ) from exc
 
             self._emit(
                 "status",
-                "Whisper 모델 로딩 중: "
-                f"backend={self._cfg.backend} model={self._cfg.model} "
-                f"device={self._cfg.device} compute={self._cfg.computeType}. "
-                "최초 실행이면 모델 다운로드 때문에 시간이 걸릴 수 있습니다.",
+                "STT 모델 로딩 중: "
+                f"profile={getattr(self._cfg, 'postProcessingProfile', 'manual')} backend={stt_backend} model={stt_model} "
+                f"device={self._cfg.device} compute={self._cfg.computeType} language={self._cfg.language}. "
+                "캐시에 없으면 Hugging Face 또는 FunASR/ModelScope 모델 다운로드가 진행될 수 있습니다.",
             )
             try:
-                model = WhisperModel(
-                    self._cfg.model,
+                model = build_stt_model(
+                    backend=stt_backend,
+                    model_name=stt_model,
                     device=self._cfg.device,
                     compute_type=self._cfg.computeType,
+                    language=self._cfg.language,
+                    status_callback=lambda message: self._emit("status", message, display=False),
                 )
             except Exception as exc:
                 raise RuntimeError(
-                    "Whisper 모델 로딩 실패: "
-                    f"backend={self._cfg.backend} model={self._cfg.model} "
-                    f"device={self._cfg.device} computeType={self._cfg.computeType}. "
-                    "float16 오류가 발생하면 config의 Whisper 장치를 cuda로 명시하고 CUDA 런타임을 확인하거나, "
-                    "CPU 실행 시 computeType을 int8 또는 float32로 변경하세요. "
+                    "STT 모델 로딩 실패: "
+                    f"backend={stt_backend} model={stt_model} device={self._cfg.device} "
+                    f"computeType={self._cfg.computeType} language={self._cfg.language}. "
+                    "Fail-Fast: 설정한 STT backend/model/device를 수정하거나 ./bin/avc setup으로 의존성과 모델을 준비하세요. "
                     f"원인: {exc}"
                 ) from exc
-            self._emit("status", "Whisper 모델 로딩 완료")
+            self._emit("status", "STT 모델 로딩 완료")
             text_translator = None
             self._emit("status", "Whisper 전처리 모델 준비 시작: 전사/번역은 모든 모델 로딩이 끝난 뒤 시작됩니다.")
             if self._cfg.translationEnabled:
@@ -628,6 +638,7 @@ class WhisperTranscriptWorker:
             "status",
             f"Whisper 전사 루프 시작: step_seconds={step_seconds} window_seconds={window_seconds} "
             f"commit_lag_seconds={commit_lag_seconds} language={self._cfg.language} "
+            f"stt_backend={self._stt_settings_for_language()[0]} stt_model={self._stt_settings_for_language()[1]} "
             f"translation_enabled={self._cfg.translationEnabled} "
             f"translation_backend={self._cfg.translationBackend} "
             f"translation_target={self._cfg.translationTargetLanguage} beam_size={self._cfg.beamSize} "

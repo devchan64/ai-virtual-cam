@@ -5,6 +5,21 @@ def whisper_backend_options() -> list[str]:
     return ["faster-whisper", "openai-whisper", "whisper.cpp", "mock"]
 
 
+def whisper_stt_backend_options() -> list[str]:
+    return ["faster-whisper", "funasr-paraformer", "funasr-sensevoice", "mock"]
+
+
+def whisper_stt_model_options(backend: str | None = None) -> list[str]:
+    normalized = str(backend or "").strip().lower()
+    if normalized == "funasr-paraformer":
+        return ["paraformer-zh", "paraformer-zh-streaming"]
+    if normalized == "funasr-sensevoice":
+        return ["iic/SenseVoiceSmall"]
+    if normalized == "mock":
+        return ["mock"]
+    return whisper_model_options()
+
+
 def whisper_model_options() -> list[str]:
     return ["large-v3", "medium", "small", "base", "tiny"]
 

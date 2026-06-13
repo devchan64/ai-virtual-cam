@@ -415,6 +415,16 @@ STT 모델과 문장 경계 모델의 책임을 분리해 검증한다.
 - 모델 준비 순서는 `STT 모델 -> 번역 모델 -> 문장 경계/후처리 모델 -> 입력 장치 열기 -> 전사 루프`를 유지한다.
 - setup 사전 다운로드 대상에는 중국어 STT 후보 모델도 포함한다.
 
+2026-06-13 구현 상태:
+
+- `WhisperConfig`/`setting.json`에 `sttBackendEn`, `sttModelEn`, `sttBackendKo`, `sttModelKo`, `sttBackendZh`, `sttModelZh`를 추가했다.
+- `postProcessingProfile=auto-by-language`이고 인식 언어가 `zh`이면 `sttBackendZh=funasr-paraformer`, `sttModelZh=paraformer-zh`를 사용한다.
+- 영어/한국어 기본 STT는 `faster-whisper` + `large-v3`를 유지한다.
+- `src/app/stt_model.py`가 faster-whisper와 FunASR STT를 동일한 `transcribe()` 인터페이스로 감싼다.
+- FunASR STT 로딩/생성 중 stdout/stderr 진행 출력은 캡처해 status 로그로 제한하며, 모델 다운로드 가능성은 로딩 로그에 명시한다.
+- FunASR STT는 Whisper 내장 번역을 지원하지 않으므로 `translationBackend=whisper` 조합은 Fail-Fast로 중지한다. 중국어 번역은 NLLB 경로를 사용한다.
+- `./bin/avc setup`의 모델 사전 다운로드 대상에 언어별 STT 모델을 포함했다.
+
 #### 검증 지표
 
 중국어 backend 교체 평가는 다음 지표를 기존 lifecycle 지표와 함께 본다.

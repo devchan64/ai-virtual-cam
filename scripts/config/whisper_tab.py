@@ -10,6 +10,8 @@ from scripts.config.whisper_options import (
     whisper_post_processing_profile_options,
     whisper_sentence_boundary_backend_options,
     whisper_sentence_boundary_model_options,
+    whisper_stt_backend_options,
+    whisper_stt_model_options,
     whisper_translation_backend_options,
     whisper_translation_model_options,
     whisper_translation_target_display_from_raw,
@@ -117,6 +119,50 @@ def build_whisper_tab(
         "hint.whisper_language",
         "Whisper는 한 번에 하나의 인식 언어를 사용합니다. 한국어, 영어, 중국어가 섞이면 자동 감지를 사용하세요.",
     )
+
+    stt_frame = ttk.LabelFrame(
+        tab_whisper,
+        text=gui._tr("label.whisper_stt_models", "언어별 STT 모델"),
+    )
+    gui._register_localized_widget(stt_frame, "label.whisper_stt_models", "언어별 STT 모델")
+    stt_frame.grid(row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(4, 8))
+    for col in range(4):
+        stt_frame.columnconfigure(col, weight=1 if col in (1, 3) else 0)
+    stt_row = 0
+    for lang_code, lang_label in (("en", "영어"), ("ko", "한국어"), ("zh", "중국어")):
+        backend_key = f"whisper_stt_backend_{lang_code}"
+        model_key = f"whisper_stt_model_{lang_code}"
+        backend_default = whisper_default(f"sttBackend{lang_code.title()}")
+        model_default = whisper_default(f"sttModel{lang_code.title()}")
+        gui._add_combo(
+            stt_frame,
+            stt_row,
+            backend_key,
+            gui._tr(f"label.{backend_key}", f"{lang_label} STT 백엔드"),
+            whisper_stt_backend_options(),
+            backend_default,
+            label_key=f"label.{backend_key}",
+        )
+        stt_row += 1
+        gui._add_combo(
+            stt_frame,
+            stt_row,
+            model_key,
+            gui._tr(f"label.{model_key}", f"{lang_label} STT 모델"),
+            whisper_stt_model_options(backend_default),
+            model_default,
+            label_key=f"label.{model_key}",
+        )
+        stt_row += 1
+    _add_hint(
+        gui,
+        ttk,
+        stt_frame,
+        stt_row,
+        "hint.whisper_stt_models",
+        "auto-by-language 운영에서는 인식 언어별 STT backend를 사용합니다. 중국어 기본 후보는 FunASR Paraformer이며 실패 시 자동 폴백하지 않습니다.",
+    )
+    row += 1
 
     gui._add_combo(
         tab_whisper,

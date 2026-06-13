@@ -1604,6 +1604,12 @@ class ConfigGui:
             "whisper_input_device": _audio_default_input_device(),
             "whisper_backend": whisper["backend"],
             "whisper_model": whisper["model"],
+            "whisper_stt_backend_en": whisper["sttBackendEn"],
+            "whisper_stt_model_en": whisper["sttModelEn"],
+            "whisper_stt_backend_ko": whisper["sttBackendKo"],
+            "whisper_stt_model_ko": whisper["sttModelKo"],
+            "whisper_stt_backend_zh": whisper["sttBackendZh"],
+            "whisper_stt_model_zh": whisper["sttModelZh"],
             "whisper_language": _whisper_language_display_from_raw(whisper["language"]),
             "whisper_task": whisper["task"],
             "whisper_translation_enabled": whisper["translationEnabled"],
@@ -2197,6 +2203,12 @@ class ConfigGui:
             self.vars["whisper_input_device"].set(input_display)
         self._set_var("whisper_backend", whisper_cfg.get("backend", defaults["whisper_backend"]))
         self._set_var("whisper_model", whisper_cfg.get("model", defaults["whisper_model"]))
+        self._set_var("whisper_stt_backend_en", whisper_cfg.get("sttBackendEn", defaults["whisper_stt_backend_en"]))
+        self._set_var("whisper_stt_model_en", whisper_cfg.get("sttModelEn", defaults["whisper_stt_model_en"]))
+        self._set_var("whisper_stt_backend_ko", whisper_cfg.get("sttBackendKo", defaults["whisper_stt_backend_ko"]))
+        self._set_var("whisper_stt_model_ko", whisper_cfg.get("sttModelKo", defaults["whisper_stt_model_ko"]))
+        self._set_var("whisper_stt_backend_zh", whisper_cfg.get("sttBackendZh", defaults["whisper_stt_backend_zh"]))
+        self._set_var("whisper_stt_model_zh", whisper_cfg.get("sttModelZh", defaults["whisper_stt_model_zh"]))
         self._set_var(
             "whisper_language",
             _whisper_language_display_from_raw(whisper_cfg.get("language", _whisper_language_raw_from_display(defaults["whisper_language"]))),
@@ -3916,6 +3928,12 @@ class ConfigGui:
             ),
             whisper_backend=iv["whisper_backend"].get().strip(),
             whisper_model=iv["whisper_model"].get().strip(),
+            whisper_stt_backend_en=iv["whisper_stt_backend_en"].get().strip(),
+            whisper_stt_model_en=iv["whisper_stt_model_en"].get().strip(),
+            whisper_stt_backend_ko=iv["whisper_stt_backend_ko"].get().strip(),
+            whisper_stt_model_ko=iv["whisper_stt_model_ko"].get().strip(),
+            whisper_stt_backend_zh=iv["whisper_stt_backend_zh"].get().strip(),
+            whisper_stt_model_zh=iv["whisper_stt_model_zh"].get().strip(),
             whisper_language=_whisper_language_raw_from_display(iv["whisper_language"].get()),
             whisper_task="transcribe",
             whisper_translation_enabled=self._parse_bool(iv["whisper_translation_enabled"].get()),

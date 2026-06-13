@@ -82,6 +82,12 @@ class WhisperConfigTest(unittest.TestCase):
             whisper_input_device="pulse",
             whisper_backend="mock",
             whisper_model="tiny",
+            whisper_stt_backend_en="faster-whisper",
+            whisper_stt_model_en="tiny",
+            whisper_stt_backend_ko="faster-whisper",
+            whisper_stt_model_ko="large-v3",
+            whisper_stt_backend_zh="funasr-paraformer",
+            whisper_stt_model_zh="paraformer-zh",
             whisper_language="en",
             whisper_task="transcribe",
             whisper_translation_enabled=True,
@@ -109,6 +115,12 @@ class WhisperConfigTest(unittest.TestCase):
                 "inputDevice": "pulse",
                 "backend": "mock",
                 "model": "tiny",
+                "sttBackendEn": "faster-whisper",
+                "sttModelEn": "tiny",
+                "sttBackendKo": "faster-whisper",
+                "sttModelKo": "large-v3",
+                "sttBackendZh": "funasr-paraformer",
+                "sttModelZh": "paraformer-zh",
                 "language": "en",
                 "task": "transcribe",
                 "translationEnabled": True,
@@ -201,6 +213,10 @@ class WhisperConfigTest(unittest.TestCase):
         self.assertEqual(loaded.whisper.inputDevice, "pulse")
         self.assertEqual(loaded.whisper.backend, "mock")
         self.assertEqual(loaded.whisper.model, "base")
+        self.assertEqual(loaded.whisper.sttBackendEn, whisper_default("sttBackendEn"))
+        self.assertEqual(loaded.whisper.sttModelEn, whisper_default("sttModelEn"))
+        self.assertEqual(loaded.whisper.sttBackendZh, "funasr-paraformer")
+        self.assertEqual(loaded.whisper.sttModelZh, "paraformer-zh")
         self.assertFalse(loaded.whisper.translationEnabled)
         self.assertEqual(loaded.whisper.translationTargetLanguage, whisper_default("translationTargetLanguage"))
         self.assertEqual(loaded.whisper.translationBackend, whisper_default("translationBackend"))
@@ -221,6 +237,18 @@ class WhisperConfigTest(unittest.TestCase):
         self.assertEqual(loaded.whisper.sentenceBoundaryDevice, whisper_default("sentenceBoundaryDevice"))
         self.assertEqual(loaded.whisper.sentenceBoundaryComputeType, whisper_default("sentenceBoundaryComputeType"))
 
+
+
+    def test_whisper_allows_chinese_funasr_stt_backend(self) -> None:
+        loaded = WhisperConfig.from_dict({
+            "language": "zh",
+            "postProcessingProfile": "auto-by-language",
+            "sttBackendZh": "funasr-paraformer",
+            "sttModelZh": "paraformer-zh",
+        })
+
+        self.assertEqual(loaded.sttBackendZh, "funasr-paraformer")
+        self.assertEqual(loaded.sttModelZh, "paraformer-zh")
 
     def test_whisper_allows_chinese_funasr_post_processing_backend(self) -> None:
         loaded = WhisperConfig.from_dict({
@@ -325,6 +353,10 @@ class WhisperConfigTest(unittest.TestCase):
             WhisperConfig.from_dict({"temperature": 1.5})
         with self.assertRaisesRegex(ValueError, "whisper.postProcessingProfile"):
             WhisperConfig.from_dict({"postProcessingProfile": "invalid"})
+        with self.assertRaisesRegex(ValueError, "whisper.sttBackendZh"):
+            WhisperConfig.from_dict({"sttBackendZh": "invalid"})
+        with self.assertRaisesRegex(ValueError, "whisper.sttModelZh"):
+            WhisperConfig.from_dict({"sttModelZh": ""})
         with self.assertRaisesRegex(ValueError, "whisper.sentenceBoundaryBackend"):
             WhisperConfig.from_dict({"sentenceBoundaryBackend": "invalid"})
         with self.assertRaisesRegex(ValueError, "whisper.sentenceBoundaryBackend"):

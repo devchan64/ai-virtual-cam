@@ -60,6 +60,16 @@ def download_funasr_model(model_name: str) -> None:
     _log(f"FunASR punctuation model ready: {model_name}")
 
 
+def download_funasr_stt_model(model_name: str) -> None:
+    _log(f"Downloading FunASR STT model: {model_name}")
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=SyntaxWarning)
+        from funasr import AutoModel
+
+    AutoModel(model=model_name, device="cpu")
+    _log(f"FunASR STT model ready: {model_name}")
+
+
 def download_nllb_model(model_name: str) -> None:
     _log(f"Downloading NLLB translation model: {model_name}")
     from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
@@ -77,7 +87,16 @@ def main() -> int:
     args = parser.parse_args()
 
     if not args.skip_whisper:
-        download_faster_whisper_model(str(whisper_default("model")))
+        stt_backend_models = [
+            (whisper_default("backend"), whisper_default("model")),
+            (whisper_default("sttBackendEn"), whisper_default("sttModelEn")),
+            (whisper_default("sttBackendKo"), whisper_default("sttModelKo")),
+            (whisper_default("sttBackendZh"), whisper_default("sttModelZh")),
+        ]
+        for model_name in _unique([model for backend, model in stt_backend_models if backend == "faster-whisper"]):
+            download_faster_whisper_model(model_name)
+        for model_name in _unique([model for backend, model in stt_backend_models if backend.startswith("funasr-")]):
+            download_funasr_stt_model(model_name)
 
     if not args.skip_boundary:
         backend_models = [

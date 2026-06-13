@@ -726,6 +726,12 @@ class WhisperConfig:
     inputDevice: str
     backend: str
     model: str
+    sttBackendEn: str
+    sttModelEn: str
+    sttBackendKo: str
+    sttModelKo: str
+    sttBackendZh: str
+    sttModelZh: str
     language: str
     task: str
     translationEnabled: bool
@@ -767,6 +773,12 @@ class WhisperConfig:
             inputDevice=str(raw.get("inputDevice", _default_audio_input_device())).strip(),
             backend=str(raw.get("backend", whisper_default("backend"))).strip(),
             model=str(raw.get("model", whisper_default("model"))).strip(),
+            sttBackendEn=str(raw.get("sttBackendEn", whisper_default("sttBackendEn"))).strip(),
+            sttModelEn=str(raw.get("sttModelEn", whisper_default("sttModelEn"))).strip(),
+            sttBackendKo=str(raw.get("sttBackendKo", whisper_default("sttBackendKo"))).strip(),
+            sttModelKo=str(raw.get("sttModelKo", whisper_default("sttModelKo"))).strip(),
+            sttBackendZh=str(raw.get("sttBackendZh", whisper_default("sttBackendZh"))).strip(),
+            sttModelZh=str(raw.get("sttModelZh", whisper_default("sttModelZh"))).strip(),
             language=str(raw.get("language", whisper_default("language"))).strip(),
             task=str(raw.get("task", whisper_default("task"))).strip(),
             translationEnabled=bool(raw.get("translationEnabled", raw.get("task") == "translate")),
@@ -801,6 +813,18 @@ class WhisperConfig:
         allowed_backends = {"faster-whisper", "openai-whisper", "whisper.cpp", "mock"}
         if config.backend not in allowed_backends:
             raise ValueError("whisper.backend must be one of: faster-whisper, openai-whisper, whisper.cpp, mock")
+        allowed_stt_backends = {"faster-whisper", "funasr-paraformer", "funasr-sensevoice", "mock"}
+        for lang, backend, model in (
+            ("en", config.sttBackendEn, config.sttModelEn),
+            ("ko", config.sttBackendKo, config.sttModelKo),
+            ("zh", config.sttBackendZh, config.sttModelZh),
+        ):
+            if backend not in allowed_stt_backends:
+                raise ValueError(
+                    f"whisper.sttBackend{lang.title()} must be one of: faster-whisper, funasr-paraformer, funasr-sensevoice, mock"
+                )
+            if not model:
+                raise ValueError(f"whisper.sttModel{lang.title()} is required")
         if not config.inputDevice:
             raise ValueError("whisper.inputDevice is required")
         if not config.model:
