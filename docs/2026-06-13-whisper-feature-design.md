@@ -295,6 +295,9 @@ class SentenceBoundaryDetector:
 - 중국어 처리는 문자 단위 CJK 토큰화, suffix overlap 같은 언어별 휴리스틱을 운영 로직에 추가하지 않는다. 공백 없는 텍스트의 경계와 구두점은 후처리 모델의 책임으로 둔다.
 
 현재 런타임 제약:
+- 모델 준비 순서는 `Whisper STT 모델 -> 번역 모델 -> 문장 경계/후처리 모델 -> 입력 장치 열기 -> 전사 루프`다. 입력 캡처와 전사/번역은 모든 모델 준비가 끝난 뒤 시작한다.
+- 모델 다운로드가 필요한 경우 setup 사전 다운로드 또는 런타임 모델 준비 단계에서 완료될 때까지 대기한다. 다운로드 중에는 전사 루프와 번역 job을 시작하지 않는다.
+- setup은 `AVC_DOWNLOAD_WHISPER_MODELS=ask|1|0`, `--download-whisper-models`, `--skip-whisper-models`를 지원한다. 비대화형 setup은 기본적으로 모델 다운로드를 건너뛰며, 강제 다운로드는 명시 옵션/환경변수로만 수행한다.
 - 문장 경계 모델 로딩 시작/완료 로그에는 profile, backend, model, device, compute, language를 출력한다. 캐시에 모델이 없으면 Hugging Face 또는 FunASR/ModelScope 다운로드가 발생할 수 있음을 stdout 로그로 남긴다.
 - 문장 경계 모델 로딩/분절 실패는 Fail-Fast다. legacy regex나 CPU로 자동 전환하지 않는다.
 - `language=auto` 또는 `postProcessingProfile=auto-by-language`에서 감지/설정 언어에 따른 backend/model이 바뀌면 detector를 다시 로드한다. 수동 프로필에서는 실행 중 암묵 변경하지 않는다.
@@ -599,6 +602,7 @@ stability=10/10 rate=1.000 target>=0.80
 - 임계 지표 악화 시 자동 rollback 정책은 문서화하지 않되, 실시간 실행은 즉시 경고 및 운영자 개입 필요.
 - 백엔드 초기화/로딩/분절 실패는 조건부 CPU fallback 또는 legacy regex fallback 대신 즉시 실패 노출.
 - 모델 다운로드가 필요한 경로는 다운로드 가능성을 사전에 로그로 출력한다.
+- 다운로드/로딩 단계가 끝나기 전에는 오디오 입력 장치를 열지 않고 전사/번역 job을 시작하지 않는다.
 
 ### 14.1 개정 배포 운영 절차
 
