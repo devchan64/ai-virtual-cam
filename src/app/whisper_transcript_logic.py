@@ -14,9 +14,9 @@ SLOW_PENDING_SENTENCE_CHUNKS = 4
 SLOW_PENDING_SENTENCE_CHARS = 45
 SLOW_PENDING_MAX_SENTENCE_CHARS = 120
 SLOW_PENDING_MAX_CHARS_PER_CHUNK = 18.0
-SENTENCE_CONFIRM_CHUNKS = 2
+SENTENCE_CONFIRM_CHUNKS = 3
 FORCED_SENTENCE_CONFIRM_CHUNKS = 4
-SENTENCE_CONFIRM_MAX_AGE_CHUNKS = 2
+SENTENCE_CONFIRM_MAX_AGE_CHUNKS = 3
 FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS = 4
 MIN_PROVISIONAL_TRANSLATION_WORDS = 6
 PROVISIONAL_TRANSLATION_ENABLED = False
@@ -704,6 +704,33 @@ def _looks_like_open_korean_clause(text: str, words: list[str]) -> bool:
     return not last_word.endswith(_KOREAN_FINAL_WORD_SUFFIXES)
 
 
+def _is_open_korean_clause(text: str) -> bool:
+    return _looks_like_open_korean_clause(text, _word_units(text))
+
+
+def _should_confirm_staged_sentence(staged_sentence: str, staged_confirmations: int, staged_forced: bool) -> bool:
+    if _is_open_korean_clause(staged_sentence):
+        return False
+    return staged_confirmations >= _sentence_required_confirmations(staged_forced)
+
+
+def _should_preserve_partial_replacement(staged_sentence: str, candidate: str) -> bool:
+    staged_words = _word_units(staged_sentence)
+    candidate_words = _word_units(candidate)
+    if len(staged_words) < 4 or len(candidate_words) < 4:
+        return False
+    if _looks_like_open_korean_clause(staged_sentence, staged_words):
+        return False
+    best_i, best_j, common_run = _best_common_word_run(staged_words, candidate_words)
+    if common_run < 4:
+        return False
+    left_tail = best_i + common_run == len(staged_words)
+    right_tail = best_j + common_run == len(candidate_words)
+    if left_tail and right_tail:
+        return True
+    return _boundary_sentence_end_count(staged_sentence) > 0 and best_j == 0 and common_run >= 5
+
+
 def _replacement_decision_reason(
     staged_sentence: str,
     candidate: str,
@@ -711,14 +738,13 @@ def _replacement_decision_reason(
     staged_forced: bool,
     staged_age: int,
 ) -> str:
-    if staged_confirmations >= _sentence_required_confirmations(staged_forced):
-        return "confirmed"
-
     staged_words = _word_units(staged_sentence)
     if not staged_words:
         return "empty"
     if _looks_like_open_korean_clause(staged_sentence, staged_words):
         return "open_korean_clause"
+    if staged_confirmations >= _sentence_required_confirmations(staged_forced):
+        return "confirmed"
     if staged_age > 0:
         return "aged"
 
@@ -726,6 +752,8 @@ def _replacement_decision_reason(
     if candidate_delta == "":
         return "duplicate_or_suffix"
     if candidate_delta != _normalized_text(candidate):
+        if _should_preserve_partial_replacement(staged_sentence, candidate):
+            return "partial_preserve"
         return "partial_revision"
     return "finalize"
 
@@ -743,7 +771,7 @@ def _should_finalize_replaced_sentence(
         staged_confirmations,
         staged_forced,
         staged_age,
-    ) in {"confirmed", "aged", "duplicate_or_suffix", "finalize"}
+    ) in {"confirmed", "aged", "duplicate_or_suffix", "partial_preserve", "finalize"}
 
 
 def _format_transcript_metrics(metrics: dict[str, int]) -> str:

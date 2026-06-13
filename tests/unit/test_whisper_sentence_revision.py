@@ -18,6 +18,7 @@ from src.app.whisper_window import (
     _sentences_are_revisions,
     _should_age_staged_sentence,
     _should_finalize_replaced_sentence,
+    _should_confirm_staged_sentence,
     _should_translate_staged_sentence,
     _split_completed_sentences,
     _stable_window_text,
@@ -153,12 +154,32 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
                 self.assertTrue(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
 
     def test_unconfirmed_replaced_stage_finalizes_confirmed_sentences(self) -> None:
-        self.assertTrue(_should_finalize_replaced_sentence("확정 후보", "다른 후보", 2, False, 0))
-        self.assertTrue(_should_finalize_replaced_sentence("강제 확정 후보", "다른 후보", 4, True, 0))
+        self.assertTrue(_should_finalize_replaced_sentence("확정 후보입니다", "다른 후보입니다", 3, False, 0))
+        self.assertTrue(_should_finalize_replaced_sentence("강제 확정 후보입니다", "다른 후보입니다", 4, True, 0))
 
     def test_unconfirmed_replaced_stage_waits_for_observation_age(self) -> None:
         self.assertTrue(_should_finalize_replaced_sentence("Aged candidate", "Different candidate", 1, False, 1))
         self.assertTrue(_should_finalize_replaced_sentence("Forced aged candidate", "Different candidate", 1, True, 1))
+
+    def test_open_korean_clause_does_not_confirm_from_repeated_candidate(self) -> None:
+        # Regression from 2026-06-13 monitoring chunks 54-55. The same open
+        # Korean clause repeated twice, but it was only the head of the next sentence.
+        self.assertFalse(_should_confirm_staged_sentence("이 두 직업은", 2, False))
+        self.assertFalse(_should_confirm_staged_sentence("그런데 보면 최치PD가 등장하기", 4, True))
+        self.assertTrue(_should_confirm_staged_sentence("신규 채용을 안 하고 있습니다.", 3, False))
+
+    def test_replacement_keeps_confirmed_open_korean_clause_from_monitoring(self) -> None:
+        # Regression from 2026-06-13 30-minute monitoring chunks 7-11.
+        # The staged sentence had enough repeated observations to pass the
+        # confirmation count, but its Korean tail was still an open clause.
+        staged = "1억을 넣었을 때 2000만원이 깨지는 천만원에서 20% 빠졌을 때 200이 깨지는 느낌"
+        candidate = "이런 것들을 계속해서 좀 충격도 한번 받아보고 얼마나 견뎌낼 수 있는지 그거는 사실 스스로도 몰라요."
+
+        self.assertEqual(
+            _replacement_decision_reason(staged, candidate, 4, False, 0),
+            "open_korean_clause",
+        )
+        self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 4, False, 0))
 
     def test_replacement_decision_reason_exposes_runtime_diagnostics(self) -> None:
         self.assertEqual(
@@ -196,7 +217,9 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
             with self.subTest(staged=staged, candidate=candidate):
                 self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
 
-    def test_forced_sentence_confirmation_waits_for_additional_revision_window(self) -> None:
+    def test_sentence_confirmation_waits_for_revision_windows(self) -> None:
+        self.assertEqual(_sentence_required_confirmations(False), 3)
+        self.assertEqual(_sentence_max_age_chunks(False), 3)
         self.assertEqual(_sentence_required_confirmations(True), 4)
         self.assertEqual(_sentence_max_age_chunks(True), 4)
 
@@ -209,6 +232,26 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
 
         self.assertFalse(_sentences_are_revisions(staged, candidate))
         self.assertTrue(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
+
+    def test_partial_replacement_preserves_completed_staged_sentence_from_monitoring(self) -> None:
+        cases = [
+            (
+                "특히 스웨덴의 러브블 이란 회사가 지금 제일 잘 나갑니다",
+                "이걸 쓰시면 실리콘밸리 레덴의 러브오블이라는 회사가 지금 제일 잘 나갑니다.",
+            ),
+            (
+                "그런데 공장에서 기계들이 스팀 엔진이 아닌 전기로 돌아가기 시작한 건 사실 1920년도예요.",
+                "엔진이 아닌 전기로 돌아가기 시작한 건 사실 1920년도 에요 50년 정도가 더 걸렸습니다",
+            ),
+            (
+                "엔진이 아닌 전기로 돌아가기 시작한 건 사실 1920년도 에요 50년 정도가 더 걸렸습니다",
+                "바로 다음주 수요일부터 되는 50년 정도가 더 걸렸습니다.",
+            ),
+        ]
+        for staged, candidate in cases:
+            with self.subTest(staged=staged, candidate=candidate):
+                self.assertEqual(_replacement_decision_reason(staged, candidate, 1, False, 0), "partial_preserve")
+                self.assertTrue(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
 
     def test_unconfirmed_replaced_stage_discards_tail_echo_from_log(self) -> None:
         # Regression from avc-whisper.log chunk 76. The first candidate contains prior-sentence tail echo.

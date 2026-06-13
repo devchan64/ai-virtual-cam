@@ -87,7 +87,7 @@ audio 입력
 {
   "stepSeconds": 1.5,
   "windowSeconds": 7.5,
-  "commitLagSeconds": 0.8,
+  "commitLagSeconds": 1.5,
   "beamSize": 3,
   "maxNewTokens": 96
 }
@@ -130,6 +130,8 @@ new:      "in the United States to take delivery"
 - 겹치지 않는 신규 부분만 `candidate_text`로 계산한다.
 - `commitLagSeconds` 구간은 즉시 확정하지 않는다.
 - 동일 후보 재확인 횟수(`staged_confirmations`)를 만족할 때만 `confirmed`를 확장한다.
+- 현재 기본 확정 기준은 일반 후보 3회, 강제 후보 4회 재확인이다.
+- 구두점 없는 한글 열린 절(`이 두 직업은`, `저녁에 퇴근하고` 등)은 반복 관측만으로 확정하지 않고 다음 revision 기회를 유지한다.
 - 정교화 단계에서는 `word_timestamps=true` 기반 시간 정합 후보를 도입한다.
 
 개선 방식:
@@ -148,6 +150,9 @@ new:      "in the United States to take delivery"
 - `committed_text`: 이미 모달 출력된 확정 누적 텍스트
 - `recent_committed_fragments`: 반복/중복 억제를 위한 최근 출력 조각(현재 정책에서는 보조 참조)
 - `staged_sentence`, `staged_confirmations`, `staged_age`: 문장별 안정성 판단 보조 상태
+- `replacement_decision`: staged 후보 교체 시 판단 사유(`finalize`, `open_korean_clause`, `partial_revision`, `partial_preserve`, `duplicate_or_suffix`, `aged`)
+- `lifecycle_metrics`: 세션 누적 전사 라이프사이클 카운터
+- `chunk_metrics`: 현재 chunk에서 발생한 라이프사이클 카운터
 
 ### 5.1 배포 범위(what is in scope)
 
@@ -185,6 +190,9 @@ new:      "in the United States to take delivery"
 - `pending_chunks`, `pending_chars`: 강제 확정 트리거 판단 보조값
 - `forced_by=pending_chunks|pending_chars|slow_pending`: 예외 확정 근거
 - `forced_by=pending_chars`는 진단 신호로 먼저 해석, 즉시 확정보다 완만한 확인 정책 유지.
+- `confirmed` 확정은 일반 후보 3회, forced 후보 4회 재확인을 기본으로 한다.
+- `open_korean_clause` 후보는 재확인 횟수를 만족해도 확정하지 않고 다음 경계/리비전 후보를 기다린다.
+- `partial_preserve`는 candidate가 staged 문장의 끝부분을 공유하거나 명시적 문장부호로 닫힌 staged의 suffix를 이어받는 경우 staged 문장을 보존하는 결정이다.
 
 ### 7.1 개정 배포에서의 용어 정합
 
@@ -265,6 +273,10 @@ class SentenceBoundaryDetector:
 - `pending_chars p90/max` 증가 시 문장 경계 미탐으로 다중 문장 묶임 가능성 증가.
 - `end_marks_stable=0`에서 `forced_by=pending_chunks` 또는 `forced_by=pending_chars` 반복 시 구두점 기반 분할 실패 의심.
 - 확정 전/후 텍스트가 과도하게 교차할 경우 단순 delta 계산만으로는 충분치 않으므로 경계 모듈 경향을 추가 점검.
+- `lifecycle_metrics`는 세션 누적 추세를, `chunk_metrics`는 해당 chunk의 이벤트를 추적한다.
+- `stage_replace_decision_finalize`가 많으면 staged 후보가 너무 쉽게 교체 확정되는지 확인한다.
+- `stage_discard_reason_open_korean_clause`가 많으면 열린 한글 절을 과도하게 폐기하고 있는지 확인한다.
+- `finalize_duplicate_suppressed`가 증가하면 중복 출력은 막고 있지만 앞단 경계/리비전이 불안정하다는 신호로 본다.
 
 ## 9) 단계별 확정 규칙
 
@@ -275,6 +287,8 @@ class SentenceBoundaryDetector:
 5. 경계 모듈 결과 존재 시 경계 단위로 완료 후보를 `completed`에 적재
 6. 문자열 기반 안정화가 불안정하면 `word_timestamps=true` 기반 시간 정합 후보를 검토(향후 단계)
 7. 강제 확정은 `forced_by` 트리거일 때만 제한적으로 사용
+8. replacement 단계에서 `partial_preserve`로 판단된 후보는 기존 staged 문장을 먼저 보존하고 새 candidate를 다음 stage로 관찰
+9. replacement 단계에서 `open_korean_clause`로 판단된 후보는 확정하지 않고 폐기/대기 경로로 보내 다음 문장 경계 후보를 기다림
 
 ### 9.1 배포 판단 규칙
 
@@ -430,8 +444,9 @@ unittest 성공은 테스트 코드가 실행되어 지표가 수집되었다는
 | `distinct` | 서로 다른 문장을 잘못된 revision으로 합치지 않는지 | 25 | 95% 이상 |
 | `collapse` | 같은 의미의 인접 반복 문구를 줄일 수 있는지 | 45 | 90% 이상 |
 | `stability` | 연속 partial 전사가 전체 재출력 없이 안정적으로 revision되는지 | 10 | 80% 이상 |
+| `replacement` | staged 후보 교체 시 보존/폐기/확정 결정이 의도와 맞는지 | 9 | 90% 이상 |
 
-`distinct` 목표율을 더 높게 둔 이유는 서로 다른 문장을 병합하면 원문 손실이 발생하고, 이후 번역도 복구할 수 없기 때문이다. `revision`과 `collapse`는 중복을 줄이는 방향의 품질 지표지만, 과도한 병합보다 손실 위험이 낮으므로 초기 목표율을 90%로 둔다. `stability`는 incremental ASR의 partial hypothesis instability와 revokes 문제를 현재 코드의 revision lifecycle에 맞춘 프록시 지표다.
+`distinct` 목표율을 더 높게 둔 이유는 서로 다른 문장을 병합하면 원문 손실이 발생하고, 이후 번역도 복구할 수 없기 때문이다. `revision`과 `collapse`는 중복을 줄이는 방향의 품질 지표지만, 과도한 병합보다 손실 위험이 낮으므로 초기 목표율을 90%로 둔다. `stability`는 incremental ASR의 partial hypothesis instability와 revokes 문제를 현재 코드의 revision lifecycle에 맞춘 프록시 지표다. `replacement`는 2026-06-13 30분 운영 로그에서 관측된 staged 교체 손실을 직접 추적하기 위해 추가한 지표이며, `open_korean_clause`와 `partial_preserve` 결정의 회귀를 막는다.
 
 ### 12.1 운영 규칙
 
@@ -452,6 +467,46 @@ unittest 성공은 테스트 코드가 실행되어 지표가 수집되었다는
 - `latency`: final 문장이 확정되어 전사/번역 창에 표시되기까지의 지연.
 - `revokes per second`: 이미 표시된 단어가 뒤 청크에서 수정되는 빈도.
 - `word/segment instability`: partial result가 final 전까지 흔들리는 정도.
+
+## 12.3 2026-06-13 운영 관측 반영
+
+30분 운영 로그 모니터링 결과는 다음과 같다.
+
+- 1차 관측 파일: `.tmp/whisper-monitor-20260613-2.log`
+- 1차 수집량: 30분, 18,158개 이벤트
+- 1차 성능: 평균 `stt_rtf≈0.088`, 최대 `stt_rtf≈0.13`
+- 2차 관측 파일: `.tmp/whisper-monitor-20260613-3.log`
+- 2차 수집량: 30분, 6,892개 이벤트, 1,124개 chunk, 2,412개 transcript
+- 2차 성능: 평균 `stt_rtf≈0.096`, 최대 `stt_rtf≈0.13`, 평균 `total_rtf≈0.097`
+- 결론: 계산 성능보다 문장 확정 라이프사이클과 staged 교체 판단 순서가 품질 병목이다.
+
+반영된 변경 사항:
+
+- 일반 후보 확정 기준을 2회에서 3회 재확인으로 조정했다.
+- forced 후보 확정 기준은 4회 재확인을 유지한다.
+- `commitLagSeconds` 기본/운영값은 1.5초로 정렬한다.
+- `chunk_metrics`를 추가해 해당 chunk에서 발생한 `stage_start`, `stage_revision`, `stage_replace`, `stage_discard`, `finalized` 등을 즉시 확인한다.
+- `replacement` 추적 테스트를 추가해 staged 교체 결정의 보존/폐기/확정 품질을 별도 관리한다.
+- 열린 한글 절은 반복 관측만으로 확정하지 않는다.
+- replacement 판단에서도 `open_korean_clause`가 `confirmed`보다 우선한다. 재확인 횟수를 만족해도 열린 절이면 확정하지 않는다.
+- partial replacement에서 기존 staged가 문장형으로 닫혔거나 candidate와 tail overlap이 충분하면 staged 문장을 보존한다.
+
+대표 회귀 케이스:
+
+- `이 두 직업은`이 두 번 관측되어 확정됐지만 실제로는 다음 문장의 열린 절이었다.
+- `1억을 넣었을 때 2000만원이 깨지는 천만원에서 20% 빠졌을 때 200이 깨지는 느낌`은 4회 관측됐지만 열린 절이므로 다음 candidate로 교체될 때 확정하면 안 된다.
+- `특히 스웨덴의 러브블 이란 회사가 지금 제일 잘 나갑니다`가 다음 candidate와 partial overlap되며 폐기될 위험이 있었다.
+- `엔진이 아닌 전기로 돌아가기 시작한 건 사실 1920년도 에요 50년 정도가 더 걸렸습니다`처럼 다음 문장 머리와 tail overlap이 섞인 경우 staged 보존이 필요했다.
+
+현재 추적 지표 예시:
+
+```text
+replacement=9/9 rate=1.000 target>=0.90
+revision=97/107 rate=0.907 target>=0.90
+distinct=38/38 rate=1.000 target>=0.95
+collapse=49/53 rate=0.925 target>=0.90
+stability=10/10 rate=1.000 target>=0.80
+```
 
 ## 13) 점진적 적용 순서
 

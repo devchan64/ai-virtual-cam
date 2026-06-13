@@ -38,6 +38,7 @@ from src.app.whisper_transcript_logic import (
     _sentences_are_revisions,
     _replacement_decision_reason,
     _should_finalize_replaced_sentence,
+    _should_confirm_staged_sentence,
     _should_age_staged_sentence,
     _should_translate_staged_sentence,
     _split_completed_sentences,
@@ -584,9 +585,11 @@ class WhisperTranscriptWorker:
         staged_translation_pending = False
         staged_forced = False
         lifecycle_metrics: dict[str, int] = {}
+        chunk_lifecycle_metrics: dict[str, int] = {}
 
         def count_metric(name: str, amount: int = 1) -> None:
             lifecycle_metrics[name] = lifecycle_metrics.get(name, 0) + amount
+            chunk_lifecycle_metrics[name] = chunk_lifecycle_metrics.get(name, 0) + amount
 
         self._emit(
             "status",
@@ -693,7 +696,7 @@ class WhisperTranscriptWorker:
                     f"preferred={_diagnostic_tail(preferred)}",
                     display=False,
                 )
-                if staged_confirmations >= required_confirmations:
+                if _should_confirm_staged_sentence(staged_sentence, staged_confirmations, staged_forced):
                     return finalize_staged_sentence(detected, "confirmed_forced" if staged_forced else "confirmed")
                 staged_translation_pending = True
                 self._emit("transcript", staged_sentence, log_text=f"[{detected}] {staged_sentence}", final=False)
@@ -799,6 +802,7 @@ class WhisperTranscriptWorker:
             pending_step = 0
 
             chunks += 1
+            chunk_lifecycle_metrics.clear()
             self._emit("status", f"Whisper 전사 요청: chunk={chunks} samples={buffered}", display=False)
             audio = np.concatenate(list(audio_blocks)).astype(np.float32, copy=False)
             chunk_audio_seconds = float(audio.shape[0]) / float(SAMPLE_RATE)
@@ -946,6 +950,7 @@ class WhisperTranscriptWorker:
                     f"pending_tail={_diagnostic_tail(pending_transcript_text)} "
                     f"revision_context_chars={len(_normalized_text(_revision_lifecycle_context(committed_text, staged_sentence, pending_transcript_text)))} "
                     f"forced_candidate_pending={forced_candidate_pending} "
+                    f"chunk_metrics={_format_transcript_metrics(chunk_lifecycle_metrics)} "
                     f"lifecycle_metrics={_format_transcript_metrics(lifecycle_metrics)} "
                     f"staged_confirmations={staged_confirmations} staged_age={staged_age} staged_forced={staged_forced} "
                     f"staged_tail={_diagnostic_tail(staged_sentence)}",

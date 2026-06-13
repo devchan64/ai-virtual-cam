@@ -4,6 +4,7 @@ import unittest
 from src.app.whisper_window import (
     _collapse_adjacent_repeated_phrase_details,
     _normalized_text,
+    _replacement_decision_reason,
     _sentence_output_delta,
     _sentences_are_revisions,
 )
@@ -17,6 +18,7 @@ TRACKING_TARGETS = {
     "distinct": {"target_cases": 25, "target_rate": 0.95},
     "collapse": {"target_cases": 45, "target_rate": 0.90},
     "stability": {"target_cases": 10, "target_rate": 0.80},
+    "replacement": {"target_cases": 9, "target_rate": 0.90},
 }
 
 REVISION_TRACKING_CASES = [
@@ -349,6 +351,64 @@ COLLAPSE_TRACKING_CASES = [{'source': 'avc-whisper.log', 'text': '그래서 그 
  {'source': 'avc-whisper.log', 'text': '그리고 이미 27년도 까지 27년도까지 매출은 책정이'}]
 
 
+REPLACEMENT_TRACKING_CASES = [
+    {
+        "staged": "1억을 넣었을 때 2000만원이 깨지는 천만원에서 20% 빠졌을 때 200이 깨지는 느낌",
+        "candidate": "이런 것들을 계속해서 좀 충격도 한번 받아보고 얼마나 견뎌낼 수 있는지 그거는 사실 스스로도 몰라요.",
+        "expected": "open_korean_clause",
+        "confirmations": 4,
+        "source": "2026-06-13 30m monitor chunks 7-11",
+    },
+    {
+        "staged": "이 두 직업은",
+        "candidate": "그런데 보면 최치PD가 등장하기 전까지는 이",
+        "expected": "open_korean_clause",
+        "source": "2026-06-13 30m monitor chunks 54-55",
+    },
+    {
+        "staged": "특히 스웨덴의 러브블 이란 회사가 지금 제일 잘 나갑니다",
+        "candidate": "이걸 쓰시면 실리콘밸리 레덴의 러브오블이라는 회사가 지금 제일 잘 나갑니다.",
+        "expected": "partial_preserve",
+        "source": "2026-06-13 30m monitor chunks 157-158",
+    },
+    {
+        "staged": "그런데 공장에서 기계들이 스팀 엔진이 아닌 전기로 돌아가기 시작한 건 사실 1920년도예요.",
+        "candidate": "엔진이 아닌 전기로 돌아가기 시작한 건 사실 1920년도 에요 50년 정도가 더 걸렸습니다",
+        "expected": "partial_preserve",
+        "source": "2026-06-13 30m monitor chunks 315-316",
+    },
+    {
+        "staged": "엔진이 아닌 전기로 돌아가기 시작한 건 사실 1920년도 에요 50년 정도가 더 걸렸습니다",
+        "candidate": "바로 다음주 수요일부터 되는 50년 정도가 더 걸렸습니다.",
+        "expected": "partial_preserve",
+        "source": "2026-06-13 30m monitor chunks 316-317",
+    },
+    {
+        "staged": "근데 우리가 그런 얘기하지 골적으로 얘기하지 않죠",
+        "candidate": "우리가 그런 얘기하지 않습니다",
+        "expected": "partial_revision",
+        "source": "avc-whisper.log chunk 76",
+    },
+    {
+        "staged": "바로 다음주 수요일부터 되는",
+        "candidate": "바로 다음 주 수요일부터 되는 건 절대로 아닙니다.",
+        "expected": "open_korean_clause",
+        "source": "2026-06-13 30m monitor chunk 317",
+    },
+    {
+        "staged": "저녁에 퇴근하고",
+        "candidate": "저녁에 퇴근하고 집에 와서 야 나",
+        "expected": "open_korean_clause",
+        "source": "2026-06-13 30m monitor chunk 821",
+    },
+    {
+        "staged": "타자기로 글을 쓸",
+        "candidate": "타자기로 글을 쓸 때",
+        "expected": "open_korean_clause",
+        "source": "2026-06-13 30m monitor open clause",
+    },
+]
+
 STABILITY_TRACKING_SEQUENCES = [
     [
         "이자 비용 줄어들면서 얘는 자동적으로 또 떨어지는 시스템이 구축이 된다는 거죠 지금과는",
@@ -419,6 +479,14 @@ DISTINCT_TRACKING_CASES.extend([
     {"left": "근데 요새는 다른 거 같아요", "right": "이 신용화폐 근데 요새는 다른 것 같아요", "source": "2026-06-13 monitor chunk 1006"},
     {"left": "채권사는 플랫폼을 만들어 놓을 거예요", "right": "그 플랫폼에서 거기서 바로바로 거래를 할 수 있게끔", "source": "2026-06-13 monitor chunk 1188"},
     {"left": "아니요", "right": "이거는 이미 트렌드화가 돼서 5년 10년은 더 갈 것 같죠", "source": "2026-06-13 monitor chunk 1247"},
+])
+
+REVISION_TRACKING_CASES.extend([
+    {"left": "이 두 직업은", "right": "이 두 직업은 그런데 보면 최치PD가 등장하기 전까지는", "source": "2026-06-13 30m monitor chunks 54-56"},
+    {"left": "특히 스웨덴의 러브블 이란 회사가 지금 제일 잘 나갑니다", "right": "이걸 쓰시면 실리콘밸리 레덴의 러브오블이라는 회사가 지금 제일 잘 나갑니다.", "source": "2026-06-13 30m monitor chunks 157-158"},
+    {"left": "그런데 공장에서 기계들이 스팀 엔진이 아닌 전기로 돌아가기 시작한 건 사실 1920년도예요.", "right": "엔진이 아닌 전기로 돌아가기 시작한 건 사실 1920년도 에요 50년 정도가 더 걸렸습니다", "source": "2026-06-13 30m monitor chunks 315-316"},
+    {"left": "엔진이 아닌 전기로 돌아가기 시작한 건 사실 1920년도 에요 50년 정도가 더 걸렸습니다", "right": "바로 다음주 수요일부터 되는 50년 정도가 더 걸렸습니다.", "source": "2026-06-13 30m monitor chunks 316-317"},
+    {"left": "교통사고라는 게 그 데미지가 너무 크기 때문에 안전벨트 안전벨트라는 불편함을 감수하면서 라는 확률이 매우 낮은데도 벨트라는 거예요", "right": "확률이 매우 낮은데도 벨트를 매는 거예요", "source": "2026-06-13 30m monitor chunks 820-821"},
 ])
 
 REVISION_TRACKING_CASES.extend([
@@ -512,6 +580,20 @@ def _make_collapse_tracking_test(index: int, case: dict[str, object]):
     return test
 
 
+def _make_replacement_tracking_test(index: int, case: dict[str, object]):
+    def test(self: WhisperPerformanceTrackingTest) -> None:
+        actual = _replacement_decision_reason(
+            str(case["staged"]),
+            str(case["candidate"]),
+            int(case.get("confirmations", 1)),
+            bool(case.get("forced", False)),
+            int(case.get("age", 0)),
+        )
+        matched = actual == str(case["expected"])
+        self._record("replacement", f"replacement_{index:03d}", matched)
+    return test
+
+
 def _make_stability_tracking_test(index: int, sequence: list[str]):
     def test(self: WhisperPerformanceTrackingTest) -> None:
         transition_results = []
@@ -543,6 +625,13 @@ for _index, _case in enumerate(COLLAPSE_TRACKING_CASES, 1):
         WhisperPerformanceTrackingTest,
         f"test_tracking_collapse_{_index:03d}",
         _make_collapse_tracking_test(_index, _case),
+    )
+
+for _index, _case in enumerate(REPLACEMENT_TRACKING_CASES, 1):
+    setattr(
+        WhisperPerformanceTrackingTest,
+        f"test_tracking_replacement_{_index:03d}",
+        _make_replacement_tracking_test(_index, _case),
     )
 
 for _index, _sequence in enumerate(STABILITY_TRACKING_SEQUENCES, 1):
