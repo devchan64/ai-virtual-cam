@@ -694,6 +694,20 @@ def _hangul_compact_key(words: list[str]) -> str:
     return compact
 
 
+def _short_hangul_containment_revision(left_words: list[str], right_words: list[str]) -> bool:
+    if not (1 <= len(left_words) <= 4 and len(right_words) > len(left_words)):
+        return False
+    if not _has_hangul_words(left_words) or not _has_hangul_words(right_words):
+        return False
+    left_key = _hangul_compact_key(left_words)
+    if len(left_key) < 5:
+        return False
+    for start in range(0, len(right_words) - len(left_words) + 1):
+        if _is_subsequence_at(right_words, left_words, start):
+            return len(right_words) <= len(left_words) + 3
+    return False
+
+
 def _hangul_compact_revision_match(left_words: list[str], right_words: list[str]) -> bool:
     left_key = _hangul_compact_key(left_words)
     right_key = _hangul_compact_key(right_words)
@@ -715,6 +729,36 @@ def _hangul_compact_revision_match(left_words: list[str], right_words: list[str]
     if prefix_chars >= 4 and max_block >= 5 and ratio >= 0.50:
         return True
     return max_block >= 5 and ratio >= 0.85
+
+
+def _has_hangul_words(words: list[str]) -> bool:
+    return any(any("가" <= ch <= "힣" for ch in word) for word in words)
+
+
+def _korean_revision_delta(committed_words: list[str], sentence_words: list[str]) -> str | None:
+    if not _has_hangul_words(committed_words) or not _has_hangul_words(sentence_words):
+        return None
+
+    if 1 <= len(committed_words) <= 4:
+        committed_len = len(committed_words)
+        for start in range(0, len(sentence_words) - committed_len + 1):
+            if not _is_subsequence_at(sentence_words, committed_words, start):
+                continue
+            suffix_words = sentence_words[start + committed_len :]
+            return _sentence_delta_from_words(suffix_words) if suffix_words else ""
+
+    best_i, best_j, best_len = _best_common_word_run(committed_words, sentence_words)
+    if best_len < 5:
+        return None
+
+    shorter = min(len(committed_words), len(sentence_words))
+    suffix_words = sentence_words[best_j + best_len :]
+    overlap_rate = best_len / max(shorter, 1)
+    if best_i <= 1 and best_j <= 1 and overlap_rate >= 0.70 and len(suffix_words) <= 2:
+        return ""
+    if best_i + best_len == len(committed_words) and best_len >= 8 and len(suffix_words) <= 6:
+        return _sentence_delta_from_words(suffix_words) if suffix_words else ""
+    return None
 
 
 def _is_numeric_fragment_echo(candidate_words: list[str], committed_words: list[str]) -> bool:
@@ -754,6 +798,9 @@ def _sentence_output_delta(committed_text: str, sentence: str) -> str:
         return ""
     if sentence_words == ["hi"] and committed_words[-1:] == ["high"]:
         return ""
+    korean_delta = _korean_revision_delta(committed_words, sentence_words)
+    if korean_delta is not None:
+        return korean_delta
     if len(sentence_words) <= len(committed_words):
         for start in range(0, len(committed_words) - len(sentence_words) + 1):
             if _is_subsequence_at(committed_words, sentence_words, start):
@@ -869,6 +916,8 @@ def _sentences_are_revisions(left: str, right: str) -> bool:
     if left_signature and left_signature == right_signature:
         return True
     if _share_stable_numeric_sequence(left_words, right_words):
+        return True
+    if _short_hangul_containment_revision(left_words, right_words):
         return True
     if _hangul_compact_revision_match(left_words, right_words):
         return True

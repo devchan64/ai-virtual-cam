@@ -195,6 +195,28 @@ class WhisperTranscriptDeltaTest(unittest.TestCase):
         self.assertTrue(_sentences_are_revisions(committed, sentence))
         self.assertEqual(_sentence_output_delta(committed, sentence), "for a freeway")
 
+    def test_sentence_output_delta_keeps_short_korean_revision_suffix_from_log(self) -> None:
+        self.assertEqual(_sentence_output_delta("재정적 프리미엄이", "재정적 프리미엄이 과거"), "과거")
+        self.assertEqual(_sentence_output_delta("바꾸는 모습들로", "바꾸는 모습들로 가져왔잖아요."), "가져왔잖아요")
+
+    def test_sentence_output_delta_suppresses_short_korean_suffix_revision_from_log(self) -> None:
+        self.assertTrue(_sentences_are_revisions("투자를 하겠다.", "경우는 투자를 하겠다."))
+        self.assertEqual(_sentence_output_delta("투자를 하겠다.", "경우는 투자를 하겠다."), "")
+
+    def test_sentence_output_delta_suppresses_korean_correction_only_revision_from_log(self) -> None:
+        committed = "세수가 많이 들어오면 정부가 할 수 있는 건 두 가지예요."
+        sentence = "추가 많이 들어오면 정부가 할 수 있는 건 두 가지"
+
+        self.assertTrue(_sentences_are_revisions(committed, sentence))
+        self.assertEqual(_sentence_output_delta(committed, sentence), "")
+
+    def test_sentence_output_delta_keeps_korean_revision_tail_after_internal_overlap_from_log(self) -> None:
+        committed = "트럼프 입장에서는 기업들 단에서의 맞아요 트럼프 입장에서는 이제 기업들 딴에서의 그런 세상에서는 기업들 딴에서의 그런 힘겨움을 끌어주기 위해서 트럼프의 정책적 방향성들을 제시할 수 있는 거고 그리고"
+        sentence = "트럼프 입장에서는 기업들 단에서의 맞아요 트럼프 입장에서는 이제 기업들 딴에서의 그런 힘겨움을 끌어주기 위해서 트럼프의 정책적 방향성들을 제시할 수 있는 거고 그리고 이제 만약에 그렇게"
+
+        self.assertTrue(_sentences_are_revisions(committed, sentence))
+        self.assertEqual(_sentence_output_delta(committed, sentence), "이제 만약에 그렇게")
+
 
 if __name__ == "__main__":
     unittest.main()
