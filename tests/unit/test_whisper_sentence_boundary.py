@@ -1,7 +1,19 @@
 import unittest
 
-from src.app.sentence_boundary import LegacyRegexSentenceBoundaryDetector
+from src.app.sentence_boundary import LegacyRegexSentenceBoundaryDetector, _funasr_generated_text, split_punctuated_text
 from src.app.whisper_window import _collapse_adjacent_repeated_phrase_details, _collapse_adjacent_repeated_phrases, _diagnostic_tail, _forced_sentence_reason, _new_text_delta, _pending_new_text_combined, _sentence_max_age_chunks, _sentence_output_delta, _sentence_required_confirmations, _sentences_are_revisions, _should_age_staged_sentence, _should_translate_staged_sentence, _prefer_sentence_revision, _sentence_end_count, _split_completed_sentences, _stable_window_text
+
+
+class WhisperFunasrBoundaryTest(unittest.TestCase):
+    def test_funasr_generated_text_reads_list_dict_response(self) -> None:
+        self.assertEqual(_funasr_generated_text([{"text": "台湾便当很好吃。"}]), "台湾便当很好吃。")
+
+    def test_split_punctuated_text_uses_model_inserted_chinese_punctuation(self) -> None:
+        result = split_punctuated_text("台湾便当很好吃。所以我们进去看看", "funasr-ct-punc")
+
+        self.assertEqual(result.completed, ["台湾便当很好吃。"])
+        self.assertEqual(result.pending, "所以我们进去看看")
+        self.assertEqual(result.backend, "funasr-ct-punc")
 
 
 class WhisperSentenceBoundaryTest(unittest.TestCase):

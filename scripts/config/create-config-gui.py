@@ -605,8 +605,6 @@ class ConfigGui:
     def _register_hidden_whisper_vars(self) -> None:
         defaults = self._build_video_defaults()
         for key in (
-            "whisper_sentence_boundary_backend",
-            "whisper_sentence_boundary_model",
             "whisper_sentence_boundary_device",
             "whisper_sentence_boundary_compute_type",
         ):
@@ -1649,8 +1647,15 @@ class ConfigGui:
             "whisper_beam_size": whisper["beamSize"],
             "whisper_max_new_tokens": whisper["maxNewTokens"],
             "whisper_temperature": whisper["temperature"],
+            "whisper_post_processing_profile": whisper["postProcessingProfile"],
             "whisper_sentence_boundary_backend": whisper["sentenceBoundaryBackend"],
             "whisper_sentence_boundary_model": whisper["sentenceBoundaryModel"],
+            "whisper_sentence_boundary_backend_en": whisper["sentenceBoundaryBackendEn"],
+            "whisper_sentence_boundary_model_en": whisper["sentenceBoundaryModelEn"],
+            "whisper_sentence_boundary_backend_ko": whisper["sentenceBoundaryBackendKo"],
+            "whisper_sentence_boundary_model_ko": whisper["sentenceBoundaryModelKo"],
+            "whisper_sentence_boundary_backend_zh": whisper["sentenceBoundaryBackendZh"],
+            "whisper_sentence_boundary_model_zh": whisper["sentenceBoundaryModelZh"],
             "whisper_sentence_boundary_device": whisper["sentenceBoundaryDevice"],
             "whisper_sentence_boundary_compute_type": whisper["sentenceBoundaryComputeType"],
         }
@@ -2015,8 +2020,15 @@ class ConfigGui:
             "whisper_beam_size",
             "whisper_max_new_tokens",
             "whisper_temperature",
+            "whisper_post_processing_profile",
             "whisper_sentence_boundary_backend",
             "whisper_sentence_boundary_model",
+            "whisper_sentence_boundary_backend_en",
+            "whisper_sentence_boundary_model_en",
+            "whisper_sentence_boundary_backend_ko",
+            "whisper_sentence_boundary_model_ko",
+            "whisper_sentence_boundary_backend_zh",
+            "whisper_sentence_boundary_model_zh",
             "whisper_sentence_boundary_device",
             "whisper_sentence_boundary_compute_type",
         ):
@@ -2243,8 +2255,15 @@ class ConfigGui:
         self._set_var("whisper_beam_size", whisper_cfg.get("beamSize", defaults["whisper_beam_size"]))
         self._set_var("whisper_max_new_tokens", whisper_cfg.get("maxNewTokens", defaults["whisper_max_new_tokens"]))
         self._set_var("whisper_temperature", whisper_cfg.get("temperature", defaults["whisper_temperature"]))
+        self._set_var("whisper_post_processing_profile", whisper_cfg.get("postProcessingProfile", defaults["whisper_post_processing_profile"]))
         self._set_var("whisper_sentence_boundary_backend", whisper_cfg.get("sentenceBoundaryBackend", defaults["whisper_sentence_boundary_backend"]))
         self._set_var("whisper_sentence_boundary_model", whisper_cfg.get("sentenceBoundaryModel", defaults["whisper_sentence_boundary_model"]))
+        self._set_var("whisper_sentence_boundary_backend_en", whisper_cfg.get("sentenceBoundaryBackendEn", defaults["whisper_sentence_boundary_backend_en"]))
+        self._set_var("whisper_sentence_boundary_model_en", whisper_cfg.get("sentenceBoundaryModelEn", defaults["whisper_sentence_boundary_model_en"]))
+        self._set_var("whisper_sentence_boundary_backend_ko", whisper_cfg.get("sentenceBoundaryBackendKo", defaults["whisper_sentence_boundary_backend_ko"]))
+        self._set_var("whisper_sentence_boundary_model_ko", whisper_cfg.get("sentenceBoundaryModelKo", defaults["whisper_sentence_boundary_model_ko"]))
+        self._set_var("whisper_sentence_boundary_backend_zh", whisper_cfg.get("sentenceBoundaryBackendZh", defaults["whisper_sentence_boundary_backend_zh"]))
+        self._set_var("whisper_sentence_boundary_model_zh", whisper_cfg.get("sentenceBoundaryModelZh", defaults["whisper_sentence_boundary_model_zh"]))
         self._set_var("whisper_sentence_boundary_device", whisper_cfg.get("sentenceBoundaryDevice", defaults["whisper_sentence_boundary_device"]))
         self._set_var("whisper_sentence_boundary_compute_type", whisper_cfg.get("sentenceBoundaryComputeType", defaults["whisper_sentence_boundary_compute_type"]))
         self._sync_whisper_translation_backend_options()
@@ -3942,8 +3961,15 @@ class ConfigGui:
             whisper_beam_size=int(round(float(iv["whisper_beam_size"].get()))),
             whisper_max_new_tokens=int(round(float(iv["whisper_max_new_tokens"].get()))),
             whisper_temperature=float(iv["whisper_temperature"].get()),
+            whisper_post_processing_profile=iv["whisper_post_processing_profile"].get().strip(),
             whisper_sentence_boundary_backend=iv["whisper_sentence_boundary_backend"].get().strip(),
             whisper_sentence_boundary_model=iv["whisper_sentence_boundary_model"].get().strip(),
+            whisper_sentence_boundary_backend_en=iv["whisper_sentence_boundary_backend_en"].get().strip(),
+            whisper_sentence_boundary_model_en=iv["whisper_sentence_boundary_model_en"].get().strip(),
+            whisper_sentence_boundary_backend_ko=iv["whisper_sentence_boundary_backend_ko"].get().strip(),
+            whisper_sentence_boundary_model_ko=iv["whisper_sentence_boundary_model_ko"].get().strip(),
+            whisper_sentence_boundary_backend_zh=iv["whisper_sentence_boundary_backend_zh"].get().strip(),
+            whisper_sentence_boundary_model_zh=iv["whisper_sentence_boundary_model_zh"].get().strip(),
             whisper_sentence_boundary_device=iv["whisper_sentence_boundary_device"].get().strip(),
             whisper_sentence_boundary_compute_type=iv["whisper_sentence_boundary_compute_type"].get().strip(),
         )

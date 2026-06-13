@@ -228,6 +228,13 @@ new:      "in the United States to take delivery"
   - `Segment Any Text` 기반 다국어 분절로 구두점이 부족한 텍스트에서도 문장 경계를 제안.
   - `sat-3l-sm` 류 경량 모델부터 KO/EN/ZH 적합성 실험.
   - `device=cuda`, `compute=float16` 경로 우선, 로딩/실행 실패 시 legacy regex/CPU로 폴백 없이 Fail-Fast.
+  - 단, SaT 논문의 주된 문제정의는 일반 텍스트 sentence segmentation이다. Whisper의 sliding-window partial transcript처럼 매 chunk마다 이전 가설이 재작성되는 실시간 ASR 스트림에는 그대로 적합하다고 가정하지 않는다.
+  - 운영 기본값으로 유지하더라도 `boundary_complete`, `pending_overrun`, `stage_discard_reason_empty`, `revision churn`을 언어별로 검증해 부적합성이 확인되면 ASR punctuation restoration 계열 모델로 전환한다.
+- ASR punctuation restoration / boundary scoring 모델
+  - 스트리밍 ASR 논문들은 문장 경계와 구두점 복원을 STT와 별도 문제로 다룬다.
+  - 입력 전사 텍스트를 재작성하지 않고 토큰 사이 구두점/경계만 scoring하는 sequence-labeling 또는 non-autoregressive scoring 모델을 우선 검토한다.
+  - 중국어/만다린은 공백 기반 word boundary가 없어 Mandarin punctuation restoration 연구처럼 Chinese tokenizer/Jieba류 단위 처리를 포함한 모델을 별도 후보로 본다.
+  - generation 기반 LLM 후처리는 원문 보존 위험이 있으므로 운영 기본 후보가 아니라 오프라인 비교군으로 제한한다.
 - PySBD
   - 다국어 분절 라이브러리이나 Golden Rule 기반 규칙 확장 비용이 높아 운영 기본값으로 사용하지 않음.
   - 참고 또는 비교군으로만 제한.
@@ -274,15 +281,36 @@ class SentenceBoundaryDetector:
 
 초기/실험 backend 정렬:
 - `sat`: 현재 운영 기본 backend. `wtpsplit.SaT` 모델을 로드하며 `device=cuda`, `compute=float16` 경로를 기본으로 한다.
+- `funasr-ct-punc`: 중국어 1차 실험 backend. FunASR CT-Transformer punctuation 모델을 사용해 공백 없는 Mandarin/Chinese ASR 텍스트에 구두점과 경계를 복원한다. 1차 모델은 `ct-punc-c`이며, 설치/로드/실행 실패 시 regex나 SaT로 암묵 폴백하지 않는다.
 - `mock`: 테스트/격리용 backend. 실제 운영 품질 비교군으로 사용하지 않는다.
 - `legacy-regex`: 과거 회귀 테스트 보존용 helper. 운영 backend와 기준선 비교용으로 사용하지 않으며 `WhisperConfig`에서도 허용하지 않는다.
 
+언어별 후처리 프로필:
+- `postProcessingProfile=auto-by-language`: STT 언어에 따라 후처리 backend/model을 선택한다. 기본값이다.
+- 영어 `en`: `sentenceBoundaryBackendEn=sat`, `sentenceBoundaryModelEn=sat-3l-sm`.
+- 한국어 `ko`: `sentenceBoundaryBackendKo=sat`, `sentenceBoundaryModelKo=sat-3l-sm`.
+- 중국어 `zh`: `sentenceBoundaryBackendZh=funasr-ct-punc`, `sentenceBoundaryModelZh=ct-punc-c`.
+- `postProcessingProfile=manual`: 언어별 선택을 사용하지 않고 `sentenceBoundaryBackend`/`sentenceBoundaryModel`을 그대로 사용한다.
+- config GUI는 자동 프로필, 언어별 backend/model 그룹, 수동 backend/model을 분리해 표시한다. 중국어 그룹은 다른 언어와 별도 모델군으로 운영한다.
+- 중국어 처리는 문자 단위 CJK 토큰화, suffix overlap 같은 언어별 휴리스틱을 운영 로직에 추가하지 않는다. 공백 없는 텍스트의 경계와 구두점은 후처리 모델의 책임으로 둔다.
+
 현재 런타임 제약:
-- `sat` 로딩 시작/완료 로그에는 backend, model, device, compute, language를 출력한다. 캐시에 모델이 없으면 Hugging Face 다운로드가 발생할 수 있음을 stdout 로그로 남긴다.
-- `sat` 로딩/분절 실패는 Fail-Fast다. legacy regex나 CPU로 자동 전환하지 않는다.
-- `language=auto`일 때 감지 언어가 바뀌면 `sat` detector를 해당 언어 기준으로 다시 로드한다. 고정 언어 설정에서는 detector 언어를 실행 중 암묵 변경하지 않는다.
+- 문장 경계 모델 로딩 시작/완료 로그에는 profile, backend, model, device, compute, language를 출력한다. 캐시에 모델이 없으면 Hugging Face 또는 FunASR/ModelScope 다운로드가 발생할 수 있음을 stdout 로그로 남긴다.
+- 문장 경계 모델 로딩/분절 실패는 Fail-Fast다. legacy regex나 CPU로 자동 전환하지 않는다.
+- `language=auto` 또는 `postProcessingProfile=auto-by-language`에서 감지/설정 언어에 따른 backend/model이 바뀌면 detector를 다시 로드한다. 수동 프로필에서는 실행 중 암묵 변경하지 않는다.
 
 ### 8.5 경계 진단 신호(운영 지표)
+
+2026-06-13 중국어 전사 시도에서 관측된 핵심 지표는 다음과 같다.
+
+- 설정: `language=zh`, `model=large-v3`, `device=cuda`, `compute=float16`, `stepSeconds=1.5`, `windowSeconds=7.5`, `commitLagSeconds=1.5`, `beamSize=3`, `sentenceBoundaryBackend=sat`.
+- 최근 중국어 구간: `perf=125`, `diag=125`, `zh_transcripts=163`, `errors=0`.
+- 속도: `stt_rtf avg=0.075`, `p95=0.100`; 계산 성능은 병목이 아님.
+- STT 신뢰도: `low_logprob` 후보 무시 12회. STT 자체 품질 문제도 일부 존재한다.
+- 경계 품질: `boundary_complete=0`이 82/125, `slow_pending=19`, `stage_discard_reason_empty`가 53회. 이는 문장 경계/리비전 생명주기가 중국어 스트림을 충분히 다루지 못한다는 신호다.
+- 결론: 현재 관측만으로 Whisper large-v3의 중국어 STT가 주 병목이라고 단정하지 않는다. 우선 raw STT, boundary output, committed output을 분리해 STT 오류와 경계 오류를 독립 평가한다.
+
+운영 진단 기준:
 
 - `replaced` 비율이 높을수록 후보 안정성이 낮음.
 - `pending_chars p90/max` 증가 시 문장 경계 미탐으로 다중 문장 묶임 가능성 증가.
@@ -310,6 +338,18 @@ class SentenceBoundaryDetector:
 
 - `stable_prefix` 성격을 훼손하지 않고 문장 경계를 제안해야 함.
 - 문장 끝 구두점 유무와 무관하게 경계 제안을 허용하되 pending 만료 임계치(길이/횟수)로 과도 확정을 제한.
+
+### 9.2 모델 적합성 검증 계획
+
+STT 모델과 문장 경계 모델의 책임을 분리해 검증한다.
+
+1. `raw_stt_window`: Whisper가 반환한 window 전체 텍스트를 저장한다. 이 값으로 언어별 CER/WER, `avg_logprob`, `no_speech_prob`, language drift를 평가한다.
+2. `boundary_input`: 경계 모델에 들어간 텍스트를 저장한다. 이 값은 raw STT와 동일하거나 명시적 normalization만 적용되어야 한다.
+3. `boundary_output`: completed/pending, boundary confidence, boundary count를 저장한다. 이 값으로 boundary F1, over-segmentation, under-segmentation, boundary latency를 평가한다.
+4. `committed_output`: 실제 모달/번역에 들어간 확정 텍스트를 저장한다. 이 값으로 deletion rate, duplicate insertion rate, revision churn을 평가한다.
+5. 같은 raw STT 입력에 대해 `sat`, Mandarin punctuation restoration, streaming punctuation scoring 모델을 오프라인 replay로 비교한다. 운영 코드는 특정 언어별 regex 보강이 아니라 이 비교 결과로 모델을 교체한다.
+
+중국어/만다린의 1차 후보는 공백 없는 텍스트를 직접 처리하거나 Jieba/Chinese tokenizer 기반 경계 단위를 지원하는 punctuation restoration 모델이다. SaT는 일반 텍스트 segmentation 강점은 있으나, streaming ASR partial hypothesis 안정성은 별도 검증 전까지 가정하지 않는다.
 
 ## 10) 번역 정책
 
@@ -580,6 +620,12 @@ stability=10/10 rate=1.000 target>=0.80
 - [Segment Any Text: A Universal Approach for Robust, Efficient and Adaptable Sentence Segmentation](https://arxiv.org/abs/2406.16678)
 - [wtpsplit GitHub README](https://github.com/segment-any-text/wtpsplit)
 - [Where’s the Point? Self-Supervised Multilingual Punctuation-Agnostic Sentence Segmentation](https://aclanthology.org/2023.acl-long.398/)
+- [Streaming Punctuation: A Novel Punctuation Technique Leveraging Bidirectional Context for Continuous Speech Recognition](https://arxiv.org/abs/2301.03819)
+- [Efficient Punctuation Restoration via Weighted Lookahead Scoring Method for Streaming ASR Systems](https://arxiv.org/abs/2606.05179)
+- [Punctuation Restoration for Singaporean Spoken Languages: English, Malay, and Mandarin](https://arxiv.org/abs/2212.05356)
+- [A Small and Fast BERT for Chinese Medical Punctuation Restoration](https://arxiv.org/abs/2308.12568)
+- [M2R-Whisper: Multi-stage and Multi-scale Retrieval Augmentation for Enhancing Whisper](https://arxiv.org/abs/2409.11889)
+- [Investigating Zero-Shot Generalizability on Mandarin-English Code-Switched ASR and Speech-to-text Translation](https://arxiv.org/abs/2401.00273)
 - [PySBD: Pragmatic Sentence Boundary Disambiguation](https://arxiv.org/abs/2010.09657)
 - [NIST SCTK, the NIST Scoring Toolkit](https://github.com/usnistgov/SCTK)
 - [Assessing Latency in ASR Systems: A Methodological Perspective for Real-Time Use](https://arxiv.org/abs/2409.05674)

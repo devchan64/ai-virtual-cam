@@ -7,6 +7,9 @@ from scripts.config.whisper_options import (
     whisper_language_display_from_raw,
     whisper_language_options,
     whisper_model_options,
+    whisper_post_processing_profile_options,
+    whisper_sentence_boundary_backend_options,
+    whisper_sentence_boundary_model_options,
     whisper_translation_backend_options,
     whisper_translation_model_options,
     whisper_translation_target_display_from_raw,
@@ -214,6 +217,98 @@ def build_whisper_tab(
         row,
         "hint.whisper_speed",
         "A shorter update interval improves responsiveness. A longer context window and commit lag usually improve STT accuracy and sentence continuity.",
+    )
+
+    gui._add_combo(
+        tab_whisper,
+        row,
+        "whisper_post_processing_profile",
+        gui._tr("label.whisper_post_processing_profile", "Post-processing profile"),
+        whisper_post_processing_profile_options(),
+        whisper_default("postProcessingProfile"),
+        label_key="label.whisper_post_processing_profile",
+    )
+    row += 1
+    row = _add_hint(
+        gui,
+        ttk,
+        tab_whisper,
+        row,
+        "hint.whisper_post_processing_profile",
+        "auto-by-language selects a post-processing model by STT language: English/Korean use SaT, Chinese uses FunASR CT-Transformer punctuation restoration.",
+    )
+
+    post_frame = ttk.LabelFrame(
+        tab_whisper,
+        text=gui._tr("label.whisper_post_processing_models", "Language post-processing models"),
+    )
+    gui._register_localized_widget(post_frame, "label.whisper_post_processing_models", "Language post-processing models")
+    post_frame.grid(row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(4, 8))
+    for col in range(4):
+        post_frame.columnconfigure(col, weight=1 if col in (1, 3) else 0)
+    post_row = 0
+    for lang_code, lang_label in (("en", "English"), ("ko", "한국어"), ("zh", "中文")):
+        backend_key = f"whisper_sentence_boundary_backend_{lang_code}"
+        model_key = f"whisper_sentence_boundary_model_{lang_code}"
+        backend_default = whisper_default(f"sentenceBoundaryBackend{lang_code.title()}")
+        model_default = whisper_default(f"sentenceBoundaryModel{lang_code.title()}")
+        gui._add_combo(
+            post_frame,
+            post_row,
+            backend_key,
+            gui._tr(f"label.{backend_key}", f"{lang_label} backend"),
+            whisper_sentence_boundary_backend_options(),
+            backend_default,
+            label_key=f"label.{backend_key}",
+        )
+        post_row += 1
+        gui._add_combo(
+            post_frame,
+            post_row,
+            model_key,
+            gui._tr(f"label.{model_key}", f"{lang_label} model"),
+            whisper_sentence_boundary_model_options(backend_default),
+            model_default,
+            label_key=f"label.{model_key}",
+        )
+        post_row += 1
+    _add_hint(
+        gui,
+        ttk,
+        post_frame,
+        post_row,
+        "hint.whisper_post_processing_models",
+        "FunASR CT-Transformer is selected as the first Chinese experiment model. It requires the funasr dependency and fails fast if unavailable.",
+    )
+    row += 1
+
+    gui._add_combo(
+        tab_whisper,
+        row,
+        "whisper_sentence_boundary_backend",
+        gui._tr("label.whisper_sentence_boundary_backend", "Manual boundary backend"),
+        whisper_sentence_boundary_backend_options(),
+        whisper_default("sentenceBoundaryBackend"),
+        label_key="label.whisper_sentence_boundary_backend",
+    )
+    row += 1
+    gui._add_combo(
+        tab_whisper,
+        row,
+        "whisper_sentence_boundary_model",
+        gui._tr("label.whisper_sentence_boundary_model", "Manual boundary model"),
+        whisper_sentence_boundary_model_options(whisper_default("sentenceBoundaryBackend")),
+        whisper_default("sentenceBoundaryModel"),
+        label_key="label.whisper_sentence_boundary_model",
+    )
+    row += 1
+    row = _add_hint(
+        gui,
+        ttk,
+        tab_whisper,
+        row,
+        "hint.whisper_sentence_boundary_manual",
+        "Manual boundary backend/model are used only when post-processing profile is manual.",
     )
 
     gui._add_bool_switch(

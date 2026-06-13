@@ -37,8 +37,9 @@ ACK_SENTENCE_WORDS = {
     "yes",
     "no",
 }
-SENTENCE_BOUNDARY_BACKENDS = {"sat", "mock"}
+SENTENCE_BOUNDARY_BACKENDS = {"sat", "funasr-ct-punc", "mock"}
 DEFAULT_SAT_MODEL = "sat-3l-sm"
+DEFAULT_FUNASR_CT_PUNC_MODEL = "ct-punc-c"
 
 
 @dataclass(frozen=True)
@@ -227,6 +228,91 @@ class SatSentenceBoundaryDetector:
         return SentenceBoundaryResult(completed, pending, self.backend, len(completed), 0)
 
 
+def split_punctuated_text(text: str, backend: str) -> SentenceBoundaryResult:
+    normalized = normalized_text(text)
+    if not normalized:
+        return SentenceBoundaryResult([], "", backend, 0, 0)
+    completed: list[str] = []
+    start = 0
+    for match in SENTENCE_END_MARK_RE.finditer(normalized):
+        end = match.end()
+        sentence = normalized[start:end].strip()
+        if sentence:
+            completed.append(sentence)
+        start = end
+    if completed:
+        return SentenceBoundaryResult(completed, normalized[start:].strip(), backend, len(completed), 0)
+    return SentenceBoundaryResult([], normalized, backend, 0, 0)
+
+
+class FunasrCtPuncSentenceBoundaryDetector:
+    backend = "funasr-ct-punc"
+
+    def __init__(self, model: str | None = None, device: str = "cuda", compute_type: str = "float16") -> None:
+        del compute_type
+        self.model = str(model or DEFAULT_FUNASR_CT_PUNC_MODEL).strip() or DEFAULT_FUNASR_CT_PUNC_MODEL
+        self.device = str(device or "cuda").strip().lower()
+        try:
+            from funasr import AutoModel
+        except Exception as exc:
+            raise ImportError(
+                "sentence boundary backend 'funasr-ct-punc' requires funasr. "
+                "Run ./bin/avc setup or install funasr; fallback is intentionally disabled."
+            ) from exc
+        try:
+            self._model = AutoModel(model=self.model, device=self.device)
+        except Exception as exc:
+            raise RuntimeError(
+                "sentence boundary backend 'funasr-ct-punc' initialization failed: "
+                f"model={self.model} device={self.device}. "
+                "Fail-Fast: fix the model/device/runtime instead of falling back."
+            ) from exc
+
+    def split(
+        self,
+        pending_text: str,
+        new_text: str,
+        language: str = "auto",
+        *,
+        boundary_confidence: float | None = None,
+    ) -> SentenceBoundaryResult:
+        del boundary_confidence
+        combined = pending_new_text_combined(pending_text, new_text)
+        if not combined:
+            return SentenceBoundaryResult([], "", self.backend, 0, 0)
+        normalized = normalized_text(combined)
+        try:
+            result = self._model.generate(input=normalized)
+        except Exception as exc:
+            raise RuntimeError(
+                f"funasr ct-punc sentence segmentation failed: model={self.model} device={self.device} "
+                f"language={language}. cause={type(exc).__name__}: {exc}. "
+                "Fail-Fast: inspect FunASR logs and fix the configured backend."
+            ) from exc
+        punctuated = _funasr_generated_text(result)
+        if not punctuated:
+            return SentenceBoundaryResult([], normalized, self.backend, 0, 0)
+        return split_punctuated_text(punctuated, self.backend)
+
+
+def _funasr_generated_text(result: object) -> str:
+    if isinstance(result, str):
+        return normalized_text(result)
+    if isinstance(result, dict):
+        return normalized_text(result.get("text") or result.get("sentence") or "")
+    if isinstance(result, list):
+        parts: list[str] = []
+        for item in result:
+            if isinstance(item, dict):
+                text = item.get("text") or item.get("sentence")
+                if text:
+                    parts.append(str(text))
+            elif isinstance(item, str):
+                parts.append(item)
+        return normalized_text(" ".join(parts))
+    return ""
+
+
 class LegacyRegexSentenceBoundaryDetector:
     backend = "legacy-regex"
 
@@ -323,11 +409,13 @@ def create_sentence_boundary_detector(
     normalized_backend = str(backend or "sat").strip().lower()
     if normalized_backend == "sat":
         return SatSentenceBoundaryDetector(model=model, device=device, compute_type=compute_type)
+    if normalized_backend == "funasr-ct-punc":
+        return FunasrCtPuncSentenceBoundaryDetector(model=model, device=device, compute_type=compute_type)
     if normalized_backend == "mock":
         return MockSentenceBoundaryDetector()
     raise ValueError(
         f"unsupported sentence boundary backend: {backend!r}. "
-        "Use one of: sat, mock"
+        "Use one of: sat, funasr-ct-punc, mock"
     )
 
 

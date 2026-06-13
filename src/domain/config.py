@@ -745,8 +745,15 @@ class WhisperConfig:
     beamSize: int
     maxNewTokens: int
     temperature: float
+    postProcessingProfile: str
     sentenceBoundaryBackend: str
     sentenceBoundaryModel: str
+    sentenceBoundaryBackendEn: str
+    sentenceBoundaryModelEn: str
+    sentenceBoundaryBackendKo: str
+    sentenceBoundaryModelKo: str
+    sentenceBoundaryBackendZh: str
+    sentenceBoundaryModelZh: str
     sentenceBoundaryDevice: str
     sentenceBoundaryComputeType: str
 
@@ -779,8 +786,15 @@ class WhisperConfig:
             beamSize=int(raw.get("beamSize", whisper_default("beamSize"))),
             maxNewTokens=int(raw.get("maxNewTokens", whisper_default("maxNewTokens"))),
             temperature=float(raw.get("temperature", whisper_default("temperature"))),
+            postProcessingProfile=str(raw.get("postProcessingProfile", whisper_default("postProcessingProfile"))).strip(),
             sentenceBoundaryBackend=str(raw.get("sentenceBoundaryBackend", whisper_default("sentenceBoundaryBackend"))).strip(),
             sentenceBoundaryModel=str(raw.get("sentenceBoundaryModel", whisper_default("sentenceBoundaryModel"))).strip(),
+            sentenceBoundaryBackendEn=str(raw.get("sentenceBoundaryBackendEn", whisper_default("sentenceBoundaryBackendEn"))).strip(),
+            sentenceBoundaryModelEn=str(raw.get("sentenceBoundaryModelEn", whisper_default("sentenceBoundaryModelEn"))).strip(),
+            sentenceBoundaryBackendKo=str(raw.get("sentenceBoundaryBackendKo", whisper_default("sentenceBoundaryBackendKo"))).strip(),
+            sentenceBoundaryModelKo=str(raw.get("sentenceBoundaryModelKo", whisper_default("sentenceBoundaryModelKo"))).strip(),
+            sentenceBoundaryBackendZh=str(raw.get("sentenceBoundaryBackendZh", whisper_default("sentenceBoundaryBackendZh"))).strip(),
+            sentenceBoundaryModelZh=str(raw.get("sentenceBoundaryModelZh", whisper_default("sentenceBoundaryModelZh"))).strip(),
             sentenceBoundaryDevice=str(raw.get("sentenceBoundaryDevice", whisper_default("sentenceBoundaryDevice"))).strip(),
             sentenceBoundaryComputeType=str(raw.get("sentenceBoundaryComputeType", whisper_default("sentenceBoundaryComputeType"))).strip(),
         )
@@ -835,10 +849,22 @@ class WhisperConfig:
             raise ValueError("whisper.maxNewTokens must be between 16 and 512")
         if not 0.0 <= config.temperature <= 1.0:
             raise ValueError("whisper.temperature must be between 0.0 and 1.0")
-        if config.sentenceBoundaryBackend not in {"sat", "mock"}:
-            raise ValueError("whisper.sentenceBoundaryBackend must be one of: sat, mock")
+        if config.postProcessingProfile not in {"manual", "auto-by-language"}:
+            raise ValueError("whisper.postProcessingProfile must be one of: manual, auto-by-language")
+        allowed_sentence_boundary_backends = {"sat", "funasr-ct-punc", "mock"}
+        if config.sentenceBoundaryBackend not in allowed_sentence_boundary_backends:
+            raise ValueError("whisper.sentenceBoundaryBackend must be one of: sat, funasr-ct-punc, mock")
         if not config.sentenceBoundaryModel:
             raise ValueError("whisper.sentenceBoundaryModel is required")
+        for lang, backend, model in (
+            ("en", config.sentenceBoundaryBackendEn, config.sentenceBoundaryModelEn),
+            ("ko", config.sentenceBoundaryBackendKo, config.sentenceBoundaryModelKo),
+            ("zh", config.sentenceBoundaryBackendZh, config.sentenceBoundaryModelZh),
+        ):
+            if backend not in allowed_sentence_boundary_backends:
+                raise ValueError(f"whisper.sentenceBoundaryBackend{lang.title()} must be one of: sat, funasr-ct-punc, mock")
+            if not model:
+                raise ValueError(f"whisper.sentenceBoundaryModel{lang.title()} is required")
         if config.sentenceBoundaryDevice not in {"cuda", "cpu"}:
             raise ValueError("whisper.sentenceBoundaryDevice must be one of: cuda, cpu")
         if config.sentenceBoundaryComputeType not in {"float16", "float32"}:

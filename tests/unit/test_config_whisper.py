@@ -128,8 +128,15 @@ class WhisperConfigTest(unittest.TestCase):
                 "beamSize": 1,
                 "maxNewTokens": 128,
                 "temperature": 0.2,
+                "postProcessingProfile": "auto-by-language",
                 "sentenceBoundaryBackend": "sat",
                 "sentenceBoundaryModel": "sat-3l-sm",
+                "sentenceBoundaryBackendEn": "sat",
+                "sentenceBoundaryModelEn": "sat-3l-sm",
+                "sentenceBoundaryBackendKo": "sat",
+                "sentenceBoundaryModelKo": "sat-3l-sm",
+                "sentenceBoundaryBackendZh": "funasr-ct-punc",
+                "sentenceBoundaryModelZh": "ct-punc-c",
                 "sentenceBoundaryDevice": "cuda",
                 "sentenceBoundaryComputeType": "float16",
             },
@@ -213,6 +220,19 @@ class WhisperConfigTest(unittest.TestCase):
         self.assertEqual(loaded.whisper.sentenceBoundaryModel, whisper_default("sentenceBoundaryModel"))
         self.assertEqual(loaded.whisper.sentenceBoundaryDevice, whisper_default("sentenceBoundaryDevice"))
         self.assertEqual(loaded.whisper.sentenceBoundaryComputeType, whisper_default("sentenceBoundaryComputeType"))
+
+
+    def test_whisper_allows_chinese_funasr_post_processing_backend(self) -> None:
+        loaded = WhisperConfig.from_dict({
+            "language": "zh",
+            "postProcessingProfile": "auto-by-language",
+            "sentenceBoundaryBackendZh": "funasr-ct-punc",
+            "sentenceBoundaryModelZh": "ct-punc-c",
+        })
+
+        self.assertEqual(loaded.postProcessingProfile, "auto-by-language")
+        self.assertEqual(loaded.sentenceBoundaryBackendZh, "funasr-ct-punc")
+        self.assertEqual(loaded.sentenceBoundaryModelZh, "ct-punc-c")
 
     def test_whisper_rejects_invalid_backend(self) -> None:
         with self.assertRaisesRegex(ValueError, "whisper.backend"):
@@ -303,10 +323,14 @@ class WhisperConfigTest(unittest.TestCase):
             WhisperConfig.from_dict({"maxNewTokens": 8})
         with self.assertRaisesRegex(ValueError, "whisper.temperature"):
             WhisperConfig.from_dict({"temperature": 1.5})
+        with self.assertRaisesRegex(ValueError, "whisper.postProcessingProfile"):
+            WhisperConfig.from_dict({"postProcessingProfile": "invalid"})
         with self.assertRaisesRegex(ValueError, "whisper.sentenceBoundaryBackend"):
             WhisperConfig.from_dict({"sentenceBoundaryBackend": "invalid"})
         with self.assertRaisesRegex(ValueError, "whisper.sentenceBoundaryBackend"):
             WhisperConfig.from_dict({"sentenceBoundaryBackend": "regex"})
+        with self.assertRaisesRegex(ValueError, "whisper.sentenceBoundaryBackendZh"):
+            WhisperConfig.from_dict({"sentenceBoundaryBackendZh": "regex"})
         with self.assertRaisesRegex(ValueError, "whisper.sentenceBoundaryDevice"):
             WhisperConfig.from_dict({"sentenceBoundaryDevice": "mps"})
         with self.assertRaisesRegex(ValueError, "whisper.sentenceBoundaryComputeType"):
