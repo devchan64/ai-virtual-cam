@@ -690,6 +690,36 @@ def _sentence_max_age_chunks(forced: bool) -> int:
     return FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS if forced else SENTENCE_CONFIRM_MAX_AGE_CHUNKS
 
 
+def _should_finalize_replaced_sentence(
+    staged_sentence: str,
+    candidate: str,
+    staged_confirmations: int,
+    staged_forced: bool,
+    staged_age: int,
+) -> bool:
+    if staged_confirmations >= _sentence_required_confirmations(staged_forced):
+        return True
+    if staged_age > 0:
+        return True
+
+    staged_words = _word_units(staged_sentence)
+    candidate_words = _word_units(candidate)
+    if not staged_words:
+        return False
+    if len(staged_words) >= 10:
+        return True
+
+    candidate_delta = _sentence_output_delta(staged_sentence, candidate)
+    if candidate_delta == "":
+        return True
+    if candidate_delta != _normalized_text(candidate):
+        return False
+
+    if len(staged_words) >= 8 and 0 < len(candidate_words) <= max(4, len(staged_words) // 2):
+        return _common_word_run(staged_words, candidate_words) >= 2
+    return False
+
+
 def _should_translate_staged_sentence(staged_sentence: str, staged_confirmations: int) -> bool:
     if not PROVISIONAL_TRANSLATION_ENABLED:
         return False

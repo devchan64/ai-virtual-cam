@@ -19,7 +19,10 @@ TRACKING_TARGETS = {
     "stability": {"target_cases": 10, "target_rate": 0.80},
 }
 
-REVISION_TRACKING_CASES = [{'left': '이자 비용 줄어들면서 얘는 자동적으로 또 떨어지는 시스템이 구축이 된다는 거죠 지금과는',
+REVISION_TRACKING_CASES = [
+    {'left': '예전에 2000년 중반부터 2010년대까지 미중이 싸우기 전까지만 해도 과거에 많은 연준부의장들이', 'right': '예전에 2000년 중반부터 2010년대까지 미중이 싸우기 전까지만 해도 과거에 많은 연준부의장들이 나와서 달러를', 'source': 'avc-whisper.log chunks 44-45'},
+    {'left': '예전에 2000년 중반부터 2010년대까지 미중이 싸우기 전까지만 해도 과거에 많은 연준부의장들이 나와서 달러를', 'right': '예전에 2000년 중반부터 2010년대까지 미중이 싸우기 전까지만 해도 과거에 많은 연준부의장들이 나와서 달러를 홍보를', 'source': 'avc-whisper.log chunks 45-46'},
+{'left': '이자 비용 줄어들면서 얘는 자동적으로 또 떨어지는 시스템이 구축이 된다는 거죠 지금과는',
   'right': '이자 비용 줄어들면서 얘는 자동적으로 또 떨어지는 시스템이 구축이 된다는 거죠 지금과는 완전',
   'source': 'avc-whisper.log'},
  {'left': '이자 비용 줄어들면서 얘는 자동적으로 또 떨어지는 시스템이 구축이 된다는 거죠 지금과는 완전',
@@ -210,7 +213,11 @@ REVISION_TRACKING_CASES = [{'left': '이자 비용 줄어들면서 얘는 자동
   'right': '그럼 결국에는 재정의 역할이 커질 수밖에 없는 거고 커져야만 하는 상황이고',
   'source': 'avc-whisper.log'}]
 
-DISTINCT_TRACKING_CASES = [{'left': '그렇게 됐을 경우는 금리가 떨어지겠죠 그러면 경기부가 버티면서 경기부와 버티면서 연준은 금리 그러면 인하를 하지 않아도 굳이',
+DISTINCT_TRACKING_CASES = [
+    {'left': '의장들이 나와서 달러를 홍보를 합니다', 'right': '빨라를 홍보를 합니다', 'source': 'avc-whisper.log chunk 48'},
+    {'left': '빨라를 홍보를 합니다', 'right': '이게 뭘까', 'source': 'avc-whisper.log chunk 48'},
+    {'left': '근데 우리가 그런 얘기하지 골적으로 얘기하지 않죠', 'right': '우리가 그런 얘기하지 않습니다', 'source': 'avc-whisper.log chunk 76'},
+{'left': '그렇게 됐을 경우는 금리가 떨어지겠죠 그러면 경기부가 버티면서 경기부와 버티면서 연준은 금리 그러면 인하를 하지 않아도 굳이',
   'right': '재정적 프리미엄이',
   'source': 'avc-whisper.log'},
  {'left': '있었던 기간 프리미엄의 마이너스 영역이', 'right': '복귀가 되면서 미국', 'source': 'avc-whisper.log'},

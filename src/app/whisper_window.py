@@ -35,6 +35,7 @@ from src.app.whisper_transcript_logic import (
     _sentence_output_delta,
     _sentence_required_confirmations,
     _sentences_are_revisions,
+    _should_finalize_replaced_sentence,
     _should_age_staged_sentence,
     _should_translate_staged_sentence,
     _split_completed_sentences,
@@ -689,7 +690,24 @@ class WhisperTranscriptWorker:
                 f"staged_tail={_diagnostic_tail(staged_sentence)} candidate_tail={_diagnostic_tail(candidate)}",
                 display=False,
             )
-            finalized = finalize_staged_sentence(detected, "replaced")
+            if _should_finalize_replaced_sentence(staged_sentence, candidate, staged_confirmations, staged_forced, staged_age):
+                finalized = finalize_staged_sentence(detected, "replaced")
+            else:
+                self._emit(
+                    "status",
+                    "Whisper stage 폐기: "
+                    f"chunk={chunks} reason=replaced_unconfirmed "
+                    f"staged_confirmations={staged_confirmations} required={_sentence_required_confirmations(staged_forced)} "
+                    f"staged_age={staged_age} max_age={_sentence_max_age_chunks(staged_forced)} "
+                    f"staged_forced={staged_forced} staged_tail={_diagnostic_tail(staged_sentence)} "
+                    f"candidate_tail={_diagnostic_tail(candidate)}",
+                    display=False,
+                )
+                staged_sentence = ""
+                staged_confirmations = 0
+                staged_age = 0
+                staged_forced = False
+                finalized = []
             staged_sentence = candidate
             staged_confirmations = 1
             staged_age = 0

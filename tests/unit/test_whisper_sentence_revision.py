@@ -1,7 +1,7 @@
 import unittest
 
 from src.app.sentence_boundary import LegacyRegexSentenceBoundaryDetector
-from src.app.whisper_window import _collapse_adjacent_repeated_phrase_details, _collapse_adjacent_repeated_phrases, _diagnostic_tail, _forced_sentence_reason, _new_text_delta, _pending_new_text_combined, _sentence_max_age_chunks, _sentence_output_delta, _sentence_required_confirmations, _sentences_are_revisions, _should_age_staged_sentence, _should_translate_staged_sentence, _prefer_sentence_revision, _sentence_end_count, _split_completed_sentences, _stable_window_text
+from src.app.whisper_window import _collapse_adjacent_repeated_phrase_details, _collapse_adjacent_repeated_phrases, _diagnostic_tail, _forced_sentence_reason, _new_text_delta, _pending_new_text_combined, _sentence_max_age_chunks, _sentence_output_delta, _sentence_required_confirmations, _sentences_are_revisions, _should_age_staged_sentence, _should_finalize_replaced_sentence, _should_translate_staged_sentence, _prefer_sentence_revision, _sentence_end_count, _split_completed_sentences, _stable_window_text
 
 
 class WhisperSentenceRevisionTest(unittest.TestCase):
@@ -115,6 +115,48 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
 
         self.assertTrue(_sentences_are_revisions(staged, revised))
         self.assertEqual(_prefer_sentence_revision(staged, revised), revised)
+
+    def test_unconfirmed_replaced_stage_is_not_finalized(self) -> None:
+        self.assertFalse(_should_finalize_replaced_sentence("짧은 후보", "다른 후보", 1, False, 0))
+        self.assertFalse(_should_finalize_replaced_sentence("강제 후보", "다른 후보", 2, True, 0))
+        self.assertTrue(_should_finalize_replaced_sentence("확정 후보", "다른 후보", 2, False, 0))
+        self.assertTrue(_should_finalize_replaced_sentence("강제 확정 후보", "다른 후보", 3, True, 0))
+
+    def test_unconfirmed_replaced_stage_waits_for_observation_age(self) -> None:
+        self.assertTrue(_should_finalize_replaced_sentence("나이 든 후보", "다른 후보", 1, False, 1))
+        self.assertTrue(_should_finalize_replaced_sentence("강제 나이 후보", "다른 후보", 1, True, 1))
+
+    def test_unconfirmed_replaced_stage_discards_dollar_noise_from_log(self) -> None:
+        # Regression from avc-whisper.log chunk 48. These are unstable alternatives, not final lines.
+        staged = "의장들이 나와서 달러를 홍보를 합니다"
+        candidate = "빨라를 홍보를 합니다"
+
+        self.assertFalse(_sentences_are_revisions(staged, candidate))
+        self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
+
+    def test_unconfirmed_replaced_stage_discards_tail_echo_from_log(self) -> None:
+        # Regression from avc-whisper.log chunk 76. The first candidate contains prior-sentence tail echo.
+        staged = "근데 우리가 그런 얘기하지 골적으로 얘기하지 않죠"
+        candidate = "우리가 그런 얘기하지 않습니다"
+
+        self.assertFalse(_sentences_are_revisions(staged, candidate))
+        self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
+
+    def test_replaced_stage_finalizes_long_sentence_from_log(self) -> None:
+        # Regression from avc-whisper.log chunk 59. A single-observation but long completed sentence should not be dropped.
+        staged = "이게 초래할 미래의 형국도 저는 지금의 경제 시스템으로는 감당 불가능하다"
+        candidate = "여기서 이제 일론 머스크의 비판을 또 하나 좀 말씀드리는데 XG가 X지갑 만들었잖아요"
+
+        self.assertFalse(_sentences_are_revisions(staged, candidate))
+        self.assertTrue(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
+
+    def test_replaced_stage_finalizes_suffix_candidate_from_log(self) -> None:
+        # Regression from avc-whisper.log chunk 25. Suffix-only candidate means the staged sentence is already complete.
+        staged = "정부가 어떻게 보면은 자산시장 사재기에 더 더 집중화시키고 있는 전략일 것이다"
+        candidate = "전략일 것이다"
+
+        self.assertFalse(_sentences_are_revisions(staged, candidate))
+        self.assertTrue(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
 
     def test_staged_sentence_can_age_without_pending_revision(self) -> None:
         self.assertTrue(_should_age_staged_sentence("Completed sentence.", "Different topic starts here"))

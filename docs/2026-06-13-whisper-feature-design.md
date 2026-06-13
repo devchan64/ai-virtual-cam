@@ -85,9 +85,9 @@ audio 입력
 
 ```json
 {
-  "stepSeconds": 1.0,
-  "windowSeconds": 4.0,
-  "commitLagSeconds": 1.0,
+  "stepSeconds": 1.5,
+  "windowSeconds": 7.5,
+  "commitLagSeconds": 0.8,
   "beamSize": 3,
   "maxNewTokens": 96
 }
