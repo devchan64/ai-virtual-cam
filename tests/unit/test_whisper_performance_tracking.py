@@ -19,8 +19,8 @@ TRACKING_TARGETS = {
     "distinct": {"target_cases": 25, "target_rate": 0.95},
     "collapse": {"target_cases": 45, "target_rate": 0.90},
     "stability": {"target_cases": 10, "target_rate": 0.80},
-    "replacement": {"target_cases": 9, "target_rate": 0.90},
-    "pending": {"target_cases": 9, "target_rate": 0.90},
+    "replacement": {"target_cases": 11, "target_rate": 0.90},
+    "pending": {"target_cases": 10, "target_rate": 0.90},
 }
 
 REVISION_TRACKING_CASES = [
@@ -409,10 +409,28 @@ REPLACEMENT_TRACKING_CASES = [
         "expected": "open_korean_clause",
         "source": "2026-06-13 30m monitor open clause",
     },
+    {
+        "staged": "Currently, in the robot world, I worked as I've never",
+        "candidate": "It's my first",
+        "expected": "open_latin_clause",
+        "source": "whisper-monitor-20260613-5 chunks 119-120",
+    },
+    {
+        "staged": "Like, R2D2 would beep at you and it's hard to figure out what he's talking about, to be able to translate,",
+        "candidate": "there are probably, I don't know, three to five robots in industry for every one that's a personal robot.",
+        "expected": "open_latin_clause",
+        "source": "whisper-monitor-20260613-5 chunk 433",
+    },
 ]
 
 
 PENDING_TRACKING_CASES = [
+    {
+        "pending": "So, as much as the exchange of emotions is important, especially when when and especially when people meet and talk, one of the core of the exchange key to emotional exchange is nodding their head nodding your head, making your nodding and making a bright face, and Ariana is nodding her head, making her face look",
+        "chunks": 7,
+        "expected": "long_no_boundary",
+        "source": "whisper-monitor-20260613-5 chunk 368",
+    },
     {
         "pending": "so as far as SpaceX the reason that there hasn't been a huge number of a big improvement in in the space industry because it is there's such a significant amount of capital that's needed to start a rocket company, and it's a very difficult technical challenge and the number of people that really understand rocketry in",
         "chunks": 13,

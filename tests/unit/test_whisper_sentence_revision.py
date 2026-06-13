@@ -153,6 +153,25 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
             with self.subTest(staged=staged, candidate=candidate):
                 self.assertTrue(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
 
+    def test_unconfirmed_replaced_stage_waits_on_open_latin_clause_from_monitoring(self) -> None:
+        cases = [
+            (
+                "Currently, in the robot world, I worked as I've never",
+                "It's my first",
+            ),
+            (
+                "Like, R2D2 would beep at you and it's hard to figure out what he's talking about, to be able to translate,",
+                "there are probably, I don't know, three to five robots in industry for every one that's a personal robot.",
+            ),
+        ]
+        for staged, candidate in cases:
+            with self.subTest(staged=staged):
+                self.assertEqual(
+                    _replacement_decision_reason(staged, candidate, 1, False, 0),
+                    "open_latin_clause",
+                )
+                self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
+
     def test_unconfirmed_replaced_stage_finalizes_confirmed_sentences(self) -> None:
         self.assertTrue(_should_finalize_replaced_sentence("확정 후보입니다", "다른 후보입니다", 3, False, 0))
         self.assertTrue(_should_finalize_replaced_sentence("강제 확정 후보입니다", "다른 후보입니다", 4, True, 0))

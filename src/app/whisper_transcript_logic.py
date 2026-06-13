@@ -696,6 +696,10 @@ def _sentence_max_age_chunks(forced: bool) -> int:
 _KOREAN_FINAL_WORD_SUFFIXES = ("다", "요", "죠", "까")
 
 
+def _has_latin_words(words: list[str]) -> bool:
+    return any(any("a" <= ch <= "z" for ch in word.lower()) for word in words)
+
+
 def _looks_like_open_korean_clause(text: str, words: list[str]) -> bool:
     if _boundary_sentence_end_count(text) > 0:
         return False
@@ -709,6 +713,14 @@ def _looks_like_open_korean_clause(text: str, words: list[str]) -> bool:
 
 def _is_open_korean_clause(text: str) -> bool:
     return _looks_like_open_korean_clause(text, _word_units(text))
+
+
+def _looks_like_open_latin_clause(text: str, words: list[str]) -> bool:
+    if _boundary_sentence_end_count(text) > 0:
+        return False
+    if len(words) < 4 or not _has_latin_words(words) or _has_hangul_words(words):
+        return False
+    return True
 
 
 def _should_confirm_staged_sentence(staged_sentence: str, staged_confirmations: int, staged_forced: bool) -> bool:
@@ -746,6 +758,8 @@ def _replacement_decision_reason(
         return "empty"
     if _looks_like_open_korean_clause(staged_sentence, staged_words):
         return "open_korean_clause"
+    if _looks_like_open_latin_clause(staged_sentence, staged_words):
+        return "open_latin_clause"
     if staged_confirmations >= _sentence_required_confirmations(staged_forced):
         return "confirmed"
     if staged_age > 0:
