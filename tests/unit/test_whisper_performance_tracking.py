@@ -403,6 +403,33 @@ STABILITY_TRACKING_SEQUENCES = [
 ]
 
 
+REVISION_TRACKING_CASES.extend([
+    {"left": "그렇죠", "right": "스테이블 코인인가요", "source": "2026-06-13 monitor chunks 1114"},
+    {"left": "스테이블 코인인가요", "right": "그렇죠", "source": "2026-06-13 monitor chunks 1114"},
+    {"left": "그게 유럽입니다", "right": "그게 유럽 모형이에요", "source": "2026-06-13 monitor chunk 910"},
+    {"left": "그게 유럽 모형이에요", "right": "없어 아주", "source": "2026-06-13 monitor chunk 911"},
+    {"left": "그러니까 미국이 함부로 그걸 안 하는 거죠", "right": "그게 이런 모형이에요", "source": "2026-06-13 monitor chunk 913"},
+    {"left": "저는 이게 상당히 걱정이 돼요", "right": "왜냐하면 미국인들 돈만 들어가는 게 아니라 전세계 돈이 다 빨려 들어가겠죠", "source": "2026-06-13 monitor chunk 1176"},
+])
+
+DISTINCT_TRACKING_CASES.extend([
+    {"left": "지금 코스피도 많이 오르고", "right": "근데 중요한 건 그거는 반도체 국한된 얘기잖아요", "source": "2026-06-13 monitor chunk 878"},
+    {"left": "근데 중요한 건 그거는 반도체 국한된 얘기잖아요", "right": "반도체 산업의 종사자들은 늘어날 수 있고 투자가 늘어날 수 있다고", "source": "2026-06-13 monitor chunk 881"},
+    {"left": "결국에 돈의 문제예요", "right": "재정이 확보가 안되고 재정이 확보가 안되니까 연구개발이 안 되잖아요", "source": "2026-06-13 monitor chunk 933"},
+    {"left": "근데 요새는 다른 거 같아요", "right": "이 신용화폐 근데 요새는 다른 것 같아요", "source": "2026-06-13 monitor chunk 1006"},
+    {"left": "채권사는 플랫폼을 만들어 놓을 거예요", "right": "그 플랫폼에서 거기서 바로바로 거래를 할 수 있게끔", "source": "2026-06-13 monitor chunk 1188"},
+    {"left": "아니요", "right": "이거는 이미 트렌드화가 돼서 5년 10년은 더 갈 것 같죠", "source": "2026-06-13 monitor chunk 1247"},
+])
+
+COLLAPSE_TRACKING_CASES.extend([
+    {"source": "2026-06-13 monitor chunk 1111", "text": "그렇다면은 돈은 계속 풀어야 되는데 그렇다면 돈은 계속 풀어야 되는데 마지막 남은"},
+    {"source": "2026-06-13 monitor chunk 1163", "text": "이 스테이블 코인은 새로운 화폐의 탄생 이라고 탄생이라고 보셔야 돼요."},
+    {"source": "2026-06-13 monitor chunk 1212", "text": "왜냐하면 우리는 종이돈을 가지고서 맡겨서 스테이블콘 이라는 새로운 아바타 돈을 돈을 만들 수 있고 사실 내"},
+    {"source": "2026-06-13 monitor chunk 1229", "text": "보면 최단의 웰스, 부호와 화폐의 관점에서 5년 10년의 걸음을 화폐 활용도를 화폐 활용도를 높이려면"},
+    {"source": "2026-06-13 monitor chunk 1238", "text": "그러면서 당연히 부의 양극화는 더 심화되는 돈을 이용해가지고 정부가 어떻게 돈을 이용해서 정부가 어떻게 보면 자산시장 사재기에 더 집중화시키고 있는 있는 전략일"},
+])
+
+
 class WhisperPerformanceTrackingTest(unittest.TestCase):
     records: list[tuple[str, str, bool]] = []
 

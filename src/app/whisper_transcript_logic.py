@@ -703,11 +703,8 @@ def _should_finalize_replaced_sentence(
         return True
 
     staged_words = _word_units(staged_sentence)
-    candidate_words = _word_units(candidate)
     if not staged_words:
         return False
-    if len(staged_words) >= 10:
-        return True
 
     candidate_delta = _sentence_output_delta(staged_sentence, candidate)
     if candidate_delta == "":
@@ -715,9 +712,7 @@ def _should_finalize_replaced_sentence(
     if candidate_delta != _normalized_text(candidate):
         return False
 
-    if len(staged_words) >= 8 and 0 < len(candidate_words) <= max(4, len(staged_words) // 2):
-        return _common_word_run(staged_words, candidate_words) >= 2
-    return False
+    return True
 
 
 def _should_translate_staged_sentence(staged_sentence: str, staged_confirmations: int) -> bool:

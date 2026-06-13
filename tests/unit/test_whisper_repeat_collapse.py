@@ -126,6 +126,25 @@ class WhisperRepeatCollapseTest(unittest.TestCase):
         self.assertEqual(collapsed, "그러니까 이게 상황에 따라서 그렇게 하더라고요.")
         self.assertEqual(rules, ["compact_korean"])
 
+    def test_collapse_korean_stablecoin_birth_revision_from_monitoring(self) -> None:
+        # Regression from 2026-06-13 monitoring chunk 1163.
+        text = "이 스테이블 코인은 새로운 화폐의 탄생 이라고 탄생이라고 보셔야 돼요."
+
+        collapsed, rules = _collapse_adjacent_repeated_phrase_details(text)
+
+        self.assertEqual(collapsed, "이 스테이블 코인은 새로운 화폐의 탄생이라고 보셔야 돼요.")
+        self.assertEqual(rules, ["compact_korean"])
+
+    def test_collapse_korean_last_card_revision_from_monitoring(self) -> None:
+        # Regression from 2026-06-13 monitoring chunk 1111.
+        text = "그렇다면은 돈은 계속 풀어야 되는데 그렇다면 돈은 계속 풀어야 되는데 마지막 남은"
+
+        collapsed, rules = _collapse_adjacent_repeated_phrase_details(text)
+
+        self.assertEqual(collapsed, "그렇다면은 돈은 계속 풀어야 되는데 마지막 남은")
+        self.assertEqual(rules, ["compact_korean"])
+
+
 
 if __name__ == "__main__":
     unittest.main()

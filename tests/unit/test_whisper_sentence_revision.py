@@ -116,9 +116,23 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         self.assertTrue(_sentences_are_revisions(staged, revised))
         self.assertEqual(_prefer_sentence_revision(staged, revised), revised)
 
-    def test_unconfirmed_replaced_stage_is_not_finalized(self) -> None:
-        self.assertFalse(_should_finalize_replaced_sentence("짧은 후보", "다른 후보", 1, False, 0))
-        self.assertFalse(_should_finalize_replaced_sentence("강제 후보", "다른 후보", 2, True, 0))
+    def test_unconfirmed_replaced_stage_finalizes_completed_short_sentences_from_monitoring(self) -> None:
+        # Regressions from 2026-06-13 monitoring. These are complete short utterances,
+        # not disposable noise just because they were observed once before a replacement.
+        cases = [
+            ("그렇죠", "스테이블 코인인가요"),
+            ("스테이블 코인인가요", "그렇죠"),
+            ("그게 유럽입니다", "그게 유럽 모형이에요"),
+            ("그러니까 미국이 함부로 그걸 안 하는 거죠", "그게 이런 모형이에요"),
+            ("근데 요새는 다른 거 같아요", "이 신용화폐 근데 요새는 다른 것 같아요"),
+            ("저는 이게 상당히 걱정이 돼요", "왜냐하면 미국인들 돈만 들어가는 게 아니라 전세계 돈이 다 빨려 들어가겠죠"),
+            ("아니요", "이거는 이미 트렌드화가 돼서 5년 10년은 더 갈 것 같죠"),
+        ]
+        for staged, candidate in cases:
+            with self.subTest(staged=staged, candidate=candidate):
+                self.assertTrue(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
+
+    def test_unconfirmed_replaced_stage_finalizes_confirmed_sentences(self) -> None:
         self.assertTrue(_should_finalize_replaced_sentence("확정 후보", "다른 후보", 2, False, 0))
         self.assertTrue(_should_finalize_replaced_sentence("강제 확정 후보", "다른 후보", 3, True, 0))
 
@@ -126,13 +140,15 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         self.assertTrue(_should_finalize_replaced_sentence("나이 든 후보", "다른 후보", 1, False, 1))
         self.assertTrue(_should_finalize_replaced_sentence("강제 나이 후보", "다른 후보", 1, True, 1))
 
-    def test_unconfirmed_replaced_stage_discards_dollar_noise_from_log(self) -> None:
-        # Regression from avc-whisper.log chunk 48. These are unstable alternatives, not final lines.
+    def test_unconfirmed_replaced_stage_preserves_completed_dollar_sentence_from_log(self) -> None:
+        # Regression from avc-whisper.log chunk 48 and 2026-06-13 monitoring chunks 991-992.
+        # Without a semantic verifier, fail closed on dropping completed text; later candidates
+        # are still staged and must earn their own confirmations.
         staged = "의장들이 나와서 달러를 홍보를 합니다"
         candidate = "빨라를 홍보를 합니다"
 
         self.assertFalse(_sentences_are_revisions(staged, candidate))
-        self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
+        self.assertTrue(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
 
     def test_unconfirmed_replaced_stage_discards_tail_echo_from_log(self) -> None:
         # Regression from avc-whisper.log chunk 76. The first candidate contains prior-sentence tail echo.
