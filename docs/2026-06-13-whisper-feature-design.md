@@ -1,6 +1,6 @@
-# Whisper Sliding-Window STT 리비전 관리 설계
+# Whisper 기능 설계
 
-> [개전 배포 버전] 기존 설계문서의 핵심 결정사항을 운영/배포 관점에서 정리한 문서입니다.
+> Whisper 전사, 번역, 출력, 성능 기준을 운영/배포 관점에서 정리한 기능 설계 문서입니다.
 
 작성일: 2026-06-13
 
@@ -17,7 +17,7 @@
 - 1차 목표: 영상회의에서 발생하는 음성 텍스트를 수집해 실시간 번역(회의 지원)으로 제공
 - 2차 목표: 자막이 지원되지 않는 영상 스트리밍 환경에서 실시간 스크립트를 생성해 화면 자막을 보완
 
-이 문서는 위스퍼 스트리밍 전사에서 생기는 **중복/리비전(문장 덮어쓰기)**를 줄이고, 정확도·지연·안정성(안정적 출력)을 동시에 개선하기 위한 구현 정책을 정리한다.
+이 문서는 위스퍼 기능의 전사, 번역, 출력, 성능 기준을 정리한다. 슬라이딩 윈도우는 중복/리비전(문장 덮어쓰기)을 줄이고 정확도·지연·안정성을 개선하기 위한 구현 방법 중 하나로 다룬다.
 
 ## 2) 현재 운영 문제
 
@@ -69,7 +69,7 @@
 
 - 위 4개 축을 기반으로 **정합성 우선**, **리비전 수치 우선**, **처리량 보존**을 1차 목표로 둔다.
 
-## 4) 기본 처리 파이프라인
+## 4) 슬라이딩 윈도우 처리 파이프라인
 
 ```text
 audio 입력
@@ -418,7 +418,42 @@ class SentenceBoundaryDetector:
 - **주간**: 후보군 비교 리포트 배포 리뷰
 - **릴리스 직전 2주**: 동일 세션셋으로 재현성 검증, 최종 판정
 
-## 12) 점진적 적용 순서
+## 12) 서비스 패스 기준
+
+Whisper 실시간 전사/번역 경로의 테스트 기준은 현재 코드가 통과하는지에 맞춰 유동적으로 정하지 않는다. 기준은 사용자가 서비스에서 체감하는 품질 문제, 즉 문장 누락, 중복 확정, 잘못된 revision 병합을 줄이는 방향으로 고정한다.
+
+`tests/unit/test_whisper_performance_tracking.py`는 누적 운영 로그에서 관측한 중복/누락/revision 사례를 고정 케이스로 만들고, 문장 revision 관리가 서비스 하한선을 넘는지 검증한다.
+
+| 도메인 | 의미 | 최소 케이스 | 패스 기준 |
+| --- | --- | ---: | ---: |
+| `revision` | 이전 partial/final 문장이 새 STT 윈도우에서 올바르게 갱신되는지 | 90 | 90% 이상 |
+| `distinct` | 서로 다른 문장을 잘못된 revision으로 합치지 않는지 | 25 | 95% 이상 |
+| `collapse` | 같은 의미의 인접 반복 문구를 줄일 수 있는지 | 45 | 90% 이상 |
+| `stability` | 연속 partial 전사가 전체 재출력 없이 안정적으로 revision되는지 | 10 | 80% 이상 |
+
+`distinct` 기준을 더 높게 둔 이유는 서로 다른 문장을 병합하면 원문 손실이 발생하고, 이후 번역도 복구할 수 없기 때문이다. `revision`과 `collapse`는 중복을 줄이는 방향의 품질 지표지만, 과도한 병합보다 손실 위험이 낮으므로 초기 서비스 하한선을 90%로 둔다. `stability`는 incremental ASR의 partial hypothesis instability와 revokes 문제를 현재 코드의 revision lifecycle에 맞춘 프록시 지표다. 초기 기준은 운영 로그 기반 케이스가 더 쌓이기 전까지 80%로 둔다.
+
+### 12.1 운영 규칙
+
+- 기준은 현재 코드 통과 여부에 맞춰 낮추지 않는다.
+- 실패하면 알고리즘, 버퍼 라이프사이클, revision 판단, 또는 대표 테스트 케이스를 개선한다.
+- 새 로그에서 중복/누락/잘못된 revision이 관측되면 케이스를 추가한다.
+- 케이스 추가로 게이트가 실패하는 것은 정상적인 품질 신호다. 기준을 낮추는 대신 구현을 개선한다.
+- 기준 변경은 서비스 요구가 바뀌거나 정답 코퍼스 기반 WER/CER 평가가 도입될 때만 문서와 함께 수행한다.
+
+### 12.2 다음 평가 기준
+
+정답 전사 코퍼스가 준비되면 다음 지표를 추가한다.
+
+- `WER` 또는 한국어/중국어에 적합한 `CER`: 정답 전사 대비 전사 오류율.
+- `deletion rate`: 사용자가 관측한 문장 손실 문제를 직접 측정한다.
+- `duplicate insertion rate`: 반복 문장 확정 문제를 직접 측정한다.
+- `RTF`: `처리 시간 / 오디오 길이`로 실시간 가능성을 확인한다.
+- `latency`: final 문장이 확정되어 전사/번역 창에 표시되기까지의 지연.
+- `revokes per second`: 이미 표시된 단어가 뒤 청크에서 수정되는 빈도.
+- `word/segment instability`: partial result가 final 전까지 흔들리는 정도.
+
+## 13) 점진적 적용 순서
 
 1. 경계 모듈 분리 정리 및 상태/로깅 정합화
 2. 기존 슬라이딩 윈도우 테스트를 새 인터페이스 기준으로 정합화
@@ -429,13 +464,13 @@ class SentenceBoundaryDetector:
 7. 동일 환경/동일 로그 조건에서 `sat` 결과를 이전 운영 로그와 비교하되 `regex`를 재도입하지 않음
 8. 전환 후 1~2주 관측 기간 동안 안정성 회귀 모니터링
 
-### 12.1 릴리스 기준 (권고)
+### 13.1 릴리스 기준 (권고)
 
 - **RC 1**: `final-only` 출력/번역 경로, 롤백 계획 동작 검증
 - **RC 2**: `sat` 운영 지표 검증 및 이전 로그 대비 중복/누락 감소 확인
 - **GA 후보**: 다국어 지표 개선이 반복 실험에서 확인되었고 장애율이 기준 내일 때
 
-### 12.2 구현 우선순위(요약)
+### 13.2 구현 우선순위(요약)
 
 1. 문자열 LCP + 재확인 카운트 기반 stable 확정(현재 구조 최소 변경)
 2. 문장 경계 detector 분리 및 `sat` 백엔드 실험
@@ -443,17 +478,17 @@ class SentenceBoundaryDetector:
 4. 안정성 기준 통과 시 `replacements-trimming` 계층(경계 불안정 토큰 제거) 도입
 5. Two-Pass/causal fine-tune 검토(모델 계층 변경 단계)
 
-## 13) 실패 시 대응(간단 규칙)
+## 14) 실패 시 대응(간단 규칙)
 
 - 임계 지표 악화 시 자동 rollback 정책은 문서화하지 않되, 실시간 실행은 즉시 경고 및 운영자 개입 필요.
 - 백엔드 초기화/로딩 실패는 조건부 CPU fallback 대신 즉시 실패 노출.
 
-### 13.1 개정 배포 운영 절차
+### 14.1 개정 배포 운영 절차
 
 - 배포 직후 24시간은 운영자 모니터링 모드(`pending`·`confirmed`·`rollback` 유사지표)로 1분 단위 확인.
 - 회귀가 누적되면 원본 배포 채널로 되돌리고 원인 로그를 묶어 1페이지 인시던트 노트 작성.
 
-## 14) 참고
+## 15) 참고
 
 - [Turning Whisper into Real-Time Transcription System](https://arxiv.org/abs/2307.14743)
 - [Simul-Whisper](https://www.isca-archive.org/interspeech_2024/wang24ea_interspeech.pdf)
@@ -469,3 +504,10 @@ class SentenceBoundaryDetector:
 - [wtpsplit GitHub README](https://github.com/segment-any-text/wtpsplit)
 - [Where’s the Point? Self-Supervised Multilingual Punctuation-Agnostic Sentence Segmentation](https://aclanthology.org/2023.acl-long.398/)
 - [PySBD: Pragmatic Sentence Boundary Disambiguation](https://arxiv.org/abs/2010.09657)
+- [NIST SCTK, the NIST Scoring Toolkit](https://github.com/usnistgov/SCTK)
+- [Assessing Latency in ASR Systems: A Methodological Perspective for Real-Time Use](https://arxiv.org/abs/2409.05674)
+- [Dynamic Latency for CTC-Based Streaming Automatic Speech Recognition With Emformer](https://arxiv.org/abs/2203.15613)
+- [Benchmarking LF-MMI, CTC and RNN-T Criteria for Streaming ASR](https://arxiv.org/abs/2011.04785)
+- [Evaluating Automatic Speech Recognition in an Incremental Setting](https://arxiv.org/abs/2302.12049)
+- [Word Error Rate Estimation Without ASR Output: e-WER2](https://arxiv.org/abs/2008.03403)
+- [Assessing ASR Model Quality on Disordered Speech using BERTScore](https://arxiv.org/abs/2209.10591)
