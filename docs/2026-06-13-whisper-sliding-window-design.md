@@ -39,7 +39,7 @@
 - 중복 제어/리비전 감소는 `confirmed-only` 출력 + 재확인된 확정 구간만 누적 출력.
 - 경계 안정화는 `pending` 기반 강제 확정 패턴(`pending_chunks`, `pending_chars`)을 지표화하고 이를 낮추는 방향으로 단계적 개선.
 - 번역은 기본적으로 `final-only`; 중간 상태 번역은 동일 revision 기준 점진 갱신으로만 제한.
-- 다국어 환경에서는 `regex`는 최종 운영 백엔드가 아님.
+- 다국어 환경에서는 `regex` 운영 시나리오를 폐기함.
 - 설정 유효성 실패 시 자동 폴백 없이 즉시 실패 노출(Fail-Fast).
 
 
@@ -48,7 +48,7 @@
 - confirmed-only 출력 + 재확인된 확정 구간만 누적 출력.
 - 경계 안정화는 `pending_chunks`, `pending_chars` 기반 지표를 낮추는 방식으로 단계적 강화.
 - 번역은 `final-only`를 우선 유지하고 partial/staged 번역은 same revision 갱신으로 제한.
-- 다국어 환경에서 `regex`는 최종 운영 백엔드로 채택하지 않음.
+- 다국어 환경에서 `regex` 운영 시나리오는 폐기함.
 - `sentence_boundary.py`와 `split_completed_sentences` 시그니처 정합은 구현이 진행 중이므로 계속 보강.
 ## 3) 설계 목표 (문헌 기반)
 
@@ -194,7 +194,7 @@ new:      "in the United States to take delivery"
 
 ### 8.1 기본 선언
 
-**`regex`는 다국어 운영 최종 백엔드로 사용하지 않는다.**
+**`regex`는 다국어 운영 백엔드와 기준선 시나리오에서 제거한다.**
 
 이유
 - 다국어 텍스트에서 구두점 의존 분할의 오탐·미탐 위험이 커, 장기 품질/안정성 지표를 하향시킴.
@@ -202,7 +202,7 @@ new:      "in the United States to take delivery"
 
 ### 8.2 배포 제약
 
-- 본 개정 배포에서는 `regex`를 실서비스 기본 경계기로 사용하지 않음.
+- 본 개정 배포에서는 `regex`를 실서비스 경계기나 비교 기준선으로 사용하지 않음.
 - 다국어 미지원 언어(혹은 테스트 부재 언어)에서는 후보 경로 성능을 보수적으로 관찰하고, 신규 장애 유입 시 기능 토글을 통해 즉시 중단할 수 있어야 함.
 
 ### 8.3 후보 도구 검토 목록
@@ -210,7 +210,7 @@ new:      "in the United States to take delivery"
 - `wtpsplit` / SaT
   - `Segment Any Text` 기반 다국어 분절로 구두점이 부족한 텍스트에서도 문장 경계를 제안.
   - `sat-3l-sm` 류 경량 모델부터 KO/EN/ZH 적합성 실험.
-  - `device=cuda`, `compute=float16` 경로 우선, 로딩/실행 실패 시 regex/CPU로 폴백 없이 Fail-Fast.
+  - `device=cuda`, `compute=float16` 경로 우선, 로딩/실행 실패 시 legacy regex/CPU로 폴백 없이 Fail-Fast.
 - PySBD
   - 다국어 분절 라이브러리이나 Golden Rule 기반 규칙 확장 비용이 높아 운영 기본값으로 사용하지 않음.
   - 참고 또는 비교군으로만 제한.
@@ -256,7 +256,7 @@ class SentenceBoundaryDetector:
 `split_completed_sentences` 래퍼는 현재 구현에서 경계 모듈 호출 진입점으로 간주한다.
 
 초기/실험 backend 정렬:
-- `regex`: 과도기 동작 및 기준선 비교용.
+- `legacy-regex`: 과거 회귀 테스트 보존용 helper. 운영 backend와 기준선 비교용으로 사용하지 않음.
 - `sat`: 다국어 실험 후보 1순위(최종 채택 전 검증 단계).
 
 ### 8.5 경계 진단 신호(운영 지표)
@@ -323,7 +323,7 @@ class SentenceBoundaryDetector:
 
 #### A. 비교군 정의
 
-- **Baseline(현행)**: `sentenceBoundaryBackend=regex` (과도기 기준선)
+- **Baseline**: 이전 운영 로그와 수집 지표. `sentenceBoundaryBackend=regex` 기준선은 폐기.
 - **Candidate A**: `sentenceBoundaryBackend=sat` 기본값(실험군)
 - **Candidate B(옵션)**: `sat + pending/강제 확정 임계치 조정`(후속 실험)
 
@@ -426,13 +426,13 @@ class SentenceBoundaryDetector:
 4. 다국어 실험 백엔드(`sat`) 정합성 통합
 5. 로그 지표 수집 추가 및 통제군 대비 비교
 6. 지표 개선 시 기본 backend 전환 결정
-7. 동일 환경/동일 로그 조건에서 과도기(`regex`)과 실험 후보(`sat`)를 비교
+7. 동일 환경/동일 로그 조건에서 `sat` 결과를 이전 운영 로그와 비교하되 `regex`를 재도입하지 않음
 8. 전환 후 1~2주 관측 기간 동안 안정성 회귀 모니터링
 
 ### 12.1 릴리스 기준 (권고)
 
 - **RC 1**: `final-only` 출력/번역 경로, 롤백 계획 동작 검증
-- **RC 2**: 문장 경계 백엔드 실험군 비교(sat vs regex baseline)
+- **RC 2**: `sat` 운영 지표 검증 및 이전 로그 대비 중복/누락 감소 확인
 - **GA 후보**: 다국어 지표 개선이 반복 실험에서 확인되었고 장애율이 기준 내일 때
 
 ### 12.2 구현 우선순위(요약)

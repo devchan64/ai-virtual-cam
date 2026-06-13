@@ -23,6 +23,10 @@ WHISPER_DEFAULTS = {
     "beamSize": 3,
     "maxNewTokens": 96,
     "temperature": 0.0,
+    "sentenceBoundaryBackend": "sat",
+    "sentenceBoundaryModel": "sat-3l-sm",
+    "sentenceBoundaryDevice": "cuda",
+    "sentenceBoundaryComputeType": "float16",
 }
 
 

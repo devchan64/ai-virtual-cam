@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import re
+import warnings
 from dataclasses import dataclass
+from typing import Protocol
 
 
 SENTENCE_END_PATTERN = r"(?:(?<!\d)\.(?!\d)|[!?。！？…]+)"
@@ -35,6 +37,8 @@ ACK_SENTENCE_WORDS = {
     "yes",
     "no",
 }
+SENTENCE_BOUNDARY_BACKENDS = {"sat", "mock"}
+DEFAULT_SAT_MODEL = "sat-3l-sm"
 
 
 @dataclass(frozen=True)
@@ -51,6 +55,20 @@ class SentenceBoundaryResult:
     backend: str
     boundary_count: int
     soft_boundary_count: int = 0
+
+
+class SentenceBoundaryDetector(Protocol):
+    backend: str
+
+    def split(
+        self,
+        pending_text: str,
+        new_text: str,
+        language: str = "auto",
+        *,
+        boundary_confidence: float | None = None,
+    ) -> SentenceBoundaryResult:
+        ...
 
 
 def normalized_text(text: str) -> str:
@@ -138,15 +156,79 @@ def sentence_end_count(text: str) -> int:
     return len(SENTENCE_END_MARK_RE.findall(text or ""))
 
 
-class SentenceBoundaryDetector:
-    backend = "base"
+class SatSentenceBoundaryDetector:
+    backend = "sat"
 
-    def split(self, pending_text: str, new_text: str, language: str = "auto") -> SentenceBoundaryResult:
-        raise NotImplementedError
+    def __init__(self, model: str | None = None, device: str = "cuda", compute_type: str = "float16") -> None:
+        self.model = str(model or DEFAULT_SAT_MODEL).strip() or DEFAULT_SAT_MODEL
+        self.device = str(device or "cuda").strip().lower()
+        self.compute_type = str(compute_type or "float16").strip().lower()
+        try:
+            from wtpsplit import SaT
+        except Exception as exc:
+            raise ImportError(
+                "sentence boundary backend 'sat' requires wtpsplit. "
+                "Run ./bin/avc setup or install wtpsplit; regex fallback is intentionally disabled."
+            ) from exc
+        try:
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message=r".*hf_xet\.download_files\(\) is deprecated.*",
+                    category=DeprecationWarning,
+                )
+                self._segmenter = SaT(self.model)
+            if self.compute_type == "float16":
+                self._segmenter.half()
+            if self.device != "cpu":
+                self._segmenter.to(self.device)
+        except Exception as exc:
+            raise RuntimeError(
+                "sentence boundary backend 'sat' initialization failed: "
+                f"model={self.model} device={self.device} compute={self.compute_type}. "
+                "Fail-Fast: fix the model/device/runtime instead of falling back to regex."
+            ) from exc
+
+    def split(
+        self,
+        pending_text: str,
+        new_text: str,
+        language: str = "auto",
+        *,
+        boundary_confidence: float | None = None,
+    ) -> SentenceBoundaryResult:
+        del language
+        del boundary_confidence
+        combined = pending_new_text_combined(pending_text, new_text)
+        if not combined:
+            return SentenceBoundaryResult([], "", self.backend, 0, 0)
+        normalized = normalized_text(combined)
+        try:
+            raw_segments = list(self._segmenter.split(normalized))
+        except Exception as exc:
+            raise RuntimeError(
+                f"sat sentence segmentation failed: model={self.model} device={self.device} "
+                f"compute={self.compute_type}. cause={type(exc).__name__}: {exc}. "
+                "Fail-Fast: inspect wtpsplit/CUDA logs and fix the configured backend."
+            ) from exc
+        segments = [normalized_text(segment) for segment in raw_segments if normalized_text(segment)]
+        if not segments:
+            return SentenceBoundaryResult([], normalized, self.backend, 0, 0)
+        if len(segments) == 1:
+            only = segments[0]
+            if sentence_end_count(only) > 0:
+                return SentenceBoundaryResult([only], "", self.backend, 1, 0)
+            return SentenceBoundaryResult([], only, self.backend, 0, 0)
+        completed = segments[:-1]
+        pending = segments[-1]
+        if sentence_end_count(pending) > 0:
+            completed.append(pending)
+            pending = ""
+        return SentenceBoundaryResult(completed, pending, self.backend, len(completed), 0)
 
 
-class RegexSentenceBoundaryDetector(SentenceBoundaryDetector):
-    backend = "regex"
+class LegacyRegexSentenceBoundaryDetector:
+    backend = "legacy-regex"
 
     def split(
         self,
@@ -212,6 +294,43 @@ class RegexSentenceBoundaryDetector(SentenceBoundaryDetector):
         return [left], right
 
 
+class MockSentenceBoundaryDetector:
+    backend = "mock"
+
+    def split(
+        self,
+        pending_text: str,
+        new_text: str,
+        language: str = "auto",
+        *,
+        boundary_confidence: float | None = None,
+    ) -> SentenceBoundaryResult:
+        del language
+        del boundary_confidence
+        combined = pending_new_text_combined(pending_text, new_text)
+        return SentenceBoundaryResult([], combined, self.backend, 0, 0)
+
+
+def create_sentence_boundary_detector(
+    backend: str,
+    *,
+    model: str | None = None,
+    device: str = "cuda",
+    compute_type: str = "float16",
+    language: str | None = None,
+) -> SentenceBoundaryDetector:
+    del language
+    normalized_backend = str(backend or "sat").strip().lower()
+    if normalized_backend == "sat":
+        return SatSentenceBoundaryDetector(model=model, device=device, compute_type=compute_type)
+    if normalized_backend == "mock":
+        return MockSentenceBoundaryDetector()
+    raise ValueError(
+        f"unsupported sentence boundary backend: {backend!r}. "
+        "Use one of: sat, mock"
+    )
+
+
 def split_completed_sentences(
     pending_text: str,
     new_text: str,
@@ -219,7 +338,8 @@ def split_completed_sentences(
     *,
     boundary_confidence: float | None = None,
 ) -> tuple[list[str], str]:
-    result = RegexSentenceBoundaryDetector().split(
+    # Legacy regression helper. Runtime code must use create_sentence_boundary_detector().
+    result = LegacyRegexSentenceBoundaryDetector().split(
         pending_text,
         new_text,
         language,

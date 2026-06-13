@@ -468,6 +468,10 @@ def build_config(
     whisper_beam_size: int = whisper_default("beamSize"),
     whisper_max_new_tokens: int = whisper_default("maxNewTokens"),
     whisper_temperature: float = whisper_default("temperature"),
+    whisper_sentence_boundary_backend: str = whisper_default("sentenceBoundaryBackend"),
+    whisper_sentence_boundary_model: str = whisper_default("sentenceBoundaryModel"),
+    whisper_sentence_boundary_device: str = whisper_default("sentenceBoundaryDevice"),
+    whisper_sentence_boundary_compute_type: str = whisper_default("sentenceBoundaryComputeType"),
 ) -> dict:
     if audio_output_device is None:
         audio_output_device = _default_audio_output_device()
@@ -601,5 +605,9 @@ def build_config(
             "beamSize": int(whisper_beam_size),
             "maxNewTokens": int(whisper_max_new_tokens),
             "temperature": float(whisper_temperature),
+            "sentenceBoundaryBackend": str(whisper_sentence_boundary_backend),
+            "sentenceBoundaryModel": str(whisper_sentence_boundary_model),
+            "sentenceBoundaryDevice": str(whisper_sentence_boundary_device),
+            "sentenceBoundaryComputeType": str(whisper_sentence_boundary_compute_type),
         },
     }

@@ -745,6 +745,10 @@ class WhisperConfig:
     beamSize: int
     maxNewTokens: int
     temperature: float
+    sentenceBoundaryBackend: str
+    sentenceBoundaryModel: str
+    sentenceBoundaryDevice: str
+    sentenceBoundaryComputeType: str
 
     @classmethod
     def from_dict(cls, raw: dict) -> "WhisperConfig":
@@ -775,6 +779,10 @@ class WhisperConfig:
             beamSize=int(raw.get("beamSize", whisper_default("beamSize"))),
             maxNewTokens=int(raw.get("maxNewTokens", whisper_default("maxNewTokens"))),
             temperature=float(raw.get("temperature", whisper_default("temperature"))),
+            sentenceBoundaryBackend=str(raw.get("sentenceBoundaryBackend", whisper_default("sentenceBoundaryBackend"))).strip(),
+            sentenceBoundaryModel=str(raw.get("sentenceBoundaryModel", whisper_default("sentenceBoundaryModel"))).strip(),
+            sentenceBoundaryDevice=str(raw.get("sentenceBoundaryDevice", whisper_default("sentenceBoundaryDevice"))).strip(),
+            sentenceBoundaryComputeType=str(raw.get("sentenceBoundaryComputeType", whisper_default("sentenceBoundaryComputeType"))).strip(),
         )
         allowed_backends = {"faster-whisper", "openai-whisper", "whisper.cpp", "mock"}
         if config.backend not in allowed_backends:
@@ -827,6 +835,14 @@ class WhisperConfig:
             raise ValueError("whisper.maxNewTokens must be between 16 and 512")
         if not 0.0 <= config.temperature <= 1.0:
             raise ValueError("whisper.temperature must be between 0.0 and 1.0")
+        if config.sentenceBoundaryBackend not in {"sat", "mock"}:
+            raise ValueError("whisper.sentenceBoundaryBackend must be one of: sat, mock")
+        if not config.sentenceBoundaryModel:
+            raise ValueError("whisper.sentenceBoundaryModel is required")
+        if config.sentenceBoundaryDevice not in {"cuda", "cpu"}:
+            raise ValueError("whisper.sentenceBoundaryDevice must be one of: cuda, cpu")
+        if config.sentenceBoundaryComputeType not in {"float16", "float32"}:
+            raise ValueError("whisper.sentenceBoundaryComputeType must be one of: float16, float32")
         return config
 
 

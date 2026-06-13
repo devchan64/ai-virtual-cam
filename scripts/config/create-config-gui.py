@@ -597,9 +597,21 @@ class ConfigGui:
             "seg_opt_mask_gamma",
         )
         self._build_form()
+        self._register_hidden_whisper_vars()
         self._load_existing_config()
         self.root.bind("<Configure>", self._on_root_configure)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _register_hidden_whisper_vars(self) -> None:
+        defaults = self._build_video_defaults()
+        for key in (
+            "whisper_sentence_boundary_backend",
+            "whisper_sentence_boundary_model",
+            "whisper_sentence_boundary_device",
+            "whisper_sentence_boundary_compute_type",
+        ):
+            if key not in self.vars:
+                self.vars[key] = tk.StringVar(value=str(defaults[key]))
 
     def _is_serve_running(self) -> bool:
         process = self._serve_process
@@ -1637,6 +1649,10 @@ class ConfigGui:
             "whisper_beam_size": whisper["beamSize"],
             "whisper_max_new_tokens": whisper["maxNewTokens"],
             "whisper_temperature": whisper["temperature"],
+            "whisper_sentence_boundary_backend": whisper["sentenceBoundaryBackend"],
+            "whisper_sentence_boundary_model": whisper["sentenceBoundaryModel"],
+            "whisper_sentence_boundary_device": whisper["sentenceBoundaryDevice"],
+            "whisper_sentence_boundary_compute_type": whisper["sentenceBoundaryComputeType"],
         }
 
     def _create_virtual_camera(self) -> None:
@@ -1999,6 +2015,10 @@ class ConfigGui:
             "whisper_beam_size",
             "whisper_max_new_tokens",
             "whisper_temperature",
+            "whisper_sentence_boundary_backend",
+            "whisper_sentence_boundary_model",
+            "whisper_sentence_boundary_device",
+            "whisper_sentence_boundary_compute_type",
         ):
             self._set_var(key, defaults.get(key))
         self._sync_whisper_translation_backend_options()
@@ -2223,6 +2243,10 @@ class ConfigGui:
         self._set_var("whisper_beam_size", whisper_cfg.get("beamSize", defaults["whisper_beam_size"]))
         self._set_var("whisper_max_new_tokens", whisper_cfg.get("maxNewTokens", defaults["whisper_max_new_tokens"]))
         self._set_var("whisper_temperature", whisper_cfg.get("temperature", defaults["whisper_temperature"]))
+        self._set_var("whisper_sentence_boundary_backend", whisper_cfg.get("sentenceBoundaryBackend", defaults["whisper_sentence_boundary_backend"]))
+        self._set_var("whisper_sentence_boundary_model", whisper_cfg.get("sentenceBoundaryModel", defaults["whisper_sentence_boundary_model"]))
+        self._set_var("whisper_sentence_boundary_device", whisper_cfg.get("sentenceBoundaryDevice", defaults["whisper_sentence_boundary_device"]))
+        self._set_var("whisper_sentence_boundary_compute_type", whisper_cfg.get("sentenceBoundaryComputeType", defaults["whisper_sentence_boundary_compute_type"]))
         self._sync_whisper_translation_backend_options()
 
     def _set_var(self, key: str, value):
@@ -3918,6 +3942,10 @@ class ConfigGui:
             whisper_beam_size=int(round(float(iv["whisper_beam_size"].get()))),
             whisper_max_new_tokens=int(round(float(iv["whisper_max_new_tokens"].get()))),
             whisper_temperature=float(iv["whisper_temperature"].get()),
+            whisper_sentence_boundary_backend=iv["whisper_sentence_boundary_backend"].get().strip(),
+            whisper_sentence_boundary_model=iv["whisper_sentence_boundary_model"].get().strip(),
+            whisper_sentence_boundary_device=iv["whisper_sentence_boundary_device"].get().strip(),
+            whisper_sentence_boundary_compute_type=iv["whisper_sentence_boundary_compute_type"].get().strip(),
         )
 
 

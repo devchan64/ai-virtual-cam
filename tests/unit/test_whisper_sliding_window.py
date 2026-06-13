@@ -1,6 +1,6 @@
 import unittest
 
-from src.app.sentence_boundary import RegexSentenceBoundaryDetector
+from src.app.sentence_boundary import LegacyRegexSentenceBoundaryDetector
 from src.app.whisper_window import _collapse_adjacent_repeated_phrase_details, _collapse_adjacent_repeated_phrases, _diagnostic_tail, _forced_sentence_reason, _new_text_delta, _pending_new_text_combined, _sentence_max_age_chunks, _sentence_output_delta, _sentence_required_confirmations, _sentences_are_revisions, _should_age_staged_sentence, _should_translate_staged_sentence, _prefer_sentence_revision, _sentence_end_count, _split_completed_sentences, _stable_window_text
 
 
@@ -192,7 +192,7 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
 
     def test_sentence_boundary_does_not_complete_incomplete_tail_before_ack_revision_from_log(self) -> None:
         # Regression from avc-whisper.log.1 chunks 847-848.
-        detector = RegexSentenceBoundaryDetector()
+        detector = LegacyRegexSentenceBoundaryDetector()
 
         result = detector.split(
             "It will take him probably a",
@@ -206,7 +206,7 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
 
 
     def test_sentence_boundary_soft_splits_long_english_restart_without_punctuation(self) -> None:
-        detector = RegexSentenceBoundaryDetector()
+        detector = LegacyRegexSentenceBoundaryDetector()
 
         result = detector.split(
             "And Tesla does use the camera so it does know if a person is using their turn signal and they are trying to merge in",
@@ -219,7 +219,7 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
         self.assertEqual(result.soft_boundary_count, 1)
 
     def test_sentence_boundary_soft_splits_are_disabled_under_low_model_confidence(self) -> None:
-        detector = RegexSentenceBoundaryDetector()
+        detector = LegacyRegexSentenceBoundaryDetector()
 
         result = detector.split(
             "And Tesla does use the camera so it does know if a person is using their turn signal and they are trying to merge in",
@@ -236,7 +236,7 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
         self.assertEqual(result.soft_boundary_count, 0)
 
     def test_sentence_boundary_soft_splits_remain_when_confidence_high(self) -> None:
-        detector = RegexSentenceBoundaryDetector()
+        detector = LegacyRegexSentenceBoundaryDetector()
 
         result = detector.split(
             "And Tesla does use the camera so it does know if a person is using their turn signal and they are trying to merge in",
@@ -250,7 +250,7 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
         self.assertEqual(result.soft_boundary_count, 1)
 
     def test_sentence_boundary_soft_split_is_not_used_for_korean(self) -> None:
-        detector = RegexSentenceBoundaryDetector()
+        detector = LegacyRegexSentenceBoundaryDetector()
 
         result = detector.split(
             "이 문장은 아직 끝나지 않았고 다음 내용이 계속 이어지고 있어서 경계를 확정하면 안 됩니다",
@@ -262,7 +262,7 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
         self.assertIn("그런데 새 문장이", result.pending)
 
     def test_sentence_boundary_does_not_prepend_short_pending_before_revised_completed_sentence(self) -> None:
-        detector = RegexSentenceBoundaryDetector()
+        detector = LegacyRegexSentenceBoundaryDetector()
 
         result = detector.split(
             "You have quick",
@@ -274,7 +274,7 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
         self.assertEqual(result.pending, "You have quick controls at the")
 
     def test_sentence_boundary_soft_splits_here_is_restart_from_log(self) -> None:
-        detector = RegexSentenceBoundaryDetector()
+        detector = LegacyRegexSentenceBoundaryDetector()
 
         result = detector.split(
             "But you can add from all these different functions right here and then just hit save so it's really nice to have those shortcuts right there",
@@ -290,7 +290,7 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
         self.assertEqual(result.soft_boundary_count, 1)
 
     def test_sentence_boundary_keeps_short_english_pending_without_restart_signal(self) -> None:
-        detector = RegexSentenceBoundaryDetector()
+        detector = LegacyRegexSentenceBoundaryDetector()
 
         result = detector.split(
             "This gives",
@@ -302,7 +302,7 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
         self.assertEqual(result.pending, "This gives you a live camera option")
 
     def test_sentence_boundary_soft_splits_and_you_restart_from_log(self) -> None:
-        detector = RegexSentenceBoundaryDetector()
+        detector = LegacyRegexSentenceBoundaryDetector()
 
         result = detector.split(
             "money you've spent on charging the car and how much gas savings you've had for the year and for the month",
@@ -318,7 +318,7 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
         self.assertEqual(result.soft_boundary_count, 1)
 
     def test_sentence_boundary_soft_splits_so_it_restart_from_log(self) -> None:
-        detector = RegexSentenceBoundaryDetector()
+        detector = LegacyRegexSentenceBoundaryDetector()
 
         result = detector.split(
             "And you go in here and you can tap on these and change from kilowatt hours to percentage",
@@ -334,7 +334,7 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
         self.assertEqual(result.soft_boundary_count, 1)
 
     def test_sentence_boundary_drops_dangling_and_before_revised_sentence_from_log(self) -> None:
-        detector = RegexSentenceBoundaryDetector()
+        detector = LegacyRegexSentenceBoundaryDetector()
 
         result = detector.split(
             "And",
@@ -346,7 +346,7 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
         self.assertEqual(result.pending, "if you ever need service, go in")
 
     def test_sentence_boundary_does_not_soft_split_lowercase_this_inside_phrase_from_log(self) -> None:
-        detector = RegexSentenceBoundaryDetector()
+        detector = LegacyRegexSentenceBoundaryDetector()
 
         result = detector.split(
             "If you enjoyed this video, please give it a like and subscribe for more Tesla and tech videos and send",
@@ -393,8 +393,8 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
         self.assertEqual(pending, "Next")
         self.assertEqual(_sentence_end_count("It costs $9.99 per month."), 1)
 
-    def test_forced_sentence_reason_uses_pending_limits(self) -> None:
-        self.assertEqual(_forced_sentence_reason("still pending", 10), "pending_chunks")
+    def test_forced_sentence_reason_uses_boundary_or_slow_pending_signals(self) -> None:
+        self.assertEqual(_forced_sentence_reason("still pending", 10), "")
         self.assertEqual(_forced_sentence_reason(("x" * 180) + ".", 1), "pending_chars")
         self.assertEqual(_forced_sentence_reason("x" * 180, 1), "")
         self.assertEqual(_forced_sentence_reason("short", 1), "")
@@ -531,7 +531,7 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
 
     def test_sentence_boundary_splits_long_driver_seat_sentence_from_log(self) -> None:
         # Regression from avc-whisper.log chunks 23-33.
-        detector = RegexSentenceBoundaryDetector()
+        detector = LegacyRegexSentenceBoundaryDetector()
 
         result = detector.split(
             "",
@@ -598,6 +598,34 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
             "Half of them are from tesla and The Tesla Model",
         )
 
+    def test_collapse_korean_compact_question_revision_from_log(self) -> None:
+        text = "그래서 첫 번째 질문이 첫번째 질문이 그거예요"
+
+        self.assertEqual(
+            _collapse_adjacent_repeated_phrases(text),
+            "그래서 첫번째 질문이 그거예요",
+        )
+
+    def test_collapse_korean_compact_name_spacing_revision_from_log(self) -> None:
+        text = "이제 케빈워시가 들어왔으니까 케빈워시는 케빈 워시가 들어왔으니까 케빈 워시는 결국에는"
+
+        self.assertEqual(
+            _collapse_adjacent_repeated_phrases(text),
+            "이제 케빈 워시가 들어왔으니까 케빈 워시는 결국에는",
+        )
+
+    def test_collapse_korean_long_compact_revision_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 20-34 on 2026-06-13.
+        text = "이제 케빈 오씨가 들어왔으니까 케빈 이제 케빈워시가 들어왔으니까 케빈워시는 케빈 워시가 들어왔으니까 케빈 워시는 결국에는 들어왔으니까 케빈워시는 결국에는 트럼프의 사람이니까 결국에는 금리를 화끈하게 내려주지 않겠어라는 않겠어? 라는 질문이신거죠?"
+
+        collapsed, rules = _collapse_adjacent_repeated_phrase_details(text)
+
+        self.assertEqual(
+            collapsed,
+            "이제 케빈 오씨가 들어왔으니까 케빈 이제 케빈 워시가 들어왔으니까 케빈워시는 결국에는 트럼프의 사람이니까 결국에는 금리를 화끈하게 내려주지 않겠어? 라는 질문이신거죠?",
+        )
+        self.assertEqual(rules, ["compact_korean", "compact_korean", "compact_korean"])
+
     def test_collapse_details_report_applied_rules(self) -> None:
         text = "EPA estimated ranges are a best best-case scenario."
 
@@ -660,7 +688,7 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
 
     def test_sentence_boundary_soft_split_trims_incomplete_if_tail_from_log(self) -> None:
         # Regression from avc-whisper.log chunks 242-246.
-        detector = RegexSentenceBoundaryDetector()
+        detector = LegacyRegexSentenceBoundaryDetector()
         result = detector.split(
             "",
             "halfway and another great new feature that came with a recent software update is the automatic turn signal if When you enable that, it'll automatically turn your turn signal off",
@@ -675,7 +703,7 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
         self.assertEqual(result.soft_boundary_count, 1)
 
     def test_sentence_boundary_soft_splits_once_you_are_navigated_from_log(self) -> None:
-        detector = RegexSentenceBoundaryDetector()
+        detector = LegacyRegexSentenceBoundaryDetector()
 
         result = detector.split(
             "going i can navigate to it and my tesla will take me there",
@@ -742,6 +770,14 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
         # Regression from ongoing Korean stream where the same sentence is emitted repeatedly.
         self.assertEqual(_sentence_output_delta("다음 영상에서 만나요.", "다음 영상에서 만나요."), "")
         self.assertEqual(_sentence_output_delta("다음 영상에서 만나요", "다음 영상에서 만나요."), "")
+
+    def test_sentence_revision_detects_korean_comma_number_revision_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 8-12: 1400원 and 1,400원 are the same numeric value.
+        staged = "1400원, 1220원, 이래 올라오잖아요."
+        revised = "1,400원, 1,220원, 이러러 나오잖아요"
+
+        self.assertTrue(_sentences_are_revisions(staged, revised))
+        self.assertEqual(_prefer_sentence_revision(staged, revised), staged)
 
     def test_staged_sentence_does_not_age_on_korean_revision_candidate(self) -> None:
         # Ensure Korean staged text waits for stabilized revision rather than aging prematurely.
@@ -819,7 +855,7 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
 
     def test_sentence_boundary_soft_splits_the_missing_navigation_from_log(self) -> None:
         # Regression from avc-whisper.log chunks 700-703.
-        detector = RegexSentenceBoundaryDetector()
+        detector = LegacyRegexSentenceBoundaryDetector()
         result = detector.split(
             "",
             "Another thing is I think the Achilles heel of the system right now is the navigation The missing on-ramps, issues with going into the right driveway or other things",

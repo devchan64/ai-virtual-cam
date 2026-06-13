@@ -128,6 +128,10 @@ class WhisperConfigTest(unittest.TestCase):
                 "beamSize": 1,
                 "maxNewTokens": 128,
                 "temperature": 0.2,
+                "sentenceBoundaryBackend": "sat",
+                "sentenceBoundaryModel": "sat-3l-sm",
+                "sentenceBoundaryDevice": "cuda",
+                "sentenceBoundaryComputeType": "float16",
             },
         )
 
@@ -205,6 +209,10 @@ class WhisperConfigTest(unittest.TestCase):
         self.assertEqual(loaded.whisper.beamSize, whisper_default("beamSize"))
         self.assertEqual(loaded.whisper.maxNewTokens, whisper_default("maxNewTokens"))
         self.assertEqual(loaded.whisper.temperature, whisper_default("temperature"))
+        self.assertEqual(loaded.whisper.sentenceBoundaryBackend, whisper_default("sentenceBoundaryBackend"))
+        self.assertEqual(loaded.whisper.sentenceBoundaryModel, whisper_default("sentenceBoundaryModel"))
+        self.assertEqual(loaded.whisper.sentenceBoundaryDevice, whisper_default("sentenceBoundaryDevice"))
+        self.assertEqual(loaded.whisper.sentenceBoundaryComputeType, whisper_default("sentenceBoundaryComputeType"))
 
     def test_whisper_rejects_invalid_backend(self) -> None:
         with self.assertRaisesRegex(ValueError, "whisper.backend"):
@@ -295,6 +303,14 @@ class WhisperConfigTest(unittest.TestCase):
             WhisperConfig.from_dict({"maxNewTokens": 8})
         with self.assertRaisesRegex(ValueError, "whisper.temperature"):
             WhisperConfig.from_dict({"temperature": 1.5})
+        with self.assertRaisesRegex(ValueError, "whisper.sentenceBoundaryBackend"):
+            WhisperConfig.from_dict({"sentenceBoundaryBackend": "invalid"})
+        with self.assertRaisesRegex(ValueError, "whisper.sentenceBoundaryBackend"):
+            WhisperConfig.from_dict({"sentenceBoundaryBackend": "regex"})
+        with self.assertRaisesRegex(ValueError, "whisper.sentenceBoundaryDevice"):
+            WhisperConfig.from_dict({"sentenceBoundaryDevice": "mps"})
+        with self.assertRaisesRegex(ValueError, "whisper.sentenceBoundaryComputeType"):
+            WhisperConfig.from_dict({"sentenceBoundaryComputeType": "int8"})
         with self.assertRaisesRegex(ValueError, "whisper.translationBeamSize"):
             WhisperConfig.from_dict({"translationBeamSize": 0})
         with self.assertRaisesRegex(ValueError, "whisper.translationMaxNewTokens"):

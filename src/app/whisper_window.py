@@ -18,7 +18,11 @@ from pathlib import Path
 
 
 from src.app.rotating_log import install_rotating_stdout_log
-from src.app.sentence_boundary import RegexSentenceBoundaryDetector, sentence_end_count as _boundary_sentence_end_count, split_completed_sentences as _boundary_split_completed_sentences
+from src.app.sentence_boundary import (
+    create_sentence_boundary_detector,
+    sentence_end_count as _boundary_sentence_end_count,
+    split_completed_sentences as _boundary_split_completed_sentences,
+)
 from src.app.translation_model import TranslationRequest, build_text_translator
 from src.app.transcript_revision import append_context as _append_committed_text, consume_committed_prefix as _consume_committed_prefix, revision_lifecycle_context as _revision_lifecycle_context
 from src.domain.whisper_defaults import whisper_default
@@ -42,10 +46,10 @@ MIN_SEGMENT_AVG_LOGPROB = -1.0
 MAX_SEGMENT_NO_SPEECH_PROB = 0.75
 RECENT_TRANSCRIPT_WINDOW = 8
 MAX_RECENT_SHORT_TEXT_REPEATS = 2
-MAX_PENDING_SENTENCE_CHUNKS = 10
 MAX_PENDING_SENTENCE_CHARS = 180
 SLOW_PENDING_SENTENCE_CHUNKS = 4
 SLOW_PENDING_SENTENCE_CHARS = 45
+SLOW_PENDING_MAX_SENTENCE_CHARS = 120
 SLOW_PENDING_MAX_CHARS_PER_CHUNK = 18.0
 SENTENCE_CONFIRM_CHUNKS = 2
 FORCED_SENTENCE_CONFIRM_CHUNKS = 3
@@ -322,8 +326,15 @@ def _new_text_delta(committed_text: str, stable_text: str) -> str:
     return stable
 
 
+_WORD_UNIT_RE = re.compile(
+    r"\d{1,3}(?:,\d{3})+(?:\.\d+)?[A-Za-z가-힣]*|"
+    r"\d+(?:\.\d+)?[A-Za-z가-힣]*|"
+    r"[A-Za-z가-힣]+"
+)
+
+
 def _word_units(text: str) -> list[str]:
-    return re.findall(r"[0-9A-Za-z가-힣]+", _normalized_text(text).lower())
+    return [match.group(0).replace(",", "") for match in _WORD_UNIT_RE.finditer(_normalized_text(text).lower())]
 
 
 def _new_text_delta_after_internal_overlap(committed_text: str, stable_text: str) -> str | None:
@@ -417,6 +428,36 @@ def _collapse_adjacent_duplicate_determiners(units: list[str]) -> bool:
     return False
 
 
+def _compact_hangul_phrase_key(units: list[str]) -> str:
+    compact = "".join(_word_units(" ".join(units)))
+    if not any("가" <= ch <= "힣" for ch in compact):
+        return ""
+    return compact
+
+
+def _collapse_adjacent_compact_korean_revisions(units: list[str]) -> bool:
+    max_phrase_len = min(12, len(units) // 2 + 2)
+    for left_start in range(0, len(units) - 3):
+        for left_len in range(1, max_phrase_len + 1):
+            right_start = left_start + left_len
+            if right_start >= len(units):
+                break
+            left_key = _compact_hangul_phrase_key(units[left_start:right_start])
+            if len(left_key) < 5:
+                continue
+            min_right_len = 2 if left_len == 1 else 1
+            for right_len in range(min_right_len, max_phrase_len + 1):
+                right_end = right_start + right_len
+                if right_end > len(units):
+                    break
+                right_key = _compact_hangul_phrase_key(units[right_start:right_end])
+                if left_key != right_key:
+                    continue
+                del units[left_start:right_start]
+                return True
+    return False
+
+
 def _collapse_numeric_value_revisions(text: str) -> str:
     return re.sub(
         r"\bone\s+thousand\s+dollars(?:\s+worth)?\s+\$1,?000\s+worth\b",
@@ -441,6 +482,9 @@ def _collapse_adjacent_repeated_phrase_details(text: str) -> tuple[str, list[str
             continue
         if _collapse_adjacent_duplicate_determiners(units):
             rules.append("duplicate_determiner")
+            continue
+        if _collapse_adjacent_compact_korean_revisions(units):
+            rules.append("compact_korean")
             continue
         break
     passes = 0
@@ -614,6 +658,24 @@ def _extract_of_numeric_tokens(words: list[str]) -> set[str]:
     return values
 
 
+def _numeric_value_sequence(words: list[str]) -> tuple[str, ...]:
+    values: list[str] = []
+    for word in words:
+        digits = "".join(ch for ch in word if ch.isdigit())
+        if digits:
+            values.append(digits)
+    return tuple(values)
+
+
+def _share_stable_numeric_sequence(left_words: list[str], right_words: list[str]) -> bool:
+    left_numbers = _numeric_value_sequence(left_words)
+    right_numbers = _numeric_value_sequence(right_words)
+    if len(left_numbers) < 2 or left_numbers != right_numbers:
+        return False
+    shorter = min(len(left_words), len(right_words))
+    return shorter <= 12 and len(left_numbers) / max(shorter, 1) >= 0.25
+
+
 def _is_numeric_fragment_echo(candidate_words: list[str], committed_words: list[str]) -> bool:
     if len(candidate_words) > 4 or not candidate_words:
         return False
@@ -765,6 +827,8 @@ def _sentences_are_revisions(left: str, right: str) -> bool:
     right_signature = _short_revision_signature(right_words)
     if left_signature and left_signature == right_signature:
         return True
+    if _share_stable_numeric_sequence(left_words, right_words):
+        return True
     shorter = min(len(left_words), len(right_words))
     best_i, best_j, common_run = _best_common_word_run(left_words, right_words)
     prefix_run = _longest_prefix_revision_run(left_words, right_words)
@@ -821,6 +885,12 @@ def _prefer_sentence_revision(left: str, right: str) -> str:
             if _sentence_end_count(right) >= _sentence_end_count(left):
                 return _normalized_text(right)
         return _normalized_text(right)
+    if _share_stable_numeric_sequence(left_words, right_words):
+        if _sentence_end_count(right) > _sentence_end_count(left):
+            return _normalized_text(right)
+        if len(right_words) > len(left_words):
+            return _normalized_text(right)
+        return _normalized_text(left)
     if len(right_words) > len(left_words):
         return _normalized_text(right)
     if _sentence_end_count(right) > _sentence_end_count(left):
@@ -843,40 +913,9 @@ def _sentence_end_count(text: str) -> int:
     return _boundary_sentence_end_count(text)
 
 
-_INCOMPLETE_TAIL_WORDS = {
-    "a",
-    "an",
-    "and",
-    "at",
-    "because",
-    "but",
-    "can",
-    "for",
-    "from",
-    "if",
-    "in",
-    "it",
-    "of",
-    "on",
-    "or",
-    "re",
-    "that",
-    "the",
-    "to",
-    "which",
-    "with",
-}
-
-
-def _has_incomplete_sentence_tail(text: str) -> bool:
+def _has_unstable_numeric_tail(text: str) -> bool:
     words = _word_units(text)
-    if not words:
-        return False
-    if words[-1] in _INCOMPLETE_TAIL_WORDS:
-        return True
-    if len(words) >= 2 and words[-1].isdigit() and words[-2] in {"from", "to"}:
-        return True
-    return False
+    return bool(len(words) >= 2 and words[-1].isdigit() and words[-2] in {"from", "to"})
 
 
 def _forced_sentence_reason(pending_text: str, pending_chunks: int) -> str:
@@ -885,15 +924,13 @@ def _forced_sentence_reason(pending_text: str, pending_chunks: int) -> str:
         return ""
     pending_chars = len(normalized)
     chars_per_chunk = pending_chars / max(pending_chunks, 1)
-    if pending_chunks >= MAX_PENDING_SENTENCE_CHUNKS and not _has_incomplete_sentence_tail(normalized):
-        return "pending_chunks"
     if pending_chars >= MAX_PENDING_SENTENCE_CHARS and _sentence_end_count(normalized) > 0:
         return "pending_chars"
     if (
         pending_chunks >= SLOW_PENDING_SENTENCE_CHUNKS
-        and pending_chars >= SLOW_PENDING_SENTENCE_CHARS
+        and SLOW_PENDING_SENTENCE_CHARS <= pending_chars <= SLOW_PENDING_MAX_SENTENCE_CHARS
         and chars_per_chunk <= SLOW_PENDING_MAX_CHARS_PER_CHUNK
-        and not _has_incomplete_sentence_tail(normalized)
+        and not _has_unstable_numeric_tail(normalized)
     ):
         return "slow_pending"
     return ""
@@ -915,7 +952,39 @@ class WhisperTranscriptWorker:
         self._capture_process: subprocess.Popen[bytes] | None = None
         self._capture_thread: threading.Thread | None = None
         self._recent_transcripts: deque[str] = deque(maxlen=RECENT_TRANSCRIPT_WINDOW)
-        self._sentence_boundary_detector = RegexSentenceBoundaryDetector()
+        self._sentence_boundary_backend = str(getattr(config, "sentenceBoundaryBackend", "sat")).strip() or "sat"
+        self._sentence_boundary_model = getattr(config, "sentenceBoundaryModel", None)
+        self._boundary_detector_language = str(getattr(config, "language", "en")).strip().lower()
+        if self._boundary_detector_language == "auto":
+            self._boundary_detector_language = "en"
+        self._sentence_boundary_detector = None
+
+    def _build_sentence_boundary_detector(self, detected_language: str) -> object:
+        device = str(getattr(self._cfg, "sentenceBoundaryDevice", "cuda"))
+        compute_type = str(getattr(self._cfg, "sentenceBoundaryComputeType", "float16"))
+        self._emit(
+            "status",
+            "문장 경계 모델 로딩 중: "
+            f"backend={self._sentence_boundary_backend} model={self._sentence_boundary_model} "
+            f"device={device} compute={compute_type} language={detected_language}. "
+            "캐시에 없으면 Hugging Face 모델 다운로드가 진행될 수 있습니다.",
+            display=False,
+        )
+        detector = create_sentence_boundary_detector(
+            self._sentence_boundary_backend,
+            model=self._sentence_boundary_model,
+            device=device,
+            compute_type=compute_type,
+            language=detected_language,
+        )
+        self._emit(
+            "status",
+            "문장 경계 모델 로딩 완료: "
+            f"backend={self._sentence_boundary_backend} model={self._sentence_boundary_model} "
+            f"device={device} compute={compute_type} language={detected_language}",
+            display=False,
+        )
+        return detector
 
     def _emit(
         self,
@@ -928,6 +997,23 @@ class WhisperTranscriptWorker:
     ) -> None:
         _log_line(f"[avc] whisper {kind}: {log_text if log_text is not None else text}")
         self._events.put(TranscriptEvent(kind, text, display, log_text, final))
+
+    def _sync_sentence_boundary_detector(self, detected_language: str) -> None:
+        normalized = str(detected_language or "en").strip().lower()
+        if normalized == "auto":
+            normalized = "en"
+        if self._sentence_boundary_detector is None:
+            self._sentence_boundary_detector = self._build_sentence_boundary_detector(normalized)
+            self._boundary_detector_language = normalized
+            return
+        if self._sentence_boundary_backend != "sat":
+            return
+        if self._boundary_detector_language == normalized:
+            return
+        if self._cfg.language != "auto":
+            return
+        self._sentence_boundary_detector = self._build_sentence_boundary_detector(normalized)
+        self._boundary_detector_language = normalized
 
     def _accepted_segment_texts(self, segments) -> tuple[list[str], list[str], float | None]:
         texts: list[str] = []
@@ -1314,6 +1400,7 @@ class WhisperTranscriptWorker:
                 text = _new_text_delta(delta_base_text, stable_text)
                 stt_elapsed = time.perf_counter() - stt_started_at
                 detected = getattr(info, "language", self._cfg.language)
+                self._sync_sentence_boundary_detector(str(detected))
                 if rejected_reasons:
                     self._emit(
                         "status",
@@ -1337,8 +1424,15 @@ class WhisperTranscriptWorker:
                         detected,
                         boundary_confidence=boundary_confidence,
                     )
-                    completed_sentences = boundary_result.completed
-                    pending_transcript_text = boundary_result.pending
+                    completed_sentences = []
+                    for sentence in boundary_result.completed:
+                        collapsed_sentence, sentence_collapse_rules = _collapse_adjacent_repeated_phrase_details(sentence)
+                        if sentence_collapse_rules:
+                            repeat_collapse_rules.extend(f"sentence_{rule}" for rule in sentence_collapse_rules)
+                        completed_sentences.append(collapsed_sentence)
+                    pending_transcript_text, pending_collapse_rules = _collapse_adjacent_repeated_phrase_details(boundary_result.pending)
+                    if pending_collapse_rules:
+                        repeat_collapse_rules.extend(f"pending_{rule}" for rule in pending_collapse_rules)
                     boundary_complete = boundary_result.boundary_count
                     boundary_soft = boundary_result.soft_boundary_count
                     if completed_sentences:
@@ -1347,7 +1441,10 @@ class WhisperTranscriptWorker:
                         pending_chunks += 1
                         forced_by = _forced_sentence_reason(pending_transcript_text, pending_chunks)
                         if forced_by:
-                            completed_sentences = [pending_transcript_text]
+                            forced_sentence, forced_collapse_rules = _collapse_adjacent_repeated_phrase_details(pending_transcript_text)
+                            if forced_collapse_rules:
+                                repeat_collapse_rules.extend(f"forced_{rule}" for rule in forced_collapse_rules)
+                            completed_sentences = [forced_sentence]
                             forced_candidate_pending = True
                     for sentence in completed_sentences:
                         produced_sentences = stage_completed_sentence(sentence, detected, forced=bool(forced_by))
@@ -1376,7 +1473,10 @@ class WhisperTranscriptWorker:
                         pending_chunks += 1
                         forced_by = _forced_sentence_reason(pending_transcript_text, pending_chunks)
                         if forced_by:
-                            completed_sentences = [pending_transcript_text]
+                            forced_sentence, forced_collapse_rules = _collapse_adjacent_repeated_phrase_details(pending_transcript_text)
+                            if forced_collapse_rules:
+                                repeat_collapse_rules.extend(f"forced_{rule}" for rule in forced_collapse_rules)
+                            completed_sentences = [forced_sentence]
                             forced_candidate_pending = True
                             for sentence in completed_sentences:
                                 produced_sentences = stage_completed_sentence(sentence, detected, forced=bool(forced_by))
@@ -1494,6 +1594,8 @@ class WhisperTranscriptWorker:
                 )
             except Exception as exc:
                 self._emit("error", f"Whisper 전사 실패: {exc}")
+                self._stop.set()
+                raise
 
     def _run_mock(self) -> None:
         self._emit("status", "Whisper mock 출력 시작")
