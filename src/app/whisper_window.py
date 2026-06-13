@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from difflib import SequenceMatcher
 import platform
 import queue
 import re
@@ -676,6 +677,36 @@ def _share_stable_numeric_sequence(left_words: list[str], right_words: list[str]
     return shorter <= 12 and len(left_numbers) / max(shorter, 1) >= 0.25
 
 
+def _hangul_compact_key(words: list[str]) -> str:
+    compact = "".join(words)
+    if not any("가" <= ch <= "힣" for ch in compact):
+        return ""
+    return compact
+
+
+def _hangul_compact_revision_match(left_words: list[str], right_words: list[str]) -> bool:
+    left_key = _hangul_compact_key(left_words)
+    right_key = _hangul_compact_key(right_words)
+    if not left_key or not right_key:
+        return False
+    shorter_len = min(len(left_key), len(right_key))
+    if shorter_len < 8:
+        return False
+    if left_key == right_key:
+        return True
+    if shorter_len >= 8 and (left_key in right_key or right_key in left_key):
+        return True
+    matcher = SequenceMatcher(None, left_key, right_key)
+    ratio = matcher.ratio()
+    max_block = max((block.size for block in matcher.get_matching_blocks()), default=0)
+    prefix_chars = 0
+    while prefix_chars < shorter_len and left_key[prefix_chars] == right_key[prefix_chars]:
+        prefix_chars += 1
+    if prefix_chars >= 4 and max_block >= 5 and ratio >= 0.50:
+        return True
+    return max_block >= 5 and ratio >= 0.85
+
+
 def _is_numeric_fragment_echo(candidate_words: list[str], committed_words: list[str]) -> bool:
     if len(candidate_words) > 4 or not candidate_words:
         return False
@@ -828,6 +859,8 @@ def _sentences_are_revisions(left: str, right: str) -> bool:
     if left_signature and left_signature == right_signature:
         return True
     if _share_stable_numeric_sequence(left_words, right_words):
+        return True
+    if _hangul_compact_revision_match(left_words, right_words):
         return True
     shorter = min(len(left_words), len(right_words))
     best_i, best_j, common_run = _best_common_word_run(left_words, right_words)

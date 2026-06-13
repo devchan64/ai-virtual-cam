@@ -779,6 +779,45 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
         self.assertTrue(_sentences_are_revisions(staged, revised))
         self.assertEqual(_prefer_sentence_revision(staged, revised), staged)
 
+    def test_sentence_revision_detects_korean_compact_abenomics_revision_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 60-63.
+        staged = "아베 신조가 에나를 들이붓던 아베노믹스 라는게 있었어요"
+        revised = "아베 신조가 엔화를 들이붓던 에나를 들이붓던 거였거든요."
+
+        self.assertTrue(_sentences_are_revisions(staged, revised))
+        self.assertEqual(_prefer_sentence_revision(staged, revised), revised)
+
+    def test_sentence_revision_keeps_longer_korean_revision_when_short_tail_reappears_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 62-63.
+        staged = "아베 신조가 엔화를 들이붓던 에나를 들이붓던 거였거든요."
+        revised = "아베 신조 거였거든요."
+
+        self.assertTrue(_sentences_are_revisions(staged, revised))
+        self.assertEqual(_prefer_sentence_revision(staged, revised), staged)
+
+    def test_sentence_revision_detects_korean_spacing_revision_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 220-223.
+        staged = "그래서 아베가 엔화약세를 만들고 싶어"
+        revised = "그래서 아베가 엔화 약세를 만들고 싶어 했어요"
+
+        self.assertTrue(_sentences_are_revisions(staged, revised))
+        self.assertEqual(_prefer_sentence_revision(staged, revised), revised)
+
+    def test_sentence_revision_detects_korean_latin_n_revision_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 223-225 and 249-252.
+        self.assertTrue(_sentences_are_revisions("그래서 엔을 뿌렸거든요.", "그래서 n을 뿌렸거든요."))
+        self.assertEqual(_prefer_sentence_revision("그래서 엔을 뿌렸거든요.", "그래서 n을 뿌렸거든요."), "그래서 엔을 뿌렸거든요.")
+        self.assertTrue(_sentences_are_revisions("엔화가 너무너무 약세가 되지 수 있지 않을까요", "N화가 너무너무 약세가 되지 않을까요?"))
+        self.assertEqual(_prefer_sentence_revision("엔화가 너무너무 약세가 되지 수 있지 않을까요", "N화가 너무너무 약세가 되지 않을까요?"), "N화가 너무너무 약세가 되지 않을까요?")
+
+    def test_sentence_revision_detects_korean_second_plan_extension_from_log(self) -> None:
+        # Regression from avc-whisper.log chunks 97-100.
+        staged = "근데 두 번째는 뭐냐면 웃는"
+        revised = "근데 두 번째 안은 뭐냐면 웃는 그날까지 던지겠습니다"
+
+        self.assertTrue(_sentences_are_revisions(staged, revised))
+        self.assertEqual(_prefer_sentence_revision(staged, revised), revised)
+
     def test_staged_sentence_does_not_age_on_korean_revision_candidate(self) -> None:
         # Ensure Korean staged text waits for stabilized revision rather than aging prematurely.
         staged = "우리는 맥북을 통신으로 사용할 수 있을 것입니다"
