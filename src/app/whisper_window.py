@@ -29,12 +29,14 @@ from src.app.whisper_transcript_logic import (
     _new_text_delta,
     _normalized_text,
     _pending_new_text_combined,
+    _format_transcript_metrics,
     _prefer_sentence_revision,
     _sentence_end_count,
     _sentence_max_age_chunks,
     _sentence_output_delta,
     _sentence_required_confirmations,
     _sentences_are_revisions,
+    _replacement_decision_reason,
     _should_finalize_replaced_sentence,
     _should_age_staged_sentence,
     _should_translate_staged_sentence,
@@ -581,6 +583,11 @@ class WhisperTranscriptWorker:
         staged_age = 0
         staged_translation_pending = False
         staged_forced = False
+        lifecycle_metrics: dict[str, int] = {}
+
+        def count_metric(name: str, amount: int = 1) -> None:
+            lifecycle_metrics[name] = lifecycle_metrics.get(name, 0) + amount
+
         self._emit(
             "status",
             f"Whisper 전사 루프 시작: step_seconds={step_seconds} window_seconds={window_seconds} "
@@ -611,6 +618,8 @@ class WhisperTranscriptWorker:
             nonlocal committed_text, staged_sentence, staged_confirmations, staged_age, staged_forced
             if not staged_sentence:
                 return []
+            count_metric("finalize_attempt")
+            count_metric(f"finalize_reason_{reason}")
             output_sentence = _sentence_output_delta(committed_text, staged_sentence)
             staged_before = staged_sentence
             committed_before_chars = len(_normalized_text(committed_text))
@@ -619,12 +628,14 @@ class WhisperTranscriptWorker:
             staged_age = 0
             staged_forced = False
             if not output_sentence:
+                count_metric("finalize_duplicate_suppressed")
                 self._emit(
                     "status",
                     f"Whisper 확정 후보 중복 무시: chunk={chunks} reason={reason} text={staged_before!r}",
                     display=False,
                 )
                 return []
+            count_metric("finalized")
             committed_text = _append_committed_text(committed_text, output_sentence)
             self._remember_transcript(output_sentence)
             self._emit(
@@ -642,9 +653,11 @@ class WhisperTranscriptWorker:
             nonlocal staged_sentence, staged_confirmations, staged_age, staged_translation_pending, staged_forced
             candidate = _sentence_output_delta(committed_text, sentence)
             if not candidate:
+                count_metric("candidate_duplicate_suppressed")
                 self._emit("status", f"Whisper 중복 문장 무시: chunk={chunks} text={sentence!r}", display=False)
                 return []
             if not staged_sentence:
+                count_metric("stage_start")
                 staged_sentence = candidate
                 staged_confirmations = 1
                 staged_age = 0
@@ -661,8 +674,11 @@ class WhisperTranscriptWorker:
                 return []
             is_revision = _sentences_are_revisions(staged_sentence, candidate)
             if is_revision:
+                count_metric("stage_revision")
                 staged_before = staged_sentence
                 preferred = _prefer_sentence_revision(staged_sentence, candidate)
+                if preferred != staged_before:
+                    count_metric("stage_revision_changed")
                 staged_sentence = preferred
                 staged_confirmations += 1
                 staged_age = 0
@@ -682,17 +698,28 @@ class WhisperTranscriptWorker:
                 staged_translation_pending = True
                 self._emit("transcript", staged_sentence, log_text=f"[{detected}] {staged_sentence}", final=False)
                 return []
+            count_metric("stage_replace")
+            replacement_reason = _replacement_decision_reason(
+                staged_sentence,
+                candidate,
+                staged_confirmations,
+                staged_forced,
+                staged_age,
+            )
+            count_metric(f"stage_replace_decision_{replacement_reason}")
             self._emit(
                 "status",
                 "Whisper stage 교체: "
-                f"chunk={chunks} reason=revision_false forced={forced} "
+                f"chunk={chunks} reason=revision_false decision={replacement_reason} forced={forced} "
                 f"staged_confirmations={staged_confirmations} staged_age={staged_age} "
                 f"staged_tail={_diagnostic_tail(staged_sentence)} candidate_tail={_diagnostic_tail(candidate)}",
                 display=False,
             )
             if _should_finalize_replaced_sentence(staged_sentence, candidate, staged_confirmations, staged_forced, staged_age):
-                finalized = finalize_staged_sentence(detected, "replaced")
+                finalized = finalize_staged_sentence(detected, f"replaced_{replacement_reason}")
             else:
+                count_metric("stage_discard")
+                count_metric(f"stage_discard_reason_{replacement_reason}")
                 self._emit(
                     "status",
                     "Whisper stage 폐기: "
@@ -708,6 +735,7 @@ class WhisperTranscriptWorker:
                 staged_age = 0
                 staged_forced = False
                 finalized = []
+            count_metric("stage_start")
             staged_sentence = candidate
             staged_confirmations = 1
             staged_age = 0
@@ -740,6 +768,7 @@ class WhisperTranscriptWorker:
             if not staged_sentence:
                 return []
             if not _should_age_staged_sentence(staged_sentence, pending_text):
+                count_metric("stage_age_hold")
                 staged_age = 0
                 self._emit(
                     "status",
@@ -748,8 +777,10 @@ class WhisperTranscriptWorker:
                 )
                 return []
             staged_age += 1
+            count_metric("stage_age_tick")
             max_age = _sentence_max_age_chunks(staged_forced)
             if staged_age >= max_age:
+                count_metric("stage_age_finalize")
                 return finalize_staged_sentence(detected, "aged_forced" if staged_forced else "aged")
             return []
 
@@ -844,6 +875,7 @@ class WhisperTranscriptWorker:
                         pending_chunks += 1
                         forced_by = _forced_sentence_reason(pending_transcript_text, pending_chunks)
                         if forced_by:
+                            count_metric("forced_candidate")
                             forced_before_collapse = pending_transcript_text
                             forced_sentence, forced_collapse_rules = _collapse_adjacent_repeated_phrase_details(forced_before_collapse)
                             if forced_collapse_rules:
@@ -878,6 +910,7 @@ class WhisperTranscriptWorker:
                         pending_chunks += 1
                         forced_by = _forced_sentence_reason(pending_transcript_text, pending_chunks)
                         if forced_by:
+                            count_metric("forced_candidate")
                             forced_before_collapse = pending_transcript_text
                             forced_sentence, forced_collapse_rules = _collapse_adjacent_repeated_phrase_details(forced_before_collapse)
                             if forced_collapse_rules:
@@ -913,6 +946,7 @@ class WhisperTranscriptWorker:
                     f"pending_tail={_diagnostic_tail(pending_transcript_text)} "
                     f"revision_context_chars={len(_normalized_text(_revision_lifecycle_context(committed_text, staged_sentence, pending_transcript_text)))} "
                     f"forced_candidate_pending={forced_candidate_pending} "
+                    f"lifecycle_metrics={_format_transcript_metrics(lifecycle_metrics)} "
                     f"staged_confirmations={staged_confirmations} staged_age={staged_age} staged_forced={staged_forced} "
                     f"staged_tail={_diagnostic_tail(staged_sentence)}",
                     display=False,

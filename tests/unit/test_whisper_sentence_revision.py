@@ -1,7 +1,27 @@
 import unittest
 
 from src.app.sentence_boundary import LegacyRegexSentenceBoundaryDetector
-from src.app.whisper_window import _collapse_adjacent_repeated_phrase_details, _collapse_adjacent_repeated_phrases, _diagnostic_tail, _forced_sentence_reason, _new_text_delta, _pending_new_text_combined, _sentence_max_age_chunks, _sentence_output_delta, _sentence_required_confirmations, _sentences_are_revisions, _should_age_staged_sentence, _should_finalize_replaced_sentence, _should_translate_staged_sentence, _prefer_sentence_revision, _sentence_end_count, _split_completed_sentences, _stable_window_text
+from src.app.whisper_window import (
+    _collapse_adjacent_repeated_phrase_details,
+    _collapse_adjacent_repeated_phrases,
+    _diagnostic_tail,
+    _forced_sentence_reason,
+    _format_transcript_metrics,
+    _new_text_delta,
+    _pending_new_text_combined,
+    _prefer_sentence_revision,
+    _replacement_decision_reason,
+    _sentence_end_count,
+    _sentence_max_age_chunks,
+    _sentence_output_delta,
+    _sentence_required_confirmations,
+    _sentences_are_revisions,
+    _should_age_staged_sentence,
+    _should_finalize_replaced_sentence,
+    _should_translate_staged_sentence,
+    _split_completed_sentences,
+    _stable_window_text,
+)
 
 
 class WhisperSentenceRevisionTest(unittest.TestCase):
@@ -134,11 +154,51 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
 
     def test_unconfirmed_replaced_stage_finalizes_confirmed_sentences(self) -> None:
         self.assertTrue(_should_finalize_replaced_sentence("확정 후보", "다른 후보", 2, False, 0))
-        self.assertTrue(_should_finalize_replaced_sentence("강제 확정 후보", "다른 후보", 3, True, 0))
+        self.assertTrue(_should_finalize_replaced_sentence("강제 확정 후보", "다른 후보", 4, True, 0))
 
     def test_unconfirmed_replaced_stage_waits_for_observation_age(self) -> None:
-        self.assertTrue(_should_finalize_replaced_sentence("나이 든 후보", "다른 후보", 1, False, 1))
-        self.assertTrue(_should_finalize_replaced_sentence("강제 나이 후보", "다른 후보", 1, True, 1))
+        self.assertTrue(_should_finalize_replaced_sentence("Aged candidate", "Different candidate", 1, False, 1))
+        self.assertTrue(_should_finalize_replaced_sentence("Forced aged candidate", "Different candidate", 1, True, 1))
+
+    def test_replacement_decision_reason_exposes_runtime_diagnostics(self) -> None:
+        self.assertEqual(
+            _replacement_decision_reason("그 아래 3-5% 정도", "인플루언서, 유명한 사람들", 1, False, 1),
+            "open_korean_clause",
+        )
+        self.assertEqual(
+            _replacement_decision_reason("Aged candidate", "Different candidate", 1, False, 1),
+            "aged",
+        )
+        self.assertEqual(
+            _replacement_decision_reason("정부가 어떻게 보면은 자산시장 사재기에 더 집중화시키고 있는 전략일 것이다", "전략일 것이다", 1, False, 0),
+            "duplicate_or_suffix",
+        )
+
+    def test_transcript_metrics_format_is_stable_for_log_analysis(self) -> None:
+        self.assertEqual(_format_transcript_metrics({}), "none")
+        self.assertEqual(
+            _format_transcript_metrics({"stage_revision": 2, "stage_start": 3, "stage_discard": 0}),
+            "stage_revision=2,stage_start=3",
+        )
+
+    def test_unconfirmed_replaced_stage_waits_on_open_korean_clause_from_monitoring(self) -> None:
+        # Regressions from 2026-06-13 monitoring. These candidates were replaced
+        # before the next revision had a chance to complete the Korean clause.
+        cases = [
+            ("그 아래 3-5% 정도", "인플루언서, 유명한 사람들, 연예인들 그리고 나머지 95%"),
+            ("새로운 물리학 이론을", "그건 모릅니다"),
+            ("그리고 아무도 모를 때는 그냥 해보시면 되는 것", "기계가 잘하는 거 가지고 인간이 경쟁하는 건 무모한 짓이에요."),
+            ("AI가 점점점 확장이 좀 확장이 되면서", "그럼 어떻게 되죠?"),
+            ("앞으로 산업이 어떻게 새롭게 재편될지 그것도", "이 모든 것은 저의 개인적인 생각입니다"),
+            ("뭔가 좀 꿈과 희망이 있는 많은 이야기를 해줘야 되겠다라고 생각은 했는데 또 역시 얘기를 하면서 점점 디스토피아로 가지 않을까 싶고", "이 모든 것은 저의 개인적인 생각입니다"),
+        ]
+        for staged, candidate in cases:
+            with self.subTest(staged=staged, candidate=candidate):
+                self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
+
+    def test_forced_sentence_confirmation_waits_for_additional_revision_window(self) -> None:
+        self.assertEqual(_sentence_required_confirmations(True), 4)
+        self.assertEqual(_sentence_max_age_chunks(True), 4)
 
     def test_unconfirmed_replaced_stage_preserves_completed_dollar_sentence_from_log(self) -> None:
         # Regression from avc-whisper.log chunk 48 and 2026-06-13 monitoring chunks 991-992.

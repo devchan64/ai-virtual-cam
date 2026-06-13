@@ -19,7 +19,7 @@ WHISPER_DEFAULTS = {
     "chunkSeconds": 7.5,
     "stepSeconds": 1.5,
     "windowSeconds": 7.5,
-    "commitLagSeconds": 0.8,
+    "commitLagSeconds": 1.5,
     "beamSize": 3,
     "maxNewTokens": 96,
     "temperature": 0.0,

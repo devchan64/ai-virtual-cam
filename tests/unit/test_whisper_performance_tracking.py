@@ -421,6 +421,26 @@ DISTINCT_TRACKING_CASES.extend([
     {"left": "아니요", "right": "이거는 이미 트렌드화가 돼서 5년 10년은 더 갈 것 같죠", "source": "2026-06-13 monitor chunk 1247"},
 ])
 
+REVISION_TRACKING_CASES.extend([
+    {"left": "새로운 물리학 이론을", "right": "새로운 물리학 이론을 만들어낼 수 있을까?", "source": "2026-06-13 30m monitor chunk 765"},
+    {"left": "자연의 법칙은 이렇게 해도 충분히 바꿀", "right": "자연의 법칙은 이렇게 해도 충분히 바꿀 수 있다고 생각합니다.", "source": "2026-06-13 30m monitor forced revision"},
+    {"left": "앞으로 적어도 30년 40년 동안 여러분들께서 일을 하시고 싶으셔야", "right": "앞으로 적어도 30년 40년 동안 여러분들께서 일을 하시고 싶으셔야 됩니다", "source": "2026-06-13 30m monitor forced revision"},
+    {"left": "비행기에서는 다 꺼버리고 디지털 디속스를 하고 10시간 12시간 비행기 타다", "right": "비행기에서는 다 꺼버리고 디지털 디톡스를 하고 10시간 12시간 비행기를 타다가", "source": "2026-06-13 30m monitor open clause revision"},
+])
+
+DISTINCT_TRACKING_CASES.extend([
+    {"left": "그 아래 3-5% 정도", "right": "인플루언서, 유명한 사람들, 연예인들 그리고 나머지 95%", "source": "2026-06-13 30m monitor chunk 861"},
+    {"left": "그리고 아무도 모를 때는 그냥 해보시면 되는 것", "right": "기계가 잘하는 거 가지고 인간이 경쟁하는 건 무모한 짓이에요.", "source": "2026-06-13 30m monitor chunk 1135"},
+    {"left": "AI가 점점점 확장이 좀 확장이 되면서", "right": "그럼 어떻게 되죠?", "source": "2026-06-13 30m monitor chunk 424"},
+    {"left": "앞으로 산업이 어떻게 새롭게 재편될지 그것도", "right": "이 모든 것은 저의 개인적인 생각입니다", "source": "2026-06-13 30m monitor chunk 837"},
+])
+
+COLLAPSE_TRACKING_CASES.extend([
+    {"source": "2026-06-13 30m monitor chunk 98", "text": "무나하지 않나요? 화성연료를 켠거에요. 우아하지 않나요?"},
+    {"source": "2026-06-13 30m monitor chunk 133", "text": "밀어버린 거죠 건재하죠 건지하죠?"},
+    {"source": "2026-06-13 30m monitor chunk 272", "text": "생각보다 핵융합은 초기 건설 비용 때문에 비싼 에너지원이에요. 생각보다 핵융합은 초기 건설 비용 때문에 비싼 에너지원이에요."},
+])
+
 COLLAPSE_TRACKING_CASES.extend([
     {"source": "2026-06-13 monitor chunk 1111", "text": "그렇다면은 돈은 계속 풀어야 되는데 그렇다면 돈은 계속 풀어야 되는데 마지막 남은"},
     {"source": "2026-06-13 monitor chunk 1163", "text": "이 스테이블 코인은 새로운 화폐의 탄생 이라고 탄생이라고 보셔야 돼요."},

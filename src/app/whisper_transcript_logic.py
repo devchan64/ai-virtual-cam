@@ -15,9 +15,9 @@ SLOW_PENDING_SENTENCE_CHARS = 45
 SLOW_PENDING_MAX_SENTENCE_CHARS = 120
 SLOW_PENDING_MAX_CHARS_PER_CHUNK = 18.0
 SENTENCE_CONFIRM_CHUNKS = 2
-FORCED_SENTENCE_CONFIRM_CHUNKS = 3
+FORCED_SENTENCE_CONFIRM_CHUNKS = 4
 SENTENCE_CONFIRM_MAX_AGE_CHUNKS = 2
-FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS = 3
+FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS = 4
 MIN_PROVISIONAL_TRANSLATION_WORDS = 6
 PROVISIONAL_TRANSLATION_ENABLED = False
 
@@ -690,6 +690,46 @@ def _sentence_max_age_chunks(forced: bool) -> int:
     return FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS if forced else SENTENCE_CONFIRM_MAX_AGE_CHUNKS
 
 
+_KOREAN_FINAL_WORD_SUFFIXES = ("다", "요", "죠", "까")
+
+
+def _looks_like_open_korean_clause(text: str, words: list[str]) -> bool:
+    if _boundary_sentence_end_count(text) > 0:
+        return False
+    if not words or not _has_hangul_words(words):
+        return False
+    last_word = words[-1]
+    if not any("가" <= ch <= "힣" for ch in last_word):
+        return False
+    return not last_word.endswith(_KOREAN_FINAL_WORD_SUFFIXES)
+
+
+def _replacement_decision_reason(
+    staged_sentence: str,
+    candidate: str,
+    staged_confirmations: int,
+    staged_forced: bool,
+    staged_age: int,
+) -> str:
+    if staged_confirmations >= _sentence_required_confirmations(staged_forced):
+        return "confirmed"
+
+    staged_words = _word_units(staged_sentence)
+    if not staged_words:
+        return "empty"
+    if _looks_like_open_korean_clause(staged_sentence, staged_words):
+        return "open_korean_clause"
+    if staged_age > 0:
+        return "aged"
+
+    candidate_delta = _sentence_output_delta(staged_sentence, candidate)
+    if candidate_delta == "":
+        return "duplicate_or_suffix"
+    if candidate_delta != _normalized_text(candidate):
+        return "partial_revision"
+    return "finalize"
+
+
 def _should_finalize_replaced_sentence(
     staged_sentence: str,
     candidate: str,
@@ -697,22 +737,18 @@ def _should_finalize_replaced_sentence(
     staged_forced: bool,
     staged_age: int,
 ) -> bool:
-    if staged_confirmations >= _sentence_required_confirmations(staged_forced):
-        return True
-    if staged_age > 0:
-        return True
+    return _replacement_decision_reason(
+        staged_sentence,
+        candidate,
+        staged_confirmations,
+        staged_forced,
+        staged_age,
+    ) in {"confirmed", "aged", "duplicate_or_suffix", "finalize"}
 
-    staged_words = _word_units(staged_sentence)
-    if not staged_words:
-        return False
 
-    candidate_delta = _sentence_output_delta(staged_sentence, candidate)
-    if candidate_delta == "":
-        return True
-    if candidate_delta != _normalized_text(candidate):
-        return False
-
-    return True
+def _format_transcript_metrics(metrics: dict[str, int]) -> str:
+    parts = [f"{key}={metrics[key]}" for key in sorted(metrics) if metrics[key]]
+    return ",".join(parts) if parts else "none"
 
 
 def _should_translate_staged_sentence(staged_sentence: str, staged_confirmations: int) -> bool:
