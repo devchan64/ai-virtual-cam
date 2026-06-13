@@ -612,6 +612,7 @@ class WhisperTranscriptWorker:
                 return []
             output_sentence = _sentence_output_delta(committed_text, staged_sentence)
             staged_before = staged_sentence
+            committed_before_chars = len(_normalized_text(committed_text))
             staged_sentence = ""
             staged_confirmations = 0
             staged_age = 0
@@ -627,7 +628,10 @@ class WhisperTranscriptWorker:
             self._remember_transcript(output_sentence)
             self._emit(
                 "status",
-                f"Whisper 문장 확정: chunk={chunks} reason={reason} text={output_sentence!r}",
+                "Whisper 문장 확정: "
+                f"chunk={chunks} reason={reason} committed_before_chars={committed_before_chars} "
+                f"output_chars={len(_normalized_text(output_sentence))} staged_tail={_diagnostic_tail(staged_before)} "
+                f"text={output_sentence!r}",
                 display=False,
             )
             self._emit("transcript", output_sentence, log_text=f"[{detected}] {output_sentence}", final=True)
@@ -645,27 +649,73 @@ class WhisperTranscriptWorker:
                 staged_age = 0
                 staged_translation_pending = True
                 staged_forced = forced
+                self._emit(
+                    "status",
+                    "Whisper stage 시작: "
+                    f"chunk={chunks} forced={forced} candidate_chars={len(_normalized_text(candidate))} "
+                    f"candidate_tail={_diagnostic_tail(candidate)} committed_chars={len(_normalized_text(committed_text))}",
+                    display=False,
+                )
                 self._emit("transcript", staged_sentence, log_text=f"[{detected}] {staged_sentence}", final=False)
                 return []
-            if _sentences_are_revisions(staged_sentence, candidate):
-                staged_sentence = _prefer_sentence_revision(staged_sentence, candidate)
+            is_revision = _sentences_are_revisions(staged_sentence, candidate)
+            if is_revision:
+                staged_before = staged_sentence
+                preferred = _prefer_sentence_revision(staged_sentence, candidate)
+                staged_sentence = preferred
                 staged_confirmations += 1
                 staged_age = 0
                 staged_forced = staged_forced or forced
                 required_confirmations = _sentence_required_confirmations(staged_forced)
+                self._emit(
+                    "status",
+                    "Whisper stage 리비전: "
+                    f"chunk={chunks} confirmations={staged_confirmations}/{required_confirmations} "
+                    f"forced={staged_forced} preferred_changed={preferred != staged_before} "
+                    f"staged_before={_diagnostic_tail(staged_before)} candidate={_diagnostic_tail(candidate)} "
+                    f"preferred={_diagnostic_tail(preferred)}",
+                    display=False,
+                )
                 if staged_confirmations >= required_confirmations:
                     return finalize_staged_sentence(detected, "confirmed_forced" if staged_forced else "confirmed")
                 staged_translation_pending = True
                 self._emit("transcript", staged_sentence, log_text=f"[{detected}] {staged_sentence}", final=False)
                 return []
+            self._emit(
+                "status",
+                "Whisper stage 교체: "
+                f"chunk={chunks} reason=revision_false forced={forced} "
+                f"staged_confirmations={staged_confirmations} staged_age={staged_age} "
+                f"staged_tail={_diagnostic_tail(staged_sentence)} candidate_tail={_diagnostic_tail(candidate)}",
+                display=False,
+            )
             finalized = finalize_staged_sentence(detected, "replaced")
             staged_sentence = candidate
             staged_confirmations = 1
             staged_age = 0
             staged_translation_pending = True
             staged_forced = forced
+            self._emit(
+                "status",
+                "Whisper stage 시작: "
+                f"chunk={chunks} forced={forced} candidate_chars={len(_normalized_text(candidate))} "
+                f"candidate_tail={_diagnostic_tail(candidate)} committed_chars={len(_normalized_text(committed_text))}",
+                display=False,
+            )
             self._emit("transcript", staged_sentence, log_text=f"[{detected}] {staged_sentence}", final=False)
             return finalized
+
+        def log_collapse_diagnostic(scope: str, before: str, after: str, rules: list[str]) -> None:
+            if not rules:
+                return
+            self._emit(
+                "status",
+                "Whisper collapse 진단: "
+                f"chunk={chunks} scope={scope} rules={','.join(rules)} "
+                f"before_chars={len(_normalized_text(before))} after_chars={len(_normalized_text(after))} "
+                f"before_tail={_diagnostic_tail(before)} after_tail={_diagnostic_tail(after)}",
+                display=False,
+            )
 
         def age_staged_sentence(detected: str, pending_text: str = "") -> list[str]:
             nonlocal staged_age
@@ -725,6 +775,7 @@ class WhisperTranscriptWorker:
                 accepted_texts, rejected_reasons, boundary_confidence = self._accepted_segment_texts(segment_list)
                 raw_window_text = " ".join(accepted_texts).strip()
                 window_text, repeat_collapse_rules = _collapse_adjacent_repeated_phrase_details(raw_window_text)
+                log_collapse_diagnostic("window", raw_window_text, window_text, repeat_collapse_rules)
                 repeat_collapse_chars = max(0, len(_normalized_text(raw_window_text)) - len(_normalized_text(window_text)))
                 stable_text = _stable_window_text(window_text, commit_lag_seconds, window_seconds)
                 delta_base_text = _append_committed_text(committed_text, pending_transcript_text)
@@ -759,10 +810,13 @@ class WhisperTranscriptWorker:
                     for sentence in boundary_result.completed:
                         collapsed_sentence, sentence_collapse_rules = _collapse_adjacent_repeated_phrase_details(sentence)
                         if sentence_collapse_rules:
+                            log_collapse_diagnostic("sentence", sentence, collapsed_sentence, sentence_collapse_rules)
                             repeat_collapse_rules.extend(f"sentence_{rule}" for rule in sentence_collapse_rules)
                         completed_sentences.append(collapsed_sentence)
-                    pending_transcript_text, pending_collapse_rules = _collapse_adjacent_repeated_phrase_details(boundary_result.pending)
+                    pending_before_collapse = boundary_result.pending
+                    pending_transcript_text, pending_collapse_rules = _collapse_adjacent_repeated_phrase_details(pending_before_collapse)
                     if pending_collapse_rules:
+                        log_collapse_diagnostic("pending", pending_before_collapse, pending_transcript_text, pending_collapse_rules)
                         repeat_collapse_rules.extend(f"pending_{rule}" for rule in pending_collapse_rules)
                     boundary_complete = boundary_result.boundary_count
                     boundary_soft = boundary_result.soft_boundary_count
@@ -772,8 +826,10 @@ class WhisperTranscriptWorker:
                         pending_chunks += 1
                         forced_by = _forced_sentence_reason(pending_transcript_text, pending_chunks)
                         if forced_by:
-                            forced_sentence, forced_collapse_rules = _collapse_adjacent_repeated_phrase_details(pending_transcript_text)
+                            forced_before_collapse = pending_transcript_text
+                            forced_sentence, forced_collapse_rules = _collapse_adjacent_repeated_phrase_details(forced_before_collapse)
                             if forced_collapse_rules:
+                                log_collapse_diagnostic("forced", forced_before_collapse, forced_sentence, forced_collapse_rules)
                                 repeat_collapse_rules.extend(f"forced_{rule}" for rule in forced_collapse_rules)
                             completed_sentences = [forced_sentence]
                             forced_candidate_pending = True
@@ -804,8 +860,10 @@ class WhisperTranscriptWorker:
                         pending_chunks += 1
                         forced_by = _forced_sentence_reason(pending_transcript_text, pending_chunks)
                         if forced_by:
-                            forced_sentence, forced_collapse_rules = _collapse_adjacent_repeated_phrase_details(pending_transcript_text)
+                            forced_before_collapse = pending_transcript_text
+                            forced_sentence, forced_collapse_rules = _collapse_adjacent_repeated_phrase_details(forced_before_collapse)
                             if forced_collapse_rules:
+                                log_collapse_diagnostic("forced", forced_before_collapse, forced_sentence, forced_collapse_rules)
                                 repeat_collapse_rules.extend(f"forced_{rule}" for rule in forced_collapse_rules)
                             completed_sentences = [forced_sentence]
                             forced_candidate_pending = True
