@@ -929,8 +929,9 @@ class WhisperTranscriptWorker:
         _log_line(f"[avc] whisper {kind}: {log_text if log_text is not None else text}")
         self._events.put(TranscriptEvent(kind, text, display, log_text, final))
 
-    def _accepted_segment_texts(self, segments) -> tuple[list[str], list[str]]:
+    def _accepted_segment_texts(self, segments) -> tuple[list[str], list[str], float | None]:
         texts: list[str] = []
+        accepted_scores: list[tuple[float, float]] = []
         rejected: list[str] = []
         for segment in segments:
             text = segment.text.strip()
@@ -945,7 +946,19 @@ class WhisperTranscriptWorker:
                 rejected.append(f"low_logprob text={text!r} avg_logprob={avg_logprob:.2f}")
                 continue
             texts.append(text)
-        return texts, rejected
+            accepted_scores.append((avg_logprob, no_speech_prob))
+        if not accepted_scores:
+            return texts, rejected, None
+
+        avg_logprob = sum(score for score, _ in accepted_scores) / len(accepted_scores)
+        avg_no_speech = sum(no_speech for _, no_speech in accepted_scores) / len(accepted_scores)
+        # Convert model-native metrics to a boundary confidence score in [0,1].
+        # - avg_logprob: higher is better, with -1.5 treated as near-zero and -0.1 near-one
+        # - no_speech_prob: lower is better, 0..MAX_SEGMENT_NO_SPEECH_PROB
+        logprob_score = max(0.0, min(1.0, (avg_logprob + 1.5) / 1.4))
+        no_speech_score = max(0.0, min(1.0, 1.0 - (avg_no_speech / MAX_SEGMENT_NO_SPEECH_PROB)))
+        confidence = 0.7 * logprob_score + 0.3 * no_speech_score
+        return texts, rejected, confidence
 
     def _is_repeated_hallucination(self, text: str) -> bool:
         normalized = " ".join(text.split())
@@ -1292,7 +1305,7 @@ class WhisperTranscriptWorker:
                     condition_on_previous_text=False,
                 )
                 segment_list = list(segments)
-                accepted_texts, rejected_reasons = self._accepted_segment_texts(segment_list)
+                accepted_texts, rejected_reasons, boundary_confidence = self._accepted_segment_texts(segment_list)
                 raw_window_text = " ".join(accepted_texts).strip()
                 window_text, repeat_collapse_rules = _collapse_adjacent_repeated_phrase_details(raw_window_text)
                 repeat_collapse_chars = max(0, len(_normalized_text(raw_window_text)) - len(_normalized_text(window_text)))
@@ -1313,11 +1326,17 @@ class WhisperTranscriptWorker:
                 forced_candidate_pending = False
                 boundary_complete = 0
                 boundary_soft = 0
+                boundary_confidence_display = f"{boundary_confidence:.2f}" if boundary_confidence is not None else "n/a"
                 if text and self._is_repeated_hallucination(text):
                     self._emit("status", f"Whisper 반복 전사 무시: chunk={chunks} text={text!r}", display=False)
                     text = ""
                 if text:
-                    boundary_result = self._sentence_boundary_detector.split(pending_transcript_text, text, detected)
+                    boundary_result = self._sentence_boundary_detector.split(
+                        pending_transcript_text,
+                        text,
+                        detected,
+                        boundary_confidence=boundary_confidence,
+                    )
                     completed_sentences = boundary_result.completed
                     pending_transcript_text = boundary_result.pending
                     boundary_complete = boundary_result.boundary_count
@@ -1375,7 +1394,7 @@ class WhisperTranscriptWorker:
                     "Whisper 문장 진단: "
                     f"chunk={chunks} completed={len(completed_sentences)} final={len(final_sentences)} forced_by={forced_by or 'none'} "
                     f"boundary_backend={self._sentence_boundary_detector.backend} "
-                    f"boundary_complete={boundary_complete} boundary_soft={boundary_soft} "
+                    f"boundary_complete={boundary_complete} boundary_soft={boundary_soft} boundary_conf={boundary_confidence_display} "
                     f"pending_chars={len(pending_transcript_text)} pending_chunks={pending_chunks} "
                     f"pending_chars_per_chunk={len(pending_transcript_text) / max(pending_chunks, 1):.1f} "
                     f"window_chars={len(_normalized_text(window_text))} stable_chars={len(_normalized_text(stable_text))} "

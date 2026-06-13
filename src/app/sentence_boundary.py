@@ -12,6 +12,7 @@ SOFT_BOUNDARY_RE = re.compile(
 )
 MIN_SOFT_BOUNDARY_PREFIX_CHARS = 80
 MIN_SOFT_BOUNDARY_SUFFIX_CHARS = 24
+MIN_SOFT_BOUNDARY_CONFIDENCE = 0.55
 SOFT_BOUNDARY_INCOMPLETE_TAIL_WORDS = {
     "a",
     "an",
@@ -147,7 +148,14 @@ class SentenceBoundaryDetector:
 class RegexSentenceBoundaryDetector(SentenceBoundaryDetector):
     backend = "regex"
 
-    def split(self, pending_text: str, new_text: str, language: str = "auto") -> SentenceBoundaryResult:
+    def split(
+        self,
+        pending_text: str,
+        new_text: str,
+        language: str = "auto",
+        *,
+        boundary_confidence: float | None = None,
+    ) -> SentenceBoundaryResult:
         combined = pending_new_text_combined(pending_text, new_text)
         if not combined:
             return SentenceBoundaryResult([], "", self.backend, 0, 0)
@@ -160,13 +168,22 @@ class RegexSentenceBoundaryDetector(SentenceBoundaryDetector):
             consumed_end = match.end(1)
         if consumed_end > 0:
             return SentenceBoundaryResult(completed, combined[consumed_end:].strip(), self.backend, len(completed), 0)
-        soft_completed, soft_pending = self._split_soft_boundary(combined, language)
+        soft_completed, soft_pending = self._split_soft_boundary(
+            combined, language, boundary_confidence=boundary_confidence
+        )
         if soft_completed:
             return SentenceBoundaryResult(soft_completed, soft_pending, self.backend, len(soft_completed), len(soft_completed))
         return SentenceBoundaryResult([], combined, self.backend, 0, 0)
 
-    def _split_soft_boundary(self, text: str, language: str) -> tuple[list[str], str]:
+    def _split_soft_boundary(
+        self,
+        text: str,
+        language: str,
+        boundary_confidence: float | None = None,
+    ) -> tuple[list[str], str]:
         if language not in {"en", "auto"}:
+            return [], text
+        if boundary_confidence is not None and boundary_confidence < MIN_SOFT_BOUNDARY_CONFIDENCE:
             return [], text
         normalized = normalized_text(text)
         if len(normalized) < MIN_SOFT_BOUNDARY_PREFIX_CHARS + MIN_SOFT_BOUNDARY_SUFFIX_CHARS:
@@ -195,6 +212,17 @@ class RegexSentenceBoundaryDetector(SentenceBoundaryDetector):
         return [left], right
 
 
-def split_completed_sentences(pending_text: str, new_text: str, language: str = "auto") -> tuple[list[str], str]:
-    result = RegexSentenceBoundaryDetector().split(pending_text, new_text, language)
+def split_completed_sentences(
+    pending_text: str,
+    new_text: str,
+    language: str = "auto",
+    *,
+    boundary_confidence: float | None = None,
+) -> tuple[list[str], str]:
+    result = RegexSentenceBoundaryDetector().split(
+        pending_text,
+        new_text,
+        language,
+        boundary_confidence=boundary_confidence,
+    )
     return result.completed, result.pending

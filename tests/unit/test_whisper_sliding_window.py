@@ -218,6 +218,37 @@ class WhisperSlidingWindowTextTest(unittest.TestCase):
         self.assertEqual(result.pending, "But now let's dive into some of the settings you have to know")
         self.assertEqual(result.soft_boundary_count, 1)
 
+    def test_sentence_boundary_soft_splits_are_disabled_under_low_model_confidence(self) -> None:
+        detector = RegexSentenceBoundaryDetector()
+
+        result = detector.split(
+            "And Tesla does use the camera so it does know if a person is using their turn signal and they are trying to merge in",
+            "But now let's dive into some of the settings you have to know",
+            "en",
+            boundary_confidence=0.10,
+        )
+
+        self.assertEqual(result.completed, [])
+        self.assertEqual(
+            result.pending,
+            "And Tesla does use the camera so it does know if a person is using their turn signal and they are trying to merge in But now let's dive into some of the settings you have to know",
+        )
+        self.assertEqual(result.soft_boundary_count, 0)
+
+    def test_sentence_boundary_soft_splits_remain_when_confidence_high(self) -> None:
+        detector = RegexSentenceBoundaryDetector()
+
+        result = detector.split(
+            "And Tesla does use the camera so it does know if a person is using their turn signal and they are trying to merge in",
+            "But now let's dive into some of the settings you have to know",
+            "en",
+            boundary_confidence=0.85,
+        )
+
+        self.assertEqual(result.completed, ["And Tesla does use the camera so it does know if a person is using their turn signal and they are trying to merge in"])
+        self.assertEqual(result.pending, "But now let's dive into some of the settings you have to know")
+        self.assertEqual(result.soft_boundary_count, 1)
+
     def test_sentence_boundary_soft_split_is_not_used_for_korean(self) -> None:
         detector = RegexSentenceBoundaryDetector()
 

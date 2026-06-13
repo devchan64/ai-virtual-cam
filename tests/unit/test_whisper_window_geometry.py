@@ -313,12 +313,13 @@ class WhisperWindowGeometryTest(unittest.TestCase):
             SimpleNamespace(text=" 저신뢰 ", avg_logprob=-1.4, no_speech_prob=0.1),
         ]
 
-        texts, rejected = worker._accepted_segment_texts(segments)
+        texts, rejected, boundary_confidence = worker._accepted_segment_texts(segments)
 
         self.assertEqual(texts, ["정상 문장"])
         self.assertEqual(len(rejected), 2)
         self.assertIn("no_speech", rejected[0])
         self.assertIn("low_logprob", rejected[1])
+        self.assertIsNotNone(boundary_confidence)
 
     def test_rejects_repeated_short_transcripts(self) -> None:
         worker = WhisperTranscriptWorker(WhisperConfig.from_dict({"inputDevice": "default"}), queue.Queue())
