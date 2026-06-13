@@ -23,6 +23,59 @@ def _load_config_gui_module():
     return module
 
 
+class _DummyVar:
+    def __init__(self, value):
+        self._value = value
+
+    def get(self):
+        return self._value
+
+    def set(self, value):
+        self._value = value
+
+
+class _DummyWidget:
+    def __init__(self):
+        self.values = ()
+
+    def __setitem__(self, key, value):
+        if key != "values":
+            raise KeyError(key)
+        self.values = tuple(value)
+
+
+class _DummyFrame:
+    def grid(self):
+        pass
+
+
+
+
+class _GridChild:
+    def __init__(self, row):
+        self.row = row
+        self.visible = True
+
+    def grid_info(self):
+        return {"row": self.row} if self.visible else {}
+
+    def grid_remove(self):
+        self.visible = False
+
+    def grid(self):
+        self.visible = True
+
+
+class _GridParent:
+    def __init__(self, children):
+        self._children = children
+
+    def winfo_children(self):
+        return list(self._children)
+
+
+
+
 class ConfigGuiAudioValidationTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -40,6 +93,95 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
             pack = self.module._read_flat_yaml(self.module.LANG_PACK_DIR / f"config-gui.{lang}.yaml")
             missing = sorted(key for key in keys if key not in pack)
             self.assertEqual(missing, [], f"missing Whisper i18n keys for {lang}")
+
+
+
+    def test_grid_rows_restores_rows_after_grid_remove(self) -> None:
+        first = _GridChild(1)
+        second = _GridChild(2)
+        parent = _GridParent([first, second])
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        gui._grid_row_cache = {}
+
+        self.module.ConfigGui._grid_rows(gui, parent, [2], False)
+        self.assertTrue(first.visible)
+        self.assertFalse(second.visible)
+
+        self.module.ConfigGui._grid_rows(gui, parent, [2], True)
+        self.assertTrue(second.visible)
+
+    def test_whisper_stt_gui_shows_only_selected_language_options(self) -> None:
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        gui.vars = {
+            "whisper_language": _DummyVar("한국어 (ko)"),
+            "whisper_stt_backend_en": _DummyVar("faster-whisper"),
+            "whisper_stt_model_en": _DummyVar("large-v3"),
+            "whisper_stt_backend_ko": _DummyVar("faster-whisper"),
+            "whisper_stt_model_ko": _DummyVar("large-v3"),
+            "whisper_stt_backend_zh": _DummyVar("funasr-paraformer"),
+            "whisper_stt_model_zh": _DummyVar("paraformer-zh"),
+            "whisper_sentence_boundary_backend": _DummyVar("sat"),
+            "whisper_sentence_boundary_model": _DummyVar("sat-3l-sm"),
+        }
+        gui._widgets = {key: _DummyWidget() for key in gui.vars if key != "whisper_language"}
+        gui._whisper_tab = object()
+        gui._whisper_stt_frame = _DummyFrame()
+        gui._whisper_global_stt_rows = [10, 11]
+        gui._whisper_stt_language_rows = {"en": [1, 2], "ko": [3, 4], "zh": [5, 6]}
+        gui._whisper_manual_boundary_rows = [20, 21, 22]
+        gui._whisper_backend_option_rows = {
+            "compute_type": 30,
+            "beam_size": 31,
+            "max_new_tokens": 32,
+            "temperature": 33,
+        }
+        gui._whisper_backend_specific_rows = list(gui._whisper_backend_option_rows.values())
+        gui._schedule_update_scrollbar_state = lambda: None
+        grid_calls = []
+        gui._grid_rows = lambda parent, rows, visible: grid_calls.append((parent, tuple(rows), visible))
+
+        self.module.ConfigGui._sync_whisper_runtime_options(gui)
+
+        stt_visibility = {
+            rows: visible for parent, rows, visible in grid_calls if parent is gui._whisper_stt_frame
+        }
+        self.assertFalse(stt_visibility[(1, 2)])
+        self.assertTrue(stt_visibility[(3, 4)])
+        self.assertFalse(stt_visibility[(5, 6)])
+        self.assertEqual(gui._widgets["whisper_stt_backend_ko"].values, ("faster-whisper", "mock"))
+        backend_option_visibility = {
+            rows: visible for parent, rows, visible in grid_calls if parent is gui._whisper_tab
+        }
+        self.assertTrue(backend_option_visibility[(32,)])
+        self.assertTrue(backend_option_visibility[(33,)])
+
+        grid_calls.clear()
+        gui.vars["whisper_language"].set("中文 (zh)")
+        self.module.ConfigGui._sync_whisper_runtime_options(gui)
+
+        stt_visibility = {
+            rows: visible for parent, rows, visible in grid_calls if parent is gui._whisper_stt_frame
+        }
+        self.assertFalse(stt_visibility[(1, 2)])
+        self.assertFalse(stt_visibility[(3, 4)])
+        self.assertTrue(stt_visibility[(5, 6)])
+        self.assertIn("funasr-paraformer", gui._widgets["whisper_stt_backend_zh"].values)
+        self.assertEqual(gui._widgets["whisper_stt_model_zh"].values, ("paraformer-zh", "paraformer-zh-streaming"))
+        backend_option_visibility = {
+            rows: visible for parent, rows, visible in grid_calls if parent is gui._whisper_tab
+        }
+        self.assertFalse(backend_option_visibility[(32,)])
+        self.assertFalse(backend_option_visibility[(33,)])
+
+        grid_calls.clear()
+        gui.vars["whisper_stt_backend_zh"].set("faster-whisper")
+        self.module.ConfigGui._sync_whisper_runtime_options(gui)
+        backend_option_visibility = {
+            rows: visible for parent, rows, visible in grid_calls if parent is gui._whisper_tab
+        }
+        self.assertTrue(backend_option_visibility[(32,)])
+        self.assertTrue(backend_option_visibility[(33,)])
+        self.assertEqual(gui._widgets["whisper_stt_model_zh"].values, ("large-v3", "medium", "small", "base", "tiny"))
 
     def test_resolve_and_validate_audio_runtime_devices_maps_display_values(self) -> None:
         with mock.patch.object(self.audio_devices.platform, "system", return_value="Linux"), mock.patch.object(

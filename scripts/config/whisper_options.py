@@ -14,6 +14,17 @@ def whisper_stt_backend_options(language: str | None = None) -> list[str]:
     return ["faster-whisper", "mock"]
 
 
+def whisper_stt_backend_runtime_option_keys(backend: str | None = None) -> tuple[str, ...]:
+    normalized = str(backend or "").strip().lower()
+    if normalized == "faster-whisper":
+        return ("compute_type", "beam_size", "max_new_tokens", "temperature")
+    if normalized == "mock":
+        return ()
+    if normalized.startswith("funasr-"):
+        return ()
+    return ()
+
+
 def whisper_stt_model_options(backend: str | None = None, language: str | None = None) -> list[str]:
     normalized = str(backend or "").strip().lower()
     normalized_language = str(language or "").strip().lower()
@@ -92,9 +103,6 @@ def whisper_translation_backend_options() -> list[str]:
 
 def whisper_translation_model_options() -> list[str]:
     return ["facebook/nllb-200-distilled-600M"]
-
-def whisper_post_processing_profile_options() -> list[str]:
-    return ["manual"]
 
 
 def whisper_sentence_boundary_backend_options() -> list[str]:

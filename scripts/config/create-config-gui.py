@@ -45,7 +45,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from src.tools.config_builder import build_config
-from src.domain.whisper_defaults import whisper_defaults
+from src.domain.whisper_defaults import whisper_default, whisper_defaults
 from src.tools.config_io import discover_camera_mode_options, discover_cameras, write_config
 from src.audio.gate import AudioGateConfig, NoiseGate
 from scripts.config.audio_devices import (
@@ -84,6 +84,7 @@ from scripts.config.whisper_options import (
     whisper_language_raw_from_display as _whisper_language_raw_from_display,
     whisper_sentence_boundary_model_options as _whisper_sentence_boundary_model_options,
     whisper_stt_backend_options as _whisper_stt_backend_options,
+    whisper_stt_backend_runtime_option_keys as _whisper_stt_backend_runtime_option_keys,
     whisper_stt_model_options as _whisper_stt_model_options,
     whisper_translation_target_display_from_raw as _whisper_translation_target_display_from_raw,
     whisper_translation_target_raw_from_display as _whisper_translation_target_raw_from_display,
@@ -562,6 +563,7 @@ class ConfigGui:
         self._window_geometry_save_after_id: str | None = None
         self._window_geometry_meta_cache: dict[str, str] = {}
         self._tab_meta: list[tuple[ttk.Frame, str, str]] = []
+        self._grid_row_cache = {}
         self._input_device_label: ttk.Label | None = None
         self._output_device_label: ttk.Label | None = None
         self._camera_preview_btn: ttk.Button | None = None
@@ -1216,15 +1218,11 @@ class ConfigGui:
             whisper_translation_backend_widget.bind("<<ComboboxSelected>>", self._on_whisper_translation_backend_changed)
         for key in (
             "whisper_language",
-            "whisper_post_processing_profile",
             "whisper_backend",
             "whisper_stt_backend_en",
             "whisper_stt_backend_ko",
             "whisper_stt_backend_zh",
             "whisper_sentence_boundary_backend",
-            "whisper_sentence_boundary_backend_en",
-            "whisper_sentence_boundary_backend_ko",
-            "whisper_sentence_boundary_backend_zh",
         ):
             widget = self._widgets.get(key)
             if widget is not None:
@@ -1648,7 +1646,6 @@ class ConfigGui:
             "whisper_beam_size": whisper["beamSize"],
             "whisper_max_new_tokens": whisper["maxNewTokens"],
             "whisper_temperature": whisper["temperature"],
-            "whisper_post_processing_profile": whisper["postProcessingProfile"],
             "whisper_sentence_boundary_backend": whisper["sentenceBoundaryBackend"],
             "whisper_sentence_boundary_model": whisper["sentenceBoundaryModel"],
             "whisper_sentence_boundary_backend_en": whisper["sentenceBoundaryBackendEn"],
@@ -2021,15 +2018,8 @@ class ConfigGui:
             "whisper_beam_size",
             "whisper_max_new_tokens",
             "whisper_temperature",
-            "whisper_post_processing_profile",
             "whisper_sentence_boundary_backend",
             "whisper_sentence_boundary_model",
-            "whisper_sentence_boundary_backend_en",
-            "whisper_sentence_boundary_model_en",
-            "whisper_sentence_boundary_backend_ko",
-            "whisper_sentence_boundary_model_ko",
-            "whisper_sentence_boundary_backend_zh",
-            "whisper_sentence_boundary_model_zh",
             "whisper_sentence_boundary_device",
             "whisper_sentence_boundary_compute_type",
         ):
@@ -2262,15 +2252,8 @@ class ConfigGui:
         self._set_var("whisper_beam_size", whisper_cfg.get("beamSize", defaults["whisper_beam_size"]))
         self._set_var("whisper_max_new_tokens", whisper_cfg.get("maxNewTokens", defaults["whisper_max_new_tokens"]))
         self._set_var("whisper_temperature", whisper_cfg.get("temperature", defaults["whisper_temperature"]))
-        self._set_var("whisper_post_processing_profile", whisper_cfg.get("postProcessingProfile", defaults["whisper_post_processing_profile"]))
         self._set_var("whisper_sentence_boundary_backend", whisper_cfg.get("sentenceBoundaryBackend", defaults["whisper_sentence_boundary_backend"]))
         self._set_var("whisper_sentence_boundary_model", whisper_cfg.get("sentenceBoundaryModel", defaults["whisper_sentence_boundary_model"]))
-        self._set_var("whisper_sentence_boundary_backend_en", whisper_cfg.get("sentenceBoundaryBackendEn", defaults["whisper_sentence_boundary_backend_en"]))
-        self._set_var("whisper_sentence_boundary_model_en", whisper_cfg.get("sentenceBoundaryModelEn", defaults["whisper_sentence_boundary_model_en"]))
-        self._set_var("whisper_sentence_boundary_backend_ko", whisper_cfg.get("sentenceBoundaryBackendKo", defaults["whisper_sentence_boundary_backend_ko"]))
-        self._set_var("whisper_sentence_boundary_model_ko", whisper_cfg.get("sentenceBoundaryModelKo", defaults["whisper_sentence_boundary_model_ko"]))
-        self._set_var("whisper_sentence_boundary_backend_zh", whisper_cfg.get("sentenceBoundaryBackendZh", defaults["whisper_sentence_boundary_backend_zh"]))
-        self._set_var("whisper_sentence_boundary_model_zh", whisper_cfg.get("sentenceBoundaryModelZh", defaults["whisper_sentence_boundary_model_zh"]))
         self._set_var("whisper_sentence_boundary_device", whisper_cfg.get("sentenceBoundaryDevice", defaults["whisper_sentence_boundary_device"]))
         self._set_var("whisper_sentence_boundary_compute_type", whisper_cfg.get("sentenceBoundaryComputeType", defaults["whisper_sentence_boundary_compute_type"]))
         self._sync_whisper_runtime_options()
@@ -3788,11 +3771,25 @@ class ConfigGui:
         if parent is None:
             return
         target_rows = set(rows)
-        for child in parent.grid_slaves():
+        cache = getattr(self, "_grid_row_cache", None)
+        if cache is None:
+            cache = {}
+            self._grid_row_cache = cache
+        try:
+            children = parent.winfo_children()
+        except Exception:
+            children = parent.grid_slaves()
+        for child in children:
             try:
-                row = int(child.grid_info().get("row", -1))
+                grid_info = child.grid_info()
             except Exception:
                 continue
+            if grid_info.get("row") not in (None, ""):
+                try:
+                    cache[child] = int(grid_info.get("row", -1))
+                except Exception:
+                    pass
+            row = cache.get(child)
             if row not in target_rows:
                 continue
             if visible:
@@ -3813,12 +3810,9 @@ class ConfigGui:
         selected_language = _whisper_language_raw_from_display(language_var.get()) if language_var is not None else "en"
         if selected_language not in {"en", "ko", "zh"}:
             selected_language = "en"
-        profile_var = self.vars.get("whisper_post_processing_profile")
-        if profile_var is not None and profile_var.get().strip() != "manual":
-            profile_var.set("manual")
-
+        global_stt_parent = getattr(self, "_whisper_global_stt_parent", getattr(self, "_whisper_tab", None))
         for row in getattr(self, "_whisper_global_stt_rows", []):
-            self._grid_rows(getattr(self, "_whisper_tab", None), [row], False)
+            self._grid_rows(global_stt_parent, [row], False)
 
         stt_frame = getattr(self, "_whisper_stt_frame", None)
         if stt_frame is not None:
@@ -3826,27 +3820,28 @@ class ConfigGui:
         for lang, rows in getattr(self, "_whisper_stt_language_rows", {}).items():
             self._grid_rows(stt_frame, rows, lang == selected_language)
 
-        post_frame = getattr(self, "_whisper_post_frame", None)
-        if post_frame is not None:
-            post_frame.grid_remove()
-
+        manual_boundary_parent = getattr(self, "_whisper_manual_boundary_parent", getattr(self, "_whisper_tab", None))
         for row in getattr(self, "_whisper_manual_boundary_rows", []):
-            self._grid_rows(getattr(self, "_whisper_tab", None), [row], True)
+            self._grid_rows(manual_boundary_parent, [row], True)
 
-        active_stt_backend_key = f"whisper_stt_backend_{selected_language}"
-        active_stt_model_key = f"whisper_stt_model_{selected_language}"
-        active_stt_backend_widget = self._widgets.get(active_stt_backend_key)
-        active_stt_backend_var = self.vars.get(active_stt_backend_key)
-        active_stt_backend_values = _whisper_stt_backend_options(selected_language)
-        if active_stt_backend_widget is not None:
-            active_stt_backend_widget["values"] = tuple(active_stt_backend_values)
-        if active_stt_backend_var is not None and active_stt_backend_var.get().strip() not in active_stt_backend_values:
-            active_stt_backend_var.set(active_stt_backend_values[0])
-        active_stt_backend = active_stt_backend_var.get().strip() if active_stt_backend_var is not None else "faster-whisper"
-        self._set_combobox_values_for_backend(
-            active_stt_model_key,
-            _whisper_stt_model_options(active_stt_backend, selected_language),
-        )
+        active_stt_backend = "faster-whisper"
+        for lang in ("en", "ko", "zh"):
+            stt_backend_key = f"whisper_stt_backend_{lang}"
+            stt_model_key = f"whisper_stt_model_{lang}"
+            stt_backend_widget = self._widgets.get(stt_backend_key)
+            stt_backend_var = self.vars.get(stt_backend_key)
+            stt_backend_values = _whisper_stt_backend_options(lang)
+            if stt_backend_widget is not None:
+                stt_backend_widget["values"] = tuple(stt_backend_values)
+            if stt_backend_var is not None and stt_backend_var.get().strip() not in stt_backend_values:
+                stt_backend_var.set(stt_backend_values[0])
+            stt_backend = stt_backend_var.get().strip() if stt_backend_var is not None else "faster-whisper"
+            self._set_combobox_values_for_backend(
+                stt_model_key,
+                _whisper_stt_model_options(stt_backend, lang),
+            )
+            if lang == selected_language:
+                active_stt_backend = stt_backend
 
         active_boundary_backend_key = "whisper_sentence_boundary_backend"
         active_boundary_model_key = "whisper_sentence_boundary_model"
@@ -3857,9 +3852,10 @@ class ConfigGui:
             _whisper_sentence_boundary_model_options(active_boundary_backend),
         )
 
-        faster_whisper_selected = active_stt_backend == "faster-whisper"
-        for row in getattr(self, "_whisper_backend_specific_rows", []):
-            self._grid_rows(getattr(self, "_whisper_tab", None), [row], faster_whisper_selected)
+        active_stt_option_keys = set(_whisper_stt_backend_runtime_option_keys(active_stt_backend))
+        backend_option_parent = getattr(self, "_whisper_backend_option_parent", getattr(self, "_whisper_tab", None))
+        for option_key, row in getattr(self, "_whisper_backend_option_rows", {}).items():
+            self._grid_rows(backend_option_parent, [row], option_key in active_stt_option_keys)
 
         self._schedule_update_scrollbar_state()
 
@@ -4057,15 +4053,15 @@ class ConfigGui:
             whisper_beam_size=int(round(float(iv["whisper_beam_size"].get()))),
             whisper_max_new_tokens=int(round(float(iv["whisper_max_new_tokens"].get()))),
             whisper_temperature=float(iv["whisper_temperature"].get()),
-            whisper_post_processing_profile=iv["whisper_post_processing_profile"].get().strip(),
+            whisper_post_processing_profile=whisper_default("postProcessingProfile"),
             whisper_sentence_boundary_backend=iv["whisper_sentence_boundary_backend"].get().strip(),
             whisper_sentence_boundary_model=iv["whisper_sentence_boundary_model"].get().strip(),
-            whisper_sentence_boundary_backend_en=iv["whisper_sentence_boundary_backend_en"].get().strip(),
-            whisper_sentence_boundary_model_en=iv["whisper_sentence_boundary_model_en"].get().strip(),
-            whisper_sentence_boundary_backend_ko=iv["whisper_sentence_boundary_backend_ko"].get().strip(),
-            whisper_sentence_boundary_model_ko=iv["whisper_sentence_boundary_model_ko"].get().strip(),
-            whisper_sentence_boundary_backend_zh=iv["whisper_sentence_boundary_backend_zh"].get().strip(),
-            whisper_sentence_boundary_model_zh=iv["whisper_sentence_boundary_model_zh"].get().strip(),
+            whisper_sentence_boundary_backend_en=whisper_default("sentenceBoundaryBackendEn"),
+            whisper_sentence_boundary_model_en=whisper_default("sentenceBoundaryModelEn"),
+            whisper_sentence_boundary_backend_ko=whisper_default("sentenceBoundaryBackendKo"),
+            whisper_sentence_boundary_model_ko=whisper_default("sentenceBoundaryModelKo"),
+            whisper_sentence_boundary_backend_zh=whisper_default("sentenceBoundaryBackendZh"),
+            whisper_sentence_boundary_model_zh=whisper_default("sentenceBoundaryModelZh"),
             whisper_sentence_boundary_device=iv["whisper_sentence_boundary_device"].get().strip(),
             whisper_sentence_boundary_compute_type=iv["whisper_sentence_boundary_compute_type"].get().strip(),
         )

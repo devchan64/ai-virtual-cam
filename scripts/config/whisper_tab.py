@@ -7,7 +7,6 @@ from scripts.config.whisper_options import (
     whisper_language_display_from_raw,
     whisper_language_options,
     whisper_model_options,
-    whisper_post_processing_profile_options,
     whisper_sentence_boundary_backend_options,
     whisper_sentence_boundary_model_options,
     whisper_stt_backend_options,
@@ -31,6 +30,15 @@ def _add_hint(gui, ttk, parent, row: int, key: str, default: str) -> int:
     return row + 1
 
 
+def _add_group(gui, ttk, parent, row: int, key: str, default: str):
+    frame = ttk.LabelFrame(parent, text=gui._tr(key, default))
+    gui._register_localized_widget(frame, key, default)
+    frame.grid(row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(4, 8))
+    for col in range(4):
+        frame.columnconfigure(col, weight=1 if col in (1, 2, 3) else 0)
+    return frame, row + 1
+
+
 def build_whisper_tab(
     gui,
     tab_whisper,
@@ -41,15 +49,18 @@ def build_whisper_tab(
 ) -> None:
     gui._whisper_tab = tab_whisper
     row = 0
+
+    input_frame, row = _add_group(gui, ttk, tab_whisper, row, "label.whisper_group_input", "입력/실행")
+    input_row = 0
     gui._add_bool_switch(
-        tab_whisper,
-        row,
+        input_frame,
+        input_row,
         "whisper_enabled",
         gui._tr("label.whisper_enabled", "Whisper 음성 인식"),
         False,
         label_key="label.whisper_enabled",
     )
-    row += 1
+    input_row += 1
 
     whisper_input_candidates = audio_input_device_candidates()
     whisper_input_default = audio_default_input_device()
@@ -63,76 +74,70 @@ def build_whisper_tab(
         whisper_input_default,
     )
     gui._add_combo(
-        tab_whisper,
-        row,
+        input_frame,
+        input_row,
         "whisper_input_device",
         gui._tr("label.whisper_input_device", "입력 장치"),
         whisper_input_display_values,
         whisper_input_default_display,
         label_key="label.whisper_input_device",
     )
-    row += 1
+    input_row += 1
 
     whisper_input_meter_btn = ttk.Button(
-        tab_whisper,
+        input_frame,
         text=gui._tr("button.whisper_input_meter", "Whisper 입력 dB 미터"),
         command=gui._run_whisper_input_meter,
     )
     gui._register_localized_widget(whisper_input_meter_btn, "button.whisper_input_meter", "Whisper 입력 dB 미터")
-    whisper_input_meter_btn.grid(row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0))
-    row += 1
+    whisper_input_meter_btn.grid(row=input_row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0))
 
-    global_backend_row = row
+    stt_frame, row = _add_group(gui, ttk, tab_whisper, row, "label.whisper_group_stt", "STT 언어/모델")
+    stt_row = 0
     gui._add_combo(
-        tab_whisper,
-        row,
-        "whisper_backend",
-        gui._tr("label.whisper_backend", "Whisper 백엔드"),
-        whisper_backend_options(),
-        whisper_default("backend"),
-        label_key="label.whisper_backend",
-    )
-    row += 1
-    global_model_row = row
-    gui._add_combo(
-        tab_whisper,
-        row,
-        "whisper_model",
-        gui._tr("label.whisper_model", "Whisper 모델"),
-        whisper_model_options(),
-        whisper_default("model"),
-        label_key="label.whisper_model",
-    )
-    row += 1
-    gui._whisper_global_stt_rows = [global_backend_row, global_model_row]
-    gui._add_combo(
-        tab_whisper,
-        row,
+        stt_frame,
+        stt_row,
         "whisper_language",
         gui._tr("label.whisper_language", "인식 언어(단일 선택)"),
         whisper_language_options(),
         whisper_language_display_from_raw(whisper_default("language")),
         label_key="label.whisper_language",
     )
-    row += 1
-    row = _add_hint(
+    stt_row += 1
+    stt_row = _add_hint(
         gui,
         ttk,
-        tab_whisper,
-        row,
+        stt_frame,
+        stt_row,
         "hint.whisper_language",
         "Whisper는 한 번에 하나의 인식 언어를 사용합니다. 자동 감지는 사용하지 않으며, 현재 입력 언어를 한국어/영어/중국어 중 하나로 명시하세요.",
     )
 
-    stt_frame = ttk.LabelFrame(
-        tab_whisper,
-        text=gui._tr("label.whisper_stt_models", "언어별 STT 모델"),
+    global_backend_row = stt_row
+    gui._add_combo(
+        stt_frame,
+        stt_row,
+        "whisper_backend",
+        gui._tr("label.whisper_backend", "Whisper 백엔드"),
+        whisper_backend_options(),
+        whisper_default("backend"),
+        label_key="label.whisper_backend",
     )
-    gui._register_localized_widget(stt_frame, "label.whisper_stt_models", "언어별 STT 모델")
-    stt_frame.grid(row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(4, 8))
-    for col in range(4):
-        stt_frame.columnconfigure(col, weight=1 if col in (1, 3) else 0)
-    stt_row = 0
+    stt_row += 1
+    global_model_row = stt_row
+    gui._add_combo(
+        stt_frame,
+        stt_row,
+        "whisper_model",
+        gui._tr("label.whisper_model", "Whisper 모델"),
+        whisper_model_options(),
+        whisper_default("model"),
+        label_key="label.whisper_model",
+    )
+    stt_row += 1
+    gui._whisper_global_stt_parent = stt_frame
+    gui._whisper_global_stt_rows = [global_backend_row, global_model_row]
+
     stt_language_rows = {}
     for lang_code, lang_label in (("en", "영어"), ("ko", "한국어"), ("zh", "중국어")):
         lang_rows = []
@@ -171,34 +176,35 @@ def build_whisper_tab(
         stt_frame,
         stt_row,
         "hint.whisper_stt_models",
-        "STT 모델 타입과 모델은 인식 언어별로 선택합니다. 영어/한국어는 현재 Whisper 계열을 사용하며, 중국어는 FunASR 후보를 추가로 선택할 수 있습니다.",
+        "STT 모델 타입과 모델은 위의 인식 언어에 맞는 항목만 표시합니다. 언어를 바꾸면 해당 언어의 백엔드와 모델 후보로 전환되며, 기본값은 유지됩니다.",
     )
-    row += 1
 
+    runtime_frame, row = _add_group(gui, ttk, tab_whisper, row, "label.whisper_group_runtime", "STT 응답/성능")
+    runtime_row = 0
     gui._add_combo(
-        tab_whisper,
-        row,
+        runtime_frame,
+        runtime_row,
         "whisper_device",
         gui._tr("label.whisper_device", "STT 장치"),
         ["auto", "cpu", "cuda", "mps"],
         whisper_default("device"),
         label_key="label.whisper_device",
     )
-    row += 1
-    whisper_compute_type_row = row
+    runtime_row += 1
+    whisper_compute_type_row = runtime_row
     gui._add_combo(
-        tab_whisper,
-        row,
+        runtime_frame,
+        runtime_row,
         "whisper_compute_type",
         gui._tr("label.whisper_compute_type", "STT 연산 타입"),
         ["auto", "int8", "float16", "float32"],
         whisper_default("computeType"),
         label_key="label.whisper_compute_type",
     )
-    row += 1
+    runtime_row += 1
     gui._add_slider(
-        tab_whisper,
-        row,
+        runtime_frame,
+        runtime_row,
         "whisper_step_seconds",
         gui._tr("label.whisper_step_seconds", "업데이트 간격(초)"),
         whisper_default("stepSeconds"),
@@ -207,10 +213,10 @@ def build_whisper_tab(
         resolution=0.5,
         label_key="label.whisper_step_seconds",
     )
-    row += 1
+    runtime_row += 1
     gui._add_slider(
-        tab_whisper,
-        row,
+        runtime_frame,
+        runtime_row,
         "whisper_window_seconds",
         gui._tr("label.whisper_window_seconds", "컨텍스트 윈도우(초)"),
         whisper_default("windowSeconds"),
@@ -219,10 +225,10 @@ def build_whisper_tab(
         resolution=0.5,
         label_key="label.whisper_window_seconds",
     )
-    row += 1
+    runtime_row += 1
     gui._add_slider(
-        tab_whisper,
-        row,
+        runtime_frame,
+        runtime_row,
         "whisper_commit_lag_seconds",
         gui._tr("label.whisper_commit_lag_seconds", "확정 지연(초)"),
         whisper_default("commitLagSeconds"),
@@ -231,11 +237,11 @@ def build_whisper_tab(
         resolution=0.5,
         label_key="label.whisper_commit_lag_seconds",
     )
-    row += 1
-    whisper_beam_size_row = row
+    runtime_row += 1
+    whisper_beam_size_row = runtime_row
     gui._add_slider(
-        tab_whisper,
-        row,
+        runtime_frame,
+        runtime_row,
         "whisper_beam_size",
         gui._tr("label.whisper_beam_size", "Beam 크기"),
         whisper_default("beamSize"),
@@ -244,11 +250,11 @@ def build_whisper_tab(
         resolution=1,
         label_key="label.whisper_beam_size",
     )
-    row += 1
-    whisper_max_new_tokens_row = row
+    runtime_row += 1
+    whisper_max_new_tokens_row = runtime_row
     gui._add_slider(
-        tab_whisper,
-        row,
+        runtime_frame,
+        runtime_row,
         "whisper_max_new_tokens",
         gui._tr("label.whisper_max_new_tokens", "STT 최대 토큰"),
         whisper_default("maxNewTokens"),
@@ -257,11 +263,11 @@ def build_whisper_tab(
         resolution=16,
         label_key="label.whisper_max_new_tokens",
     )
-    row += 1
-    whisper_temperature_row = row
+    runtime_row += 1
+    whisper_temperature_row = runtime_row
     gui._add_slider(
-        tab_whisper,
-        row,
+        runtime_frame,
+        runtime_row,
         "whisper_temperature",
         gui._tr("label.whisper_temperature", "STT temperature"),
         whisper_default("temperature"),
@@ -270,147 +276,84 @@ def build_whisper_tab(
         resolution=0.1,
         label_key="label.whisper_temperature",
     )
-    row += 1
-    row = _add_hint(
-        gui,
-        ttk,
-        tab_whisper,
-        row,
-        "hint.whisper_speed",
-        "업데이트 간격을 줄이면 응답성이 좋아집니다. 컨텍스트 윈도우와 확정 지연을 늘리면 보통 STT 정확도와 문장 연속성이 좋아집니다.",
-    )
-    gui._whisper_backend_specific_rows = [
-        whisper_compute_type_row,
-        whisper_beam_size_row,
-        whisper_max_new_tokens_row,
-        whisper_temperature_row,
-    ]
-
-    gui._add_combo(
-        tab_whisper,
-        row,
-        "whisper_post_processing_profile",
-        gui._tr("label.whisper_post_processing_profile", "후처리 프로필"),
-        whisper_post_processing_profile_options(),
-        whisper_default("postProcessingProfile"),
-        label_key="label.whisper_post_processing_profile",
-    )
-    row += 1
-    row = _add_hint(
-        gui,
-        ttk,
-        tab_whisper,
-        row,
-        "hint.whisper_post_processing_profile",
-        "후처리 프로필은 manual만 지원합니다. 문장 경계 backend/model은 아래 수동 설정을 사용합니다.",
-    )
-
-    post_frame = ttk.LabelFrame(
-        tab_whisper,
-        text=gui._tr("label.whisper_post_processing_models", "언어별 후처리 모델"),
-    )
-    gui._register_localized_widget(post_frame, "label.whisper_post_processing_models", "언어별 후처리 모델")
-    post_frame.grid(row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(4, 8))
-    for col in range(4):
-        post_frame.columnconfigure(col, weight=1 if col in (1, 3) else 0)
-    post_row = 0
-    post_language_rows = {}
-    for lang_code, lang_label in (("en", "영어"), ("ko", "한국어"), ("zh", "중국어")):
-        lang_rows = []
-        backend_key = f"whisper_sentence_boundary_backend_{lang_code}"
-        model_key = f"whisper_sentence_boundary_model_{lang_code}"
-        backend_default = whisper_default(f"sentenceBoundaryBackend{lang_code.title()}")
-        model_default = whisper_default(f"sentenceBoundaryModel{lang_code.title()}")
-        lang_rows.append(post_row)
-        gui._add_combo(
-            post_frame,
-            post_row,
-            backend_key,
-            gui._tr(f"label.{backend_key}", f"{lang_label} 백엔드"),
-            whisper_sentence_boundary_backend_options(),
-            backend_default,
-            label_key=f"label.{backend_key}",
-        )
-        post_row += 1
-        lang_rows.append(post_row)
-        gui._add_combo(
-            post_frame,
-            post_row,
-            model_key,
-            gui._tr(f"label.{model_key}", f"{lang_label} 모델"),
-            whisper_sentence_boundary_model_options(backend_default),
-            model_default,
-            label_key=f"label.{model_key}",
-        )
-        post_row += 1
-        post_language_rows[lang_code] = lang_rows
-    gui._whisper_post_frame = post_frame
-    gui._whisper_post_language_rows = post_language_rows
+    runtime_row += 1
     _add_hint(
         gui,
         ttk,
-        post_frame,
-        post_row,
-        "hint.whisper_post_processing_models",
-        "중국어 1차 실험 모델은 FunASR CT-Transformer입니다. funasr 의존성이 필요하며 사용할 수 없으면 Fail-Fast로 중지합니다.",
+        runtime_frame,
+        runtime_row,
+        "hint.whisper_speed",
+        "업데이트 간격/컨텍스트/확정 지연은 공통 STT 스트리밍 설정입니다. Beam, 최대 토큰, temperature, 연산 타입은 선택한 STT 모델 타입이 지원할 때만 표시됩니다.",
     )
-    row += 1
+    gui._whisper_backend_option_parent = runtime_frame
+    gui._whisper_backend_option_rows = {
+        "compute_type": whisper_compute_type_row,
+        "beam_size": whisper_beam_size_row,
+        "max_new_tokens": whisper_max_new_tokens_row,
+        "temperature": whisper_temperature_row,
+    }
+    gui._whisper_backend_specific_rows = list(gui._whisper_backend_option_rows.values())
 
-    manual_boundary_backend_row = row
+    boundary_frame, row = _add_group(gui, ttk, tab_whisper, row, "label.whisper_group_boundary", "문장 경계")
+    boundary_row = 0
+    manual_boundary_backend_row = boundary_row
     gui._add_combo(
-        tab_whisper,
-        row,
+        boundary_frame,
+        boundary_row,
         "whisper_sentence_boundary_backend",
         gui._tr("label.whisper_sentence_boundary_backend", "수동 문장 경계 백엔드"),
         whisper_sentence_boundary_backend_options(),
         whisper_default("sentenceBoundaryBackend"),
         label_key="label.whisper_sentence_boundary_backend",
     )
-    row += 1
-    manual_boundary_model_row = row
+    boundary_row += 1
+    manual_boundary_model_row = boundary_row
     gui._add_combo(
-        tab_whisper,
-        row,
+        boundary_frame,
+        boundary_row,
         "whisper_sentence_boundary_model",
         gui._tr("label.whisper_sentence_boundary_model", "수동 문장 경계 모델"),
         whisper_sentence_boundary_model_options(whisper_default("sentenceBoundaryBackend")),
         whisper_default("sentenceBoundaryModel"),
         label_key="label.whisper_sentence_boundary_model",
     )
-    row += 1
-    manual_boundary_hint_row = row
-    row = _add_hint(
+    boundary_row += 1
+    manual_boundary_hint_row = boundary_row
+    _add_hint(
         gui,
         ttk,
-        tab_whisper,
-        row,
+        boundary_frame,
+        boundary_row,
         "hint.whisper_sentence_boundary_manual",
         "문장 경계 backend/model은 모든 언어에서 이 수동 설정을 사용합니다.",
     )
+    gui._whisper_manual_boundary_parent = boundary_frame
     gui._whisper_manual_boundary_rows = [manual_boundary_backend_row, manual_boundary_model_row, manual_boundary_hint_row]
 
+    translation_group, row = _add_group(gui, ttk, tab_whisper, row, "label.whisper_group_translation", "번역")
+    translation_row = 0
     gui._add_bool_switch(
-        tab_whisper,
-        row,
+        translation_group,
+        translation_row,
         "whisper_translation_enabled",
         gui._tr("label.whisper_translation_enabled", "번역 창"),
         whisper_default("translationEnabled"),
         label_key="label.whisper_translation_enabled",
     )
-    row += 1
+    translation_row += 1
     gui._add_combo(
-        tab_whisper,
-        row,
+        translation_group,
+        translation_row,
         "whisper_translation_backend",
         gui._tr("label.whisper_translation_backend", "번역 백엔드"),
         whisper_translation_backend_options(),
         whisper_default("translationBackend"),
         label_key="label.whisper_translation_backend",
     )
-    row += 1
+    translation_row += 1
 
-    whisper_translation_frame = ttk.Frame(tab_whisper)
-    whisper_translation_frame.grid(row=row, column=0, columnspan=4, sticky="ew", padx=0, pady=(0, 4))
+    whisper_translation_frame = ttk.Frame(translation_group)
+    whisper_translation_frame.grid(row=translation_row, column=0, columnspan=4, sticky="ew", padx=0, pady=(0, 4))
     whisper_translation_frame.columnconfigure(0, weight=1)
     _add_hint(
         gui,
@@ -420,10 +363,10 @@ def build_whisper_tab(
         "hint.whisper_translation_whisper_backend",
         "Whisper 번역은 영어 출력만 지원하며 외부 번역 모델 설정을 사용하지 않습니다.",
     )
-    row += 1
+    translation_row += 1
 
-    nllb_translation_frame = ttk.Frame(tab_whisper)
-    nllb_translation_frame.grid(row=row, column=0, columnspan=4, sticky="ew", padx=0, pady=(0, 4))
+    nllb_translation_frame = ttk.Frame(translation_group)
+    nllb_translation_frame.grid(row=translation_row, column=0, columnspan=4, sticky="ew", padx=0, pady=(0, 4))
     for col in range(4):
         nllb_translation_frame.columnconfigure(col, weight=1 if col in (1, 3) else 0)
     nllb_row = 0
@@ -504,7 +447,6 @@ def build_whisper_tab(
         "mock": whisper_translation_frame,
         "nllb-transformers": nllb_translation_frame,
     }
-    row += 1
 
     reset_whisper_btn = ttk.Button(
         tab_whisper,
