@@ -510,6 +510,10 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
             ("还宽零零。", "其有没？"),
             ("好像有没？", "对对。"),
             ("难。", "没？"),
+            ("小吃街而在成都CT walk的情况下，就是你每走一段都觉得闻到各种不同香味的辣椒扑鼻而来。", "而当。"),
+            ("然后这个老板极力推荐他自己弄的辣椒粉，配上这个。", "假。"),
+            ("讲其实CCB这种东西使用寿命都不太长久，最主要也是因为市场价炒的太高了，感觉性价比也不高。", "对当下。"),
+            ("他们这里的外卖呢选择非常非常的多。", "要"),
         ]
         for staged, candidate in cases:
             with self.subTest(staged=staged, candidate=candidate):
@@ -519,12 +523,25 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
                 self.assertFalse(_should_stage_replacement_candidate(staged, candidate, reason))
 
     def test_chinese_long_replacement_candidate_can_be_staged_for_observation(self) -> None:
-        staged = "为什么呢？"
-        candidate = "是因为绑匪呢提出要1700万美金的，然后他们还继续威胁家属。"
-        reason = _replacement_decision_reason(staged, candidate, 1, False, 0)
-
-        self.assertEqual(reason, "unconfirmed_cjk")
-        self.assertTrue(_should_stage_replacement_candidate(staged, candidate, reason))
+        cases = [
+            (
+                "为什么呢？",
+                "是因为绑匪呢提出要1700万美金的，然后他们还继续威胁家属。",
+            ),
+            (
+                "是单脆皮年轻人，就是我和赵周丽梅走一段路，就在会，唉声叹气然。",
+                "单干脆皮年轻人就是我和周苏妮妹走一段路进，咱们唉声叹气，而后来实在受不了了，直接。",
+            ),
+            (
+                "我和赵苏，你每走一段路进，咱们唉声叹气，然后后来实在受不了了，直接跑去浴约按摩这两只。",
+                "唉，声叹气，然后来实在受不了了，直接跑去浴约按摩，这两只猫真的很活泼，从外面打架。",
+            ),
+        ]
+        for staged, candidate in cases:
+            with self.subTest(staged=staged, candidate=candidate):
+                reason = _replacement_decision_reason(staged, candidate, 1, False, 0)
+                self.assertEqual(reason, "unconfirmed_cjk")
+                self.assertTrue(_should_stage_replacement_candidate(staged, candidate, reason))
 
     def test_chinese_confirmed_stage_can_finalize_on_replacement(self) -> None:
         staged = "如果你跟绑匪妥协的话，就会导致第二例案情的发生。"

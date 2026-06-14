@@ -625,6 +625,90 @@ REPLACEMENT_TRACKING_CASES.extend([
         "expected": "unconfirmed_cjk",
         "source": "2026-06-14 monitor chunk 73 revision candidate before convergence",
     },
+    {
+        "staged": "小吃街而在成都CT walk的情况下，就是你每走一段都觉得闻到各种不同香味的辣椒扑鼻而来。",
+        "candidate": "而当。",
+        "expected": "unconfirmed_cjk",
+        "source": "2026-06-14 avc-whisper.log chunk 313 long CJK sentence replaced by short fragment",
+    },
+    {
+        "staged": "然后这个老板极力推荐他自己弄的辣椒粉，配上这个。",
+        "candidate": "假。",
+        "expected": "unconfirmed_cjk",
+        "source": "2026-06-14 avc-whisper.log chunk 317 long CJK sentence replaced by one-character fragment",
+    },
+    {
+        "staged": "讲其实CCB这种东西使用寿命都不太长久，最主要也是因为市场价炒的太高了，感觉性价比也不高。",
+        "candidate": "对当下。",
+        "expected": "unconfirmed_cjk",
+        "source": "2026-06-14 avc-whisper.log.1 chunk 299 confirmed-ish long CJK replaced by short tail",
+    },
+    {
+        "staged": "价比也不高，对，当下我是有点被劝退，后面还去看了衣服，因为晚上想要去蹦迪，但是反而被他家暴着吸引了注意力。",
+        "candidate": "其实这。",
+        "expected": "unconfirmed_cjk",
+        "source": "2026-06-14 avc-whisper.log.1 chunk 302 long CJK replaced by short tail",
+    },
+    {
+        "staged": "是单脆皮年轻人，就是我和赵周丽梅走一段路，就在会，唉声叹气然。",
+        "candidate": "单干脆皮年轻人就是我和周苏妮妹走一段路进，咱们唉声叹气，而后来实在受不了了，直接。",
+        "expected": "unconfirmed_cjk",
+        "source": "2026-06-14 avc-whisper.log chunk 306 long CJK churn",
+    },
+    {
+        "staged": "我和赵苏，你每走一段路进，咱们唉声叹气，然后后来实在受不了了，直接跑去浴约按摩这两只。",
+        "candidate": "唉，声叹气，然后来实在受不了了，直接跑去浴约按摩，这两只猫真的很活泼，从外面打架。",
+        "expected": "unconfirmed_cjk",
+        "source": "2026-06-14 avc-whisper.log chunk 308 long CJK churn",
+    },
+    {
+        "staged": "而直接跑去预约按摩，这两只猫真的很活泼，从外面打架打到猫砂盆里面还在打按。",
+        "candidate": "两只猫真的很活泼和外面打架，打到猫砂盆里面，还在打按摩店的底下有个小吃街，而在。",
+        "expected": "unconfirmed_cjk",
+        "source": "2026-06-14 avc-whisper.log chunk 310 long CJK churn",
+    },
+    {
+        "staged": "他们这里的外卖呢选择非常非常的多。",
+        "candidate": "要",
+        "expected": "unconfirmed_cjk",
+        "source": "2026-06-14 avc-whisper.log.1 chunk 101 stable Chinese sentence replaced by one-character fragment",
+    },
+    {
+        "staged": "就在这里，野餐，今太阳要来洗。",
+        "candidate": "那 个 是",
+        "expected": "unconfirmed_cjk",
+        "source": "2026-06-14 avc-whisper.log.3 chunk 15716 unprocessed short CJK replacement",
+    },
+    {
+        "staged": "洗吹头发天呐，每次就是来，不然做什么头发护理。",
+        "candidate": "发，所以呢每次就是来不管做什么头发护理呢，他们都会就是。",
+        "expected": "unconfirmed_cjk",
+        "source": "2026-06-14 avc-whisper.log.3 chunk 15721 unprocessed long CJK churn",
+    },
+    {
+        "staged": "有没有有有有没有？",
+        "candidate": "The是the.",
+        "expected": "unconfirmed_cjk",
+        "source": "2026-06-14 avc-whisper.log.4 chunk 14055 zh language-mismatch churn",
+    },
+    {
+        "staged": "美好，baby, i need you.",
+        "candidate": "I love feeling feeleling baby, baby you only.",
+        "expected": "unconfirmed_cjk",
+        "source": "2026-06-14 avc-whisper.log.4 chunk 14082 zh mixed-latin churn",
+    },
+    {
+        "staged": "机记。",
+        "candidate": "As the mentionnearly.",
+        "expected": "unconfirmed_cjk",
+        "source": "2026-06-14 avc-whisper.log.5 chunk 12127 zh language-mismatch churn",
+    },
+    {
+        "staged": "就下了将。",
+        "candidate": "Two shot ted seventy in the part three.",
+        "expected": "unconfirmed_cjk",
+        "source": "2026-06-14 avc-whisper.log.5 chunk 12153 zh language-mismatch churn",
+    },
 ])
 
 
@@ -665,6 +749,20 @@ TRANSLATION_QUALITY_TRACKING_CASES = [
         "case_source": "2026-06-14 monitor zh->ko acceptable baseline",
     },
     {
+        "source": "卷卷头前前面呢，他还帮我做了一个非常蓬松的刘海给。",
+        "observed": "이 책 앞에는 그가 저에게 아주 느슨한 해양을 만들어주었습니다.",
+        "expected_terms": {"앞머리", "머리"},
+        "forbidden_terms": {"책", "해양"},
+        "case_source": "2026-06-14 avc-whisper.log.3 zh->ko hairstyle mistranslation",
+    },
+    {
+        "source": "日穿搭衣服呢是前几天买的裤子呢，也是本地的一个牌。",
+        "observed": "이 옷은 며칠 전에 구입한 바둑이고, 지역 카드입니다.",
+        "expected_terms": {"바지", "옷"},
+        "forbidden_terms": {"바둑", "카드"},
+        "case_source": "2026-06-14 avc-whisper.log.3 zh->ko clothing mistranslation",
+    },
+    {
         "source": "他们这里的外卖呢选择非常非常的多。",
         "observed": "이곳의 배달 선택지는 매우 많습니다.",
         "expected_terms": {"배달", "많"},
@@ -679,7 +777,11 @@ FINAL_QUALITY_TRACKING_CASES = [
     {"text": "很漂亮的咖啡厅，而且。", "language": "zh", "expected_flags": {"short_cjk"}, "source": "2026-06-14 monitor chunk 537"},
     {"text": "Good oodbye.", "language": "zh", "expected_flags": {"latin_only_for_zh"}, "source": "2026-06-14 monitor chunk 504"},
     {"text": "Good morning.", "language": "zh", "expected_flags": {"latin_only_for_zh"}, "source": "2026-06-14 monitor chunk 506"},
+    {"text": "Everybody should.", "language": "zh", "expected_flags": {"latin_only_for_zh"}, "source": "2026-06-14 avc-whisper.log.5 language-mismatch"},
+    {"text": "As the mentionnearly.", "language": "zh", "expected_flags": {"latin_only_for_zh"}, "source": "2026-06-14 avc-whisper.log.5 language-mismatch"},
     {"text": "matcha ice cream很好吃。", "language": "zh", "expected_flags": {"mixed_latin_zh"}, "source": "synthetic zh mixed latin"},
+    {"text": "Oh, my god,我真的很开心。", "language": "zh", "expected_flags": {"mixed_latin_zh"}, "source": "2026-06-14 avc-whisper.log.4 mixed latin zh"},
+    {"text": "I love felelceline baby, baby, you oonly you, oh,你you can.", "language": "zh", "expected_flags": {"mixed_latin_zh"}, "source": "2026-06-14 avc-whisper.log.4 mixed latin zh"},
     {"text": "要 去 找", "language": "zh", "expected_flags": {"short_cjk", "no_end_marker"}, "source": "2026-06-14 monitor chunk 354"},
     {"text": "看起来好好吃啊，你真的有很多小吃呢，我看到。", "language": "zh", "expected_flags": set(), "source": "2026-06-14 monitor chunk 50 stable comparison"},
 ]
@@ -833,6 +935,18 @@ COALESCE_TRACKING_CASES = [
         "sentences": ["果是怎么样？", "然后我让小哥哥给我拿了几台测试一下，就是室内室外光线不一样的。"],
         "expected_count": 1,
         "source": "avc-whisper.log chunk 270",
+    },
+    {
+        "language": "zh",
+        "sentences": ["他们都会就是跟你拿你的包包然。", "后给你换上相对应的。"],
+        "expected_count": 1,
+        "source": "avc-whisper.log.3 chunk 15722 unprocessed multi-completed zh",
+    },
+    {
+        "language": "zh",
+        "sentences": ["有一种莫名的熟悉感。", "第一次来韩国的时候是solo trip,去年是跟助理们一起来。"],
+        "expected_count": 1,
+        "source": "avc-whisper.log.3 chunk 15777 unprocessed mixed zh-latin multi-completed",
     },
     {
         "language": "ko",
