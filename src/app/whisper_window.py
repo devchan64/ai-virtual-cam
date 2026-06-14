@@ -291,12 +291,6 @@ def _is_modal_output_event(event: TranscriptEvent) -> bool:
     return event.display and event.kind in {"transcript", "translation", "error"}
 
 
-def _is_sliding_window_status_event(text: str) -> bool:
-    if not text:
-        return False
-    text = str(text)
-    prefixes = ("Whisper 전사 요청:", "Whisper 문장 진단:", "Whisper 성능:", "Whisper 안정성 지표:")
-    return any(text.startswith(prefix) for prefix in prefixes)
 
 
 class WhisperTranscriptWorker:
@@ -1219,6 +1213,7 @@ class WhisperTranscriptWindow:
         self._translation_partial_active = False
         self._events: queue.Queue[TranscriptEvent] = queue.Queue()
         self._worker = WhisperTranscriptWorker(app_config.whisper, self._events)
+        self._stt_status_run_index = 0
         self._thread = threading.Thread(target=self._worker.run, daemon=True)
         self._root = tk.Tk()
         self._root.title(_window_title("transcript", self._ui_language))
@@ -1406,6 +1401,16 @@ class WhisperTranscriptWindow:
         text_widget.tag_configure(PARTIAL_TEXT_TAG, foreground=PARTIAL_TEXT_COLOR)
         text_widget.tag_configure(ERROR_TEXT_TAG, foreground=ERROR_TEXT_COLOR)
 
+    def _next_stt_status_index_label(self) -> str:
+        self._stt_status_run_index = int(getattr(self, "_stt_status_run_index", 0)) + 1
+        return f"{self._stt_status_run_index:03d}"
+
+    def _append_stt_status_transcript(self, line: str) -> None:
+        if self._stt_status_text is None:
+            return
+        index = self._next_stt_status_index_label()
+        self._append(f"[{index}] {line}", self._stt_status_text, final=True)
+
     def _append(self, line: str, text_widget=None, *, final: bool = True, tag: str | None = None) -> None:
         target = text_widget if text_widget is not None else self._text
         partial_attr = None
@@ -1438,12 +1443,9 @@ class WhisperTranscriptWindow:
                 event = self._events.get_nowait()
             except queue.Empty:
                 break
-            if event.kind == "status" and self._stt_status_text is not None and event.display and _is_sliding_window_status_event(event.text):
-                self._append(event.text, self._stt_status_text, final=event.final)
-                continue
-            if event.kind == "transcript" and event.display:
-                if self._stt_status_text is not None:
-                    self._append(event.text, self._stt_status_text, final=event.final)
+            if event.kind == "transcript":
+                if event.display and event.final:
+                    self._append_stt_status_transcript(event.text)
                 if not event.final:
                     continue
             if not _is_modal_output_event(event):

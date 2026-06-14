@@ -19,7 +19,6 @@ from src.app.whisper_window import (
     WhisperTranscriptWindow,
     WhisperTranscriptWorker,
     _is_modal_output_event,
-    _is_sliding_window_status_event,
     _load_ui_language,
     _load_window_geometry,
     _window_manager_geometry,
@@ -341,11 +340,48 @@ class WhisperWindowGeometryTest(unittest.TestCase):
         window._events.put(TranscriptEvent("transcript", "안녕하세요", display=True, final=True))
         window._poll_events()
 
-        self.assertIn(("end", "안녕하세요\n", FINAL_TEXT_TAG), window._stt_status_text.lines)
+        self.assertIn(("end", "[001] 안녕하세요\n", FINAL_TEXT_TAG), window._stt_status_text.lines)
         self.assertIn(("end", "안녕하세요\n", FINAL_TEXT_TAG), window._text.lines)
 
 
-    def test_partial_transcript_not_shown_in_transcript_window(self) -> None:
+    def test_stt_status_window_numbers_each_final_transcript(self) -> None:
+        class FakeRoot:
+            def after(self, delay, callback):
+                self.delay = delay
+                self.callback = callback
+
+        class FakeText:
+            def __init__(self) -> None:
+                self.lines = []
+
+            def insert(self, index, text, tag=None) -> None:
+                self.lines.append((index, text, tag))
+
+            def delete(self, start, end) -> None:
+                self.lines.append((start, end, "DELETE"))
+
+            def see(self, index) -> None:
+                self.lines.append((index, "SEE"))
+
+        window = WhisperTranscriptWindow.__new__(WhisperTranscriptWindow)
+        window._stt_status_text = FakeText()
+        window._text = FakeText()
+        window._translation_text = None
+        window._transcript_partial_active = False
+        window._translation_partial_active = False
+        window._root = FakeRoot()
+        window._events = queue.Queue()
+        window._update_line_numbers = lambda _widget: None
+        window._stt_status_run_index = 0
+
+        window._events.put(TranscriptEvent("transcript", "첫 문장", display=True, final=True))
+        window._events.put(TranscriptEvent("transcript", "둘째 문장", display=True, final=True))
+        window._poll_events()
+
+        self.assertIn(("end", "[001] 첫 문장\n", FINAL_TEXT_TAG), window._stt_status_text.lines)
+        self.assertIn(("end", "[002] 둘째 문장\n", FINAL_TEXT_TAG), window._stt_status_text.lines)
+
+    def test_partial_transcript_not_shown_in_stt_status_window(self) -> None:
         class FakeRoot:
             def after(self, delay, callback):
                 self.delay = delay
@@ -377,11 +413,11 @@ class WhisperWindowGeometryTest(unittest.TestCase):
         window._events.put(TranscriptEvent("transcript", "임시 문장", display=True, final=False))
         window._poll_events()
 
-        self.assertIn(("end", "임시 문장", PARTIAL_TEXT_TAG), window._stt_status_text.lines)
+        self.assertEqual(window._stt_status_text.lines, [])
         self.assertNotIn(("end", "임시 문장", PARTIAL_TEXT_TAG), window._text.lines)
 
 
-    def test_status_events_only_forward_sliding_window_metrics_to_stt_status_window(self) -> None:
+    def test_status_events_not_forwarded_to_stt_status_window(self) -> None:
         class FakeRoot:
             def after(self, delay, callback):
                 self.delay = delay
@@ -416,19 +452,7 @@ class WhisperWindowGeometryTest(unittest.TestCase):
         window._events.put(TranscriptEvent("status", "Whisper 성능: chunk=4 step=1.5"))
         window._poll_events()
 
-        self.assertNotIn(("end", "STT 모델 로딩 완료", FINAL_TEXT_TAG), window._stt_status_text.lines)
-        self.assertIn(("end", "Whisper 문장 진단: chunk=3 completed=1 final=1\n", FINAL_TEXT_TAG), window._stt_status_text.lines)
-        self.assertIn(("end", "Whisper 전사 요청: chunk=4 samples=16000\n", FINAL_TEXT_TAG), window._stt_status_text.lines)
-        self.assertIn(("end", "Whisper 성능: chunk=4 step=1.5\n", FINAL_TEXT_TAG), window._stt_status_text.lines)
-
-
-    def test_is_sliding_window_status_event(self) -> None:
-        self.assertTrue(_is_sliding_window_status_event("Whisper 전사 요청: chunk=1 samples=16000"))
-        self.assertTrue(_is_sliding_window_status_event("Whisper 문장 진단: chunk=1 completed=0"))
-        self.assertTrue(_is_sliding_window_status_event("Whisper 성능: chunk=1 step=1.5"))
-        self.assertTrue(_is_sliding_window_status_event("Whisper 안정성 지표: chunk=1"))
-        self.assertFalse(_is_sliding_window_status_event("STT 모델 로딩 완료"))
-        self.assertFalse(_is_sliding_window_status_event("Whisper mock 출력 시작"))
+        self.assertEqual(window._stt_status_text.lines, [])
 
 
     def test_sanitizes_geometry_before_restore(self) -> None:
