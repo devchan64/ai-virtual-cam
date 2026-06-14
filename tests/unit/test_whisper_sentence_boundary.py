@@ -34,6 +34,21 @@ class WhisperSentenceBoundaryTest(unittest.TestCase):
             "Because if you didn't know,",
         )
 
+    def test_pending_new_text_trims_internal_chinese_restart_from_monitoring(self) -> None:
+        pending = "它是先做成一个寿司条，然后把这米再切断了，摆成四个墩儿墩儿，然后就是火山的底座，然后上面这个撒的就更像熔岩一样，然后用喷枪"
+        new = "条，然后把这米再切断了，摆成四个墩儿墩儿，然后就是火山的底座，然后上面这个洒的就更像熔岩一样，然后用喷枪"
+
+        self.assertEqual(
+            _pending_new_text_combined(pending, new),
+            "它是先做成一个寿司条，然后把这米再切断了，摆成四个墩儿墩儿，然后就是火山的底座，然后上面这个洒的就更像熔岩一样，然后用喷枪",
+        )
+
+    def test_pending_new_text_keeps_distinct_chinese_continuation(self) -> None:
+        self.assertEqual(
+            _pending_new_text_combined("这个长得真的好像火山啊", "然后用喷枪把上面烤一下"),
+            "这个长得真的好像火山啊然后用喷枪把上面烤一下",
+        )
+
     def test_pending_new_text_drops_incomplete_tail_before_ack_revision_from_log(self) -> None:
         # Regression from avc-whisper.log.1 chunks 847-848.
         self.assertEqual(

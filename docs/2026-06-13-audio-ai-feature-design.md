@@ -306,7 +306,7 @@ class SentenceBoundaryDetector:
 - 백엔드별 실행 속성은 `whisper_stt_backend_runtime_option_keys()`에서 정의한다. `faster-whisper`는 `computeType`, `beamSize`, `maxNewTokens`, `temperature`를 노출하고, `qwen3-asr-transformers`와 `qwen3-asr-vllm-streaming`은 `computeType`, `maxNewTokens`를 노출한다. 제거된 FunASR STT 계열 속성은 더 이상 화면에 노출하지 않는다.
 - config GUI는 후처리 프로필 선택을 제공하지 않는다. `postProcessingProfile`은 계약 호환을 위해 `manual`로 저장하고, 화면에는 실제 운영되는 `sentenceBoundaryBackend`/`sentenceBoundaryModel` 수동 설정만 노출한다.
 - config GUI의 오디오 AI 탭은 `입력/실행`, `STT 언어/모델`, `STT 응답/성능`, `문장 경계`, `번역` 그룹으로 구분한다. 선택 언어와 선택 STT 백엔드에 맞는 설정만 해당 그룹 안에서 표시한다.
-- 중국어 처리는 문자 단위 CJK 토큰화, suffix overlap 같은 언어별 휴리스틱을 운영 로직에 추가하지 않는다. 공백 없는 텍스트의 경계와 구두점은 후처리 모델의 책임으로 둔다.
+- 중국어 처리는 의미 보정/문장 경계 결정을 문자 단위 CJK 토큰화나 suffix overlap 휴리스틱에 맡기지 않는다. 공백 없는 텍스트의 경계와 구두점은 후처리 모델의 책임으로 둔다. 다만 pending 텍스트와 다음 STT 윈도우가 같은 CJK no-space 구간을 내부 중간부터 다시 내보내는 경우, 중복 연결을 막기 위한 결합 단계의 overlap 제거는 허용한다. 이 로직은 문장 경계 판단이 아니라 append-only 버퍼 접합 무결성 보정이며, `pending_chars_per_chunk`, `repeat_collapse_chars`, `candidate_duplicate_suppressed`, `final_quality_cjk_internal_gap`로 회귀를 관찰한다.
 
 현재 런타임 제약:
 - 모델 준비 순서는 `STT 모델 -> 번역 모델 -> 문장 경계/후처리 모델 -> 입력 장치 열기 -> 전사 루프`다. 입력 캡처와 전사/번역은 모든 모델 준비가 끝난 뒤 시작한다.
@@ -340,6 +340,8 @@ class SentenceBoundaryDetector:
 - `stage_discard_reason_open_korean_clause`가 많으면 열린 한글 절을 과도하게 폐기하고 있는지 확인한다.
 - `pending_overrun`은 pending이 길이/관측 횟수 임계치를 넘었지만 확정되지 않은 상태를 나타낸다. `long_no_boundary`는 경계 모델이 문장 경계를 찾지 못해 번역 지연이 커질 수 있는 신호다. 일반 overrun은 180자/8 chunks 이상, 빠른 overrun은 240자/4 chunks 이상을 기준으로 추적한다.
 - `finalize_duplicate_suppressed`가 증가하면 중복 출력은 막고 있지만 앞단 경계/리비전이 불안정하다는 신호로 본다.
+- `pending_chars_per_chunk`가 80~100 이상으로 튀면서 `repeat_collapse_chars=0`이면 문장 경계 모델 실패만이 아니라 pending 결합에서 내부 재시작을 그대로 이어붙인 케이스를 의심한다.
+- CJK no-space continuation에서 인위적 공백이 삽입되면 `final_quality_cjk_internal_gap`가 증가할 수 있다. 이 지표는 번역 차단용 hard fail이 아니라 pending 결합/출력 접합 품질 관측용으로 사용한다.
 
 ## 9) 단계별 확정 규칙
 
@@ -660,7 +662,7 @@ unittest 성공은 테스트 코드가 실행되어 지표가 수집되었다는
 | `translation_quality` | 관측된 번역 출력 샘플에서 고유명사/도메인 용어/명백한 환각 회귀를 추적하는지 | 8 | 80% 이상 |
 | `stage_candidate` | 중국어 staged 후보를 보류/전환하는 결정이 장기 보류 없이 동작하는지 | 4 | 100% |
 
-`distinct` 목표율을 더 높게 둔 이유는 서로 다른 문장을 병합하면 원문 손실이 발생하고, 이후 번역도 복구할 수 없기 때문이다. `revision`과 `collapse`는 중복을 줄이는 방향의 품질 지표지만, 과도한 병합보다 손실 위험이 낮으므로 초기 목표율을 90%로 둔다. `stability`는 incremental ASR의 partial hypothesis instability와 revokes 문제를 현재 코드의 revision lifecycle에 맞춘 프록시 지표다. `replacement`는 2026-06-13 30분 운영 로그에서 관측된 staged 교체 손실을 직접 추적하기 위해 추가한 지표이며, `open_korean_clause`와 `partial_preserve` 결정의 회귀를 막는다. `pending`은 영어 장문처럼 경계가 늦게 나오는 구간에서 번역 지연 위험을 추적하기 위한 지표다. `coalesce`는 중국어 punctuation 모델이 한 STT 윈도우를 여러 completed 후보로 나누면서 단일 staging 슬롯을 반복 교체하는 문제를 추적한다. `translation_quality`는 STT/문장 확정과 분리된 번역 모델 품질 축이다. 이 값은 실제 모델을 실행하는 패스 기준이 아니라, 운영 로그에서 관측한 source/observed 쌍을 기준으로 고유명사 보존, 도메인 용어 보존, 금지 오역을 확인하는 회귀 샘플 지표다. `stage_candidate`는 중국어 짧은 fragment를 즉시 stage하지 않되, 보류 age가 한계에 도달하고 후보가 충분히 성장했을 때 새 관찰 후보로 전환하는지를 추적한다.
+`distinct` 목표율을 더 높게 둔 이유는 서로 다른 문장을 병합하면 원문 손실이 발생하고, 이후 번역도 복구할 수 없기 때문이다. `revision`과 `collapse`는 중복을 줄이는 방향의 품질 지표지만, 과도한 병합보다 손실 위험이 낮으므로 초기 목표율을 90%로 둔다. `stability`는 incremental ASR의 partial hypothesis instability와 revokes 문제를 현재 코드의 revision lifecycle에 맞춘 프록시 지표다. `replacement`는 2026-06-13 30분 운영 로그에서 관측된 staged 교체 손실을 직접 추적하기 위해 추가한 지표이며, `open_korean_clause`와 `partial_preserve` 결정의 회귀를 막는다. `pending`은 영어 장문처럼 경계가 늦게 나오는 구간에서 번역 지연 위험을 추적하고, 중국어 no-space STT 윈도우의 내부 재시작이 pending에 중복 접합되는지 확인하기 위한 지표다. `coalesce`는 중국어 punctuation 모델이 한 STT 윈도우를 여러 completed 후보로 나누면서 단일 staging 슬롯을 반복 교체하는 문제를 추적한다. `translation_quality`는 STT/문장 확정과 분리된 번역 모델 품질 축이다. 이 값은 실제 모델을 실행하는 패스 기준이 아니라, 운영 로그에서 관측한 source/observed 쌍을 기준으로 고유명사 보존, 도메인 용어 보존, 금지 오역을 확인하는 회귀 샘플 지표다. `stage_candidate`는 중국어 짧은 fragment를 즉시 stage하지 않되, 보류 age가 한계에 도달하고 후보가 충분히 성장했을 때 새 관찰 후보로 전환하는지를 추적한다.
 
 ### 12.1 운영 규칙
 
@@ -775,6 +777,41 @@ perf_samples=1064 max_stt=0.350s max_total=0.370s avg_total_rtf=0.010 translatio
 운영 판단은 Qwen3-ASR를 중국어 품질 우선 후보로 올리고, FunASR STT는 후보군에서 제외해 폐기한다는 것이다. 단, 현재 비교는 같은 입력 replay가 아니라 시간대가 다른 운영 로그 기반이므로 기본값 변경 전에는 동일 입력에서 `faster-whisper`, `qwen3-asr-0.6b`, `funasr-paraformer`를 replay 비교해야 한다. FunASR 관련 과거 로그는 기준선 기록으로만 문서에 남긴다.
 
 결론은 STT/staging 생명주기 병목과 번역 모델 품질 병목을 분리해서 본다는 것이다. 중국어 completed 병합은 문장 손실과 stage churn을 줄이기 위한 조치이며, 낮은 `translation_quality`는 중한 번역 백엔드/모델 비교 과제로 남긴다.
+
+## 12.5 2026-06-15 중국어 pending 내부 재시작 관측
+
+최근 3개 회전 로그(`avc-whisper.log`, `.1`, `.2`) 집계에서 계산 성능은 병목이 아니었다.
+
+```text
+diag=2494 duplicate=491 final=271 replace=160 discard=155 suppressed=29
+avg_stt_rtf=0.035 avg_total_rtf=0.035 avg_text_chars=101.5
+quality: cjk_internal_gap=194 mixed_latin_zh=37 latin_only_for_zh=6 no_end_marker=3
+```
+
+대표 문제는 pending이 길어진 상태에서 다음 STT 윈도우가 같은 CJK 구간을 내부 중간부터 다시 내보내는 경우였다.
+
+```text
+pending_tail=...喷枪
+new_text=条，然后把这米再切断了，摆成四个墩儿墩儿，然后就是火山的底座，然后上面这个洒的就更像熔岩一样，然后用喷枪
+old_result=...喷枪 条，然后把这米再切断了...
+```
+
+이 케이스는 문장 경계 모델의 구두점 결정 문제가 아니라 pending/new 접합 단계에서 내부 재시작을 새 continuation으로 오인한 문제다. 따라서 `pending_new_text_combined()`는 CJK no-space 텍스트에 한해 긴 내부 prefix overlap이 확인되면 `pending prefix + new_text`로 병합한다. 서로 다른 중국어 continuation은 인위적 공백을 넣지 않고 그대로 이어붙인다.
+
+반영 후 추적 테스트는 다음 회귀를 포함한다.
+
+- 내부 재시작: `...喷枪` 뒤에 `条，然后...喷枪`이 들어오는 경우 중복 tail을 제거한다.
+- 독립 continuation: `这个长得真的好像火山啊` 뒤에 `然后用喷枪把上面烤一下`이 들어오는 경우 공백 없이 이어붙는다.
+
+검증 결과:
+
+```text
+sentence boundary/revision/delta/repeat/performance related tests: 440 passed
+unit test discover: 567 passed
+./bin/avc test: passed, integration skipped=1
+```
+
+운영 파라미터(`windowSeconds=30`, `stepSeconds=2`, `commitLagSeconds=3`, `maxNewTokens=192`)는 이번 관측에서 병목으로 보이지 않았다. 우선순위는 STT 모델 품질과 pending/revision 생명주기 지표 개선이며, `final_quality_cjk_internal_gap`는 공백 없는 CJK 출력에서 false positive가 있을 수 있으므로 hard fail이 아니라 추세 지표로만 사용한다.
 
 ## 13) 점진적 적용 순서
 

@@ -94,6 +94,29 @@ def join_text_units(units: list[str], separator: str) -> str:
     return separator.join(units).strip()
 
 
+def has_cjk_chars(text: str) -> bool:
+    return any("\u3400" <= char <= "\u9fff" for char in text)
+
+
+def combine_by_internal_cjk_restart(pending_units: list[str], new_units: list[str]) -> str | None:
+    if len(pending_units) < 12 or len(new_units) < 12:
+        return None
+    best_i = 0
+    best_len = 0
+    for index in range(1, len(pending_units)):
+        length = 0
+        while index + length < len(pending_units) and length < len(new_units) and pending_units[index + length] == new_units[length]:
+            length += 1
+        if length > best_len:
+            best_i = index
+            best_len = length
+    if best_len < 12:
+        return None
+    if best_len / max(len(new_units), 1) < 0.45:
+        return None
+    return join_text_units(pending_units[:best_i] + new_units, "")
+
+
 def strip_incomplete_tail(text: str) -> str:
     normalized = normalized_text(text)
     units, separator = text_units(normalized)
@@ -147,10 +170,16 @@ def pending_new_text_combined(pending_text: str, new_text: str) -> str:
     new_units, new_separator = text_units(new)
     if pending_separator != new_separator:
         return normalized_text(f"{pending} {new}")
+    if pending_separator == "" and has_cjk_chars(pending) and has_cjk_chars(new):
+        internal_restart = combine_by_internal_cjk_restart(pending_units, new_units)
+        if internal_restart is not None:
+            return internal_restart
     max_overlap = min(len(pending_units), len(new_units))
     for overlap in range(max_overlap, 0, -1):
         if pending_units[-overlap:] == new_units[:overlap]:
             return join_text_units(pending_units + new_units[overlap:], pending_separator)
+    if pending_separator == "" and has_cjk_chars(pending) and has_cjk_chars(new):
+        return join_text_units(pending_units + new_units, "")
     return normalized_text(f"{pending} {new}")
 
 
