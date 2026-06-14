@@ -1263,25 +1263,13 @@ class WhisperTranscriptWindow:
 
         frame = ttk.Frame(self._stt_status_root, padding=10)
         frame.grid(row=0, column=0, sticky="nsew")
-        frame.columnconfigure(0, weight=1)
+        frame.columnconfigure(1, weight=1)
         frame.rowconfigure(0, weight=1)
 
-        self._stt_status_text = tk.Text(frame, wrap="word", undo=False)
-        self._configure_transcript_text_tags(self._stt_status_text)
-        self._stt_status_text.grid(row=0, column=0, sticky="nsew")
-        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self._stt_status_text.yview)
-        scrollbar.grid(row=0, column=1, sticky="ns")
-
-        def yscroll(first: str, last: str) -> None:
-            scrollbar.set(first, last)
-
-        self._stt_status_text.configure(yscrollcommand=yscroll)
-        self._stt_status_text.bind("<Key>", self._on_text_key)
-        self._stt_status_text.bind("<Button-3>", self._show_context_menu)
-        self._stt_status_text.bind("<Control-Button-1>", self._show_context_menu)
+        self._stt_status_text = self._create_numbered_text(frame, 0)
 
         actions = ttk.Frame(frame)
-        actions.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        actions.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(8, 0))
         actions.columnconfigure(0, weight=1)
         copy_btn = ttk.Button(
             actions, text="Copy All", command=lambda: self._copy_all(self._stt_status_text)
@@ -1294,7 +1282,6 @@ class WhisperTranscriptWindow:
 
         self._stt_status_root.bind("<Configure>", self._on_stt_status_configure)
         self._stt_status_root.protocol("WM_DELETE_WINDOW", self._hide_stt_status_window)
-
 
     def _create_translation_window(self) -> None:
         tk = self._tk
