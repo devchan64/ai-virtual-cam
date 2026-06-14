@@ -1448,7 +1448,7 @@ class WhisperTranscriptWindow:
             except queue.Empty:
                 break
             if event.kind == "transcript":
-                if event.display and event.final:
+                if event.display and not event.final:
                     self._append_stt_status_transcript(event.text)
                 if not event.final:
                     continue
