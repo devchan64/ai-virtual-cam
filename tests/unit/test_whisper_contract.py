@@ -3,6 +3,7 @@ import unittest
 from src.domain.contracts.whisper import (
     WHISPER_CONTRACT,
     resolve_funasr_model_name,
+    resolve_qwen_asr_model_name,
     whisper_stt_backends_for_language,
     whisper_allowed,
     whisper_default,
@@ -33,6 +34,7 @@ class WhisperContractTest(unittest.TestCase):
         self.assertEqual(whisper_stt_backends_for_language("en"), ("faster-whisper", "mock"))
         self.assertEqual(whisper_stt_backends_for_language("ko"), ("faster-whisper", "mock"))
         self.assertIn("funasr-paraformer", whisper_stt_backends_for_language("zh"))
+        self.assertIn("qwen3-asr-transformers", whisper_stt_backends_for_language("zh"))
 
     def test_contract_resolves_funasr_model_aliases(self) -> None:
         self.assertEqual(
@@ -44,6 +46,11 @@ class WhisperContractTest(unittest.TestCase):
             "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
         )
         self.assertEqual(resolve_funasr_model_name("iic/custom"), "iic/custom")
+
+    def test_contract_resolves_qwen_asr_model_aliases(self) -> None:
+        self.assertEqual(resolve_qwen_asr_model_name("qwen3-asr-0.6b"), "Qwen/Qwen3-ASR-0.6B")
+        self.assertEqual(resolve_qwen_asr_model_name("qwen3-asr-1.7b"), "Qwen/Qwen3-ASR-1.7B")
+        self.assertEqual(resolve_qwen_asr_model_name("Qwen/custom"), "Qwen/custom")
 
     def test_contract_validates_allowed_values(self) -> None:
         whisper_spec("language").validate_allowed("ko", path="whisper.language")

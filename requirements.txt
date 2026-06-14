@@ -9,3 +9,4 @@ sentencepiece==0.2.0
 
 wtpsplit
 funasr
+qwen-asr

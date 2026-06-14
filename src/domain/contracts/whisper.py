@@ -3,7 +3,7 @@ from __future__ import annotations
 from .fields import ConfigFieldSpec
 
 WHISPER_BACKENDS = ("faster-whisper", "openai-whisper", "whisper.cpp", "mock")
-WHISPER_STT_BACKENDS = ("faster-whisper", "funasr-paraformer", "funasr-sensevoice", "mock")
+WHISPER_STT_BACKENDS = ("faster-whisper", "funasr-paraformer", "funasr-sensevoice", "qwen3-asr-transformers", "mock")
 WHISPER_LANGUAGES = ("ko", "en", "zh")
 WHISPER_TASKS = ("transcribe", "translate")
 WHISPER_TRANSLATION_TARGET_LANGUAGES = ("en", "ko", "zh")
@@ -145,6 +145,16 @@ FUNASR_MODEL_ALIASES = {
 def resolve_funasr_model_name(model_name: str) -> str:
     normalized = str(model_name or "").strip()
     return FUNASR_MODEL_ALIASES.get(normalized, normalized)
+
+QWEN_ASR_MODEL_ALIASES = {
+    "qwen3-asr-0.6b": "Qwen/Qwen3-ASR-0.6B",
+    "qwen3-asr-1.7b": "Qwen/Qwen3-ASR-1.7B",
+}
+
+
+def resolve_qwen_asr_model_name(model_name: str) -> str:
+    normalized = str(model_name or "").strip()
+    return QWEN_ASR_MODEL_ALIASES.get(normalized.lower(), normalized)
 
 
 def whisper_default(key: str):

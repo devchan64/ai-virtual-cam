@@ -58,6 +58,15 @@ class DownloadWhisperModelsTest(unittest.TestCase):
             with patch("src.app.model_cache.Path.home", return_value=home):
                 self.assertTrue(module.is_funasr_model_cached("iic/SenseVoiceSmall"))
 
+    def test_check_model_assets_marks_missing_qwen_asr_model(self) -> None:
+        module = _load_module()
+        asset = module.ModelAsset("stt", "qwen3-asr-transformers", "qwen3-asr-0.6b")
+
+        with patch.object(module, "is_qwen_asr_model_cached", return_value=False):
+            missing = module.check_model_assets([asset])
+
+        self.assertEqual(missing, [asset])
+
     def test_download_progress_reports_downloaded_and_total_bytes(self) -> None:
         module = _load_module()
         with tempfile.TemporaryDirectory() as tmpdir:

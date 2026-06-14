@@ -165,7 +165,7 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         self.assertFalse(stt_visibility[(1, 2)])
         self.assertFalse(stt_visibility[(3, 4)])
         self.assertTrue(stt_visibility[(5, 6)])
-        self.assertEqual(gui._widgets["whisper_stt_backend_zh"].values, ("funasr-paraformer", "funasr-sensevoice", "mock"))
+        self.assertEqual(gui._widgets["whisper_stt_backend_zh"].values, ("funasr-paraformer", "funasr-sensevoice", "qwen3-asr-transformers", "mock"))
         self.assertEqual(gui._widgets["whisper_stt_model_zh"].values, ("paraformer-zh", "paraformer-zh-streaming"))
         backend_option_visibility = {
             rows: visible for parent, rows, visible in grid_calls if parent is gui._whisper_tab

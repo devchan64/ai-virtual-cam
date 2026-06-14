@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.domain.contracts.whisper import resolve_funasr_model_name
+from src.domain.contracts.whisper import resolve_funasr_model_name, resolve_qwen_asr_model_name
 
 
 def modelscope_model_cache_dir(model_name: str) -> Path:
@@ -46,6 +46,21 @@ def is_hf_repo_cached(repo_id: str) -> bool:
         return False
     normalized = str(repo_id or "").strip()
     return any(repo.repo_id == normalized or repo.repo_id.endswith(f"/{normalized}") for repo in cache_info.repos)
+
+
+def is_qwen_asr_model_cached(model_name: str) -> bool:
+    return is_hf_repo_cached(resolve_qwen_asr_model_name(model_name))
+
+
+def require_qwen_asr_model_cached(model_name: str, *, purpose: str) -> None:
+    resolved = resolve_qwen_asr_model_name(model_name)
+    if is_hf_repo_cached(resolved):
+        return
+    raise RuntimeError(
+        f"{purpose} 모델이 로컬 캐시에 없습니다: model={model_name} resolvedModel={resolved}. "
+        "Serve 실행 중 다운로드는 허용하지 않습니다. config GUI의 모델 다운로드 안내창 또는 "
+        "./bin/avc setup --download-whisper-models 로 먼저 다운로드하세요."
+    )
 
 
 def require_funasr_model_cached(model_name: str, *, purpose: str) -> None:

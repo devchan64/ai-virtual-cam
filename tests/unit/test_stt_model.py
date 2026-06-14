@@ -2,7 +2,7 @@ import contextlib
 import io
 import unittest
 
-from src.app.stt_model import FunasrSttModel, SttSegment, funasr_generated_text
+from src.app.stt_model import FunasrSttModel, SttSegment, funasr_generated_text, qwen_asr_generated_text
 
 
 class SttModelTest(unittest.TestCase):
@@ -11,6 +11,19 @@ class SttModelTest(unittest.TestCase):
 
     def test_funasr_generated_text_joins_multiple_items(self) -> None:
         self.assertEqual(funasr_generated_text([{"text": "你好"}, {"text": "世界"}]), "你好 世界")
+
+    def test_qwen_asr_generated_text_reads_object_response(self) -> None:
+        class Result:
+            text = "你好世界"
+            language = "Chinese"
+
+        self.assertEqual(qwen_asr_generated_text([Result()], fallback_language="zh"), ("你好世界", "zh"))
+
+    def test_qwen_asr_generated_text_reads_dict_response(self) -> None:
+        self.assertEqual(
+            qwen_asr_generated_text([{"text": "hello", "language": "English"}], fallback_language="zh"),
+            ("hello", "en"),
+        )
 
     def test_stt_segment_defaults_are_accepted_by_whisper_filters(self) -> None:
         segment = SttSegment("你好世界")

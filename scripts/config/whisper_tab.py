@@ -239,7 +239,7 @@ def build_whisper_tab(
         runtime_frame,
         runtime_row,
         "whisper_commit_lag_seconds",
-        gui._tr("label.whisper_commit_lag_seconds", "확정 지연(초)"),
+        gui._tr("label.whisper_commit_lag_seconds", "Tail 확정 지연(초)"),
         whisper_default("commitLagSeconds"),
         0.0,
         5.0,
@@ -292,7 +292,7 @@ def build_whisper_tab(
         runtime_frame,
         runtime_row,
         "hint.whisper_speed",
-        "업데이트 간격/컨텍스트/확정 지연은 공통 STT 스트리밍 설정입니다. Beam, 최대 토큰, temperature, 연산 타입은 선택한 STT 모델 타입이 지원할 때만 표시됩니다.",
+        "업데이트 간격/컨텍스트/확정 지연은 공통 STT 스트리밍 설정입니다. 확정 지연은 윈도우 끝의 불안정한 tail을 잠시 보류하는 값이며, 문장 경계 모델이 찾은 후보도 별도 재확인 과정을 거친 뒤 final로 출력됩니다. Beam, 최대 토큰, temperature, 연산 타입은 선택한 STT 모델 타입이 지원할 때만 표시됩니다.",
     )
     gui._whisper_backend_option_parent = runtime_frame
     gui._whisper_backend_option_rows = {

@@ -149,9 +149,9 @@ new:      "in the United States to take delivery"
 초기 구현 원칙:
 - 이전/현재 결과의 최장 공통 접두사를 찾아 겹친 부분을 고정 문맥으로 본다.
 - 겹치지 않는 신규 부분만 `candidate_text`로 계산한다.
-- `commitLagSeconds` 구간은 즉시 확정하지 않는다.
-- 동일 후보 재확인 횟수(`staged_confirmations`)를 만족할 때만 `confirmed`를 확장한다.
-- 현재 기본 확정 기준은 일반 후보 3회, 강제 후보 4회 재확인이다.
+- `commitLagSeconds` 구간은 즉시 확정하지 않는다. 이 값은 STT 윈도우 끝단의 불안정한 tail을 보류하는 입력 안정화 장치이며, 문장 경계 모델의 신뢰도와는 별개의 시간 보류값이다.
+- 동일 후보 재확인 횟수(`staged_confirmations`)를 만족할 때만 `confirmed`를 확장한다. 문장 경계 모델이 `completed` 후보를 반환해도 STT 가설 텍스트는 다음 윈도우에서 고쳐질 수 있으므로, 후보 재확인은 ASR revision 안정성을 확인하는 생명주기다.
+- 현재 기본 확정 기준은 일반 후보 3회, 강제 후보 4회 재확인이다. 문장 경계 성능이 충분해 보이는 언어/백엔드에서도 확정 지연을 제거하기보다는 `commitLagSeconds`와 재확인 횟수를 분리해 지표 기반으로 낮춘다.
 - 구두점 없는 한글 열린 절(`이 두 직업은`, `저녁에 퇴근하고` 등)은 반복 관측만으로 확정하지 않고 다음 revision 기회를 유지한다.
 - 정교화 단계에서는 `word_timestamps=true` 기반 시간 정합 후보를 도입한다.
 
@@ -382,7 +382,7 @@ STT 모델과 문장 경계 모델의 책임을 분리해 검증한다.
 - FunASR 논문은 Paraformer를 60,000시간 Mandarin 데이터로 학습한 핵심 모델로 설명하며, timestamp, hotword customization, FSMN-VAD, CT-Transformer punctuation을 함께 제공한다.
 - 논문 보고 기준으로 Paraformer-large는 AISHELL test CER 1.95, AISHELL-2 test_ios CER 2.85, WenetSpeech test_meeting CER 6.97을 기록했다.
 - FunASR 공식 repo는 `paraformer-zh`, `paraformer-zh-streaming`, `ct-punc`, `fsmn-vad` 모델군과 CUDA 실행 예시를 제공한다.
-- 중국어 고정 전사와 실시간성 요구에는 `paraformer-zh` 또는 `paraformer-zh-streaming`이 1차 실험 후보이다.
+- 중국어 고정 전사와 실시간성 요구에는 `paraformer-zh` 또는 `paraformer-zh-streaming`을 1차 실험 후보로 검토했으나, 2026-06-14 운영 로그에서는 Paraformer 전사 원문 품질이 목표에 미치지 못했다. `boundary_conf=1.00`인 상태에서도 의미가 무너진 중국어 후보가 반복되어, 현재 문제는 문장 경계보다 STT 원문 품질에 가깝다.
 
 권장 실험값:
 
@@ -396,12 +396,30 @@ STT 모델과 문장 경계 모델의 책임을 분리해 검증한다.
 }
 ```
 
-#### 후보 2: SenseVoiceSmall
+#### 후보 2: Qwen3-ASR
+
+- Qwen3-ASR Technical Report와 공식 모델 카드는 `Qwen3-ASR-0.6B`, `Qwen3-ASR-1.7B`가 중국어, 영어, 한국어를 포함한 30개 언어와 22개 중국어 방언을 지원한다고 설명한다.
+- 공식 모델 카드는 offline/streaming 통합 추론, 긴 오디오 전사, transformers 백엔드와 vLLM 백엔드를 제공한다고 설명한다.
+- 논문은 1.7B가 오픈소스 ASR 중 SOTA 수준이며, 0.6B는 정확도/효율 균형과 낮은 TTFT를 목표로 한다고 보고한다.
+- 현재 프로젝트에는 1차 패치로 `qwen3-asr-transformers` 백엔드를 확보한다. vLLM streaming 백엔드는 별도 서버 수명주기와 GPU 메모리 정책이 필요하므로 후속 실험으로 분리한다.
+
+권장 실험값:
+
+```json
+{
+  "sttBackendZh": "qwen3-asr-transformers",
+  "sttModelZh": "qwen3-asr-0.6b",
+  "sentenceBoundaryBackendZh": "funasr-ct-punc",
+  "sentenceBoundaryModelZh": "ct-punc-c"
+}
+```
+
+#### 후보 3: SenseVoiceSmall
 
 - SenseVoice는 ASR, language identification, speech emotion recognition, audio event detection을 포함하는 speech foundation model이다.
 - 공식 문서와 모델 카드는 Mandarin, Cantonese, English, Japanese, Korean을 지원하며, 중국어/광둥어 benchmark에서 Whisper 대비 장점이 있다고 설명한다.
 - SenseVoiceSmall은 non-autoregressive 구조로 낮은 지연을 목표로 하므로, 중국어/한국어/영어를 모두 다루는 통합 후보로 실험 가치가 있다.
-- 다만 현재 문제는 중국어 고정 전사이므로, 1차 후보는 Paraformer-zh로 두고 SenseVoiceSmall은 2차 비교군으로 둔다.
+- Paraformer-zh 품질 부족이 관측되었으므로 SenseVoiceSmall, Qwen3-ASR 계열, Paraformer streaming 모델을 같은 입력 오디오로 비교하는 다음 실험군으로 둔다.
 
 권장 실험값:
 
@@ -799,6 +817,9 @@ perf_samples=1064 max_stt=0.350s max_total=0.370s avg_total_rtf=0.010 translatio
 - [FunASR: A Fundamental End-to-End Speech Recognition Toolkit](https://arxiv.org/abs/2305.11013)
 - [FunASR GitHub README](https://github.com/modelscope/FunASR)
 - [FunAudioLLM: Voice Understanding and Generation Foundation Models for Natural Interaction Between Humans and LLMs](https://arxiv.org/abs/2407.04051)
+- [Qwen3-ASR Technical Report](https://arxiv.org/abs/2601.21337)
+- [Qwen3-ASR-0.6B Hugging Face Model Card](https://huggingface.co/Qwen/Qwen3-ASR-0.6B)
+- [Qwen3-ASR-1.7B Hugging Face Model Card](https://huggingface.co/Qwen/Qwen3-ASR-1.7B)
 - [SenseVoice GitHub README](https://github.com/FunAudioLLM/SenseVoice)
 - [SenseVoiceSmall Hugging Face Model Card](https://huggingface.co/FunAudioLLM/SenseVoiceSmall)
 - [WeNet: Production oriented Streaming and Non-streaming End-to-End Speech Recognition Toolkit](https://arxiv.org/abs/2102.01547)

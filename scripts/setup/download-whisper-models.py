@@ -18,10 +18,11 @@ if str(ROOT_DIR) not in sys.path:
 from src.app.model_cache import (
     is_funasr_model_cached,
     is_hf_repo_cached,
+    is_qwen_asr_model_cached,
     modelscope_legacy_cache_dir,
     modelscope_model_cache_dir,
 )
-from src.domain.contracts.whisper import resolve_funasr_model_name
+from src.domain.contracts.whisper import resolve_funasr_model_name, resolve_qwen_asr_model_name
 from src.domain.whisper_defaults import whisper_default
 
 
@@ -222,6 +223,8 @@ def check_model_assets(assets: list[ModelAsset]) -> list[ModelAsset]:
                 ready = check_faster_whisper_model(asset.model)
             elif backend.startswith("funasr-"):
                 ready = is_funasr_model_cached(asset.model)
+            elif backend == "qwen3-asr-transformers":
+                ready = is_qwen_asr_model_cached(asset.model)
         elif asset.kind == "boundary":
             if backend == "sat":
                 ready = check_sat_model(asset.model)
@@ -315,6 +318,20 @@ def download_funasr_stt_model(model_name: str) -> None:
         action
     )
     _log(f"FunASR STT model ready: {model_name} resolved={resolved}")
+
+
+def download_qwen_asr_model(model_name: str) -> None:
+    resolved = resolve_qwen_asr_model_name(model_name)
+    _log(f"Downloading Qwen3-ASR STT model: {model_name} resolved={resolved}")
+    from huggingface_hub import snapshot_download
+
+    total_size = _hf_model_total_size(resolved)
+
+    def action() -> None:
+        snapshot_download(resolved)
+
+    _run_with_progress(f"qwen3-asr:{model_name}", [_hf_cache_dir(resolved)], total_size, action)
+    _log(f"Qwen3-ASR STT model ready: {model_name} resolved={resolved}")
 
 
 def download_nllb_model(model_name: str) -> None:
@@ -432,6 +449,8 @@ def main() -> int:
                 download_faster_whisper_model(asset.model)
             elif backend_name.startswith("funasr-"):
                 download_funasr_stt_model(asset.model)
+            elif backend_name == "qwen3-asr-transformers":
+                download_qwen_asr_model(asset.model)
             else:
                 _log(f"Skipping STT model download for backend: {asset.backend}")
         elif asset.kind == "boundary":

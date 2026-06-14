@@ -322,6 +322,9 @@ verify_whisper_runtime_contract() {
   if ! run_as_invoking_user "$venv_py" -c "import funasr" >/dev/null 2>&1; then
     fail "FunASR is not importable in .venv. Run ./bin/avc setup again to install Chinese Whisper post-processing dependencies, including torchaudio."
   fi
+  if ! run_as_invoking_user "$venv_py" -c "import qwen_asr" >/dev/null 2>&1; then
+    fail "qwen-asr is not importable in .venv. Run ./bin/avc setup again to install Qwen3-ASR STT dependencies."
+  fi
   if [[ "$OS_KIND" == "linux" && "$INSTALL_TRANSLATION_TORCH" == "1" ]]; then
     run_as_invoking_user "$venv_py" - <<'PYVERIFY'
 import torch
