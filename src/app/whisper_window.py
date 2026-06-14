@@ -291,6 +291,14 @@ def _is_modal_output_event(event: TranscriptEvent) -> bool:
     return event.display and event.kind in {"transcript", "translation", "error"}
 
 
+def _is_sliding_window_status_event(text: str) -> bool:
+    if not text:
+        return False
+    text = str(text)
+    prefixes = ("Whisper 전사 요청:", "Whisper 문장 진단:", "Whisper 성능:", "Whisper 안정성 지표:")
+    return any(text.startswith(prefix) for prefix in prefixes)
+
+
 class WhisperTranscriptWorker:
     def __init__(self, config: WhisperConfig, events: queue.Queue[TranscriptEvent]) -> None:
         self._cfg = config
@@ -1430,7 +1438,7 @@ class WhisperTranscriptWindow:
                 event = self._events.get_nowait()
             except queue.Empty:
                 break
-            if event.kind == "status" and self._stt_status_text is not None and event.display:
+            if event.kind == "status" and self._stt_status_text is not None and event.display and _is_sliding_window_status_event(event.text):
                 self._append(event.text, self._stt_status_text, final=event.final)
                 continue
             if event.kind == "transcript" and event.display:
