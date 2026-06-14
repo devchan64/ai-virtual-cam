@@ -742,6 +742,7 @@ class WhisperConfig:
     language: str
     task: str
     translationEnabled: bool
+    showSttStatusWindow: bool
     translationTargetLanguage: str
     translationBackend: str
     translationModel: str
@@ -789,6 +790,7 @@ class WhisperConfig:
             language=str(raw.get("language", whisper_default("language"))).strip(),
             task=str(raw.get("task", whisper_default("task"))).strip(),
             translationEnabled=bool(raw.get("translationEnabled", raw.get("task") == "translate")),
+            showSttStatusWindow=bool(raw.get("showSttStatusWindow", whisper_default("showSttStatusWindow"))),
             translationTargetLanguage=str(raw.get("translationTargetLanguage", translation_target_default)).strip(),
             translationBackend=str(raw.get("translationBackend", translation_backend_default)).strip(),
             translationModel=str(raw.get("translationModel", whisper_default("translationModel"))).strip(),

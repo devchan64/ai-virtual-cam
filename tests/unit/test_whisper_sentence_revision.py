@@ -543,6 +543,17 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
                 self.assertEqual(reason, "unconfirmed_cjk")
                 self.assertTrue(_should_stage_replacement_candidate(staged, candidate, reason))
 
+    def test_chinese_short_candidate_suppression_releases_after_age_and_growth(self) -> None:
+        staged = "我上次发现的都。"
+        early_candidate = "继续。"
+        grown_candidate = "继续吃，等下吃完再去下。"
+        reason = _replacement_decision_reason(staged, grown_candidate, 1, False, 3)
+
+        self.assertEqual(reason, "unconfirmed_cjk")
+        self.assertFalse(_should_stage_replacement_candidate(staged, early_candidate, reason, 3, 3))
+        self.assertFalse(_should_stage_replacement_candidate(staged, grown_candidate, reason, 2, 3))
+        self.assertTrue(_should_stage_replacement_candidate(staged, grown_candidate, reason, 3, 3))
+
     def test_chinese_confirmed_stage_can_finalize_on_replacement(self) -> None:
         staged = "如果你跟绑匪妥协的话，就会导致第二例案情的发生。"
         candidate = "所以世。"

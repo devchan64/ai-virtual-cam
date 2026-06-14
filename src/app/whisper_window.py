@@ -783,13 +783,20 @@ class WhisperTranscriptWorker:
             else:
                 count_metric("stage_discard")
                 count_metric(f"stage_discard_reason_{replacement_reason}")
-                should_stage_candidate = _should_stage_replacement_candidate(staged_sentence, candidate, replacement_reason)
+                max_age = _sentence_max_age_chunks(staged_forced)
+                should_stage_candidate = _should_stage_replacement_candidate(
+                    staged_sentence,
+                    candidate,
+                    replacement_reason,
+                    staged_age,
+                    max_age,
+                )
                 self._emit(
                     "status",
                     "Whisper stage 폐기: "
                     f"chunk={chunks} reason=replaced_unconfirmed "
                     f"staged_confirmations={staged_confirmations} required={_sentence_required_confirmations(staged_forced)} "
-                    f"staged_age={staged_age} max_age={_sentence_max_age_chunks(staged_forced)} "
+                    f"staged_age={staged_age} max_age={max_age} "
                     f"staged_forced={staged_forced} staged_tail={_diagnostic_tail(staged_sentence)} "
                     f"candidate_tail={_diagnostic_tail(candidate)} candidate_stage={should_stage_candidate}",
                     display=False,
@@ -798,6 +805,8 @@ class WhisperTranscriptWorker:
                 if not should_stage_candidate:
                     count_metric("stage_candidate_suppressed")
                     count_metric(f"stage_candidate_suppressed_reason_{replacement_reason}")
+                    if staged_age >= max_age:
+                        count_metric("stage_candidate_suppressed_age_overrun")
                     staged_age += 1
                     staged_translation_pending = True
                     self._emit(

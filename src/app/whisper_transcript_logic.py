@@ -850,17 +850,26 @@ def _should_finalize_replaced_sentence(
     ) in {"confirmed", "aged", "duplicate_or_suffix", "partial_preserve", "finalize"}
 
 
-def _should_stage_replacement_candidate(staged_sentence: str, candidate: str, replacement_reason: str) -> bool:
+def _should_stage_replacement_candidate(
+    staged_sentence: str,
+    candidate: str,
+    replacement_reason: str,
+    staged_age: int = 0,
+    max_age: int | None = None,
+) -> bool:
     if replacement_reason != "unconfirmed_cjk":
         return True
     candidate_words = _word_units(candidate)
     cjk_units = [word for word in candidate_words if _has_cjk_words([word])]
-    if 0 < len(cjk_units) <= SHORT_CJK_FINAL_UNITS:
-        return False
     staged_words = _word_units(staged_sentence)
     staged_cjk_units = [word for word in staged_words if _has_cjk_words([word])]
+    age_limit = SENTENCE_CONFIRM_MAX_AGE_CHUNKS if max_age is None else max_age
+    aged_enough = staged_age >= age_limit
+    enough_growth = len(cjk_units) >= len(staged_cjk_units) + 3
+    if 0 < len(cjk_units) <= SHORT_CJK_FINAL_UNITS:
+        return aged_enough and enough_growth
     if 0 < len(staged_cjk_units) <= SHORT_CJK_FINAL_UNITS and len(cjk_units) <= SHORT_CJK_FINAL_UNITS + 4:
-        return False
+        return aged_enough and enough_growth
     return True
 
 

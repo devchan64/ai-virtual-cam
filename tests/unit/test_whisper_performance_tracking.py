@@ -8,6 +8,7 @@ from src.app.whisper_window import (
     _normalized_text,
     _pending_overrun_reason,
     _replacement_decision_reason,
+    _should_stage_replacement_candidate,
     _sentence_output_delta,
     _sentences_are_revisions,
 )
@@ -26,6 +27,7 @@ TRACKING_TARGETS = {
     "final_quality": {"target_cases": 8, "target_rate": 0.90},
     "translation_quality": {"target_cases": 8, "target_rate": 0.80},
     "coalesce": {"target_cases": 10, "target_rate": 1.00},
+    "stage_candidate": {"target_cases": 4, "target_rate": 1.00},
 }
 
 REVISION_TRACKING_CASES = [
@@ -709,7 +711,71 @@ REPLACEMENT_TRACKING_CASES.extend([
         "expected": "unconfirmed_cjk",
         "source": "2026-06-14 avc-whisper.log.5 chunk 12153 zh language-mismatch churn",
     },
+    {
+        "staged": "我上次发现的都。",
+        "candidate": "继续吃，等下吃完再去下。",
+        "expected": "unconfirmed_cjk",
+        "age": 3,
+        "source": "2026-06-14 30m monitor chunk 104 aged short CJK suppression release",
+    },
+    {
+        "staged": "来看看吉普力哦，这是什么？",
+        "candidate": "可爱哦，好。",
+        "expected": "unconfirmed_cjk",
+        "age": 3,
+        "source": "2026-06-14 30m monitor chunk 121 short CJK candidate remains suppressed",
+    },
+    {
+        "staged": "厉害的吧，应应该。",
+        "candidate": "厉害的宝宝应该会喜欢我，刚刚。",
+        "expected": "unconfirmed_cjk",
+        "source": "2026-06-14 30m monitor chunk 74 short CJK candidate suppressed",
+    },
 ])
+
+
+STAGE_CANDIDATE_TRACKING_CASES = [
+    {
+        "staged": "我上次发现的都。",
+        "candidate": "爸爸妈。爸。",
+        "age": 2,
+        "max_age": 3,
+        "expected": False,
+        "source": "2026-06-14 30m monitor chunk 101 short candidate remains suppressed",
+    },
+    {
+        "staged": "我上次发现的都。",
+        "candidate": "继续吃，等下吃完再去下。",
+        "age": 2,
+        "max_age": 3,
+        "expected": False,
+        "source": "2026-06-14 30m monitor chunk 104 before max age",
+    },
+    {
+        "staged": "我上次发现的都。",
+        "candidate": "继续吃，等下吃完再去下。",
+        "age": 3,
+        "max_age": 3,
+        "expected": True,
+        "source": "2026-06-14 30m monitor chunk 104 aged growth release",
+    },
+    {
+        "staged": "来看看吉普力哦，这是什么？",
+        "candidate": "可爱哦，好。",
+        "age": 3,
+        "max_age": 3,
+        "expected": False,
+        "source": "2026-06-14 30m monitor chunk 121 short candidate remains suppressed",
+    },
+    {
+        "staged": "厉害的吧，应应该。",
+        "candidate": "厉害的宝宝应该会喜欢我，刚刚。",
+        "age": 0,
+        "max_age": 3,
+        "expected": False,
+        "source": "2026-06-14 30m monitor chunk 74 early short candidate suppressed",
+    },
+]
 
 
 TRANSLATION_OBSERVED_QUALITY_CASES = [
@@ -1017,6 +1083,26 @@ def _make_replacement_tracking_test(index: int, case: dict[str, object]):
     return test
 
 
+def _make_stage_candidate_tracking_test(index: int, case: dict[str, object]):
+    def test(self: WhisperPerformanceTrackingTest) -> None:
+        reason = _replacement_decision_reason(
+            str(case["staged"]),
+            str(case["candidate"]),
+            int(case.get("confirmations", 1)),
+            bool(case.get("forced", False)),
+            int(case.get("age", 0)),
+        )
+        actual = _should_stage_replacement_candidate(
+            str(case["staged"]),
+            str(case["candidate"]),
+            reason,
+            int(case.get("age", 0)),
+            int(case.get("max_age", 3)),
+        )
+        self._record("stage_candidate", f"stage_candidate_{index:03d}", actual == bool(case["expected"]))
+    return test
+
+
 def _make_stability_tracking_test(index: int, sequence: list[str]):
     def test(self: WhisperPerformanceTrackingTest) -> None:
         transition_results = []
@@ -1085,6 +1171,13 @@ for _index, _case in enumerate(REPLACEMENT_TRACKING_CASES, 1):
         WhisperPerformanceTrackingTest,
         f"test_tracking_replacement_{_index:03d}",
         _make_replacement_tracking_test(_index, _case),
+    )
+
+for _index, _case in enumerate(STAGE_CANDIDATE_TRACKING_CASES, 1):
+    setattr(
+        WhisperPerformanceTrackingTest,
+        f"test_tracking_stage_candidate_{_index:03d}",
+        _make_stage_candidate_tracking_test(_index, _case),
     )
 
 for _index, _sequence in enumerate(STABILITY_TRACKING_SEQUENCES, 1):

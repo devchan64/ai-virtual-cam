@@ -80,6 +80,7 @@ def whisper_stt_backends_for_language(language: str) -> tuple[str, ...]:
 
 WHISPER_CONTRACT: dict[str, ConfigFieldSpec] = {
     "enabled": ConfigFieldSpec("enabled", False, bool),
+    "showSttStatusWindow": ConfigFieldSpec("showSttStatusWindow", False, bool),
     "backend": ConfigFieldSpec("backend", "faster-whisper", str, allowed=WHISPER_BACKENDS, ui_group="stt.global"),
     "model": ConfigFieldSpec("model", "large-v3", str, ui_group="stt.global"),
     "sttBackendEn": ConfigFieldSpec("sttBackendEn", "faster-whisper", str, allowed=WHISPER_STT_BACKENDS, ui_group="stt.en"),

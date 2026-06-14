@@ -128,6 +128,7 @@ class WhisperConfigTest(unittest.TestCase):
                 "sttModelZh": "paraformer-zh",
                 "language": "en",
                 "task": "transcribe",
+                "showSttStatusWindow": False,
                 "translationEnabled": True,
                 "translationTargetLanguage": "ko",
                 "translationBackend": "nllb-transformers",

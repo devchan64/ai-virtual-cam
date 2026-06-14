@@ -607,8 +607,9 @@ unittest 성공은 테스트 코드가 실행되어 지표가 수집되었다는
 | `pending` | 긴 pending이 확정되지 않는 사유를 지표화해 번역 지연 위험을 추적하는지 | 10 | 90% 이상 |
 | `coalesce` | 중국어 completed 후보가 같은 STT 윈도우 안에서 여러 개 나올 때 단일 관측 단위로 병합되는지 | 10 | 100% |
 | `translation_quality` | 관측된 번역 출력 샘플에서 고유명사/도메인 용어/명백한 환각 회귀를 추적하는지 | 8 | 80% 이상 |
+| `stage_candidate` | 중국어 staged 후보를 보류/전환하는 결정이 장기 보류 없이 동작하는지 | 4 | 100% |
 
-`distinct` 목표율을 더 높게 둔 이유는 서로 다른 문장을 병합하면 원문 손실이 발생하고, 이후 번역도 복구할 수 없기 때문이다. `revision`과 `collapse`는 중복을 줄이는 방향의 품질 지표지만, 과도한 병합보다 손실 위험이 낮으므로 초기 목표율을 90%로 둔다. `stability`는 incremental ASR의 partial hypothesis instability와 revokes 문제를 현재 코드의 revision lifecycle에 맞춘 프록시 지표다. `replacement`는 2026-06-13 30분 운영 로그에서 관측된 staged 교체 손실을 직접 추적하기 위해 추가한 지표이며, `open_korean_clause`와 `partial_preserve` 결정의 회귀를 막는다. `pending`은 영어 장문처럼 경계가 늦게 나오는 구간에서 번역 지연 위험을 추적하기 위한 지표다. `coalesce`는 중국어 punctuation 모델이 한 STT 윈도우를 여러 completed 후보로 나누면서 단일 staging 슬롯을 반복 교체하는 문제를 추적한다. `translation_quality`는 STT/문장 확정과 분리된 번역 모델 품질 축이다. 이 값은 실제 모델을 실행하는 패스 기준이 아니라, 운영 로그에서 관측한 source/observed 쌍을 기준으로 고유명사 보존, 도메인 용어 보존, 금지 오역을 확인하는 회귀 샘플 지표다.
+`distinct` 목표율을 더 높게 둔 이유는 서로 다른 문장을 병합하면 원문 손실이 발생하고, 이후 번역도 복구할 수 없기 때문이다. `revision`과 `collapse`는 중복을 줄이는 방향의 품질 지표지만, 과도한 병합보다 손실 위험이 낮으므로 초기 목표율을 90%로 둔다. `stability`는 incremental ASR의 partial hypothesis instability와 revokes 문제를 현재 코드의 revision lifecycle에 맞춘 프록시 지표다. `replacement`는 2026-06-13 30분 운영 로그에서 관측된 staged 교체 손실을 직접 추적하기 위해 추가한 지표이며, `open_korean_clause`와 `partial_preserve` 결정의 회귀를 막는다. `pending`은 영어 장문처럼 경계가 늦게 나오는 구간에서 번역 지연 위험을 추적하기 위한 지표다. `coalesce`는 중국어 punctuation 모델이 한 STT 윈도우를 여러 completed 후보로 나누면서 단일 staging 슬롯을 반복 교체하는 문제를 추적한다. `translation_quality`는 STT/문장 확정과 분리된 번역 모델 품질 축이다. 이 값은 실제 모델을 실행하는 패스 기준이 아니라, 운영 로그에서 관측한 source/observed 쌍을 기준으로 고유명사 보존, 도메인 용어 보존, 금지 오역을 확인하는 회귀 샘플 지표다. `stage_candidate`는 중국어 짧은 fragment를 즉시 stage하지 않되, 보류 age가 한계에 도달하고 후보가 충분히 성장했을 때 새 관찰 후보로 전환하는지를 추적한다.
 
 ### 12.1 운영 규칙
 
@@ -702,6 +703,15 @@ revision=97/107 rate=0.907 target>=0.90
 collapse=49/53 rate=0.925 target>=0.90
 translation_quality=2/8 rate=0.250 target>=0.80
 ```
+
+2026-06-14 30분 중국어 STT 모니터링 결과:
+
+```text
+replace=570 discard=568 suppressed=266 revision=327 finalized=137 no_result=20
+perf_samples=1064 max_stt=0.350s max_total=0.370s avg_total_rtf=0.010 translation=0
+```
+
+이 관측에서는 CUDA/FunASR STT 처리 속도는 충분히 빠르며, `chunkSeconds=9.0`, `stepSeconds=1.5`, `commitLagSeconds=2.0` 기본값을 더 공격적으로 줄일 근거는 부족했다. 병목은 성능 파라미터보다 중국어 stage 후보 생명주기였다. 특히 짧은 CJK 후보를 보류하는 정책이 필요한 동시에, 보류 age가 `SENTENCE_CONFIRM_MAX_AGE_CHUNKS`에 도달하고 후보가 기존 stage보다 충분히 길어진 경우에는 새 관찰 후보로 전환해야 장기 보류가 줄어든다.
 
 결론은 STT/staging 생명주기 병목과 번역 모델 품질 병목을 분리해서 본다는 것이다. 중국어 completed 병합은 문장 손실과 stage churn을 줄이기 위한 조치이며, 낮은 `translation_quality`는 중한 번역 백엔드/모델 비교 과제로 남긴다.
 
