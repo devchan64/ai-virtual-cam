@@ -1446,8 +1446,11 @@ class WhisperTranscriptWindow:
             if event.kind == "status" and self._stt_status_text is not None and event.display:
                 self._append(event.text, self._stt_status_text, final=event.final)
                 continue
-            if event.kind == "transcript" and self._stt_status_text is not None and event.display:
-                self._append(event.text, self._stt_status_text, final=event.final)
+            if event.kind == "transcript" and event.display:
+                if self._stt_status_text is not None:
+                    self._append(event.text, self._stt_status_text, final=event.final)
+                if not event.final:
+                    continue
             if not _is_modal_output_event(event):
                 continue
             if event.kind == "translation" and self._translation_text is not None:

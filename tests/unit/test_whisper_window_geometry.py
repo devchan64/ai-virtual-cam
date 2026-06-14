@@ -343,6 +343,42 @@ class WhisperWindowGeometryTest(unittest.TestCase):
         self.assertIn(("end", "안녕하세요\n", FINAL_TEXT_TAG), window._stt_status_text.lines)
         self.assertIn(("end", "안녕하세요\n", FINAL_TEXT_TAG), window._text.lines)
 
+
+    def test_partial_transcript_not_shown_in_transcript_window(self) -> None:
+        class FakeRoot:
+            def after(self, delay, callback):
+                self.delay = delay
+                self.callback = callback
+
+        class FakeText:
+            def __init__(self) -> None:
+                self.lines = []
+
+            def insert(self, index, text, tag=None) -> None:
+                self.lines.append((index, text, tag))
+
+            def delete(self, start, end) -> None:
+                self.lines.append((start, end, "DELETE"))
+
+            def see(self, index) -> None:
+                self.lines.append((index, "SEE"))
+
+        window = WhisperTranscriptWindow.__new__(WhisperTranscriptWindow)
+        window._stt_status_text = FakeText()
+        window._text = FakeText()
+        window._translation_text = None
+        window._transcript_partial_active = False
+        window._translation_partial_active = False
+        window._root = FakeRoot()
+        window._events = queue.Queue()
+        window._update_line_numbers = lambda _widget: None
+
+        window._events.put(TranscriptEvent("transcript", "임시 문장", display=True, final=False))
+        window._poll_events()
+
+        self.assertIn(("end", "임시 문장", PARTIAL_TEXT_TAG), window._stt_status_text.lines)
+        self.assertNotIn(("end", "임시 문장", PARTIAL_TEXT_TAG), window._text.lines)
+
     def test_sanitizes_geometry_before_restore(self) -> None:
         self.assertEqual(
             _sanitize_window_geometry("820x460+120+80", 1920, 1080),
