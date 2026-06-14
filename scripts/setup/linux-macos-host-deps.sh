@@ -107,6 +107,7 @@ elevate_linux_with_sudo() {
     AVC_TENSORRT_ENGINE_FORCE="$TENSORRT_ENGINE_FORCE" \
     AVC_INSTALL_WHISPER_CUDA="$INSTALL_WHISPER_CUDA" \
     AVC_INSTALL_TRANSLATION_TORCH="$INSTALL_TRANSLATION_TORCH" \
+    AVC_INSTALL_QWEN_VLLM="$INSTALL_QWEN_VLLM" \
     AVC_TORCH_INDEX_URL="$TORCH_INDEX_URL" \
     bash "$0" "$@"
 }
@@ -276,6 +277,32 @@ install_translation_torch_packages() {
 
   log "Installing PyTorch/Torchaudio for Whisper translation from $torch_index_url"
   run_as_invoking_user "$venv_py" -m pip install --upgrade torch torchaudio --index-url "$torch_index_url"
+  remove_shared_venv_torch_conflicts "$venv_py"
+}
+
+remove_shared_venv_torch_conflicts() {
+  local venv_py="$1"
+  log "Removing optional Python packages that conflict with the shared PyTorch CUDA runtime"
+  run_as_invoking_user "$venv_py" - <<'PYCLEANUP'
+import importlib.metadata as metadata
+import subprocess
+import sys
+
+conflicting_packages = []
+for package_name in ("torchvision", "cuda-python", "flashinfer-python", "nvidia-cutlass-dsl", "nvidia-cutlass-dsl-libs-base"):
+    try:
+        metadata.version(package_name)
+    except metadata.PackageNotFoundError:
+        continue
+    conflicting_packages.append(package_name)
+
+if not conflicting_packages:
+    print("[ai-virtual-cam] No shared PyTorch CUDA runtime conflicts found")
+    raise SystemExit(0)
+
+print("[ai-virtual-cam] Removing incompatible optional packages: " + ", ".join(conflicting_packages))
+subprocess.check_call([sys.executable, "-m", "pip", "uninstall", "-y", *conflicting_packages])
+PYCLEANUP
 }
 
 install_whisper_cuda_runtime_packages() {
