@@ -16,14 +16,7 @@ def whisper_stt_backend_options(language: str | None = None) -> list[str]:
     if normalized_language in {"en", "ko"}:
         return ["faster-whisper", "mock"]
     if normalized_language == "zh":
-        return [
-            "faster-whisper",
-            "qwen3-asr-transformers",
-            "funasr-paraformer",
-            "funasr-paraformer-streaming",
-            "funasr-sensevoice",
-            "mock",
-        ]
+        return ["faster-whisper", "qwen3-asr-transformers", "mock"]
     return ["faster-whisper", "mock"]
 
 
@@ -33,8 +26,6 @@ def whisper_stt_backend_runtime_option_keys(backend: str | None = None) -> tuple
         return ("compute_type", "beam_size", "max_new_tokens", "temperature")
     if normalized == "mock":
         return ()
-    if normalized.startswith("funasr-"):
-        return ()
     if normalized == "qwen3-asr-transformers":
         return ("compute_type", "max_new_tokens")
     return ()
@@ -43,12 +34,6 @@ def whisper_stt_backend_runtime_option_keys(backend: str | None = None) -> tuple
 def whisper_stt_model_options(backend: str | None = None, language: str | None = None) -> list[str]:
     normalized = str(backend or "").strip().lower()
     normalized_language = str(language or "").strip().lower()
-    if normalized == "funasr-paraformer":
-        return ["paraformer-zh"] if normalized_language == "zh" else []
-    if normalized == "funasr-paraformer-streaming":
-        return ["paraformer-zh-streaming"] if normalized_language == "zh" else []
-    if normalized == "funasr-sensevoice":
-        return ["iic/SenseVoiceSmall"] if normalized_language == "zh" else []
     if normalized == "qwen3-asr-transformers":
         return ["qwen3-asr-0.6b", "qwen3-asr-1.7b"] if normalized_language == "zh" else []
     if normalized == "mock":
@@ -132,13 +117,11 @@ def whisper_translation_model_options(backend: str | None = None) -> list[str]:
 
 
 def whisper_sentence_boundary_backend_options() -> list[str]:
-    return ["sat", "funasr-ct-punc", "mock"]
+    return ["sat", "mock"]
 
 
 def whisper_sentence_boundary_model_options(backend: str | None = None) -> list[str]:
     normalized = str(backend or "").strip().lower()
-    if normalized == "funasr-ct-punc":
-        return ["ct-punc-c", "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch"]
     if normalized == "mock":
         return ["mock"]
     return ["sat-3l-sm", "sat-6l-sm", "sat-12l-sm"]

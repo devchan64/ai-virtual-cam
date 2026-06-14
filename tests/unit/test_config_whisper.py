@@ -91,8 +91,8 @@ class WhisperConfigTest(unittest.TestCase):
             whisper_stt_model_en="tiny",
             whisper_stt_backend_ko="faster-whisper",
             whisper_stt_model_ko="large-v3",
-            whisper_stt_backend_zh="funasr-paraformer",
-            whisper_stt_model_zh="paraformer-zh",
+            whisper_stt_backend_zh="qwen3-asr-transformers",
+            whisper_stt_model_zh="qwen3-asr-0.6b",
             whisper_language="en",
             whisper_task="transcribe",
             whisper_translation_enabled=True,
@@ -124,8 +124,8 @@ class WhisperConfigTest(unittest.TestCase):
                 "sttModelEn": "tiny",
                 "sttBackendKo": "faster-whisper",
                 "sttModelKo": "large-v3",
-                "sttBackendZh": "funasr-paraformer",
-                "sttModelZh": "paraformer-zh",
+                "sttBackendZh": "qwen3-asr-transformers",
+                "sttModelZh": "qwen3-asr-0.6b",
                 "language": "en",
                 "task": "transcribe",
                 "showSttStatusWindow": False,
@@ -153,8 +153,8 @@ class WhisperConfigTest(unittest.TestCase):
                 "sentenceBoundaryModelEn": "sat-3l-sm",
                 "sentenceBoundaryBackendKo": "sat",
                 "sentenceBoundaryModelKo": "sat-3l-sm",
-                "sentenceBoundaryBackendZh": "funasr-ct-punc",
-                "sentenceBoundaryModelZh": "ct-punc-c",
+                "sentenceBoundaryBackendZh": "sat",
+                "sentenceBoundaryModelZh": "sat-3l-sm",
                 "sentenceBoundaryDevice": "cuda",
                 "sentenceBoundaryComputeType": "float16",
             },
@@ -246,28 +246,26 @@ class WhisperConfigTest(unittest.TestCase):
 
 
 
-    def test_whisper_allows_chinese_funasr_stt_backend(self) -> None:
-        loaded = WhisperConfig.from_dict({
-            "language": "zh",
-            "postProcessingProfile": "manual",
-            "sttBackendZh": "funasr-paraformer",
-            "sttModelZh": "paraformer-zh",
-        })
-
-        self.assertEqual(loaded.sttBackendZh, "funasr-paraformer")
-        self.assertEqual(loaded.sttModelZh, "paraformer-zh")
+    def test_whisper_rejects_removed_chinese_funasr_stt_backend(self) -> None:
+        with self.assertRaisesRegex(ValueError, "whisper.sttBackendZh"):
+            WhisperConfig.from_dict({
+                "language": "zh",
+                "postProcessingProfile": "manual",
+                "sttBackendZh": "funasr-paraformer",
+                "sttModelZh": "paraformer-zh",
+            })
 
     def test_whisper_supports_manual_post_processing_only(self) -> None:
         loaded = WhisperConfig.from_dict({
             "language": "zh",
             "postProcessingProfile": "manual",
-            "sentenceBoundaryBackend": "funasr-ct-punc",
-            "sentenceBoundaryModel": "ct-punc-c",
+            "sentenceBoundaryBackend": "sat",
+            "sentenceBoundaryModel": "sat-3l-sm",
         })
 
         self.assertEqual(loaded.postProcessingProfile, "manual")
-        self.assertEqual(loaded.sentenceBoundaryBackend, "funasr-ct-punc")
-        self.assertEqual(loaded.sentenceBoundaryModel, "ct-punc-c")
+        self.assertEqual(loaded.sentenceBoundaryBackend, "sat")
+        self.assertEqual(loaded.sentenceBoundaryModel, "sat-3l-sm")
         with self.assertRaisesRegex(ValueError, "whisper.postProcessingProfile"):
             WhisperConfig.from_dict({"postProcessingProfile": "auto-by-language"})
 
@@ -400,11 +398,10 @@ class WhisperConfigTest(unittest.TestCase):
             WhisperConfig.from_dict({"postProcessingProfile": "invalid"})
         with self.assertRaisesRegex(ValueError, "whisper.sttBackendZh"):
             WhisperConfig.from_dict({"sttBackendZh": "invalid"})
+        with self.assertRaisesRegex(ValueError, "whisper.sttBackendZh"):
+            WhisperConfig.from_dict({"sttBackendZh": "funasr-paraformer"})
         with self.assertRaisesRegex(ValueError, "whisper.sttBackendEn"):
             WhisperConfig.from_dict({"sttBackendEn": "funasr-paraformer"})
-        loaded = WhisperConfig.from_dict({"sttBackendZh": "funasr-paraformer-streaming", "sttModelZh": "paraformer-zh-streaming"})
-        self.assertEqual(loaded.sttBackendZh, "funasr-paraformer-streaming")
-        self.assertEqual(loaded.sttModelZh, "paraformer-zh-streaming")
         with self.assertRaisesRegex(ValueError, "whisper.sttBackendKo"):
             WhisperConfig.from_dict({"sttBackendKo": "funasr-sensevoice"})
         with self.assertRaisesRegex(ValueError, "whisper.sttModelZh"):

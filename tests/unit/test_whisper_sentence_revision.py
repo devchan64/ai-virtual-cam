@@ -562,7 +562,7 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         self.assertTrue(_should_finalize_replaced_sentence(staged, candidate, 3, False, 0))
 
     def test_chinese_completed_fragments_from_same_chunk_are_coalesced(self) -> None:
-        # Regression from 2026-06-14 zh monitoring chunks 121-122. FunASR
+        # Regression from 2026-06-14 zh monitoring chunks 121-122. Prior Chinese STT
         # punctuation can return multiple completed fragments for one sliding
         # window; staging them one by one discards the earlier fragment before
         # it can be revised.

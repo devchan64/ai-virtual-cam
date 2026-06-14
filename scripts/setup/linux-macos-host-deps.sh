@@ -277,7 +277,7 @@ install_translation_torch_packages() {
     fi
   fi
 
-  log "Installing PyTorch/Torchaudio for Whisper translation and FunASR post-processing from $torch_index_url"
+  log "Installing PyTorch/Torchaudio for Whisper translation from $torch_index_url"
   run_as_invoking_user "$venv_py" -m pip install --upgrade torch torchaudio --index-url "$torch_index_url"
 }
 
@@ -318,9 +318,6 @@ verify_whisper_runtime_contract() {
   fi
   if ! run_as_invoking_user "$venv_py" -c "import transformers, sentencepiece, torch, torchaudio" >/dev/null 2>&1; then
     fail "Whisper translation dependencies are not importable in .venv. Run ./bin/avc setup again to install transformers, sentencepiece, torch, and torchaudio."
-  fi
-  if ! run_as_invoking_user "$venv_py" -c "import funasr" >/dev/null 2>&1; then
-    fail "FunASR is not importable in .venv. Run ./bin/avc setup again to install Chinese Whisper post-processing dependencies, including torchaudio."
   fi
   if ! run_as_invoking_user "$venv_py" -c "import wtpsplit" >/dev/null 2>&1; then
     fail "wtpsplit is not importable in .venv. Run ./bin/avc setup again; wtpsplit is installed with --no-deps to avoid huggingface-hub resolver conflicts."
@@ -422,7 +419,7 @@ download_whisper_models() {
     fail ".venv python not found for Whisper model pre-download: $venv_py"
   fi
 
-  log "Whisper/STT model pre-download starting. This may download from Hugging Face, FunASR, or ModelScope."
+  log "Whisper/STT model pre-download starting. This may download from Hugging Face."
   run_as_invoking_user "$venv_py" "$(pwd)/scripts/setup/download-whisper-models.py"
   log "Whisper/STT model pre-download finished"
 }

@@ -2,7 +2,6 @@ import unittest
 
 from src.domain.contracts.whisper import (
     WHISPER_CONTRACT,
-    resolve_funasr_model_name,
     resolve_qwen_asr_model_name,
     whisper_stt_backends_for_language,
     whisper_allowed,
@@ -20,7 +19,7 @@ class WhisperContractTest(unittest.TestCase):
         self.assertEqual(defaults["language"], "en")
         self.assertEqual(defaults["sttBackendZh"], "faster-whisper")
         self.assertEqual(defaults["postProcessingProfile"], "manual")
-        self.assertEqual(whisper_default("sentenceBoundaryBackendZh"), "funasr-ct-punc")
+        self.assertEqual(whisper_default("sentenceBoundaryBackendZh"), "sat")
 
     def test_contract_exposes_allowed_values(self) -> None:
         self.assertEqual(whisper_allowed("language"), ("ko", "en", "zh"))
@@ -33,25 +32,7 @@ class WhisperContractTest(unittest.TestCase):
     def test_contract_limits_stt_backends_by_language(self) -> None:
         self.assertEqual(whisper_stt_backends_for_language("en"), ("faster-whisper", "mock"))
         self.assertEqual(whisper_stt_backends_for_language("ko"), ("faster-whisper", "mock"))
-        self.assertEqual(whisper_stt_backends_for_language("zh")[0], "faster-whisper")
-        self.assertIn("funasr-paraformer", whisper_stt_backends_for_language("zh"))
-        self.assertIn("funasr-paraformer-streaming", whisper_stt_backends_for_language("zh"))
-        self.assertIn("qwen3-asr-transformers", whisper_stt_backends_for_language("zh"))
-
-    def test_contract_resolves_funasr_model_aliases(self) -> None:
-        self.assertEqual(
-            resolve_funasr_model_name("paraformer-zh"),
-            "iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
-        )
-        self.assertEqual(
-            resolve_funasr_model_name("ct-punc-c"),
-            "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
-        )
-        self.assertEqual(
-            resolve_funasr_model_name("paraformer-zh-streaming"),
-            "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online",
-        )
-        self.assertEqual(resolve_funasr_model_name("iic/custom"), "iic/custom")
+        self.assertEqual(whisper_stt_backends_for_language("zh"), ("faster-whisper", "qwen3-asr-transformers", "mock"))
 
     def test_contract_resolves_qwen_asr_model_aliases(self) -> None:
         self.assertEqual(resolve_qwen_asr_model_name("qwen3-asr-0.6b"), "Qwen/Qwen3-ASR-0.6B")

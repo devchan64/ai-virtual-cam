@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import contextlib
-import os
 import sys
 import threading
 import time
@@ -16,36 +14,16 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from src.app.model_cache import (
-    is_funasr_model_cached,
     is_hf_repo_cached,
     is_qwen_asr_model_cached,
-    modelscope_legacy_cache_dir,
-    modelscope_model_cache_dir,
 )
-from src.domain.contracts.whisper import resolve_funasr_model_name, resolve_qwen_asr_model_name
+from src.domain.contracts.whisper import resolve_qwen_asr_model_name
 from src.domain.whisper_defaults import whisper_default
 
 
 def _log(message: str) -> None:
     print(f"[ai-virtual-cam] {message}", flush=True)
 
-
-_MODELSCOPE_HUB_FILE_LOCK = "MODELSCOPE_HUB_FILE_LOCK"
-
-
-@contextlib.contextmanager
-def _with_modelscope_file_lock_disabled_for_download():
-    """Disable ModelScope file lock when download script did not set it explicitly."""
-    original = os.environ.get(_MODELSCOPE_HUB_FILE_LOCK)
-    if original is not None:
-        yield
-        return
-    os.environ[_MODELSCOPE_HUB_FILE_LOCK] = "false"
-    _log(f"ModelScope lock disabled for setup downloads: {_MODELSCOPE_HUB_FILE_LOCK}=false")
-    try:
-        yield
-    finally:
-        os.environ.pop(_MODELSCOPE_HUB_FILE_LOCK, None)
 
 
 
@@ -134,37 +112,6 @@ def _hf_model_total_size(repo_id: str) -> int | None:
     return total if found else None
 
 
-def _funasr_cache_paths(model_name: str) -> list[Path]:
-    resolved = resolve_funasr_model_name(model_name)
-    return [modelscope_model_cache_dir(resolved), modelscope_legacy_cache_dir(resolved)]
-
-
-FUNASR_HF_MIRRORS = {
-    "iic/SenseVoiceSmall": "FunAudioLLM/SenseVoiceSmall",
-}
-
-
-def _funasr_hf_mirror(model_name: str) -> str | None:
-    if os.environ.get("AVC_FUNASR_HF_MIRROR", "1") == "0":
-        return None
-    resolved = resolve_funasr_model_name(model_name)
-    return FUNASR_HF_MIRRORS.get(model_name) or FUNASR_HF_MIRRORS.get(resolved)
-
-
-def _modelscope_max_workers() -> int | None:
-    raw = os.environ.get("AVC_MODELSCOPE_MAX_WORKERS", "8").strip()
-    if not raw:
-        return None
-    try:
-        value = int(raw)
-    except ValueError:
-        raise SystemExit(f"AVC_MODELSCOPE_MAX_WORKERS must be an integer: {raw!r}")
-    return max(1, value)
-
-
-def _modelscope_endpoint() -> str | None:
-    return os.environ.get("AVC_MODELSCOPE_ENDPOINT") or None
-
 
 def _progress_monitor(label: str, paths: list[Path], total_size: int | None, stop_event: threading.Event) -> None:
     last_size = -1
@@ -248,15 +195,13 @@ def check_model_assets(assets: list[ModelAsset]) -> list[ModelAsset]:
         if asset.kind == "stt":
             if backend == "faster-whisper":
                 ready = check_faster_whisper_model(asset.model)
-            elif backend.startswith("funasr-"):
-                ready = is_funasr_model_cached(asset.model)
             elif backend == "qwen3-asr-transformers":
                 ready = is_qwen_asr_model_cached(asset.model)
+            elif backend != "mock":
+                ready = False
         elif asset.kind == "boundary":
             if backend == "sat":
                 ready = check_sat_model(asset.model)
-            elif backend == "funasr-ct-punc":
-                ready = is_funasr_model_cached(asset.model)
         elif asset.kind == "translation":
             ready = check_translation_model(asset.backend, asset.model)
         if ready:
@@ -299,68 +244,6 @@ def download_sat_model(model_name: str) -> None:
 
     _run_with_progress(f"sat:{model_name}", [_hf_cache_dir(model_name)], total_size, action)
     _log(f"SaT sentence boundary model ready: {model_name}")
-
-
-def _download_funasr_from_hf_mirror(model_name: str, *, label: str) -> bool:
-    mirror = _funasr_hf_mirror(model_name)
-    if not mirror:
-        return False
-    resolved = resolve_funasr_model_name(model_name)
-    target = modelscope_model_cache_dir(resolved)
-    _log(f"Using Hugging Face mirror for FunASR model: {model_name} mirror={mirror} target={target}")
-    from huggingface_hub import snapshot_download
-
-    total_size = _hf_model_total_size(mirror)
-
-    def action() -> None:
-        snapshot_download(mirror, local_dir=str(target), local_dir_use_symlinks=False)
-
-    _run_with_progress(f"{label}:hf-mirror:{model_name}", [target], total_size, action)
-    return True
-
-
-def _download_funasr_from_modelscope(model_name: str, *, label: str) -> None:
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", category=SyntaxWarning)
-        from modelscope.hub.snapshot_download import snapshot_download
-
-    resolved = resolve_funasr_model_name(model_name)
-    endpoint = _modelscope_endpoint()
-    max_workers = _modelscope_max_workers()
-    if endpoint:
-        _log(f"ModelScope endpoint configured: {endpoint}")
-    _log(f"ModelScope max workers: {max_workers or 'default'}")
-
-    def action() -> None:
-        with _with_modelscope_file_lock_disabled_for_download():
-            snapshot_download(
-                resolved,
-                max_workers=max_workers,
-                endpoint=endpoint,
-                enable_file_lock=False,
-            )
-
-    _run_with_progress(label, _funasr_cache_paths(model_name), None, action)
-
-
-def download_funasr_model(model_name: str) -> None:
-    _log(f"Downloading FunASR punctuation model: {model_name}")
-    resolved = resolve_funasr_model_name(model_name)
-    if resolved != model_name:
-        _log(f"Resolved FunASR punctuation model alias: {model_name} -> {resolved}")
-    if not _download_funasr_from_hf_mirror(model_name, label="funasr-punctuation"):
-        _download_funasr_from_modelscope(model_name, label=f"funasr-punctuation:{model_name}")
-    _log(f"FunASR punctuation model ready: {model_name} resolved={resolved}")
-
-
-def download_funasr_stt_model(model_name: str) -> None:
-    _log(f"Downloading FunASR STT model: {model_name}")
-    resolved = resolve_funasr_model_name(model_name)
-    if resolved != model_name:
-        _log(f"Resolved FunASR STT model alias: {model_name} -> {resolved}")
-    if not _download_funasr_from_hf_mirror(model_name, label="funasr-stt"):
-        _download_funasr_from_modelscope(model_name, label=f"funasr-stt:{model_name}")
-    _log(f"FunASR STT model ready: {model_name} resolved={resolved}")
 
 
 def download_qwen_asr_model(model_name: str) -> None:
@@ -490,8 +373,6 @@ def main() -> int:
         if asset.kind == "stt":
             if backend_name == "faster-whisper":
                 download_faster_whisper_model(asset.model)
-            elif backend_name.startswith("funasr-"):
-                download_funasr_stt_model(asset.model)
             elif backend_name == "qwen3-asr-transformers":
                 download_qwen_asr_model(asset.model)
             else:
@@ -499,8 +380,6 @@ def main() -> int:
         elif asset.kind == "boundary":
             if backend_name == "sat":
                 download_sat_model(asset.model)
-            elif backend_name == "funasr-ct-punc":
-                download_funasr_model(asset.model)
             else:
                 _log(f"Skipping sentence boundary model download for backend: {asset.backend}")
         elif asset.kind == "translation":

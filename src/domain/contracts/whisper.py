@@ -5,9 +5,6 @@ from .fields import ConfigFieldSpec
 WHISPER_BACKENDS = ("faster-whisper", "openai-whisper", "whisper.cpp", "mock")
 WHISPER_STT_BACKENDS = (
     "faster-whisper",
-    "funasr-paraformer",
-    "funasr-paraformer-streaming",
-    "funasr-sensevoice",
     "qwen3-asr-transformers",
     "mock",
 )
@@ -18,7 +15,7 @@ WHISPER_TRANSLATION_BACKENDS = ("whisper", "nllb-transformers", "m2m100-transfor
 WHISPER_RUNTIME_DEVICES = ("cuda", "cpu")
 WHISPER_COMPUTE_TYPES = ("float16", "float32")
 WHISPER_POST_PROCESSING_PROFILES = ("manual",)
-WHISPER_SENTENCE_BOUNDARY_BACKENDS = ("sat", "funasr-ct-punc", "mock")
+WHISPER_SENTENCE_BOUNDARY_BACKENDS = ("sat", "mock")
 
 WHISPER_STT_BACKENDS_BY_LANGUAGE = {
     "en": ("faster-whisper", "mock"),
@@ -26,9 +23,6 @@ WHISPER_STT_BACKENDS_BY_LANGUAGE = {
     "zh": (
         "faster-whisper",
         "qwen3-asr-transformers",
-        "funasr-paraformer",
-        "funasr-paraformer-streaming",
-        "funasr-sensevoice",
         "mock",
     ),
 }
@@ -142,23 +136,12 @@ WHISPER_CONTRACT: dict[str, ConfigFieldSpec] = {
     ),
     "sentenceBoundaryModelKo": ConfigFieldSpec("sentenceBoundaryModelKo", "sat-3l-sm", str, ui_group="boundary.ko"),
     "sentenceBoundaryBackendZh": ConfigFieldSpec(
-        "sentenceBoundaryBackendZh", "funasr-ct-punc", str, allowed=WHISPER_SENTENCE_BOUNDARY_BACKENDS, ui_group="boundary.zh"
+        "sentenceBoundaryBackendZh", "sat", str, allowed=WHISPER_SENTENCE_BOUNDARY_BACKENDS, ui_group="boundary.zh"
     ),
-    "sentenceBoundaryModelZh": ConfigFieldSpec("sentenceBoundaryModelZh", "ct-punc-c", str, ui_group="boundary.zh"),
+    "sentenceBoundaryModelZh": ConfigFieldSpec("sentenceBoundaryModelZh", "sat-3l-sm", str, ui_group="boundary.zh"),
     "sentenceBoundaryDevice": ConfigFieldSpec("sentenceBoundaryDevice", "cuda", str, allowed=WHISPER_RUNTIME_DEVICES),
     "sentenceBoundaryComputeType": ConfigFieldSpec("sentenceBoundaryComputeType", "float16", str, allowed=WHISPER_COMPUTE_TYPES),
 }
-
-FUNASR_MODEL_ALIASES = {
-    "paraformer-zh": "iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
-    "paraformer-zh-streaming": "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online",
-    "ct-punc-c": "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
-}
-
-
-def resolve_funasr_model_name(model_name: str) -> str:
-    normalized = str(model_name or "").strip()
-    return FUNASR_MODEL_ALIASES.get(normalized, normalized)
 
 QWEN_ASR_MODEL_ALIASES = {
     "qwen3-asr-0.6b": "Qwen/Qwen3-ASR-0.6B",

@@ -33,7 +33,7 @@ def _coalesce_completed_sentences_for_staging(sentences: list[str], language: st
     normalized_language = str(language or "").strip().lower()
     if normalized_language != "zh":
         return normalized_sentences
-    # FunASR punctuation can split several CJK fragments from the same sliding
+    # Model punctuation can split several CJK fragments from the same sliding
     # window. The runtime has one staged revision slot, so staging each fragment
     # independently causes unconfirmed earlier fragments to be discarded inside
     # the same chunk. Keep the model output as one observed revision unit.

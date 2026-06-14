@@ -1,19 +1,14 @@
 from __future__ import annotations
 
-import contextlib
-import io
 from dataclasses import dataclass
 from typing import Iterable
 
-from src.app.model_cache import require_funasr_model_cache_path, require_qwen_asr_model_cached
-from src.domain.contracts.whisper import resolve_funasr_model_name, resolve_qwen_asr_model_name
+from src.app.model_cache import require_qwen_asr_model_cached
+from src.domain.contracts.whisper import resolve_qwen_asr_model_name
 
 
 STT_BACKENDS = {
     "faster-whisper",
-    "funasr-paraformer",
-    "funasr-paraformer-streaming",
-    "funasr-sensevoice",
     "qwen3-asr-transformers",
     "mock",
 }
@@ -43,14 +38,11 @@ def build_stt_model(
     normalized_backend = str(backend).strip()
     if normalized_backend == "faster-whisper":
         return FasterWhisperSttModel(model_name, device, compute_type)
-    if normalized_backend in {"funasr-paraformer", "funasr-paraformer-streaming", "funasr-sensevoice"}:
-        return FunasrSttModel(normalized_backend, model_name, device, language, status_callback=status_callback)
     if normalized_backend == "qwen3-asr-transformers":
         return Qwen3AsrTransformersSttModel(model_name, device, compute_type, language)
     raise RuntimeError(
         f"지원하지 않는 whisper STT backend입니다: {backend}. "
-        "Use one of: faster-whisper, funasr-paraformer, funasr-paraformer-streaming, "
-        "funasr-sensevoice, qwen3-asr-transformers, mock"
+        "Use one of: faster-whisper, qwen3-asr-transformers, mock"
     )
 
 
@@ -127,104 +119,3 @@ def qwen_asr_generated_text(result: object, *, fallback_language: str) -> tuple[
     language = getattr(first, "language", None) or (first.get("language") if isinstance(first, dict) else None) or fallback_language
     normalized_language = {"Chinese": "zh", "English": "en", "Korean": "ko"}.get(str(language), str(language).lower())
     return str(text).strip(), normalized_language
-
-
-class FunasrSttModel:
-    def __init__(self, backend: str, model_name: str, device: str, language: str, *, status_callback=None) -> None:
-        self.backend = backend
-        self.model_name = model_name
-        self.resolved_model_name = resolve_funasr_model_name(model_name)
-        self.device = device
-        self.language = language if language in {"ko", "en", "zh"} else "zh"
-        self._status_callback = status_callback
-        try:
-            with _capture_model_output() as captured:
-                from funasr import AutoModel
-        except ModuleNotFoundError as exc:
-            raise RuntimeError(
-                f"STT backend '{backend}' requires funasr. Run ./bin/avc setup or install funasr; "
-                "fallback is intentionally disabled."
-            ) from exc
-        except Exception as exc:
-            raise RuntimeError(
-                f"STT backend '{backend}' failed while importing FunASR. "
-                f"model={model_name} device={device}. 원인: {exc}"
-            ) from exc
-        _emit_captured_output(status_callback, "FunASR STT import", captured.getvalue())
-        if self.backend == "funasr-paraformer-streaming" and self.model_name != "paraformer-zh-streaming":
-            raise RuntimeError(
-                "FunASR streaming STT backend requires model=paraformer-zh-streaming. "
-                f"configuredModel={self.model_name}. Fail-Fast: select the matching streaming model."
-            )
-        self.local_model_path = require_funasr_model_cache_path(model_name, purpose="FunASR STT")
-        if self._status_callback is not None:
-            self._status_callback(f"FunASR STT 로컬 캐시 사용: model={model_name} path={self.local_model_path}")
-        try:
-            with _capture_model_output() as captured:
-                self._model = AutoModel(model=str(self.local_model_path), device=device, disable_update=True)
-        except Exception as exc:
-            raise RuntimeError(
-                f"FunASR STT 모델 로딩 실패: backend={backend} model={model_name} resolvedModel={self.resolved_model_name} "
-                f"localPath={self.local_model_path} device={device}. 원인: {exc}"
-            ) from exc
-        _emit_captured_output(status_callback, "FunASR STT load", captured.getvalue())
-
-    def transcribe(self, audio, **_kwargs):
-        try:
-            with _capture_model_output() as captured:
-                result = self._model.generate(input=audio, fs=16000)
-        except Exception as exc:
-            raise RuntimeError(
-                f"FunASR STT 전사 실패: backend={self.backend} model={self.model_name} "
-                f"resolvedModel={self.resolved_model_name} device={self.device}. 원인: {exc}"
-            ) from exc
-        text = funasr_generated_text(result)
-        segments: Iterable[SttSegment] = [SttSegment(text=text)] if text else []
-        return segments, SttInfo(language=self.language)
-
-
-@contextlib.contextmanager
-def _capture_model_output():
-    stdout = io.StringIO()
-    stderr = io.StringIO()
-    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-        yield _CapturedOutput(stdout, stderr)
-
-
-@dataclass(frozen=True)
-class _CapturedOutput:
-    stdout: io.StringIO
-    stderr: io.StringIO
-
-    def getvalue(self) -> str:
-        return "\n".join(part.strip() for part in (self.stdout.getvalue(), self.stderr.getvalue()) if part.strip())
-
-
-def _emit_captured_output(callback, prefix: str, output: str) -> None:
-    if callback is None or not output:
-        return
-    trimmed = " ".join(output.split())
-    if trimmed:
-        callback(f"{prefix} output: {trimmed[:500]}")
-
-
-def funasr_generated_text(result: object) -> str:
-    if isinstance(result, str):
-        return _strip_funasr_control_tokens(result)
-    if isinstance(result, dict):
-        text = result.get("text") or result.get("sentence") or result.get("value") or ""
-        return _strip_funasr_control_tokens(str(text))
-    if isinstance(result, list):
-        parts = [funasr_generated_text(item) for item in result]
-        return " ".join(part for part in parts if part).strip()
-    return _strip_funasr_control_tokens(str(result or ""))
-
-
-def _strip_funasr_control_tokens(text: str) -> str:
-    stripped = str(text or "").strip()
-    while stripped.startswith("<|"):
-        end = stripped.find("|>")
-        if end < 0:
-            break
-        stripped = stripped[end + 2 :].lstrip()
-    return stripped.strip()

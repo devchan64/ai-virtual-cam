@@ -990,13 +990,13 @@ class ConfigGui:
                 value = max(current, min(99.0, float(percent)))
             else:
                 value = max(current, 20)
-        elif "downloading faster-whisper" in lower or "downloading funasr stt" in lower:
+        elif "downloading faster-whisper" in lower or "downloading qwen3-asr" in lower:
             value = max(current, 15)
-        elif "faster-whisper model ready" in lower or "funasr stt model ready" in lower:
+        elif "faster-whisper model ready" in lower or "qwen3-asr stt model ready" in lower:
             value = max(current, 35)
-        elif "downloading sat sentence" in lower or "downloading funasr punctuation" in lower:
+        elif "downloading sat sentence" in lower:
             value = max(current, 45)
-        elif "sentence boundary model ready" in lower or "punctuation model ready" in lower:
+        elif "sentence boundary model ready" in lower:
             value = max(current, 65)
         elif "downloading nllb translation" in lower or "downloading m2m100 translation" in lower:
             value = max(current, 75)

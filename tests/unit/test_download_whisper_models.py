@@ -21,59 +21,6 @@ def _load_module():
 
 
 class DownloadWhisperModelsTest(unittest.TestCase):
-    def test_with_modelscope_file_lock_disabled_for_download_sets_and_unsets_env(self) -> None:
-        module = _load_module()
-        with patch.dict(module.os.environ, {}, clear=True):
-            with module._with_modelscope_file_lock_disabled_for_download():
-                self.assertEqual(module.os.environ.get("MODELSCOPE_HUB_FILE_LOCK"), "false")
-            self.assertIsNone(module.os.environ.get("MODELSCOPE_HUB_FILE_LOCK"))
-
-    def test_with_modelscope_file_lock_disabled_for_download_preserves_existing_value(self) -> None:
-        module = _load_module()
-        with patch.dict(module.os.environ, {"MODELSCOPE_HUB_FILE_LOCK": "true"}):
-            with module._with_modelscope_file_lock_disabled_for_download():
-                self.assertEqual(module.os.environ.get("MODELSCOPE_HUB_FILE_LOCK"), "true")
-            self.assertEqual(module.os.environ.get("MODELSCOPE_HUB_FILE_LOCK"), "true")
-
-    def test_funasr_cache_rejects_partial_modelscope_directory(self) -> None:
-        module = _load_module()
-        with tempfile.TemporaryDirectory() as tmpdir:
-            home = Path(tmpdir)
-            model_dir = home / ".cache" / "modelscope" / "hub" / "models" / "iic" / "SenseVoiceSmall"
-            model_dir.mkdir(parents=True)
-            (model_dir / "README.md").write_text("partial", encoding="utf-8")
-
-            with patch("src.app.model_cache.Path.home", return_value=home):
-                self.assertFalse(module.is_funasr_model_cached("iic/SenseVoiceSmall"))
-
-    def test_funasr_cache_accepts_config_and_weights(self) -> None:
-        module = _load_module()
-        with tempfile.TemporaryDirectory() as tmpdir:
-            home = Path(tmpdir)
-            model_dir = home / ".cache" / "modelscope" / "hub" / "models" / "iic" / "SenseVoiceSmall"
-            model_dir.mkdir(parents=True)
-            (model_dir / "configuration.json").write_text("{}", encoding="utf-8")
-            (model_dir / "model.pt").write_bytes(b"weights")
-
-            with patch("src.app.model_cache.Path.home", return_value=home):
-                self.assertTrue(module.is_funasr_model_cached("iic/SenseVoiceSmall"))
-
-    def test_funasr_hf_mirror_prefers_sensevoice_mirror(self) -> None:
-        module = _load_module()
-        self.assertEqual(module._funasr_hf_mirror("iic/SenseVoiceSmall"), "FunAudioLLM/SenseVoiceSmall")
-
-    def test_funasr_hf_mirror_can_be_disabled(self) -> None:
-        module = _load_module()
-        with patch.dict(module.os.environ, {"AVC_FUNASR_HF_MIRROR": "0"}):
-            self.assertIsNone(module._funasr_hf_mirror("iic/SenseVoiceSmall"))
-
-    def test_modelscope_max_workers_uses_env_default(self) -> None:
-        module = _load_module()
-        with patch.dict(module.os.environ, {}, clear=True):
-            self.assertEqual(module._modelscope_max_workers(), 8)
-        with patch.dict(module.os.environ, {"AVC_MODELSCOPE_MAX_WORKERS": "3"}):
-            self.assertEqual(module._modelscope_max_workers(), 3)
-
     def test_check_model_assets_marks_missing_qwen_asr_model(self) -> None:
         module = _load_module()
         asset = module.ModelAsset("stt", "qwen3-asr-transformers", "qwen3-asr-0.6b")

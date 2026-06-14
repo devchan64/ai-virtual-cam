@@ -331,7 +331,7 @@ class WhisperTranscriptWorker:
         device = str(getattr(self._cfg, "sentenceBoundaryDevice", "cuda"))
         compute_type = str(getattr(self._cfg, "sentenceBoundaryComputeType", "float16"))
         backend, model = self._sentence_boundary_settings_for_language(detected_language)
-        download_source = "Hugging Face 또는 FunASR/ModelScope"
+        download_source = "Hugging Face"
         self._emit(
             "status",
             "문장 경계 모델 로딩 중: "
@@ -489,7 +489,7 @@ class WhisperTranscriptWorker:
                 "STT 모델 로딩 중: "
                 f"profile={getattr(self._cfg, 'postProcessingProfile', 'manual')} backend={stt_backend} model={stt_model} "
                 f"device={self._cfg.device} compute={self._cfg.computeType} language={self._cfg.language}. "
-                "캐시에 없으면 Hugging Face 또는 FunASR/ModelScope 모델 다운로드가 진행될 수 있습니다.",
+                "캐시에 없으면 Hugging Face 모델 다운로드가 진행될 수 있습니다.",
             )
             try:
                 model = build_stt_model(
