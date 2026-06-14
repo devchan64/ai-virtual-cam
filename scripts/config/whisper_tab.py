@@ -181,6 +181,15 @@ def build_whisper_tab(
 
     runtime_frame, row = _add_group(gui, ttk, tab_whisper, row, "label.whisper_group_runtime", "STT 응답/성능")
     runtime_row = 0
+    gui._add_bool_switch(
+        runtime_frame,
+        runtime_row,
+        "whisper_show_stt_status_window",
+        gui._tr("label.whisper_show_stt_status_window", "STT 상태창 보기"),
+        whisper_default("showSttStatusWindow"),
+        label_key="label.whisper_show_stt_status_window",
+    )
+    runtime_row += 1
     gui._add_combo(
         runtime_frame,
         runtime_row,

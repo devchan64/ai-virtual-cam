@@ -1252,7 +1252,8 @@ class WhisperTranscriptWindow:
         clear_btn = ttk.Button(actions, text="Clear", command=lambda: self._clear(self._text))
         clear_btn.grid(row=0, column=2, sticky="e")
 
-        self._create_stt_status_window()
+        if self._whisper_config.showSttStatusWindow:
+            self._create_stt_status_window()
 
         if self._whisper_config.translationEnabled:
             self._create_translation_window()

@@ -1985,6 +1985,7 @@ class ConfigGui:
             "whisper_language": _whisper_language_display_from_raw(whisper["language"]),
             "whisper_task": whisper["task"],
             "whisper_translation_enabled": whisper["translationEnabled"],
+            "whisper_show_stt_status_window": whisper["showSttStatusWindow"],
             "whisper_translation_backend": whisper["translationBackend"],
             "whisper_translation_target_language": _whisper_translation_target_display_from_raw(whisper["translationTargetLanguage"]),
             "whisper_translation_model": whisper["translationModel"],
@@ -2358,6 +2359,7 @@ class ConfigGui:
             "whisper_language",
             "whisper_translation_enabled",
             "whisper_translation_backend",
+            "whisper_show_stt_status_window",
             "whisper_translation_target_language",
             "whisper_translation_model",
             "whisper_translation_device",
@@ -2581,6 +2583,10 @@ class ConfigGui:
         self._set_var(
             "whisper_translation_enabled",
             whisper_cfg.get("translationEnabled", legacy_translation_enabled or defaults["whisper_translation_enabled"]),
+        )
+        self._set_var(
+            "whisper_show_stt_status_window",
+            whisper_cfg.get("showSttStatusWindow", defaults["whisper_show_stt_status_window"]),
         )
         self._set_var("whisper_translation_backend", whisper_cfg.get("translationBackend", defaults["whisper_translation_backend"]))
         self._set_var(
@@ -4420,6 +4426,7 @@ class ConfigGui:
             whisper_language=_whisper_language_raw_from_display(iv["whisper_language"].get()),
             whisper_task="transcribe",
             whisper_translation_enabled=self._parse_bool(iv["whisper_translation_enabled"].get()),
+            whisper_show_stt_status_window=self._parse_bool(iv["whisper_show_stt_status_window"].get()),
             whisper_translation_backend=iv["whisper_translation_backend"].get().strip(),
             whisper_translation_target_language=_whisper_translation_target_raw_from_display(
                 iv["whisper_translation_target_language"].get()

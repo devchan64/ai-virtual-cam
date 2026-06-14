@@ -224,6 +224,7 @@ class WhisperConfigTest(unittest.TestCase):
         self.assertEqual(loaded.whisper.sttBackendZh, "funasr-paraformer")
         self.assertEqual(loaded.whisper.sttModelZh, "paraformer-zh")
         self.assertFalse(loaded.whisper.translationEnabled)
+        self.assertFalse(loaded.whisper.showSttStatusWindow)
         self.assertEqual(loaded.whisper.translationTargetLanguage, whisper_default("translationTargetLanguage"))
         self.assertEqual(loaded.whisper.translationBackend, whisper_default("translationBackend"))
         self.assertEqual(loaded.whisper.translationModel, "facebook/nllb-200-distilled-600M")
