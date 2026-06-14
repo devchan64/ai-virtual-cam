@@ -16,7 +16,14 @@ def whisper_stt_backend_options(language: str | None = None) -> list[str]:
     if normalized_language in {"en", "ko"}:
         return ["faster-whisper", "mock"]
     if normalized_language == "zh":
-        return ["qwen3-asr-transformers", "funasr-paraformer", "funasr-sensevoice", "mock"]
+        return [
+            "faster-whisper",
+            "qwen3-asr-transformers",
+            "funasr-paraformer",
+            "funasr-paraformer-streaming",
+            "funasr-sensevoice",
+            "mock",
+        ]
     return ["faster-whisper", "mock"]
 
 
@@ -37,7 +44,9 @@ def whisper_stt_model_options(backend: str | None = None, language: str | None =
     normalized = str(backend or "").strip().lower()
     normalized_language = str(language or "").strip().lower()
     if normalized == "funasr-paraformer":
-        return ["paraformer-zh", "paraformer-zh-streaming"] if normalized_language == "zh" else []
+        return ["paraformer-zh"] if normalized_language == "zh" else []
+    if normalized == "funasr-paraformer-streaming":
+        return ["paraformer-zh-streaming"] if normalized_language == "zh" else []
     if normalized == "funasr-sensevoice":
         return ["iic/SenseVoiceSmall"] if normalized_language == "zh" else []
     if normalized == "qwen3-asr-transformers":

@@ -3,7 +3,14 @@ from __future__ import annotations
 from .fields import ConfigFieldSpec
 
 WHISPER_BACKENDS = ("faster-whisper", "openai-whisper", "whisper.cpp", "mock")
-WHISPER_STT_BACKENDS = ("faster-whisper", "funasr-paraformer", "funasr-sensevoice", "qwen3-asr-transformers", "mock")
+WHISPER_STT_BACKENDS = (
+    "faster-whisper",
+    "funasr-paraformer",
+    "funasr-paraformer-streaming",
+    "funasr-sensevoice",
+    "qwen3-asr-transformers",
+    "mock",
+)
 WHISPER_LANGUAGES = ("ko", "en", "zh")
 WHISPER_TASKS = ("transcribe", "translate")
 WHISPER_TRANSLATION_TARGET_LANGUAGES = ("en", "ko", "zh")
@@ -16,7 +23,14 @@ WHISPER_SENTENCE_BOUNDARY_BACKENDS = ("sat", "funasr-ct-punc", "mock")
 WHISPER_STT_BACKENDS_BY_LANGUAGE = {
     "en": ("faster-whisper", "mock"),
     "ko": ("faster-whisper", "mock"),
-    "zh": WHISPER_STT_BACKENDS,
+    "zh": (
+        "faster-whisper",
+        "qwen3-asr-transformers",
+        "funasr-paraformer",
+        "funasr-paraformer-streaming",
+        "funasr-sensevoice",
+        "mock",
+    ),
 }
 
 WHISPER_TRANSLATION_GROUPS = {
@@ -87,8 +101,8 @@ WHISPER_CONTRACT: dict[str, ConfigFieldSpec] = {
     "sttModelEn": ConfigFieldSpec("sttModelEn", "large-v3", str, ui_group="stt.en"),
     "sttBackendKo": ConfigFieldSpec("sttBackendKo", "faster-whisper", str, allowed=WHISPER_STT_BACKENDS, ui_group="stt.ko"),
     "sttModelKo": ConfigFieldSpec("sttModelKo", "large-v3", str, ui_group="stt.ko"),
-    "sttBackendZh": ConfigFieldSpec("sttBackendZh", "qwen3-asr-transformers", str, allowed=WHISPER_STT_BACKENDS, ui_group="stt.zh"),
-    "sttModelZh": ConfigFieldSpec("sttModelZh", "qwen3-asr-0.6b", str, ui_group="stt.zh"),
+    "sttBackendZh": ConfigFieldSpec("sttBackendZh", "faster-whisper", str, allowed=WHISPER_STT_BACKENDS, ui_group="stt.zh"),
+    "sttModelZh": ConfigFieldSpec("sttModelZh", "large-v3", str, ui_group="stt.zh"),
     "language": ConfigFieldSpec("language", "en", str, allowed=WHISPER_LANGUAGES),
     "task": ConfigFieldSpec("task", "transcribe", str, allowed=WHISPER_TASKS),
     "translationEnabled": ConfigFieldSpec("translationEnabled", False, bool),
@@ -105,9 +119,9 @@ WHISPER_CONTRACT: dict[str, ConfigFieldSpec] = {
     "translationMaxNewTokens": ConfigFieldSpec("translationMaxNewTokens", 128, int, min_value=16, max_value=512),
     "device": ConfigFieldSpec("device", "cuda", str),
     "computeType": ConfigFieldSpec("computeType", "float16", str),
-    "chunkSeconds": ConfigFieldSpec("chunkSeconds", 9.0, float, min_value=1.0, max_value=15.0),
+    "chunkSeconds": ConfigFieldSpec("chunkSeconds", 9.0, float, min_value=1.0, max_value=30.0),
     "stepSeconds": ConfigFieldSpec("stepSeconds", 1.5, float, min_value=0.5, max_value=5.0),
-    "windowSeconds": ConfigFieldSpec("windowSeconds", 9.0, float, min_value=1.0, max_value=15.0),
+    "windowSeconds": ConfigFieldSpec("windowSeconds", 9.0, float, min_value=1.0, max_value=30.0),
     "commitLagSeconds": ConfigFieldSpec("commitLagSeconds", 2.0, float, min_value=0.0),
     "beamSize": ConfigFieldSpec("beamSize", 3, int, min_value=1, max_value=8),
     "maxNewTokens": ConfigFieldSpec("maxNewTokens", 96, int, min_value=16, max_value=512),

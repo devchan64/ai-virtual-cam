@@ -9,7 +9,14 @@ from src.app.model_cache import require_funasr_model_cache_path, require_qwen_as
 from src.domain.contracts.whisper import resolve_funasr_model_name, resolve_qwen_asr_model_name
 
 
-STT_BACKENDS = {"faster-whisper", "funasr-paraformer", "funasr-sensevoice", "qwen3-asr-transformers", "mock"}
+STT_BACKENDS = {
+    "faster-whisper",
+    "funasr-paraformer",
+    "funasr-paraformer-streaming",
+    "funasr-sensevoice",
+    "qwen3-asr-transformers",
+    "mock",
+}
 
 
 @dataclass(frozen=True)
@@ -36,13 +43,14 @@ def build_stt_model(
     normalized_backend = str(backend).strip()
     if normalized_backend == "faster-whisper":
         return FasterWhisperSttModel(model_name, device, compute_type)
-    if normalized_backend in {"funasr-paraformer", "funasr-sensevoice"}:
+    if normalized_backend in {"funasr-paraformer", "funasr-paraformer-streaming", "funasr-sensevoice"}:
         return FunasrSttModel(normalized_backend, model_name, device, language, status_callback=status_callback)
     if normalized_backend == "qwen3-asr-transformers":
         return Qwen3AsrTransformersSttModel(model_name, device, compute_type, language)
     raise RuntimeError(
         f"지원하지 않는 whisper STT backend입니다: {backend}. "
-        "Use one of: faster-whisper, funasr-paraformer, funasr-sensevoice, qwen3-asr-transformers, mock"
+        "Use one of: faster-whisper, funasr-paraformer, funasr-paraformer-streaming, "
+        "funasr-sensevoice, qwen3-asr-transformers, mock"
     )
 
 
@@ -143,6 +151,11 @@ class FunasrSttModel:
                 f"model={model_name} device={device}. 원인: {exc}"
             ) from exc
         _emit_captured_output(status_callback, "FunASR STT import", captured.getvalue())
+        if self.backend == "funasr-paraformer-streaming" and self.model_name != "paraformer-zh-streaming":
+            raise RuntimeError(
+                "FunASR streaming STT backend requires model=paraformer-zh-streaming. "
+                f"configuredModel={self.model_name}. Fail-Fast: select the matching streaming model."
+            )
         self.local_model_path = require_funasr_model_cache_path(model_name, purpose="FunASR STT")
         if self._status_callback is not None:
             self._status_callback(f"FunASR STT 로컬 캐시 사용: model={model_name} path={self.local_model_path}")

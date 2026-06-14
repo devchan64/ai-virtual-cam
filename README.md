@@ -341,7 +341,7 @@ Linux Docker 정책:
 모델/언어 설정:
 
 - 기본 모델은 `large-v3`, CUDA 환경 기본 연산은 `float16`입니다.
-- `./bin/avc setup`은 Linux에서 `faster-whisper`, NLLB 번역용 `transformers`/`sentencepiece`, Qwen3-ASR/FunASR 의존성, CUDA 런타임 의존성을 설치하고, PyTorch는 기본적으로 CUDA 12.8 휠 인덱스에서 설치합니다. Qwen3-ASR는 `qwen-asr==0.0.6`와 `transformers==4.57.6` 조합으로 고정하고, resolver 역추적을 줄이기 위해 qwen-asr UI 의존성인 `gradio==6.17.3`도 함께 고정합니다. SaT 문장 경계용 `wtpsplit`은 `huggingface-hub` 버전 충돌을 피하기 위해 `requirements.txt` resolver 대상에서 제외하고 `--no-deps`로 별도 설치합니다.
+- `./bin/avc setup`은 Linux에서 `faster-whisper`, NLLB 번역용 `transformers`/`sentencepiece`, Qwen3-ASR/FunASR 의존성, CUDA 런타임 의존성을 설치하고, PyTorch는 기본적으로 CUDA 12.8 휠 인덱스에서 설치합니다. Qwen3-ASR는 `qwen-asr==0.0.6`와 `transformers==4.57.6` 조합으로 고정하고, resolver 역추적을 줄이기 위해 qwen-asr UI 의존성인 `gradio==6.17.3`도 함께 고정합니다. SaT 문장 경계용 `wtpsplit`은 `huggingface-hub` 버전 충돌을 피하기 위해 `requirements.txt` resolver 대상에서 제외하고 `--no-deps`로 별도 설치합니다. 대신 `cached_property`, `mosestokenizer`, `skops`, `adapters` 같은 충돌 없는 wtpsplit 런타임 의존성은 `requirements.txt`에 명시합니다.
 - setup은 오디오 AI/STT 모델을 미리 내려받을지 질의합니다. 비대화형 실행에서는 건너뛰며, `AVC_DOWNLOAD_WHISPER_MODELS=1 ./bin/avc setup` 또는 `./bin/avc setup --download-whisper-models`로 강제 다운로드할 수 있습니다. `AVC_DOWNLOAD_WHISPER_MODELS=0` 또는 `--skip-whisper-models`는 질의와 다운로드를 건너뜁니다. 다운로드 대상은 기본 Whisper 모델, 언어별 STT 모델, 언어별 문장 경계/후처리 모델, 번역 모델입니다.
 - FunASR 모델 다운로드가 느릴 수 있으므로 SenseVoiceSmall은 Hugging Face 공식 미러(`FunAudioLLM/SenseVoiceSmall`)를 우선 사용합니다. `AVC_FUNASR_HF_MIRROR=0`이면 ModelScope만 사용합니다. ModelScope 전용 모델은 `AVC_MODELSCOPE_MAX_WORKERS=8` 기본값을 조정하거나 `AVC_MODELSCOPE_ENDPOINT`로 endpoint를 지정해 비교할 수 있습니다.
 - 인식 언어는 단일 선택이며 자동 감지는 사용하지 않습니다. 현재 입력 언어를 `한국어 (ko)`, `English (en)`, `中文 (zh)` 중 하나로 명시합니다.
@@ -357,7 +357,7 @@ Linux Docker 정책:
 - 영어 STT와 한국어 STT는 실제 입력 장치 기반 실행에서 전사 창 갱신과 복사용 출력 동작을 확인했습니다.
 - 한국어 문장 추적과 영어 문장 추적은 슬라이딩 윈도우 기반 revision/final 확정 로그와 전사 창 출력 기준으로 안정화 실험을 진행했습니다.
 - 영한 번역은 확정된 영어 final 전사 문장을 대상으로 별도 번역 창에 한국어 결과를 출력하는 사용 흐름을 확인했습니다.
-- 중국어 STT는 FunASR Paraformer와 SenseVoiceSmall을 실제 로그로 실험했지만, 2026-06-14 기준 두 모델 모두 전사 원문 품질이 목표에 미치지 못했습니다. 중국어 기본 후보는 Qwen3-ASR transformers로 전환하며, FunASR 계열은 문장 경계와 비교 실험군으로 유지합니다.
+- 중국어 STT는 FunASR Paraformer, FunASR Paraformer streaming 모델, SenseVoiceSmall, Qwen3-ASR transformers를 실제 로그로 실험/비교하는 구조입니다. 2026-06-14 기준 중국어는 아직 안정화 확인 범위에 포함하지 않으며, 기본값은 `faster-whisper`/`large-v3` 기준선으로 유지하고 Qwen3-ASR/FunASR 계열은 비교 실험군으로 둡니다.
 - 중한 번역은 계속 실험 중인 영역입니다. 특히 중한 번역은 모델 품질과 문장 확정 입력 품질을 분리해 검토합니다.
 
 응답속도 조정:

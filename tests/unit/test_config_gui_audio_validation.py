@@ -165,7 +165,10 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         self.assertFalse(stt_visibility[(1, 2)])
         self.assertFalse(stt_visibility[(3, 4)])
         self.assertTrue(stt_visibility[(5, 6)])
-        self.assertEqual(gui._widgets["whisper_stt_backend_zh"].values, ("qwen3-asr-transformers", "funasr-paraformer", "funasr-sensevoice", "mock"))
+        self.assertEqual(
+            gui._widgets["whisper_stt_backend_zh"].values,
+            ("faster-whisper", "qwen3-asr-transformers", "funasr-paraformer", "funasr-paraformer-streaming", "funasr-sensevoice", "mock"),
+        )
         self.assertEqual(gui._widgets["whisper_stt_model_zh"].values, ("qwen3-asr-0.6b", "qwen3-asr-1.7b"))
         backend_option_visibility = {
             rows: visible for parent, rows, visible in grid_calls if parent is gui._whisper_tab
@@ -180,9 +183,9 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
             rows: visible for parent, rows, visible in grid_calls if parent is gui._whisper_tab
         }
         self.assertTrue(backend_option_visibility[(32,)])
-        self.assertFalse(backend_option_visibility[(33,)])
-        self.assertEqual(gui.vars["whisper_stt_backend_zh"].get(), "qwen3-asr-transformers")
-        self.assertEqual(gui._widgets["whisper_stt_model_zh"].values, ("qwen3-asr-0.6b", "qwen3-asr-1.7b"))
+        self.assertTrue(backend_option_visibility[(33,)])
+        self.assertEqual(gui.vars["whisper_stt_backend_zh"].get(), "faster-whisper")
+        self.assertEqual(gui._widgets["whisper_stt_model_zh"].values, ("large-v3", "medium", "small", "base", "tiny"))
 
     def test_resolve_and_validate_audio_runtime_devices_maps_display_values(self) -> None:
         with mock.patch.object(self.audio_devices.platform, "system", return_value="Linux"), mock.patch.object(

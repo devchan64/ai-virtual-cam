@@ -85,6 +85,18 @@ class SttModelTest(unittest.TestCase):
 
         automodel.assert_called_once_with(model=str(local_path), device="cuda", disable_update=True)
 
+    def test_funasr_streaming_backend_requires_streaming_model(self) -> None:
+        fake_module = type("FakeFunasr", (), {"AutoModel": mock.Mock()})()
+
+        with mock.patch.dict("sys.modules", {"funasr": fake_module}):
+            with self.assertRaisesRegex(RuntimeError, "paraformer-zh-streaming"):
+                FunasrSttModel(
+                    backend="funasr-paraformer-streaming",
+                    model_name="paraformer-zh",
+                    device="cuda",
+                    language="zh",
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

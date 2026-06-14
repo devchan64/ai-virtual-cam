@@ -221,8 +221,8 @@ class WhisperConfigTest(unittest.TestCase):
         self.assertEqual(loaded.whisper.model, "base")
         self.assertEqual(loaded.whisper.sttBackendEn, whisper_default("sttBackendEn"))
         self.assertEqual(loaded.whisper.sttModelEn, whisper_default("sttModelEn"))
-        self.assertEqual(loaded.whisper.sttBackendZh, "qwen3-asr-transformers")
-        self.assertEqual(loaded.whisper.sttModelZh, "qwen3-asr-0.6b")
+        self.assertEqual(loaded.whisper.sttBackendZh, "faster-whisper")
+        self.assertEqual(loaded.whisper.sttModelZh, "large-v3")
         self.assertFalse(loaded.whisper.translationEnabled)
         self.assertFalse(loaded.whisper.showSttStatusWindow)
         self.assertEqual(loaded.whisper.translationTargetLanguage, whisper_default("translationTargetLanguage"))
@@ -402,6 +402,9 @@ class WhisperConfigTest(unittest.TestCase):
             WhisperConfig.from_dict({"sttBackendZh": "invalid"})
         with self.assertRaisesRegex(ValueError, "whisper.sttBackendEn"):
             WhisperConfig.from_dict({"sttBackendEn": "funasr-paraformer"})
+        loaded = WhisperConfig.from_dict({"sttBackendZh": "funasr-paraformer-streaming", "sttModelZh": "paraformer-zh-streaming"})
+        self.assertEqual(loaded.sttBackendZh, "funasr-paraformer-streaming")
+        self.assertEqual(loaded.sttModelZh, "paraformer-zh-streaming")
         with self.assertRaisesRegex(ValueError, "whisper.sttBackendKo"):
             WhisperConfig.from_dict({"sttBackendKo": "funasr-sensevoice"})
         with self.assertRaisesRegex(ValueError, "whisper.sttModelZh"):

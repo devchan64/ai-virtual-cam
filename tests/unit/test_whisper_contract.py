@@ -18,7 +18,7 @@ class WhisperContractTest(unittest.TestCase):
 
         self.assertEqual(set(defaults), set(WHISPER_CONTRACT))
         self.assertEqual(defaults["language"], "en")
-        self.assertEqual(defaults["sttBackendZh"], "qwen3-asr-transformers")
+        self.assertEqual(defaults["sttBackendZh"], "faster-whisper")
         self.assertEqual(defaults["postProcessingProfile"], "manual")
         self.assertEqual(whisper_default("sentenceBoundaryBackendZh"), "funasr-ct-punc")
 
@@ -33,7 +33,9 @@ class WhisperContractTest(unittest.TestCase):
     def test_contract_limits_stt_backends_by_language(self) -> None:
         self.assertEqual(whisper_stt_backends_for_language("en"), ("faster-whisper", "mock"))
         self.assertEqual(whisper_stt_backends_for_language("ko"), ("faster-whisper", "mock"))
+        self.assertEqual(whisper_stt_backends_for_language("zh")[0], "faster-whisper")
         self.assertIn("funasr-paraformer", whisper_stt_backends_for_language("zh"))
+        self.assertIn("funasr-paraformer-streaming", whisper_stt_backends_for_language("zh"))
         self.assertIn("qwen3-asr-transformers", whisper_stt_backends_for_language("zh"))
 
     def test_contract_resolves_funasr_model_aliases(self) -> None:
@@ -44,6 +46,10 @@ class WhisperContractTest(unittest.TestCase):
         self.assertEqual(
             resolve_funasr_model_name("ct-punc-c"),
             "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
+        )
+        self.assertEqual(
+            resolve_funasr_model_name("paraformer-zh-streaming"),
+            "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online",
         )
         self.assertEqual(resolve_funasr_model_name("iic/custom"), "iic/custom")
 

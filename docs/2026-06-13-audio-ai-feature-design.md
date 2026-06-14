@@ -303,7 +303,7 @@ class SentenceBoundaryDetector:
 - `postProcessingProfile=manual`: 유일하게 지원하는 후처리 프로필이다. 언어별 후처리 선택을 사용하지 않고 `sentenceBoundaryBackend`/`sentenceBoundaryModel`을 모든 언어에 그대로 사용한다.
 - STT backend/model은 후처리 프로필과 분리한다. 영어/한국어/중국어는 각각 `sttBackendEn`, `sttBackendKo`, `sttBackendZh`와 대응 모델 설정으로 교체 가능하다. config GUI는 `language` 단일 선택값에 맞는 언어의 백엔드/모델만 표시하고, 언어를 바꾸면 해당 언어의 후보 목록으로 전환한다.
 - 현재 영어/한국어의 STT 모델 타입은 `faster-whisper`와 테스트용 `mock`만 제공한다. 영어/한국어용 추가 모델이 검증되면 언어별 backend 후보에 추가한다.
-- 중국어는 `faster-whisper`, `funasr-paraformer`, `funasr-sensevoice`, `mock` 후보를 제공한다.
+- 중국어는 `faster-whisper`, `qwen3-asr-transformers`, `funasr-paraformer`, `funasr-paraformer-streaming`, `funasr-sensevoice`, `mock` 후보를 제공한다. 2026-06-14 운영 로그 기준 Qwen3-ASR도 서비스 품질 기준을 만족하지 못했으므로, 중국어 기본값은 `faster-whisper`/`large-v3` 기준선으로 유지하고 Qwen3-ASR/FunASR 계열은 실험 후보로 둔다.
 - 백엔드별 실행 속성은 `whisper_stt_backend_runtime_option_keys()`에서 정의한다. `faster-whisper`는 `computeType`, `beamSize`, `maxNewTokens`, `temperature`를 노출하고, FunASR 계열은 현재 공통 스트리밍 설정과 백엔드/모델 선택만 노출한다.
 - config GUI는 후처리 프로필 선택을 제공하지 않는다. `postProcessingProfile`은 계약 호환을 위해 `manual`로 저장하고, 화면에는 실제 운영되는 `sentenceBoundaryBackend`/`sentenceBoundaryModel` 수동 설정만 노출한다.
 - config GUI의 오디오 AI 탭은 `입력/실행`, `STT 언어/모델`, `STT 응답/성능`, `문장 경계`, `번역` 그룹으로 구분한다. 선택 언어와 선택 STT 백엔드에 맞는 설정만 해당 그룹 안에서 표시한다.
@@ -315,7 +315,7 @@ class SentenceBoundaryDetector:
 - setup은 `AVC_DOWNLOAD_WHISPER_MODELS=ask|1|0`, `--download-whisper-models`, `--skip-whisper-models`를 지원한다. 비대화형 setup은 기본적으로 모델 다운로드를 건너뛰며, 강제 다운로드는 명시 옵션/환경변수로만 수행한다.
 - 문장 경계 모델 로딩 시작/완료 로그에는 profile, backend, model, device, compute, language를 출력한다. 캐시에 모델이 없으면 런타임 다운로드를 시도하지 않고, 시작 전 다운로드 안내창 또는 setup 사전 다운로드를 사용하라는 오류를 출력한다.
 - 문장 경계 모델 로딩/분절 실패는 Fail-Fast다. legacy regex나 CPU로 자동 전환하지 않는다.
-- `faster-whisper`, SaT, NLLB/M2M100, FunASR STT/문장경계 모델은 serve 런타임에서 로컬 캐시만 사용한다. Hugging Face 또는 ModelScope 네트워크 다운로드는 `scripts/setup/download-whisper-models.py` 경로로만 허용한다. `qwen-asr==0.0.6`은 `transformers==4.57.6`을 요구하므로 두 패키지를 함께 고정한다. qwen-asr의 `gradio` 요구 범위는 넓어 resolver 역추적을 만들 수 있으므로 dry-run에서 확인한 `gradio==6.17.3`도 고정한다. `wtpsplit`은 `huggingface-hub==0.25.2` 메타데이터 제약이 Qwen3-ASR/transformers와 충돌하므로 `requirements.txt`에서 직접 해석하지 않고 setup/env sync에서 `--no-deps`로 설치한다.
+- `faster-whisper`, SaT, NLLB/M2M100, FunASR STT/문장경계 모델은 serve 런타임에서 로컬 캐시만 사용한다. Hugging Face 또는 ModelScope 네트워크 다운로드는 `scripts/setup/download-whisper-models.py` 경로로만 허용한다. `qwen-asr==0.0.6`은 `transformers==4.57.6`을 요구하므로 두 패키지를 함께 고정한다. qwen-asr의 `gradio` 요구 범위는 넓어 resolver 역추적을 만들 수 있으므로 dry-run에서 확인한 `gradio==6.17.3`도 고정한다. `wtpsplit`은 `huggingface-hub==0.25.2` 메타데이터 제약이 Qwen3-ASR/transformers와 충돌하므로 패키지 자체는 `requirements.txt`에서 직접 해석하지 않고 setup/env sync에서 `--no-deps`로 설치한다. 단, 충돌하지 않는 wtpsplit 런타임 의존성(`cached_property`, `mosestokenizer`, `skops`, `adapters`)은 fresh venv에서도 import가 가능하도록 `requirements.txt`에 명시한다.
 - FunASR/ModelScope 캐시는 디렉터리 존재만으로 완료로 보지 않는다. `configuration.json` 또는 `config.json`과 모델 가중치 파일이 모두 있어야 캐시 완료로 판단한다.
 - 후처리 backend/model은 manual 설정만 사용한다. 실행 중 명시 언어가 바뀌어도 후처리 backend/model을 언어별로 암묵 변경하지 않는다.
 
@@ -372,8 +372,52 @@ STT 모델과 문장 경계 모델의 책임을 분리해 검증한다.
 
 중국어/만다린의 1차 후보는 공백 없는 텍스트를 직접 처리하거나 Jieba/Chinese tokenizer 기반 경계 단위를 지원하는 punctuation restoration 모델이다. SaT는 일반 텍스트 segmentation 강점은 있으나, streaming ASR partial hypothesis 안정성은 별도 검증 전까지 가정하지 않는다.
 
+### 9.3 중국어 음운/문맥 의존성 근거
 
-### 9.3 중국어 STT backend 교체 검토
+중국어 STT 품질 문제는 모델 종류만의 문제가 아니라 언어 구조 자체의 제약과도 연결된다. Mandarin은 가능한 음절 수가 제한적이고 같은 발음에 대응되는 글자/단어 후보가 많다. 짧은 오디오 조각에서는 음향 정보만으로 글자를 고르기 어렵고, 앞뒤 문맥과 도메인 단어 분포가 더 큰 역할을 한다.
+
+근거:
+
+- 중국어 문자음 자료는 Mandarin이 성조 포함 약 1,300개 수준의 음절에 10,000개 이상의 문자가 대응되어 평균적으로 한 음절에 여러 글자가 매핑된다고 설명한다. 이는 `raw_stt_window`가 짧을수록 문자 선택 후보가 크게 남는 구조적 이유다.
+- 중국어 word segmentation 자료는 중국어 텍스트가 공백으로 단어 경계를 표시하지 않으며, 같은 문자열도 문맥에 따라 다른 단어 분할이 가능하다고 설명한다. STT가 만든 글자열도 문장 경계와 단어 경계를 함께 추정해야 하므로 짧은 chunk 단위 확정은 불리하다.
+- Chinese ASR error correction 연구들은 중국어 ASR 오류가 환경 잡음뿐 아니라 발음/문맥 모호성 때문에 후단 교정이 필요하다고 보고한다. 특히 Pinyin 정보를 함께 쓰는 오류 교정 연구는 발음 표현을 보강하면 text-only 교정보다 안정적으로 개선된다고 보고한다.
+- Contextual ASR 연구들은 named entity와 long-tail word 인식에서 homophone 구분이 핵심 문제이며, phoneme-aware 또는 pronunciation-aware context가 CER/WER 개선에 직접 기여한다고 보고한다.
+- Qwen3-ASR Technical Report도 공개 벤치마크 점수가 비슷해도 실제 시나리오 품질 차이가 클 수 있다고 전제한다. 우리 운영 로그에서 Qwen3-ASR/FunASR/SenseVoice가 모두 흔들린 것은 특정 모델 하나의 실패가 아니라, 짧은 실시간 window와 중국어 문맥 의존성이 충돌한 결과로 해석한다.
+
+운영 가설:
+
+1. 중국어는 `stepSeconds`만 낮춰 빠르게 갱신하면 오히려 동음 후보가 짧은 fragment로 확정되어 중복/오인식이 늘 수 있다.
+2. `windowSeconds`는 영어/한국어보다 길게 잡아 비교해야 한다. 최소 9초 기준선, 12초/15초 비교군을 둔다.
+3. `commitLagSeconds`와 staged confirmation은 중국어에서 더 중요하다. tail의 마지막 1~2초가 다음 윈도우에서 글자 선택을 바꾸는 사례를 별도 지표로 추적한다.
+4. raw STT가 불안정하면 문장 경계 모델로 해결할 수 없다. 중국어는 `raw_stt_window`의 CER, mixed-script ratio, homophone-like substitution 사례를 먼저 본 뒤 boundary 품질을 평가한다.
+5. 후속 개선 후보는 단순 regex가 아니라 pronunciation-aware ASR/error-correction 또는 Pinyin-aware correction 모델이다.
+
+### 9.4 윈도우 확대와 정확도/지연 트레이드오프
+
+운영 로그에서 `windowSeconds`를 키웠을 때 중국어 전사 안정성이 일부 좋아지는 경향이 관측되었다. 이 판단은 스트리밍 ASR 연구 흐름과 일치한다. 공격적으로 짧은 chunk로 전사를 만들면 segment boundary 근처의 음향/언어 문맥이 잘리고, 후속 윈도우에서 수정될 수 있는 글자 후보를 너무 일찍 확정하게 된다.
+
+근거:
+
+- Whisper-Streaming은 Whisper가 본래 실시간 모델이 아니므로 local agreement policy와 self-adaptive latency를 사용해 여러 윈도우에서 합의된 부분만 확정한다. 이는 짧은 chunk 1회 결과보다 겹치는 문맥의 안정성을 우선하는 구조다.
+- WhisperPipe는 aggressive chunking이 정확도를 희생할 수 있고, overlapping context window와 dynamic buffering이 segment boundary 정보 손실을 줄인다고 설명한다.
+- CarelessWhisper는 encoder-decoder ASR을 저지연 causal streaming으로 바꾸는 것이 쉽지 않다고 설명한다. 즉, Whisper 계열을 짧은 context로 잘라 쓰면 원래 offline/long-form 모델의 강점을 잃을 수 있다.
+- 중국어는 동음 후보와 단어 경계 모호성이 커서 긴 문맥의 언어 모델링 효과가 더 중요할 가능성이 높다.
+
+운영 판단:
+
+- `windowSeconds` 확대는 raw STT 품질과 staged 후보 안정성을 개선할 수 있다.
+- 그러나 `windowSeconds + commitLagSeconds + staged confirmation`이 체감 확정 지연의 하한을 만든다. 계산 시간이 충분히 빨라도 자막은 늦게 보일 수 있다.
+- `windowSeconds`를 무작정 키우면 중복 후보, tail echo, pending overrun, GPU 메모리 사용량이 늘 수 있다.
+
+실험 설계:
+
+1. 중국어 기준선은 `windowSeconds=9.0`, `stepSeconds=1.5`, `commitLagSeconds=2.0`으로 둔다.
+2. 비교군은 `windowSeconds=12.0`, `15.0`을 사용하고 `stepSeconds`는 먼저 고정한다.
+3. 각 비교군에서 `raw_stt_window` CER, mixed-script ratio, repeated final count, pending overrun, final latency를 기록한다.
+4. `total_rtf`가 1.0 미만이어도 final latency가 커지면 실시간 자막 UX 실패로 판단한다.
+5. 계산 지연과 정책 지연을 분리하기 위해 성능 로그에는 `stt`, `translation`, `total` 외에 `effective_latency_estimate=windowSeconds+commitLagSeconds+total`을 추가하는 것을 검토한다.
+
+### 9.5 중국어 STT backend 교체 검토
 
 2026-06-13 중국어 운영 로그는 후처리 이전의 raw STT 품질 저하를 보여준다. `language=zh` 고정 상태에서도 영어 조각이 섞이고, `low_logprob`/`no_speech` 폐기가 반복되었다. 따라서 중국어 품질 개선은 문장 경계 모델 교체만으로 판단하지 않고, STT backend 자체를 언어별로 분기하는 실험을 포함한다.
 
@@ -383,6 +427,7 @@ STT 모델과 문장 경계 모델의 책임을 분리해 검증한다.
 - 논문 보고 기준으로 Paraformer-large는 AISHELL test CER 1.95, AISHELL-2 test_ios CER 2.85, WenetSpeech test_meeting CER 6.97을 기록했다.
 - FunASR 공식 repo는 `paraformer-zh`, `paraformer-zh-streaming`, `ct-punc`, `fsmn-vad` 모델군과 CUDA 실행 예시를 제공한다.
 - 중국어 고정 전사와 실시간성 요구에는 `paraformer-zh` 또는 `paraformer-zh-streaming`을 1차 실험 후보로 검토했으나, 2026-06-14 운영 로그에서는 Paraformer 전사 원문 품질이 목표에 미치지 못했다. `boundary_conf=1.00`인 상태에서도 의미가 무너진 중국어 후보가 반복되어, 현재 문제는 문장 경계보다 STT 원문 품질에 가깝다.
+- 2026-06-14 1차 streaming 적용은 `funasr-paraformer-streaming` backend와 `paraformer-zh-streaming` 모델을 오프라인 Paraformer backend에서 분리해 선택 가능한 실험 옵션으로 만든다. 기존 청크 루프 위에서 모델 선택을 검증하는 단계이며, stateful streaming decoder/cache/endpointing 루프는 이 backend 뒤에 붙일 후속 단계로 둔다.
 
 권장 실험값:
 
@@ -401,7 +446,7 @@ STT 모델과 문장 경계 모델의 책임을 분리해 검증한다.
 - Qwen3-ASR Technical Report와 공식 모델 카드는 `Qwen3-ASR-0.6B`, `Qwen3-ASR-1.7B`가 중국어, 영어, 한국어를 포함한 30개 언어와 22개 중국어 방언을 지원한다고 설명한다.
 - 공식 모델 카드는 offline/streaming 통합 추론, 긴 오디오 전사, transformers 백엔드와 vLLM 백엔드를 제공한다고 설명한다.
 - 논문은 1.7B가 오픈소스 ASR 중 SOTA 수준이며, 0.6B는 정확도/효율 균형과 낮은 TTFT를 목표로 한다고 보고한다.
-- 현재 프로젝트에는 1차 패치로 `qwen3-asr-transformers` 백엔드를 확보했다. 2026-06-14 SenseVoiceSmall 로그에서도 전사 원문 품질 부족이 확인되었으므로 중국어 기본 후보는 Qwen3-ASR 0.6B로 전환한다. vLLM streaming 백엔드는 별도 서버 수명주기와 GPU 메모리 정책이 필요하므로 후속 실험으로 분리한다.
+- 현재 프로젝트에는 1차 패치로 `qwen3-asr-transformers` 백엔드를 확보했다. 다만 2026-06-14 운영 로그에서 Qwen3-ASR도 현재 입력/실시간 윈도우 조건의 전사 원문 품질이 목표에 미치지 못했다. Qwen3-ASR 논문은 공개 벤치마크 점수가 비슷해도 실제 시나리오 품질 차이가 클 수 있다고 전제하므로, 프로젝트에서는 Qwen3-ASR를 기본값이 아니라 실험 후보로 낮춘다. vLLM streaming 백엔드는 별도 서버 수명주기와 GPU 메모리 정책이 필요하므로 후속 실험으로 분리한다.
 
 권장 실험값:
 
@@ -446,13 +491,13 @@ STT 모델과 문장 경계 모델의 책임을 분리해 검증한다.
 
 #### 보류 후보
 
-- LLM decoder 기반 Fun-ASR-Nano, GLM-ASR-Nano는 정확도 후보로는 가치가 있으나 vLLM/대형 decoder/VRAM 정책이 추가되어 실시간 UI 경로의 1차 후보로 두지 않는다. Qwen3-ASR는 transformers 경로를 중국어 기본 실험 후보로 사용하고, vLLM 경로는 별도 보류한다.
+- LLM decoder 기반 Fun-ASR-Nano, GLM-ASR-Nano는 정확도 후보로는 가치가 있으나 vLLM/대형 decoder/VRAM 정책이 추가되어 실시간 UI 경로의 1차 후보로 두지 않는다. Qwen3-ASR transformers 경로도 현재는 실험 후보로 유지하고, vLLM 경로는 별도 보류한다. FormalASR처럼 spoken Chinese를 written Chinese로 직접 정리하는 fine-tuned 계열은 중국어 회의 자막 품질 개선 후보로 추적한다.
 - Whisper large-v3는 영어/한국어 기본 STT로 유지 가능하지만, 중국어는 현재 로그 기준 운영 기본값으로 고정하지 않는다.
 
 #### 언어별 STT backend 설계 원칙
 
 - `backend=faster-whisper` 전역값에 중국어를 묶지 않는다. STT backend도 후처리 backend처럼 언어별 설정을 둔다.
-- 예: `sttBackendEn=faster-whisper`, `sttBackendKo=faster-whisper`, `sttBackendZh=qwen3-asr-transformers`. 영어/한국어는 현재 Whisper 계열만 운영 후보로 둔다.
+- 예: `sttBackendEn=faster-whisper`, `sttBackendKo=faster-whisper`, `sttBackendZh=faster-whisper`. 영어/한국어는 현재 Whisper 계열만 운영 후보로 두며, 중국어 Qwen3-ASR/FunASR 계열은 사용자가 명시 선택하는 실험 후보로 둔다. FunASR streaming 모델은 `sttBackendZh=funasr-paraformer-streaming`, `sttModelZh=paraformer-zh-streaming` 조합으로만 선택한다.
 - 중국어 backend 로딩 실패는 Fail-Fast다. CPU fallback, Whisper fallback, 다른 FunASR 모델 fallback은 자동 수행하지 않는다.
 - Whisper 언어 자동 감지는 폐기한다. `language`는 `ko`, `en`, `zh` 중 하나로 명시해야 한다.
 - 모델 준비 순서는 `STT 모델 -> 번역 모델 -> 문장 경계/후처리 모델 -> 입력 장치 열기 -> 전사 루프`를 유지한다.
@@ -461,9 +506,9 @@ STT 모델과 문장 경계 모델의 책임을 분리해 검증한다.
 2026-06-13 구현 상태:
 
 - `WhisperConfig`/`setting.json`에 `sttBackendEn`, `sttModelEn`, `sttBackendKo`, `sttModelKo`, `sttBackendZh`, `sttModelZh`를 추가했다. 후처리는 manual만 지원한다.
-- 명시 인식 언어가 `zh`이면 기본적으로 `sttBackendZh=qwen3-asr-transformers`, `sttModelZh=qwen3-asr-0.6b`를 사용한다. 이 선택은 후처리 프로필과 무관하다.
+- 명시 인식 언어가 `zh`이면 기본적으로 `sttBackendZh=faster-whisper`, `sttModelZh=large-v3` 기준선을 사용한다. 이 선택은 후처리 프로필과 무관하며, Qwen3-ASR/FunASR 계열은 실험 시 명시적으로 선택한다.
 - 영어/한국어 기본 STT는 `faster-whisper` + `large-v3`를 유지한다.
-- `src/app/stt_model.py`가 faster-whisper와 FunASR STT를 동일한 `transcribe()` 인터페이스로 감싼다.
+- `src/app/stt_model.py`가 faster-whisper와 FunASR STT를 동일한 `transcribe()` 인터페이스로 감싼다. `funasr-paraformer-streaming`은 streaming 모델 캐시와 설정 조합을 분리하지만, 현재 1차 패치에서는 기존 transcribe 루프에서 실험한다.
 - FunASR STT 로딩/생성 중 stdout/stderr 진행 출력은 캡처해 status 로그로 제한하며, 모델 다운로드 가능성은 로딩 로그에 명시한다.
 - FunASR STT는 Whisper 내장 번역을 지원하지 않으므로 `translationBackend=whisper` 조합은 Fail-Fast로 중지한다. 중국어 번역은 NLLB 경로를 사용한다.
 - `./bin/avc setup`의 모델 사전 다운로드 대상에 언어별 STT 모델을 포함했다.
@@ -808,6 +853,8 @@ perf_samples=1064 max_stt=0.350s max_total=0.370s avg_total_rtf=0.010 translatio
 - [WhisperKit](https://openreview.net/pdf?id=6lC3MPFbVg)
 - [Adapting Whisper for Streaming Speech Recognition via Two-Pass Decoding](https://arxiv.org/abs/2506.12154)
 - [WhisperRT](https://arxiv.org/abs/2508.12301)
+- [WhisperPipe: A Resource-Efficient Streaming Architecture for Real-Time Automatic Speech Recognition](https://arxiv.org/abs/2604.25611)
+- [CarelessWhisper: Turning Whisper into a Causal Streaming Model](https://arxiv.org/abs/2508.12301)
 - [Whisper: Robust Speech Recognition via Large-Scale Weak Supervision](https://arxiv.org/abs/2212.04356)
 - [Conformer: Convolution-augmented Transformer for Speech Recognition](https://arxiv.org/abs/2005.08100)
 - [wav2vec 2.0: A Framework for Self-Supervised Learning of Speech Representations](https://arxiv.org/abs/2006.11477)
@@ -827,6 +874,13 @@ perf_samples=1064 max_stt=0.350s max_total=0.370s avg_total_rtf=0.010 translatio
 - [Qwen3-ASR Technical Report](https://arxiv.org/abs/2601.21337)
 - [Qwen3-ASR-0.6B Hugging Face Model Card](https://huggingface.co/Qwen/Qwen3-ASR-0.6B)
 - [Qwen3-ASR-1.7B Hugging Face Model Card](https://huggingface.co/Qwen/Qwen3-ASR-1.7B)
+- [FormalASR: End-to-End Spoken Chinese to Formal Text](https://arxiv.org/abs/2605.19266)
+- [ASR-EC Benchmark: Evaluating Large Language Models on Chinese ASR Error Correction](https://arxiv.org/abs/2412.03075)
+- [Large Language Model Should Understand Pinyin for Chinese ASR Error Correction](https://arxiv.org/abs/2409.13262)
+- [Pinyin Regularization in Error Correction for Chinese Speech Recognition with Large Language Models](https://arxiv.org/abs/2407.01909)
+- [Full-text Error Correction for Chinese Speech Recognition with Large Language Model](https://arxiv.org/abs/2409.07790)
+- [PARCO: Phoneme-Augmented Robust Contextual ASR via Contrastive Entity Disambiguation](https://arxiv.org/abs/2509.04357)
+- [PAC: Pronunciation-Aware Contextualized Large Language Model-based Automatic Speech Recognition](https://arxiv.org/abs/2509.12647)
 - [SenseVoice GitHub README](https://github.com/FunAudioLLM/SenseVoice)
 - [SenseVoiceSmall Hugging Face Model Card](https://huggingface.co/FunAudioLLM/SenseVoiceSmall)
 - [WeNet: Production oriented Streaming and Non-streaming End-to-End Speech Recognition Toolkit](https://arxiv.org/abs/2102.01547)
