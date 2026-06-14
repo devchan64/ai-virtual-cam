@@ -118,8 +118,8 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
             "whisper_stt_model_en": _DummyVar("large-v3"),
             "whisper_stt_backend_ko": _DummyVar("faster-whisper"),
             "whisper_stt_model_ko": _DummyVar("large-v3"),
-            "whisper_stt_backend_zh": _DummyVar("funasr-paraformer"),
-            "whisper_stt_model_zh": _DummyVar("paraformer-zh"),
+            "whisper_stt_backend_zh": _DummyVar("qwen3-asr-transformers"),
+            "whisper_stt_model_zh": _DummyVar("qwen3-asr-0.6b"),
             "whisper_sentence_boundary_backend": _DummyVar("sat"),
             "whisper_sentence_boundary_model": _DummyVar("sat-3l-sm"),
         }
@@ -165,12 +165,12 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         self.assertFalse(stt_visibility[(1, 2)])
         self.assertFalse(stt_visibility[(3, 4)])
         self.assertTrue(stt_visibility[(5, 6)])
-        self.assertEqual(gui._widgets["whisper_stt_backend_zh"].values, ("funasr-paraformer", "funasr-sensevoice", "qwen3-asr-transformers", "mock"))
-        self.assertEqual(gui._widgets["whisper_stt_model_zh"].values, ("paraformer-zh", "paraformer-zh-streaming"))
+        self.assertEqual(gui._widgets["whisper_stt_backend_zh"].values, ("qwen3-asr-transformers", "funasr-paraformer", "funasr-sensevoice", "mock"))
+        self.assertEqual(gui._widgets["whisper_stt_model_zh"].values, ("qwen3-asr-0.6b", "qwen3-asr-1.7b"))
         backend_option_visibility = {
             rows: visible for parent, rows, visible in grid_calls if parent is gui._whisper_tab
         }
-        self.assertFalse(backend_option_visibility[(32,)])
+        self.assertTrue(backend_option_visibility[(32,)])
         self.assertFalse(backend_option_visibility[(33,)])
 
         grid_calls.clear()
@@ -179,10 +179,10 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         backend_option_visibility = {
             rows: visible for parent, rows, visible in grid_calls if parent is gui._whisper_tab
         }
-        self.assertFalse(backend_option_visibility[(32,)])
+        self.assertTrue(backend_option_visibility[(32,)])
         self.assertFalse(backend_option_visibility[(33,)])
-        self.assertEqual(gui.vars["whisper_stt_backend_zh"].get(), "funasr-paraformer")
-        self.assertEqual(gui._widgets["whisper_stt_model_zh"].values, ("paraformer-zh", "paraformer-zh-streaming"))
+        self.assertEqual(gui.vars["whisper_stt_backend_zh"].get(), "qwen3-asr-transformers")
+        self.assertEqual(gui._widgets["whisper_stt_model_zh"].values, ("qwen3-asr-0.6b", "qwen3-asr-1.7b"))
 
     def test_resolve_and_validate_audio_runtime_devices_maps_display_values(self) -> None:
         with mock.patch.object(self.audio_devices.platform, "system", return_value="Linux"), mock.patch.object(

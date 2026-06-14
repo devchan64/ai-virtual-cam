@@ -5,7 +5,7 @@ import io
 from dataclasses import dataclass
 from typing import Iterable
 
-from src.app.model_cache import require_funasr_model_cached, require_qwen_asr_model_cached
+from src.app.model_cache import require_funasr_model_cache_path, require_qwen_asr_model_cached
 from src.domain.contracts.whisper import resolve_funasr_model_name, resolve_qwen_asr_model_name
 
 
@@ -143,14 +143,16 @@ class FunasrSttModel:
                 f"model={model_name} device={device}. 원인: {exc}"
             ) from exc
         _emit_captured_output(status_callback, "FunASR STT import", captured.getvalue())
-        require_funasr_model_cached(model_name, purpose="FunASR STT")
+        self.local_model_path = require_funasr_model_cache_path(model_name, purpose="FunASR STT")
+        if self._status_callback is not None:
+            self._status_callback(f"FunASR STT 로컬 캐시 사용: model={model_name} path={self.local_model_path}")
         try:
             with _capture_model_output() as captured:
-                self._model = AutoModel(model=self.resolved_model_name, device=device, disable_update=True)
+                self._model = AutoModel(model=str(self.local_model_path), device=device, disable_update=True)
         except Exception as exc:
             raise RuntimeError(
-                f"FunASR STT 모델 로딩 실패: backend={backend} model={model_name} resolvedModel={self.resolved_model_name} device={device}. "
-                f"원인: {exc}"
+                f"FunASR STT 모델 로딩 실패: backend={backend} model={model_name} resolvedModel={self.resolved_model_name} "
+                f"localPath={self.local_model_path} device={device}. 원인: {exc}"
             ) from exc
         _emit_captured_output(status_callback, "FunASR STT load", captured.getvalue())
 
@@ -195,11 +197,21 @@ def _emit_captured_output(callback, prefix: str, output: str) -> None:
 
 def funasr_generated_text(result: object) -> str:
     if isinstance(result, str):
-        return result.strip()
+        return _strip_funasr_control_tokens(result)
     if isinstance(result, dict):
         text = result.get("text") or result.get("sentence") or result.get("value") or ""
-        return str(text).strip()
+        return _strip_funasr_control_tokens(str(text))
     if isinstance(result, list):
         parts = [funasr_generated_text(item) for item in result]
         return " ".join(part for part in parts if part).strip()
-    return str(result or "").strip()
+    return _strip_funasr_control_tokens(str(result or ""))
+
+
+def _strip_funasr_control_tokens(text: str) -> str:
+    stripped = str(text or "").strip()
+    while stripped.startswith("<|"):
+        end = stripped.find("|>")
+        if end < 0:
+            break
+        stripped = stripped[end + 2 :].lstrip()
+    return stripped.strip()

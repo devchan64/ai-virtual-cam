@@ -6,6 +6,7 @@ VENV_DIR="$ROOT_DIR/.venv"
 VENV_PY="$VENV_DIR/bin/python3"
 REQUIREMENTS_FILE="$ROOT_DIR/requirements.txt"
 INSTALL_DEEPFILTERNET="${AVC_INSTALL_DEEPFILTERNET:-0}"
+WTPSPLIT_VERSION="${AVC_WTPSPLIT_VERSION:-2.1.2}"
 
 usage() {
   cat <<'EOF'
@@ -40,6 +41,11 @@ if [[ ! -x "$VENV_PY" ]]; then
 fi
 
 "$VENV_PY" -m pip install -r "$REQUIREMENTS_FILE"
+
+# wtpsplit currently pins huggingface-hub==0.25.2 in package metadata, which
+# conflicts with transformers/Qwen3-ASR. Keep the runtime hub version selected by
+# requirements.txt and install wtpsplit as a no-deps optional runtime package.
+"$VENV_PY" -m pip install --no-deps "wtpsplit==$WTPSPLIT_VERSION"
 
 if [[ "$(uname -s)" == "Linux" ]]; then
   if [[ "$INSTALL_DEEPFILTERNET" == "1" ]]; then

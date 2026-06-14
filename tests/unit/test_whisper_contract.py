@@ -18,13 +18,13 @@ class WhisperContractTest(unittest.TestCase):
 
         self.assertEqual(set(defaults), set(WHISPER_CONTRACT))
         self.assertEqual(defaults["language"], "en")
-        self.assertEqual(defaults["sttBackendZh"], "funasr-paraformer")
+        self.assertEqual(defaults["sttBackendZh"], "qwen3-asr-transformers")
         self.assertEqual(defaults["postProcessingProfile"], "manual")
         self.assertEqual(whisper_default("sentenceBoundaryBackendZh"), "funasr-ct-punc")
 
     def test_contract_exposes_allowed_values(self) -> None:
         self.assertEqual(whisper_allowed("language"), ("ko", "en", "zh"))
-        self.assertIn("funasr-paraformer", whisper_allowed("sttBackendZh"))
+        self.assertIn("qwen3-asr-transformers", whisper_allowed("sttBackendZh"))
         self.assertNotIn("auto", whisper_allowed("language"))
         self.assertEqual(whisper_allowed("postProcessingProfile"), ("manual",))
 

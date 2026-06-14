@@ -29,6 +29,27 @@ def has_required_modelscope_files(path: Path) -> bool:
     return has_config and has_weights
 
 
+def funasr_model_cache_path(model_name: str) -> Path | None:
+    resolved = resolve_funasr_model_name(model_name)
+    candidates = (modelscope_model_cache_dir(resolved), modelscope_legacy_cache_dir(resolved))
+    for path in candidates:
+        if has_required_modelscope_files(path):
+            return path
+    return None
+
+
+def require_funasr_model_cache_path(model_name: str, *, purpose: str) -> Path:
+    cached = funasr_model_cache_path(model_name)
+    if cached is not None:
+        return cached
+    resolved = resolve_funasr_model_name(model_name)
+    raise RuntimeError(
+        f"{purpose} 모델이 로컬 캐시에 없습니다: model={model_name} resolvedModel={resolved}. "
+        "Serve 실행 중 다운로드는 허용하지 않습니다. config GUI의 모델 다운로드 안내창 또는 "
+        "./bin/avc setup --download-whisper-models 로 먼저 다운로드하세요."
+    )
+
+
 def is_funasr_model_cached(model_name: str) -> bool:
     resolved = resolve_funasr_model_name(model_name)
     candidates = (modelscope_model_cache_dir(resolved), modelscope_legacy_cache_dir(resolved))
@@ -64,14 +85,7 @@ def require_qwen_asr_model_cached(model_name: str, *, purpose: str) -> None:
 
 
 def require_funasr_model_cached(model_name: str, *, purpose: str) -> None:
-    if is_funasr_model_cached(model_name):
-        return
-    resolved = resolve_funasr_model_name(model_name)
-    raise RuntimeError(
-        f"{purpose} 모델이 로컬 캐시에 없습니다: model={model_name} resolvedModel={resolved}. "
-        "Serve 실행 중 다운로드는 허용하지 않습니다. config GUI의 모델 다운로드 안내창 또는 "
-        "./bin/avc setup --download-whisper-models 로 먼저 다운로드하세요."
-    )
+    require_funasr_model_cache_path(model_name, purpose=purpose)
 
 
 def require_hf_repo_cached(model_name: str, *, purpose: str) -> None:

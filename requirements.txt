@@ -7,6 +7,7 @@ faster-whisper==1.2.1
 transformers==4.52.4
 sentencepiece==0.2.0
 
-wtpsplit
+# wtpsplit pins huggingface-hub==0.25.2 in package metadata.
+# Install it with --no-deps from scripts/bin/avc-env so Qwen3-ASR/transformers keep huggingface-hub>=0.30.
 funasr
 qwen-asr

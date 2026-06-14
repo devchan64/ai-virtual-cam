@@ -322,6 +322,9 @@ verify_whisper_runtime_contract() {
   if ! run_as_invoking_user "$venv_py" -c "import funasr" >/dev/null 2>&1; then
     fail "FunASR is not importable in .venv. Run ./bin/avc setup again to install Chinese Whisper post-processing dependencies, including torchaudio."
   fi
+  if ! run_as_invoking_user "$venv_py" -c "import wtpsplit" >/dev/null 2>&1; then
+    fail "wtpsplit is not importable in .venv. Run ./bin/avc setup again; wtpsplit is installed with --no-deps to avoid huggingface-hub resolver conflicts."
+  fi
   if ! run_as_invoking_user "$venv_py" -c "import qwen_asr" >/dev/null 2>&1; then
     fail "qwen-asr is not importable in .venv. Run ./bin/avc setup again to install Qwen3-ASR STT dependencies."
   fi
