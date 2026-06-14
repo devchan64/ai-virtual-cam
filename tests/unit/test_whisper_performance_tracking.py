@@ -24,7 +24,7 @@ TRACKING_TARGETS = {
     "replacement": {"target_cases": 11, "target_rate": 0.90},
     "pending": {"target_cases": 10, "target_rate": 0.90},
     "final_quality": {"target_cases": 8, "target_rate": 0.90},
-    "translation_quality": {"target_cases": 6, "target_rate": 0.80},
+    "translation_quality": {"target_cases": 8, "target_rate": 0.80},
     "coalesce": {"target_cases": 10, "target_rate": 1.00},
 }
 
@@ -712,64 +712,91 @@ REPLACEMENT_TRACKING_CASES.extend([
 ])
 
 
-TRANSLATION_QUALITY_TRACKING_CASES = [
+TRANSLATION_OBSERVED_QUALITY_CASES = [
+    # These are observed output samples, not live model assertions. They are a
+    # small regression corpus for comparing translation backends on the same input.
     {
+        "category": "named_entity",
+        "source_language": "zh",
+        "target_language": "ko",
         "source": "说呢我来重庆，其实我挺怕的。",
         "observed": "제가 춘천에 왔을 때, 저는 정말 두려워했습니다.",
-        "expected_terms": {"충칭"},
-        "forbidden_terms": {"춘천"},
+        "required_any": {"충칭", "중경"},
+        "forbidden_any": {"춘천"},
         "case_source": "2026-06-14 monitor zh->ko Chongqing mistranslation",
     },
     {
+        "category": "service_name",
+        "source_language": "zh",
+        "target_language": "ko",
         "source": "第一个呢要登陆的呢就是滴滴，滴滴呢就是来中国，你要搭车的话，你就可以搭滴滴。",
         "observed": "첫 번째 착륙은滴滴,滴滴는 중국으로 오는 것입니다. 당신이 차를 타고 있다면, 당신은滴滴을 타고 갈 수 있습니다.",
-        "expected_terms": {"滴滴"},
-        "forbidden_terms": {"착륙"},
+        "required_any": {"滴滴", "디디"},
+        "forbidden_any": {"착륙"},
         "case_source": "2026-06-14 monitor zh->ko Didi mistranslation",
     },
     {
+        "category": "service_name",
+        "source_language": "zh",
+        "target_language": "ko",
         "source": "另外一个你要到录的app呢，就是那个美团外卖。",
         "observed": "또 다른 앱은 미국 유출장소입니다.",
-        "expected_terms": {"메이퇀", "美团"},
-        "forbidden_terms": {"미국", "유출장소"},
+        "required_any": {"메이퇀", "美团"},
+        "forbidden_any": {"미국", "유출장소"},
         "case_source": "2026-06-14 monitor zh->ko Meituan mistranslation",
     },
     {
+        "category": "colloquial_term",
+        "source_language": "zh",
+        "target_language": "ko",
         "source": "面可是快速面就是它会比较q一点，这个呢是比快速。",
         "observed": "하지만 가속면은 q을 조금 더 비교할 수 있고, 이면은 가속보다 더 빠르다.",
-        "expected_terms": {"쫄깃", "Q"},
-        "forbidden_terms": {"가속"},
+        "required_any": {"쫄깃", "탄력", "Q", "큐"},
+        "forbidden_any": {"가속"},
         "case_source": "2026-06-14 monitor zh->ko colloquial q mistranslation",
     },
     {
+        "category": "acceptable_baseline",
+        "source_language": "zh",
+        "target_language": "ko",
         "source": "如果你们来中国旅游呢，你们要登录好几个app第一。",
         "observed": "중국을 여행할 때 먼저 여러 앱에 접속해야 합니다.",
-        "expected_terms": {"중국", "앱"},
-        "forbidden_terms": set(),
+        "required_all": {"중국", "앱"},
+        "forbidden_any": set(),
         "case_source": "2026-06-14 monitor zh->ko acceptable baseline",
     },
     {
+        "category": "domain_term",
+        "source_language": "zh",
+        "target_language": "ko",
         "source": "卷卷头前前面呢，他还帮我做了一个非常蓬松的刘海给。",
         "observed": "이 책 앞에는 그가 저에게 아주 느슨한 해양을 만들어주었습니다.",
-        "expected_terms": {"앞머리", "머리"},
-        "forbidden_terms": {"책", "해양"},
+        "required_any": {"앞머리", "머리"},
+        "forbidden_any": {"책", "해양"},
         "case_source": "2026-06-14 avc-whisper.log.3 zh->ko hairstyle mistranslation",
     },
     {
+        "category": "domain_term",
+        "source_language": "zh",
+        "target_language": "ko",
         "source": "日穿搭衣服呢是前几天买的裤子呢，也是本地的一个牌。",
         "observed": "이 옷은 며칠 전에 구입한 바둑이고, 지역 카드입니다.",
-        "expected_terms": {"바지", "옷"},
-        "forbidden_terms": {"바둑", "카드"},
+        "required_any": {"바지", "옷"},
+        "forbidden_any": {"바둑", "카드"},
         "case_source": "2026-06-14 avc-whisper.log.3 zh->ko clothing mistranslation",
     },
     {
+        "category": "acceptable_baseline",
+        "source_language": "zh",
+        "target_language": "ko",
         "source": "他们这里的外卖呢选择非常非常的多。",
         "observed": "이곳의 배달 선택지는 매우 많습니다.",
-        "expected_terms": {"배달", "많"},
-        "forbidden_terms": set(),
+        "required_all": {"배달", "많"},
+        "forbidden_any": set(),
         "case_source": "synthetic acceptable baseline",
     },
 ]
+
 
 FINAL_QUALITY_TRACKING_CASES = [
     {"text": "潇洒最好的乳团。", "language": "zh", "expected_flags": {"short_cjk"}, "source": "2026-06-14 monitor chunk 421"},
@@ -822,11 +849,14 @@ class WhisperPerformanceTrackingTest(unittest.TestCase):
 def _make_translation_quality_tracking_test(index: int, case: dict[str, object]):
     def test(self: WhisperPerformanceTrackingTest) -> None:
         observed = str(case["observed"])
-        expected_terms = set(case["expected_terms"])
-        forbidden_terms = set(case["forbidden_terms"])
-        has_expected = any(term in observed for term in expected_terms) if expected_terms else True
-        has_forbidden = any(term in observed for term in forbidden_terms)
-        self._record("translation_quality", f"translation_quality_{index:03d}", has_expected and not has_forbidden)
+        required_any = set(case.get("required_any", set()))
+        required_all = set(case.get("required_all", set()))
+        forbidden_any = set(case.get("forbidden_any", set()))
+        matched_any = any(term in observed for term in required_any) if required_any else True
+        matched_all = all(term in observed for term in required_all)
+        has_forbidden = any(term in observed for term in forbidden_any)
+        matched = matched_any and matched_all and not has_forbidden
+        self._record("translation_quality", f"translation_quality_{index:03d}", matched)
     return test
 
 
@@ -1007,7 +1037,7 @@ for _index, _case in enumerate(COALESCE_TRACKING_CASES, 1):
     )
 
 
-for _index, _case in enumerate(TRANSLATION_QUALITY_TRACKING_CASES, 1):
+for _index, _case in enumerate(TRANSLATION_OBSERVED_QUALITY_CASES, 1):
     setattr(
         WhisperPerformanceTrackingTest,
         f"test_tracking_translation_quality_{_index:03d}",
