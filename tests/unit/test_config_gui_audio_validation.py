@@ -167,7 +167,7 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         self.assertTrue(stt_visibility[(5, 6)])
         self.assertEqual(
             gui._widgets["whisper_stt_backend_zh"].values,
-            ("faster-whisper", "qwen3-asr-transformers", "qwen3-asr-vllm-streaming", "mock"),
+            ("faster-whisper", "qwen3-asr-transformers", "mock"),
         )
         self.assertEqual(gui._widgets["whisper_stt_model_zh"].values, ("qwen3-asr-0.6b", "qwen3-asr-1.7b"))
         backend_option_visibility = {
@@ -452,6 +452,28 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
             self.module.ConfigGui._capture_all_window_geometry_meta(gui)
 
         remember.assert_any_call("whisperModelDownloadWindowGeometry", download_window)
+
+
+    def test_whisper_model_download_configure_schedules_geometry_capture(self) -> None:
+        download_window = object()
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        gui._whisper_model_download_window = download_window
+        gui._schedule_save_window_geometry_meta = mock.Mock()
+
+        event = types.SimpleNamespace(widget=download_window)
+        self.module.ConfigGui._on_whisper_model_download_configure(gui, event)
+
+        gui._schedule_save_window_geometry_meta.assert_called_once_with()
+
+    def test_whisper_model_download_configure_ignores_other_widgets(self) -> None:
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        gui._whisper_model_download_window = object()
+        gui._schedule_save_window_geometry_meta = mock.Mock()
+
+        event = types.SimpleNamespace(widget=object())
+        self.module.ConfigGui._on_whisper_model_download_configure(gui, event)
+
+        gui._schedule_save_window_geometry_meta.assert_not_called()
 
     def test_close_whisper_model_download_dialog_cancels_running_process(self) -> None:
         process = mock.Mock()

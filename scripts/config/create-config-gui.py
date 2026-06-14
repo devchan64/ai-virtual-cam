@@ -840,6 +840,7 @@ class ConfigGui:
         window.columnconfigure(0, weight=1)
         window.rowconfigure(2, weight=1)
         self._restore_named_window_geometry(window, "whisperModelDownloadWindowGeometry")
+        window.bind("<Configure>", self._on_whisper_model_download_configure)
         window.protocol("WM_DELETE_WINDOW", lambda: self._close_whisper_model_download_dialog(False))
 
         ttk.Label(
@@ -1268,6 +1269,12 @@ class ConfigGui:
 
     def _on_preview_configure(self, event) -> None:
         if self._preview_window is None or event.widget != self._preview_window:
+            return
+        self._schedule_save_window_geometry_meta()
+
+    def _on_whisper_model_download_configure(self, event) -> None:
+        window = getattr(self, "_whisper_model_download_window", None)
+        if window is None or event.widget != window:
             return
         self._schedule_save_window_geometry_meta()
 

@@ -505,7 +505,7 @@ class WhisperTranscriptWorker:
                     "STT 모델 로딩 실패: "
                     f"backend={stt_backend} model={stt_model} device={self._cfg.device} "
                     f"computeType={self._cfg.computeType} language={self._cfg.language}. "
-                    "Fail-Fast: 설정한 STT backend/model/device를 수정하거나 ./bin/avc setup으로 의존성과 모델을 준비하세요. "
+                    "Fail-Fast: 설정한 STT backend/model/device를 수정하세요. qwen3-asr-vllm-streaming은 공유 .venv에서 vLLM/mediapipe 의존성 충돌로 지원하지 않습니다. 현재는 qwen3-asr-transformers를 사용하세요. "
                     f"원인: {exc}"
                 ) from exc
             self._emit("status", "STT 모델 로딩 완료")

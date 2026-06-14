@@ -479,7 +479,7 @@ STT 모델과 문장 경계 모델의 책임을 분리해 검증한다.
 #### 언어별 STT backend 설계 원칙
 
 - `backend=faster-whisper` 전역값에 중국어를 묶지 않는다. STT backend도 후처리 backend처럼 언어별 설정을 둔다.
-- 예: `sttBackendEn=faster-whisper`, `sttBackendKo=faster-whisper`, `sttBackendZh=qwen3-asr-transformers`. 영어/한국어는 현재 Whisper 계열만 운영 후보로 둔다. 중국어는 Qwen3-ASR를 품질 우선 후보로 두며, `qwen3-asr-vllm-streaming`을 선택형 streaming 후보로 추가한다. Dolphin-CN-Dialect와 WeNet은 후속 streaming 후보로 추적한다. FunASR STT 계열은 폐기 예정이므로 신규 설정 기본값이나 추천 조합에 사용하지 않는다.
+- 예: `sttBackendEn=faster-whisper`, `sttBackendKo=faster-whisper`, `sttBackendZh=qwen3-asr-transformers`. 영어/한국어는 현재 Whisper 계열만 운영 후보로 둔다. 중국어는 Qwen3-ASR를 품질 우선 후보로 두며, `qwen3-asr-vllm-streaming`은 vLLM/mediapipe 의존성 충돌로 공유 `.venv`에서 비활성화하고, 별도 격리 런타임 후보로만 추적한다. Dolphin-CN-Dialect와 WeNet은 후속 streaming 후보로 추적한다. FunASR STT 계열은 폐기 예정이므로 신규 설정 기본값이나 추천 조합에 사용하지 않는다.
 - 중국어 backend 로딩 실패는 Fail-Fast다. CPU fallback, Whisper fallback, 다른 STT backend fallback은 자동 수행하지 않는다.
 - Whisper 언어 자동 감지는 폐기한다. `language`는 `ko`, `en`, `zh` 중 하나로 명시해야 한다.
 - 모델 준비 순서는 `STT 모델 -> 번역 모델 -> 문장 경계/후처리 모델 -> 입력 장치 열기 -> 전사 루프`를 유지한다.

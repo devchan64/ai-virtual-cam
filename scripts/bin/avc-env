@@ -6,6 +6,9 @@ VENV_DIR="$ROOT_DIR/.venv"
 VENV_PY="$VENV_DIR/bin/python3"
 REQUIREMENTS_FILE="$ROOT_DIR/requirements.txt"
 INSTALL_DEEPFILTERNET="${AVC_INSTALL_DEEPFILTERNET:-0}"
+INSTALL_QWEN_VLLM="${AVC_INSTALL_QWEN_VLLM:-0}"
+PIP_TIMEOUT="${AVC_PIP_TIMEOUT:-600}"
+PIP_RETRIES="${AVC_PIP_RETRIES:-10}"
 WTPSPLIT_VERSION="${AVC_WTPSPLIT_VERSION:-2.1.2}"
 
 usage() {
@@ -48,6 +51,13 @@ fi
 "$VENV_PY" -m pip install --no-deps "wtpsplit==$WTPSPLIT_VERSION"
 
 if [[ "$(uname -s)" == "Linux" ]]; then
+  if [[ "$INSTALL_QWEN_VLLM" == "1" ]]; then
+    echo "[avc-env] ERROR: qwen3-asr-vllm-streaming is not supported in the shared .venv because vLLM requires protobuf/opencv versions that conflict with mediapipe. Use qwen3-asr-transformers until an isolated vLLM runtime is implemented." >&2
+    exit 2
+  else
+    echo "[avc-env] info: skipping Qwen3-ASR vLLM install; shared .venv cannot safely host vLLM with mediapipe." >&2
+  fi
+
   if [[ "$INSTALL_DEEPFILTERNET" == "1" ]]; then
     if ! "$VENV_PY" -m pip install --no-deps deepfilternet; then
       echo "[avc-env] WARN: deepfilternet install failed; denoise.backend=deepfilternet may be unavailable." >&2

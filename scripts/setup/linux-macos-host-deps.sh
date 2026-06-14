@@ -14,6 +14,7 @@ TENSORRT_ENGINE_FORCE="${AVC_TENSORRT_ENGINE_FORCE:-0}"
 TENSORRT_ENGINE_PATH="${AVC_TENSORRT_ENGINE_PATH:-}"
 INSTALL_WHISPER_CUDA="${AVC_INSTALL_WHISPER_CUDA:-1}"
 INSTALL_TRANSLATION_TORCH="${AVC_INSTALL_TRANSLATION_TORCH:-1}"
+INSTALL_QWEN_VLLM="${AVC_INSTALL_QWEN_VLLM:-0}"
 TORCH_INDEX_URL="${AVC_TORCH_INDEX_URL:-}"
 
 log() {
@@ -72,6 +73,7 @@ Environment:
   AVC_TENSORRT_ENGINE_FORCE    Set 1 to re-download when output path already exists
   AVC_INSTALL_WHISPER_CUDA     Linux only: install CUDA runtime libs for faster-whisper (default: 1)
   AVC_INSTALL_TRANSLATION_TORCH Install PyTorch for NLLB translation (default: 1)
+  AVC_INSTALL_QWEN_VLLM         Unsupported in shared .venv; reserved for future isolated vLLM runtime (default: 0)
   AVC_TORCH_INDEX_URL           PyTorch wheel index URL (Linux default: CUDA 12.8)
   -h, --help               Show this help
 EOF
@@ -319,6 +321,9 @@ verify_whisper_runtime_contract() {
   fi
   if ! run_as_invoking_user "$venv_py" -c "import qwen_asr" >/dev/null 2>&1; then
     fail "qwen-asr is not importable in .venv. Run ./bin/avc setup again to install Qwen3-ASR STT dependencies."
+  fi
+  if [[ "$INSTALL_QWEN_VLLM" == "1" ]]; then
+    fail "qwen3-asr-vllm-streaming is not supported in the shared .venv because vLLM conflicts with mediapipe/protobuf. Use qwen3-asr-transformers until an isolated vLLM runtime is implemented."
   fi
   if [[ "$OS_KIND" == "linux" && "$INSTALL_TRANSLATION_TORCH" == "1" ]]; then
     run_as_invoking_user "$venv_py" - <<'PYVERIFY'
