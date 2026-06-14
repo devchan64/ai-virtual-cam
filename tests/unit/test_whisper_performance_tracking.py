@@ -600,6 +600,34 @@ COLLAPSE_TRACKING_CASES.extend([
     {"source": "2026-06-13 monitor chunk 1238", "text": "그러면서 당연히 부의 양극화는 더 심화되는 돈을 이용해가지고 정부가 어떻게 돈을 이용해서 정부가 어떻게 보면 자산시장 사재기에 더 집중화시키고 있는 있는 전략일"},
 ])
 
+REPLACEMENT_TRACKING_CASES.extend([
+    {
+        "staged": "这是我的台湾的车牌判。",
+        "candidate": "的个湾的吃排饭三。",
+        "expected": "unconfirmed_cjk",
+        "source": "2026-06-14 monitor chunks 47 short CJK churn",
+    },
+    {
+        "staged": "还宽零零。",
+        "candidate": "其有没？",
+        "expected": "unconfirmed_cjk",
+        "source": "2026-06-14 monitor chunks 48-49 short CJK churn",
+    },
+    {
+        "staged": "好像有没？",
+        "candidate": "对对。",
+        "expected": "unconfirmed_cjk",
+        "source": "2026-06-14 monitor chunks 50-51 short CJK churn",
+    },
+    {
+        "staged": "哎，汤姆再见喽台。",
+        "candidate": "哎，汤姆再见喽，台湾见。",
+        "expected": "unconfirmed_cjk",
+        "source": "2026-06-14 monitor chunk 73 revision candidate before convergence",
+    },
+])
+
+
 TRANSLATION_QUALITY_TRACKING_CASES = [
     {
         "source": "说呢我来重庆，其实我挺怕的。",

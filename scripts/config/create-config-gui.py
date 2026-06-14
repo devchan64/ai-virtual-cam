@@ -131,6 +131,7 @@ DEFAULT_WINDOW_GEOMETRY_META = {
     "inputMeterWindowGeometry": "640x480+140+140",
     "whisperWindowGeometry": "780x420+50+119",
     "whisperTranslationWindowGeometry": "780x420+860+119",
+    "whisperModelDownloadWindowGeometry": "720x420+160+160",
 }
 MIN_WINDOW_WIDTH = 640
 MIN_WINDOW_HEIGHT = 480
@@ -561,6 +562,7 @@ class ConfigGui:
         self._whisper_model_download_window: tk.Toplevel | None = None
         self._whisper_model_download_log_text: tk.Text | None = None
         self._whisper_model_download_on_success: Callable[[], None] | None = None
+        self._whisper_model_download_cancelled = False
         self._whisper_model_download_status_var = tk.StringVar(
             value=self._tr("status.whisper_model_download_idle", "모델 다운로드 대기 중")
         )
@@ -826,7 +828,7 @@ class ConfigGui:
         window.transient(self.root)
         window.columnconfigure(0, weight=1)
         window.rowconfigure(2, weight=1)
-        window.geometry("720x420")
+        self._restore_named_window_geometry(window, "whisperModelDownloadWindowGeometry")
         window.protocol("WM_DELETE_WINDOW", lambda: self._close_whisper_model_download_dialog(False))
 
         ttk.Label(
@@ -878,11 +880,22 @@ class ConfigGui:
     def _close_whisper_model_download_dialog(self, downloaded: bool) -> None:
         process = self._whisper_model_download_process
         if process is not None and process.poll() is None:
+            self._whisper_model_download_cancelled = True
             self._set_whisper_model_download_status(
-                self._tr("status.whisper_model_download_running", "모델 다운로드가 이미 진행 중입니다.")
+                self._tr("status.whisper_model_download_cancelled", "모델 다운로드를 취소했습니다.")
             )
-            return
+            try:
+                process.send_signal(signal.SIGINT)
+            except ProcessLookupError:
+                pass
+            except Exception:
+                try:
+                    process.terminate()
+                except Exception:
+                    pass
         window = self._whisper_model_download_window
+        if window is not None:
+            self._remember_named_window_geometry("whisperModelDownloadWindowGeometry", window)
         self._whisper_model_download_window = None
         self._whisper_model_download_btn = None
         self._whisper_model_download_progress = None
@@ -899,6 +912,7 @@ class ConfigGui:
                 running=False,
                 status_key="status.serve_stopped",
             )
+
 
     def _start_serve(self) -> None:
         if self._is_serve_running():
@@ -1045,6 +1059,7 @@ class ConfigGui:
                 self._tr("status.whisper_model_download_running", "모델 다운로드가 이미 진행 중입니다.")
             )
             return
+        self._whisper_model_download_cancelled = False
         self._sync_whisper_runtime_options()
         self._sync_whisper_translation_backend_options()
         try:
@@ -1124,6 +1139,12 @@ class ConfigGui:
             self._whisper_model_download_progress.configure(value=100 if return_code == 0 else 0)
         if self._whisper_model_download_btn is not None:
             self._whisper_model_download_btn.state(["!disabled"])
+        if self._whisper_model_download_cancelled:
+            self._whisper_model_download_cancelled = False
+            self._set_whisper_model_download_status(
+                self._tr("status.whisper_model_download_cancelled", "모델 다운로드가 취소되었습니다.")
+            )
+            return
         if return_code == 0:
             message = self._tr("status.whisper_model_download_done", "모델 다운로드가 완료되었습니다.")
             print(f"[avc] Whisper model download finished", flush=True)
@@ -1352,6 +1373,7 @@ class ConfigGui:
             self._remember_named_window_geometry("audioTuneWindowGeometry", getattr(self, "_audio_tune_window", None))
             self._remember_named_window_geometry("audioGateTestWindowGeometry", getattr(self, "_audio_gate_test_window", None))
             self._remember_named_window_geometry("inputMeterWindowGeometry", getattr(self, "_audio_input_meter_window", None))
+            self._remember_named_window_geometry("whisperModelDownloadWindowGeometry", getattr(self, "_whisper_model_download_window", None))
         except Exception as exc:
             _log(f"ERROR [Window geometry capture] {exc}")
 

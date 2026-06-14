@@ -850,6 +850,20 @@ def _should_finalize_replaced_sentence(
     ) in {"confirmed", "aged", "duplicate_or_suffix", "partial_preserve", "finalize"}
 
 
+def _should_stage_replacement_candidate(staged_sentence: str, candidate: str, replacement_reason: str) -> bool:
+    if replacement_reason != "unconfirmed_cjk":
+        return True
+    candidate_words = _word_units(candidate)
+    cjk_units = [word for word in candidate_words if _has_cjk_words([word])]
+    if 0 < len(cjk_units) <= SHORT_CJK_FINAL_UNITS:
+        return False
+    staged_words = _word_units(staged_sentence)
+    staged_cjk_units = [word for word in staged_words if _has_cjk_words([word])]
+    if 0 < len(staged_cjk_units) <= SHORT_CJK_FINAL_UNITS and len(cjk_units) <= SHORT_CJK_FINAL_UNITS + 4:
+        return False
+    return True
+
+
 def _format_transcript_metrics(metrics: dict[str, int]) -> str:
     parts = [f"{key}={metrics[key]}" for key in sorted(metrics) if metrics[key]]
     return ",".join(parts) if parts else "none"

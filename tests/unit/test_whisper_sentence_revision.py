@@ -20,6 +20,7 @@ from src.app.whisper_window import (
     _sentences_are_revisions,
     _should_age_staged_sentence,
     _should_finalize_replaced_sentence,
+    _should_stage_replacement_candidate,
     _should_confirm_staged_sentence,
     _should_translate_staged_sentence,
     _should_translate_final_sentence,
@@ -501,6 +502,29 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
             with self.subTest(staged=staged, candidate=candidate):
                 self.assertEqual(_replacement_decision_reason(staged, candidate, 1, False, 0), "unconfirmed_cjk")
                 self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
+
+
+    def test_chinese_short_replacement_candidate_is_suppressed_from_recent_log(self) -> None:
+        cases = [
+            ("这是我的台湾的车牌判。", "的个湾的吃排饭三。"),
+            ("还宽零零。", "其有没？"),
+            ("好像有没？", "对对。"),
+            ("难。", "没？"),
+        ]
+        for staged, candidate in cases:
+            with self.subTest(staged=staged, candidate=candidate):
+                reason = _replacement_decision_reason(staged, candidate, 1, False, 0)
+                self.assertEqual(reason, "unconfirmed_cjk")
+                self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
+                self.assertFalse(_should_stage_replacement_candidate(staged, candidate, reason))
+
+    def test_chinese_long_replacement_candidate_can_be_staged_for_observation(self) -> None:
+        staged = "为什么呢？"
+        candidate = "是因为绑匪呢提出要1700万美金的，然后他们还继续威胁家属。"
+        reason = _replacement_decision_reason(staged, candidate, 1, False, 0)
+
+        self.assertEqual(reason, "unconfirmed_cjk")
+        self.assertTrue(_should_stage_replacement_candidate(staged, candidate, reason))
 
     def test_chinese_confirmed_stage_can_finalize_on_replacement(self) -> None:
         staged = "如果你跟绑匪妥协的话，就会导致第二例案情的发生。"

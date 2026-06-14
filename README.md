@@ -361,12 +361,12 @@ Linux Docker 정책:
 
 응답속도 조정:
 
-- `청크/윈도우 길이(초)`(`chunkSeconds`, `windowSeconds`): 최근 몇 초의 오디오 문맥을 STT 모델에 전달할지 결정합니다. 길게 잡으면 빠른 발화의 문장 완성도와 앞뒤 문맥 안정성에 유리하지만, tail echo와 후보 리비전 관리 부담이 늘 수 있습니다. 기본 추천값은 `7.5`초입니다.
+- `청크/윈도우 길이(초)`(`chunkSeconds`, `windowSeconds`): 최근 몇 초의 오디오 문맥을 STT 모델에 전달할지 결정합니다. 길게 잡으면 빠른 발화의 문장 완성도와 앞뒤 문맥 안정성에 유리하지만, tail echo와 후보 리비전 관리 부담이 늘 수 있습니다. 기본 추천값은 `9.0`초입니다.
 - `갱신 주기(초)`(`stepSeconds`): 몇 초마다 새 STT 요청을 만들지 결정합니다. 기본 추천값은 `1.5`초이며, 낮추면 화면 갱신은 빨라지지만 같은 문맥을 반복 처리하는 비율이 커집니다.
-- `확정 지연(초)`(`commitLagSeconds`): 윈도우 끝단의 불안정한 tail을 즉시 확정하지 않기 위한 보류 구간입니다. 기본 추천값은 `1.5`초입니다.
+- `확정 지연(초)`(`commitLagSeconds`): 윈도우 끝단의 불안정한 tail을 즉시 확정하지 않기 위한 보류 구간입니다. 기본 추천값은 `2.0`초입니다.
 - `Beam 크기`(`beamSize`): 디코딩 후보를 몇 갈래로 탐색할지 결정합니다. `1`은 가장 빠른 greedy 디코딩에 가깝고 지연을 줄이는 데 유리합니다. 값을 키우면 후보 탐색이 늘어 일부 발화의 정확도와 안정성이 좋아질 수 있지만, large-v3에서는 GPU 사용량과 디코딩 시간이 늘어 응답이 늦어질 수 있습니다.
-- 빠른 발화와 문장 누락이 문제라면 우선 `windowSeconds=7.5`, `stepSeconds=1.5`, `commitLagSeconds=1.5`, `beamSize=3`, `temperature=0.0` 조합을 시작점으로 사용하세요. `maxNewTokens=96`은 속도 튜닝값이라기보다 긴 출력 생성을 막는 상한값입니다.
-- 문장이 여전히 자주 끊기거나 앞뒤 문맥을 놓치면 `windowSeconds`를 `9.0`까지 늘려 비교합니다. tail echo와 staging 교체가 늘면 `windowSeconds`를 다시 낮추거나 `stepSeconds`를 함께 줄여 같은 후보가 더 자주 재확인되는지 비교합니다.
+- 빠른 발화와 문장 누락이 문제라면 우선 `windowSeconds=9.0`, `stepSeconds=1.5`, `commitLagSeconds=2.0`, `beamSize=3`, `temperature=0.0` 조합을 시작점으로 사용하세요. `maxNewTokens=96`은 속도 튜닝값이라기보다 긴 출력 생성을 막는 상한값입니다.
+- 문장이 여전히 자주 끊기거나 앞뒤 문맥을 놓치면 `windowSeconds`를 `12.0`까지 늘려 비교합니다. tail echo와 staging 교체가 늘면 `windowSeconds`를 다시 낮추거나 `stepSeconds`를 함께 줄여 같은 후보가 더 자주 재확인되는지 비교합니다.
 - 속도는 충분하지만 고유명사나 짧은 발화 인식이 흔들리면 `beamSize`를 `3` 또는 `5`로 올려 비교합니다. 문장이 실제로 잘릴 때만 `maxNewTokens`를 `128` 또는 `192`로 올립니다. 짧은 청크에서는 이 값이 응답속도에 거의 영향을 주지 않을 수 있습니다.
 - 번역까지 포함한 지연은 NLLB `translationBeamSize`와 `translationMaxNewTokens`의 영향을 받습니다. 실시간 응답성은 `translationBeamSize=1`, `translationMaxNewTokens=128`에서 시작하고, 번역 품질이나 긴 문장 완성도가 부족하면 각각 `3` 또는 `256`으로 올려 비교합니다.
 - 실시간 번역은 기본적으로 확정된 final 전사 문장만 대상으로 합니다. staged/partial 문장은 뒤 청크에서 수정될 가능성이 높아 중복 번역과 premature translation을 만들 수 있으므로 기본값에서 번역하지 않습니다. 상세 설계와 참고 자료는 [`docs/2026-06-13-audio-ai-feature-design.md`](docs/2026-06-13-audio-ai-feature-design.md)를 확인합니다.
@@ -587,10 +587,10 @@ python3 -m unittest tests.unit.test_whisper_performance_tracking
     "translationMaxNewTokens": 128,
     "device": "cuda",
     "computeType": "float16",
-    "chunkSeconds": 7.5,
+    "chunkSeconds": 9.0,
     "stepSeconds": 1.5,
-    "windowSeconds": 7.5,
-    "commitLagSeconds": 0.8,
+    "windowSeconds": 9.0,
+    "commitLagSeconds": 2.0,
     "beamSize": 3,
     "maxNewTokens": 96,
     "temperature": 0.0

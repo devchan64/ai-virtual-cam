@@ -100,8 +100,8 @@ audio 입력
 ```json
 {
   "stepSeconds": 1.5,
-  "windowSeconds": 7.5,
-  "commitLagSeconds": 1.5,
+  "windowSeconds": 9.0,
+  "commitLagSeconds": 2.0,
   "beamSize": 3,
   "maxNewTokens": 96,
   "temperature": 0.0,
@@ -647,7 +647,7 @@ unittest 성공은 테스트 코드가 실행되어 지표가 수집되었다는
 
 - 일반 후보 확정 기준을 2회에서 3회 재확인으로 조정했다.
 - forced 후보 확정 기준은 4회 재확인을 유지한다.
-- `commitLagSeconds` 기본/운영값은 1.5초로 정렬한다.
+- `commitLagSeconds` 기본/운영값은 2.0초로 정렬한다.
 - VAD 기반 필터링은 현재 슬라이딩 윈도우 확정 정책과 충돌해 운영 경로에서 제거한다.
 - `chunk_metrics`를 추가해 해당 chunk에서 발생한 `stage_start`, `stage_revision`, `stage_replace`, `stage_discard`, `finalized` 등을 즉시 확인한다.
 - `pending_overrun`을 추가해 긴 pending이 `long_no_boundary`, `with_end_mark`, `unstable_numeric_tail` 중 어떤 상태인지 추적한다.
