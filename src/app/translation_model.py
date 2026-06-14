@@ -9,6 +9,12 @@ NLLB_LANGUAGE_CODES = {
     "zh": "zho_Hans",
 }
 
+M2M100_LANGUAGE_CODES = {
+    "en": "en",
+    "ko": "ko",
+    "zh": "zh",
+}
+
 
 @dataclass(frozen=True)
 class TranslationRequest:
@@ -125,7 +131,83 @@ class NllbTransformersTranslator(LocalTextTranslator):
             raise RuntimeError(detail) from exc
 
 
+class M2M100TransformersTranslator(LocalTextTranslator):
+    def __init__(self, model_name: str, device: str, compute_type: str, beam_size: int = 1, max_new_tokens: int = 128) -> None:
+        if not model_name:
+            raise RuntimeError("whisper.translationModel is required for m2m100-transformers")
+        try:
+            import torch
+            from transformers import M2M100ForConditionalGeneration, M2M100Tokenizer
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "M2M100 번역 의존성이 없습니다. ./bin/avc setup을 실행해 transformers, torch, sentencepiece를 설치하세요. "
+                f"설정값 translationBackend=m2m100-transformers translationModel={model_name}. 원인: {exc}"
+            ) from exc
+
+        resolved_device = NllbTransformersTranslator._resolve_device(torch, device)
+        torch_dtype = NllbTransformersTranslator._resolve_dtype(torch, compute_type, resolved_device)
+        self._model_name = model_name
+        self._requested_device = str(device or "auto").strip()
+        self._requested_compute_type = str(compute_type or "auto").strip()
+        self._beam_size = _validate_generation_int("whisper.translationBeamSize", beam_size, 1, 8)
+        self._max_new_tokens = _validate_generation_int("whisper.translationMaxNewTokens", max_new_tokens, 16, 512)
+        try:
+            self._tokenizer = M2M100Tokenizer.from_pretrained(model_name)
+            self._model = M2M100ForConditionalGeneration.from_pretrained(model_name, torch_dtype=torch_dtype)
+            self._model.to(resolved_device)
+            self._model.eval()
+        except Exception as exc:
+            raise RuntimeError(
+                "M2M100 번역 모델 로딩 실패: "
+                f"translationModel={model_name} device={device} computeType={compute_type}. "
+                "최초 실행이면 모델 다운로드가 필요합니다. CUDA/메모리/네트워크 상태를 확인하세요. "
+                f"원인: {exc}"
+            ) from exc
+        self._torch = torch
+        self._device = resolved_device
+
+    def translate(self, request: TranslationRequest) -> str:
+        source = _m2m100_language_code(request.source_language)
+        target = _m2m100_language_code(request.target_language)
+        text = request.text.strip()
+        if not text:
+            return ""
+        if source == target:
+            return text
+        try:
+            self._tokenizer.src_lang = source
+            encoded = self._tokenizer(text, return_tensors="pt", truncation=True, max_length=512).to(self._device)
+            forced_bos_token_id = self._tokenizer.get_lang_id(target)
+            with self._torch.inference_mode():
+                generated = self._model.generate(
+                    **encoded,
+                    forced_bos_token_id=forced_bos_token_id,
+                    **_translation_generation_kwargs(self._beam_size, self._max_new_tokens),
+                )
+            return self._tokenizer.batch_decode(generated, skip_special_tokens=True)[0].strip()
+        except Exception as exc:
+            detail = _translation_failure_detail(
+                exc,
+                backend="M2M100",
+                model_name=self._model_name,
+                device=self._requested_device,
+                resolved_device=self._device,
+                compute_type=self._requested_compute_type,
+                source_language=request.source_language,
+                target_language=request.target_language,
+            )
+            raise RuntimeError(detail) from exc
+
+
 def _nllb_generation_kwargs(beam_size: int, max_new_tokens: int) -> dict:
+    return _translation_generation_kwargs(beam_size, max_new_tokens)
+
+
+def _m2m100_generation_kwargs(beam_size: int, max_new_tokens: int) -> dict:
+    return _translation_generation_kwargs(beam_size, max_new_tokens)
+
+
+def _translation_generation_kwargs(beam_size: int, max_new_tokens: int) -> dict:
     return {
         "max_new_tokens": int(max_new_tokens),
         "num_beams": int(beam_size),
@@ -187,6 +269,7 @@ def _validate_torch_cuda_supports_current_gpu(torch) -> None:
 def _translation_failure_detail(
     exc: Exception,
     *,
+    backend: str = "NLLB",
     model_name: str,
     device: str,
     resolved_device: str,
@@ -196,7 +279,7 @@ def _translation_failure_detail(
 ) -> str:
     cause = str(exc)
     base = (
-        "NLLB 번역 실패: "
+        f"{backend} 번역 실패: "
         f"source={source_language} target={target_language} "
         f"translationModel={model_name} translationDevice={device} "
         f"resolvedDevice={resolved_device} translationComputeType={compute_type}. "
@@ -218,6 +301,13 @@ def _nllb_language_code(language: str) -> str:
     return NLLB_LANGUAGE_CODES[normalized]
 
 
+def _m2m100_language_code(language: str) -> str:
+    normalized = str(language or "").strip().lower()
+    if normalized not in M2M100_LANGUAGE_CODES:
+        raise RuntimeError(f"M2M100 번역 언어는 en/ko/zh만 지원합니다. 설정값={language}")
+    return M2M100_LANGUAGE_CODES[normalized]
+
+
 def build_text_translator(
     backend: str,
     model_name: str,
@@ -233,4 +323,6 @@ def build_text_translator(
         return MockTextTranslator()
     if normalized == "nllb-transformers":
         return NllbTransformersTranslator(model_name, device, compute_type, beam_size, max_new_tokens)
+    if normalized == "m2m100-transformers":
+        return M2M100TransformersTranslator(model_name, device, compute_type, beam_size, max_new_tokens)
     raise RuntimeError(f"지원하지 않는 whisper.translationBackend입니다: {backend}")

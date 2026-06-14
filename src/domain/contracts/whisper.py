@@ -7,7 +7,7 @@ WHISPER_STT_BACKENDS = ("faster-whisper", "funasr-paraformer", "funasr-sensevoic
 WHISPER_LANGUAGES = ("ko", "en", "zh")
 WHISPER_TASKS = ("transcribe", "translate")
 WHISPER_TRANSLATION_TARGET_LANGUAGES = ("en", "ko", "zh")
-WHISPER_TRANSLATION_BACKENDS = ("whisper", "nllb-transformers", "mock")
+WHISPER_TRANSLATION_BACKENDS = ("whisper", "nllb-transformers", "m2m100-transformers", "mock")
 WHISPER_RUNTIME_DEVICES = ("cuda", "cpu")
 WHISPER_COMPUTE_TYPES = ("float16", "float32")
 WHISPER_POST_PROCESSING_PROFILES = ("manual",)
@@ -18,6 +18,60 @@ WHISPER_STT_BACKENDS_BY_LANGUAGE = {
     "ko": ("faster-whisper", "mock"),
     "zh": WHISPER_STT_BACKENDS,
 }
+
+WHISPER_TRANSLATION_GROUPS = {
+    "whisper": {
+        "source_languages": WHISPER_LANGUAGES,
+        "target_languages": ("en",),
+        "models": (),
+    },
+    "nllb-transformers": {
+        "source_languages": WHISPER_LANGUAGES,
+        "target_languages": WHISPER_TRANSLATION_TARGET_LANGUAGES,
+        "models": (
+            "facebook/nllb-200-distilled-600M",
+            "facebook/nllb-200-distilled-1.3B",
+            "facebook/nllb-200-1.3B",
+            "facebook/nllb-200-3.3B",
+        ),
+    },
+    "m2m100-transformers": {
+        "source_languages": WHISPER_LANGUAGES,
+        "target_languages": WHISPER_TRANSLATION_TARGET_LANGUAGES,
+        "models": ("facebook/m2m100_1.2B",),
+    },
+    "mock": {
+        "source_languages": WHISPER_LANGUAGES,
+        "target_languages": WHISPER_TRANSLATION_TARGET_LANGUAGES,
+        "models": (),
+    },
+}
+
+
+def whisper_translation_backends_for_language(language: str) -> tuple[str, ...]:
+    normalized = str(language or "").strip().lower()
+    return tuple(
+        backend
+        for backend, group in WHISPER_TRANSLATION_GROUPS.items()
+        if normalized in group["source_languages"]
+    )
+
+
+def whisper_translation_targets_for_backend(language: str, backend: str) -> tuple[str, ...]:
+    normalized_language = str(language or "").strip().lower()
+    normalized_backend = str(backend or "").strip().lower()
+    group = WHISPER_TRANSLATION_GROUPS.get(normalized_backend)
+    if not group or normalized_language not in group["source_languages"]:
+        return ()
+    return tuple(group["target_languages"])
+
+
+def whisper_translation_models_for_backend(backend: str) -> tuple[str, ...]:
+    normalized_backend = str(backend or "").strip().lower()
+    group = WHISPER_TRANSLATION_GROUPS.get(normalized_backend)
+    if not group:
+        return ()
+    return tuple(group["models"])
 
 
 def whisper_stt_backends_for_language(language: str) -> tuple[str, ...]:

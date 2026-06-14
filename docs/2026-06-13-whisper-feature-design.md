@@ -693,7 +693,30 @@ stability=10/10 rate=1.000 target>=0.80
 - 배포 직후 24시간은 운영자 모니터링 모드(`pending`·`confirmed`·`rollback` 유사지표)로 1분 단위 확인.
 - 회귀가 누적되면 원본 배포 채널로 되돌리고 원인 로그를 묶어 1페이지 인시던트 노트 작성.
 
-## 15) 참고
+## 15) 중국어 번역 백엔드 확장 정책
+
+중국어 STT가 안정화된 뒤 관측한 로그에서는 STT보다 `zh->ko` 번역 품질이 병목으로 나타났다. 특히 지명(`重庆`), 서비스명(`滴滴`, `美团`), 구어체 표현(`Q`)에서 `nllb-200-distilled-600M`의 오역이 반복되었다. 이 문제는 언어별 문자열 휴리스틱을 추가하는 방식보다 번역 백엔드/모델 선택지를 계약 데이터로 관리하고, 동일 테스트 케이스에서 모델별 품질 지표를 비교하는 방식으로 접근한다.
+
+정책은 다음과 같다.
+
+- 번역 백엔드와 모델은 STT 언어를 source language로 보고 사용할 수 있는 조합을 계약 데이터(`WHISPER_TRANSLATION_GROUPS`)에 명시한다.
+- GUI는 선택된 STT 언어와 번역 백엔드에 맞는 target/model 목록만 표시한다.
+- 저장 검증은 GUI와 같은 계약 데이터를 사용하며, 허용되지 않은 조합은 실행 전 Fail-Fast로 거부한다.
+- 휴리스틱 패턴은 범용성 유지 비용이 높으므로 품질 게이트/진단 수준으로 최소화하고, 번역 품질 개선은 모델 교체 또는 백엔드 교체 실험으로 진행한다.
+
+현재 반영한 후보는 다음과 같다.
+
+| 백엔드 | 모델 | 위치 | 판단 |
+| --- | --- | --- | --- |
+| `nllb-transformers` | `facebook/nllb-200-distilled-600M` | 기본값 | 빠르고 현재 기준선이다. 중국어 고유명사/구어체 오역이 있어 품질 지표상 개선 여지가 크다. |
+| `nllb-transformers` | `facebook/nllb-200-distilled-1.3B`, `facebook/nllb-200-1.3B`, `facebook/nllb-200-3.3B` | 추가 옵션 | 같은 백엔드로 모델 크기만 바꾸어 실험할 수 있어 가장 낮은 위험의 품질 개선 후보이다. |
+| `m2m100-transformers` | `facebook/m2m100_1.2B` | 신규 백엔드 | 영어 중심 우회가 아닌 직접 many-to-many 번역 모델이며 `zh`/`ko`를 지원한다. NLLB와 다른 계열의 비교군으로 적합하다. |
+| `seamless-m4t-v2` | `facebook/seamless-m4t-v2-large` | 후속 후보 | text-to-text와 speech/text translation을 모두 지원하지만 구현/메모리 비용이 크므로 바로 기본 백엔드로 넣지 않는다. |
+| LLM 번역 | TowerInstruct, X-ALMA Group6 | 후속 후보 | 중국어/한국어를 포함한 번역 특화 모델이지만 지연/VRAM 비용이 커서 실시간 기본값보다 고품질 실험군으로 분리한다. |
+
+모델 비교는 `translation_quality` 추적 케이스를 기준으로 진행한다. 이 테스트는 서비스 품질 지표를 출력하지만, 현재는 실험 기준선 수집을 위해 단위 테스트 실패로 처리하지 않는다.
+
+## 16) 참고
 
 - [Turning Whisper into Real-Time Transcription System](https://arxiv.org/abs/2307.14743)
 - [Simul-Whisper](https://www.isca-archive.org/interspeech_2024/wang24ea_interspeech.pdf)
@@ -729,3 +752,16 @@ stability=10/10 rate=1.000 target>=0.80
 - [Evaluating Automatic Speech Recognition in an Incremental Setting](https://arxiv.org/abs/2302.12049)
 - [Word Error Rate Estimation Without ASR Output: e-WER2](https://arxiv.org/abs/2008.03403)
 - [Assessing ASR Model Quality on Disordered Speech using BERTScore](https://arxiv.org/abs/2209.10591)
+- [No Language Left Behind: Scaling Human-Centered Machine Translation](https://arxiv.org/abs/2207.04672)
+- [facebook/nllb-200-distilled-600M Model Card](https://huggingface.co/facebook/nllb-200-distilled-600M)
+- [facebook/nllb-200-distilled-1.3B Model Card](https://huggingface.co/facebook/nllb-200-distilled-1.3B)
+- [facebook/nllb-200-3.3B Model Card](https://huggingface.co/facebook/nllb-200-3.3B)
+- [Beyond English-Centric Multilingual Machine Translation](https://arxiv.org/abs/2010.11125)
+- [facebook/m2m100_1.2B Model Card](https://huggingface.co/facebook/m2m100_1.2B)
+- [SeamlessM4T: Massively Multilingual & Multimodal Machine Translation](https://arxiv.org/abs/2308.11596)
+- [Seamless: Multilingual Expressive and Streaming Speech Translation](https://arxiv.org/abs/2312.05187)
+- [facebook/seamless-m4t-v2-large Model Card](https://huggingface.co/facebook/seamless-m4t-v2-large)
+- [Tower: An Open Multilingual Large Language Model for Translation-Related Tasks](https://arxiv.org/abs/2402.17733)
+- [Unbabel/TowerInstruct-7B-v0.2 Model Card](https://huggingface.co/Unbabel/TowerInstruct-7B-v0.2)
+- [X-ALMA: Plug & Play Modules and Adaptive Rejection for Quality Translation at Scale](https://arxiv.org/abs/2410.03115)
+- [haoranxu/X-ALMA-13B-Group6 Model Card](https://huggingface.co/haoranxu/X-ALMA-13B-Group6)

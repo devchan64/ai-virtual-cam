@@ -849,6 +849,11 @@ def _should_translate_staged_sentence(staged_sentence: str, staged_confirmations
     return len(_word_units(staged_sentence)) >= MIN_PROVISIONAL_TRANSLATION_WORDS
 
 
+def _should_translate_final_sentence(sentence: str, language: str) -> bool:
+    flags = set(_final_sentence_diagnostic_flags(sentence, language))
+    return not flags.intersection({"latin_only_for_zh", "short_cjk", "no_end_marker", "empty"})
+
+
 def _is_short_staged_suffix_repeat(staged_sentence: str, pending_text: str) -> bool:
     staged_words = _word_units(staged_sentence)
     pending_words = _word_units(pending_text)

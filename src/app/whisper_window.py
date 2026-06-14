@@ -44,6 +44,7 @@ from src.app.whisper_transcript_logic import (
     _should_confirm_staged_sentence,
     _should_age_staged_sentence,
     _should_translate_staged_sentence,
+    _should_translate_final_sentence,
     _split_completed_sentences,
     _stable_window_text,
     _word_units,
@@ -453,6 +454,10 @@ class WhisperTranscriptWorker:
                 except ModuleNotFoundError as exc:
                     raise RuntimeError("sounddevice 모듈이 없습니다. ./bin/avc setup 실행 후 재시도하세요.") from exc
 
+            self._emit(
+                "status",
+                "STT 서비스 대기: 사용 모델 다운로드/로딩이 끝나기 전까지 입력 캡처와 전사를 시작하지 않습니다.",
+            )
             self._emit(
                 "status",
                 "STT 모델 로딩 중: "
@@ -998,7 +1003,18 @@ class WhisperTranscriptWorker:
                     and _should_translate_staged_sentence(staged_sentence, staged_confirmations)
                 ):
                     translation_jobs.append((staged_sentence, False))
-                translation_jobs.extend((sentence, True) for sentence in final_sentences)
+                for sentence in final_sentences:
+                    if _should_translate_final_sentence(sentence, detected):
+                        translation_jobs.append((sentence, True))
+                    else:
+                        count_metric("translation_skip_final_quality")
+                        self._emit(
+                            "status",
+                            "Whisper 번역 생략: "
+                            f"chunk={chunks} reason=final_quality flags={','.join(_final_sentence_diagnostic_flags(sentence, detected))} "
+                            f"text={sentence!r}",
+                            display=False,
+                        )
                 if self._cfg.translationEnabled and not translation_failed and translation_jobs:
                     try:
                         translation_attempted = True

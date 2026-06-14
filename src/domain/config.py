@@ -6,7 +6,13 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from src.domain.contracts.whisper import whisper_spec, whisper_stt_backends_for_language
+from src.domain.contracts.whisper import (
+    whisper_spec,
+    whisper_stt_backends_for_language,
+    whisper_translation_backends_for_language,
+    whisper_translation_models_for_backend,
+    whisper_translation_targets_for_backend,
+)
 from src.domain.whisper_defaults import whisper_default
 
 
@@ -833,20 +839,40 @@ class WhisperConfig:
             config.translationTargetLanguage, path="whisper.translationTargetLanguage"
         )
         whisper_spec("translationBackend").validate_allowed(config.translationBackend, path="whisper.translationBackend")
+        if config.translationEnabled:
+            allowed_translation_backends = whisper_translation_backends_for_language(config.language)
+            if config.translationBackend not in allowed_translation_backends:
+                allowed_values = ", ".join(allowed_translation_backends)
+                raise ValueError(
+                    f"whisper.translationBackend must be one of for language={config.language}: {allowed_values}"
+                )
+            allowed_translation_targets = whisper_translation_targets_for_backend(config.language, config.translationBackend)
+            if config.translationTargetLanguage not in allowed_translation_targets:
+                allowed_values = ", ".join(allowed_translation_targets)
+                raise ValueError(
+                    "whisper.translationTargetLanguage must be one of "
+                    f"for language={config.language} backend={config.translationBackend}: {allowed_values}"
+                )
+            allowed_translation_models = whisper_translation_models_for_backend(config.translationBackend)
+            if allowed_translation_models and config.translationModel not in allowed_translation_models:
+                allowed_values = ", ".join(allowed_translation_models)
+                raise ValueError(
+                    f"whisper.translationModel must be one of for backend={config.translationBackend}: {allowed_values}"
+                )
         if config.translationEnabled and config.translationBackend == "whisper" and config.translationTargetLanguage != "en":
             raise ValueError("whisper.translationTargetLanguage must be en when whisper.translationBackend=whisper")
         if config.translationEnabled and config.translationBackend != "whisper" and config.task == "translate":
             raise ValueError("whisper.task must be transcribe when whisper.translationBackend is not whisper")
-        if config.translationEnabled and config.translationBackend == "nllb-transformers" and not config.translationModel:
-            raise ValueError("whisper.translationModel is required when whisper.translationBackend=nllb-transformers")
+        if config.translationEnabled and config.translationBackend in {"nllb-transformers", "m2m100-transformers"} and not config.translationModel:
+            raise ValueError(f"whisper.translationModel is required when whisper.translationBackend={config.translationBackend}")
         whisper_spec("translationDevice").validate_allowed(config.translationDevice, path="whisper.translationDevice")
         whisper_spec("translationComputeType").validate_allowed(config.translationComputeType, path="whisper.translationComputeType")
         whisper_spec("translationBeamSize").validate_range(config.translationBeamSize, path="whisper.translationBeamSize")
         whisper_spec("translationMaxNewTokens").validate_range(
             config.translationMaxNewTokens, path="whisper.translationMaxNewTokens"
         )
-        if config.translationEnabled and config.translationBackend == "nllb-transformers" and config.translationDevice != "cuda":
-            raise ValueError("whisper.translationDevice must be cuda when whisper.translationBackend=nllb-transformers")
+        if config.translationEnabled and config.translationBackend in {"nllb-transformers", "m2m100-transformers"} and config.translationDevice != "cuda":
+            raise ValueError(f"whisper.translationDevice must be cuda when whisper.translationBackend={config.translationBackend}")
         if not config.device:
             raise ValueError("whisper.device is required")
         if not config.computeType:

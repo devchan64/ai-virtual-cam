@@ -21,6 +21,7 @@ from src.app.whisper_window import (
     _should_finalize_replaced_sentence,
     _should_confirm_staged_sentence,
     _should_translate_staged_sentence,
+    _should_translate_final_sentence,
     _split_completed_sentences,
     _stable_window_text,
 )
@@ -86,6 +87,13 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
 
     def test_sentence_revision_rejects_distinct_sentences(self) -> None:
         self.assertFalse(_sentences_are_revisions("Tesla app.", "It was going a little fast."))
+
+    def test_final_sentence_translation_skips_unstable_chinese_outputs(self) -> None:
+        self.assertFalse(_should_translate_final_sentence("Not a.", "zh"))
+        self.assertFalse(_should_translate_final_sentence("蒸牛。", "zh"))
+        self.assertFalse(_should_translate_final_sentence("要 去 找", "zh"))
+        self.assertTrue(_should_translate_final_sentence("第一个呢要登陆的呢就是滴滴，滴滴呢就是来中国，你要搭车的话，你就可以搭滴滴。", "zh"))
+        self.assertTrue(_should_translate_final_sentence("面可是快速面就是它会比较q一点，这个呢是比快速。", "zh"))
 
     def test_staged_sentence_is_not_translated_before_final_by_default(self) -> None:
         self.assertFalse(_should_translate_staged_sentence("Again awesome.", 1))

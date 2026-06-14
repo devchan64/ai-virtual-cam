@@ -4,6 +4,11 @@ import unittest
 from pathlib import Path
 
 from src.domain.config import AppConfig, WhisperConfig
+from src.domain.contracts.whisper import (
+    whisper_translation_backends_for_language,
+    whisper_translation_models_for_backend,
+    whisper_translation_targets_for_backend,
+)
 from src.domain.whisper_defaults import whisper_default
 from src.tools.config_builder import build_config
 
@@ -288,6 +293,19 @@ class WhisperConfigTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "whisper.translationTargetLanguage"):
             WhisperConfig.from_dict({"translationEnabled": True, "translationBackend": "whisper", "translationTargetLanguage": "ko"})
 
+    def test_whisper_translation_contract_groups_by_language_and_backend(self) -> None:
+        self.assertIn("m2m100-transformers", whisper_translation_backends_for_language("zh"))
+        self.assertEqual(
+            whisper_translation_targets_for_backend("zh", "whisper"),
+            ("en",),
+        )
+        self.assertIn("ko", whisper_translation_targets_for_backend("zh", "m2m100-transformers"))
+        self.assertEqual(
+            whisper_translation_models_for_backend("m2m100-transformers"),
+            ("facebook/m2m100_1.2B",),
+        )
+        self.assertIn("facebook/nllb-200-3.3B", whisper_translation_models_for_backend("nllb-transformers"))
+
     def test_whisper_allows_multilingual_translation_target_with_nllb_backend(self) -> None:
         loaded = WhisperConfig.from_dict({
             "translationEnabled": True,
@@ -299,6 +317,27 @@ class WhisperConfigTest(unittest.TestCase):
         self.assertEqual(loaded.task, "transcribe")
         self.assertEqual(loaded.translationTargetLanguage, "ko")
         self.assertEqual(loaded.translationBackend, "nllb-transformers")
+
+    def test_whisper_allows_m2m100_translation_backend(self) -> None:
+        loaded = WhisperConfig.from_dict({
+            "language": "zh",
+            "translationEnabled": True,
+            "translationBackend": "m2m100-transformers",
+            "translationTargetLanguage": "ko",
+            "translationModel": "facebook/m2m100_1.2B",
+        })
+
+        self.assertEqual(loaded.translationBackend, "m2m100-transformers")
+        self.assertEqual(loaded.translationModel, "facebook/m2m100_1.2B")
+
+    def test_whisper_rejects_translation_model_not_allowed_for_backend(self) -> None:
+        with self.assertRaisesRegex(ValueError, "whisper.translationModel"):
+            WhisperConfig.from_dict({
+                "translationEnabled": True,
+                "translationBackend": "m2m100-transformers",
+                "translationTargetLanguage": "ko",
+                "translationModel": "facebook/nllb-200-distilled-600M",
+            })
 
     def test_whisper_rejects_translate_task_for_nllb_backend(self) -> None:
         with self.assertRaisesRegex(ValueError, "whisper.task"):

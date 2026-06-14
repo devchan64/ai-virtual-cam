@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from src.domain.contracts.whisper import (
+    whisper_translation_backends_for_language,
+    whisper_translation_models_for_backend,
+    whisper_translation_targets_for_backend,
+)
+
 
 def whisper_backend_options() -> list[str]:
     return ["faster-whisper", "openai-whisper", "whisper.cpp", "mock"]
@@ -97,12 +103,19 @@ def whisper_translation_target_display_from_raw(value: object) -> str:
     return WHISPER_TRANSLATION_TARGET_RAW_TO_DISPLAY.get(raw, WHISPER_TRANSLATION_TARGET_RAW_TO_DISPLAY["en"])
 
 
-def whisper_translation_backend_options() -> list[str]:
-    return ["whisper", "nllb-transformers", "mock"]
+def whisper_translation_backend_options(language: str | None = None) -> list[str]:
+    return list(whisper_translation_backends_for_language(language or "en"))
 
 
-def whisper_translation_model_options() -> list[str]:
-    return ["facebook/nllb-200-distilled-600M"]
+def whisper_translation_target_options_for_backend(language: str | None, backend: str | None) -> list[str]:
+    return [
+        whisper_translation_target_display_from_raw(target)
+        for target in whisper_translation_targets_for_backend(language or "en", backend or "whisper")
+    ]
+
+
+def whisper_translation_model_options(backend: str | None = None) -> list[str]:
+    return list(whisper_translation_models_for_backend(backend or "nllb-transformers"))
 
 
 def whisper_sentence_boundary_backend_options() -> list[str]:

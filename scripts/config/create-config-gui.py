@@ -86,7 +86,10 @@ from scripts.config.whisper_options import (
     whisper_stt_backend_options as _whisper_stt_backend_options,
     whisper_stt_backend_runtime_option_keys as _whisper_stt_backend_runtime_option_keys,
     whisper_stt_model_options as _whisper_stt_model_options,
+    whisper_translation_backend_options as _whisper_translation_backend_options,
+    whisper_translation_model_options as _whisper_translation_model_options,
     whisper_translation_target_display_from_raw as _whisper_translation_target_display_from_raw,
+    whisper_translation_target_options_for_backend as _whisper_translation_target_options_for_backend,
     whisper_translation_target_raw_from_display as _whisper_translation_target_raw_from_display,
 )
 
@@ -551,6 +554,14 @@ class ConfigGui:
         self._serve_stop_btn: ttk.Button | None = None
         self._serve_output_thread: threading.Thread | None = None
         self._serve_stop_requested = False
+        self._whisper_model_download_process: subprocess.Popen[str] | None = None
+        self._whisper_model_download_thread: threading.Thread | None = None
+        self._whisper_model_download_btn: ttk.Button | None = None
+        self._whisper_model_download_progress: ttk.Progressbar | None = None
+        self._whisper_model_download_status_var = tk.StringVar(
+            value=self._tr("status.whisper_model_download_idle", "모델 다운로드 대기 중")
+        )
+        self._whisper_model_download_status_label: ttk.Label | None = None
         self._language_var = tk.StringVar(value=self._lang)
         self._language_var.trace_add("write", lambda *_args: self._on_language_changed())
         self._language_label: ttk.Label | None = None
@@ -810,6 +821,168 @@ class ConfigGui:
         )
         self._serve_output_thread = threading.Thread(target=self._serve_output_worker, args=(self._serve_process,), daemon=True)
         self._serve_output_thread.start()
+
+    def _set_whisper_model_download_status(self, message: str) -> None:
+        self._whisper_model_download_status_var.set(message)
+
+    def _on_whisper_model_download_line(self, message: str) -> None:
+        self._set_whisper_model_download_status(message)
+        progress = self._whisper_model_download_progress
+        if progress is None:
+            return
+        lower = message.lower()
+        current = float(progress.cget("value") or 0)
+        value = current
+        if "downloading faster-whisper" in lower or "downloading funasr stt" in lower:
+            value = max(current, 15)
+        elif "faster-whisper model ready" in lower or "funasr stt model ready" in lower:
+            value = max(current, 35)
+        elif "downloading sat sentence" in lower or "downloading funasr punctuation" in lower:
+            value = max(current, 45)
+        elif "sentence boundary model ready" in lower or "punctuation model ready" in lower:
+            value = max(current, 65)
+        elif "downloading nllb translation" in lower or "downloading m2m100 translation" in lower:
+            value = max(current, 75)
+        elif "translation model ready" in lower:
+            value = max(current, 95)
+        elif "pre-download completed" in lower:
+            value = 100
+        progress.configure(value=value)
+
+    def _build_whisper_model_download_command(self) -> list[str]:
+        language_var = self.vars.get("whisper_language")
+        language_display = language_var.get().strip() if language_var is not None else "en"
+        language = _whisper_language_raw_from_display(language_display)
+        if language not in {"en", "ko", "zh"}:
+            language = "en"
+
+        stt_backend_key = f"whisper_stt_backend_{language}"
+        stt_model_key = f"whisper_stt_model_{language}"
+        stt_backend = self.vars.get(stt_backend_key).get().strip() if self.vars.get(stt_backend_key) is not None else "faster-whisper"
+        stt_model = self.vars.get(stt_model_key).get().strip() if self.vars.get(stt_model_key) is not None else "large-v3"
+        boundary_backend = self.vars.get("whisper_sentence_boundary_backend").get().strip()
+        boundary_model = self.vars.get("whisper_sentence_boundary_model").get().strip()
+
+        venv_python = ROOT_DIR / ".venv" / "bin" / "python"
+        python_cmd = str(venv_python if venv_python.exists() else Path(sys.executable))
+        cmd = [
+            python_cmd,
+            "-u",
+            str(ROOT_DIR / "scripts" / "setup" / "download-whisper-models.py"),
+            "--stt-backend",
+            stt_backend,
+            "--stt-model",
+            stt_model,
+            "--boundary-backend",
+            boundary_backend,
+            "--boundary-model",
+            boundary_model,
+        ]
+
+        translation_enabled_var = self.vars.get("whisper_translation_enabled")
+        translation_enabled = bool(translation_enabled_var.get()) if translation_enabled_var is not None else False
+        if translation_enabled:
+            translation_backend = self.vars.get("whisper_translation_backend").get().strip()
+            translation_model = self.vars.get("whisper_translation_model").get().strip()
+            cmd.extend(["--translation-backend", translation_backend, "--translation-model", translation_model])
+        else:
+            cmd.append("--skip-translation")
+        return cmd
+
+    def _start_whisper_model_download(self) -> None:
+        process = self._whisper_model_download_process
+        if process is not None and process.poll() is None:
+            self._set_whisper_model_download_status(
+                self._tr("status.whisper_model_download_running", "모델 다운로드가 이미 진행 중입니다.")
+            )
+            return
+        self._sync_whisper_runtime_options()
+        self._sync_whisper_translation_backend_options()
+        try:
+            cmd = self._build_whisper_model_download_command()
+        except Exception as exc:
+            message = f"Whisper model download command build failed: {exc}"
+            print(f"[avc] {message}", flush=True)
+            self._show_error(self._tr("msg.whisper_model_download_error.title", "모델 다운로드 오류"), str(exc))
+            return
+
+        print(f"[avc] Whisper model download starting: {' '.join(cmd)}", flush=True)
+        self._set_whisper_model_download_status(
+            self._tr("status.whisper_model_download_starting", "모델 다운로드를 시작합니다.")
+        )
+        if self._whisper_model_download_btn is not None:
+            self._whisper_model_download_btn.state(["disabled"])
+        if self._whisper_model_download_progress is not None:
+            self._whisper_model_download_progress.configure(value=5)
+        try:
+            self._whisper_model_download_process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                cwd=str(ROOT_DIR),
+                env=dict(os.environ),
+            )
+        except Exception as exc:
+            self._whisper_model_download_process = None
+            if self._whisper_model_download_progress is not None:
+                self._whisper_model_download_progress.configure(value=0)
+            if self._whisper_model_download_btn is not None:
+                self._whisper_model_download_btn.state(["!disabled"])
+            print(f"[avc] Whisper model download start failed: {exc}", flush=True)
+            self._show_error(self._tr("msg.whisper_model_download_error.title", "모델 다운로드 오류"), str(exc))
+            self._set_whisper_model_download_status(str(exc))
+            return
+
+        self._whisper_model_download_thread = threading.Thread(
+            target=self._whisper_model_download_worker,
+            args=(self._whisper_model_download_process,),
+            daemon=True,
+        )
+        self._whisper_model_download_thread.start()
+
+    def _whisper_model_download_worker(self, process: subprocess.Popen[str]) -> None:
+        last_line = ""
+        try:
+            if process.stdout is not None:
+                for line in process.stdout:
+                    clean_line = line.rstrip("\n")
+                    if not clean_line:
+                        continue
+                    last_line = clean_line
+                    print(clean_line, flush=True)
+                    try:
+                        self.root.after(0, lambda msg=clean_line: self._on_whisper_model_download_line(msg))
+                    except RuntimeError:
+                        pass
+            return_code = process.wait()
+        except Exception as exc:
+            last_line = str(exc)
+            print(f"[avc] Whisper model download watcher failed: {exc}", flush=True)
+            return_code = process.returncode if process is not None else 1
+        try:
+            self.root.after(0, lambda code=return_code, msg=last_line: self._whisper_model_download_finished(code, msg))
+        except RuntimeError:
+            self._whisper_model_download_process = None
+            self._whisper_model_download_thread = None
+
+    def _whisper_model_download_finished(self, return_code: int | None, last_line: str) -> None:
+        self._whisper_model_download_process = None
+        self._whisper_model_download_thread = None
+        if self._whisper_model_download_progress is not None:
+            self._whisper_model_download_progress.configure(value=100 if return_code == 0 else 0)
+        if self._whisper_model_download_btn is not None:
+            self._whisper_model_download_btn.state(["!disabled"])
+        if return_code == 0:
+            message = self._tr("status.whisper_model_download_done", "모델 다운로드가 완료되었습니다.")
+            print(f"[avc] Whisper model download finished", flush=True)
+        else:
+            message = self._tr("status.whisper_model_download_failed", "모델 다운로드 실패(code={code})").format(code=return_code)
+            if last_line:
+                message = f"{message}: {last_line}"
+            print(f"[avc] Whisper model download failed: code={return_code} last={last_line}", flush=True)
+        self._set_whisper_model_download_status(message)
 
     def _serve_output_worker(self, process: subprocess.Popen[str]) -> None:
         try:
@@ -3766,6 +3939,7 @@ class ConfigGui:
 
     def _on_whisper_runtime_selection_changed(self, _event=None) -> None:
         self._sync_whisper_runtime_options()
+        self._sync_whisper_translation_backend_options()
 
     def _grid_rows(self, parent, rows: list[int], visible: bool) -> None:
         if parent is None:
@@ -3863,8 +4037,19 @@ class ConfigGui:
         self._sync_whisper_translation_backend_options()
 
     def _sync_whisper_translation_backend_options(self) -> None:
+        language_var = self.vars.get("whisper_language")
+        language_display = language_var.get().strip() if language_var is not None else "en"
+        language = _whisper_language_raw_from_display(language_display)
         backend_var = self.vars.get("whisper_translation_backend")
         backend = backend_var.get().strip() if backend_var is not None else "whisper"
+        backend_options = _whisper_translation_backend_options(language)
+        backend_widget = self._widgets.get("whisper_translation_backend")
+        if backend_widget is not None:
+            backend_widget["values"] = tuple(backend_options)
+        if backend not in backend_options:
+            backend = backend_options[0] if backend_options else "whisper"
+            self._set_var("whisper_translation_backend", backend)
+
         frames = getattr(self, "_whisper_translation_backend_frames", {})
         for name, frame in frames.items():
             if name == backend:
@@ -3872,9 +4057,21 @@ class ConfigGui:
             else:
                 frame.grid_remove()
 
+        target_options = _whisper_translation_target_options_for_backend(language, backend)
+        target_widget = self._widgets.get("whisper_translation_target_language")
+        if target_widget is not None:
+            target_widget["values"] = tuple(target_options)
+        target_var = self.vars.get("whisper_translation_target_language")
+        target_display = target_var.get().strip() if target_var is not None else ""
+        if target_options and target_display not in target_options:
+            self._set_var("whisper_translation_target_language", target_options[0])
+
+        model_options = _whisper_translation_model_options(backend)
+        self._set_combobox_values_for_backend("whisper_translation_model", model_options)
+
         if backend == "whisper":
             self._set_var("whisper_translation_target_language", _whisper_translation_target_display_from_raw("en"))
-        elif backend == "nllb-transformers":
+        elif backend in {"nllb-transformers", "m2m100-transformers"}:
             self._set_var("whisper_translation_device", "cuda")
             compute_var = self.vars.get("whisper_translation_compute_type")
             compute_type = compute_var.get().strip() if compute_var is not None else ""

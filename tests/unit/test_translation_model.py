@@ -3,6 +3,8 @@ import unittest
 from src.app.translation_model import (
     MockTextTranslator,
     TranslationRequest,
+    _m2m100_generation_kwargs,
+    _m2m100_language_code,
     _nllb_generation_kwargs,
     _nllb_language_code,
     _torch_cuda_is_usable_for_current_gpu,
@@ -47,6 +49,15 @@ class TranslationModelTest(unittest.TestCase):
     def test_nllb_rejects_unsupported_language(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "en/ko/zh"):
             _nllb_language_code("ja")
+
+    def test_m2m100_language_codes_cover_supported_targets(self) -> None:
+        self.assertEqual(_m2m100_language_code("en"), "en")
+        self.assertEqual(_m2m100_language_code("ko"), "ko")
+        self.assertEqual(_m2m100_language_code("zh"), "zh")
+
+    def test_m2m100_rejects_unsupported_language(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "en/ko/zh"):
+            _m2m100_language_code("ja")
 
     def test_whisper_backend_uses_whisper_translate_path(self) -> None:
         self.assertIsNone(build_text_translator("whisper", "unused", "cpu", "float32"))
@@ -97,6 +108,14 @@ class TranslationModelTest(unittest.TestCase):
         self.assertEqual(kwargs["no_repeat_ngram_size"], 3)
         self.assertGreater(kwargs["repetition_penalty"], 1.0)
         self.assertNotIn("early_stopping", kwargs)
+
+    def test_m2m100_generation_kwargs_match_translation_defaults(self) -> None:
+        kwargs = _m2m100_generation_kwargs(3, 256)
+
+        self.assertEqual(kwargs["num_beams"], 3)
+        self.assertEqual(kwargs["max_new_tokens"], 256)
+        self.assertEqual(kwargs["no_repeat_ngram_size"], 3)
+        self.assertGreater(kwargs["repetition_penalty"], 1.0)
 
     def test_translation_generation_options_are_validated(self) -> None:
         self.assertEqual(_validate_generation_int("test.option", 1, 1, 8), 1)

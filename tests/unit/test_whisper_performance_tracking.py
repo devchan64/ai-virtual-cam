@@ -23,6 +23,7 @@ TRACKING_TARGETS = {
     "replacement": {"target_cases": 11, "target_rate": 0.90},
     "pending": {"target_cases": 10, "target_rate": 0.90},
     "final_quality": {"target_cases": 8, "target_rate": 0.90},
+    "translation_quality": {"target_cases": 6, "target_rate": 0.80},
 }
 
 REVISION_TRACKING_CASES = [
@@ -597,6 +598,51 @@ COLLAPSE_TRACKING_CASES.extend([
     {"source": "2026-06-13 monitor chunk 1238", "text": "그러면서 당연히 부의 양극화는 더 심화되는 돈을 이용해가지고 정부가 어떻게 돈을 이용해서 정부가 어떻게 보면 자산시장 사재기에 더 집중화시키고 있는 있는 전략일"},
 ])
 
+TRANSLATION_QUALITY_TRACKING_CASES = [
+    {
+        "source": "说呢我来重庆，其实我挺怕的。",
+        "observed": "제가 춘천에 왔을 때, 저는 정말 두려워했습니다.",
+        "expected_terms": {"충칭"},
+        "forbidden_terms": {"춘천"},
+        "case_source": "2026-06-14 monitor zh->ko Chongqing mistranslation",
+    },
+    {
+        "source": "第一个呢要登陆的呢就是滴滴，滴滴呢就是来中国，你要搭车的话，你就可以搭滴滴。",
+        "observed": "첫 번째 착륙은滴滴,滴滴는 중국으로 오는 것입니다. 당신이 차를 타고 있다면, 당신은滴滴을 타고 갈 수 있습니다.",
+        "expected_terms": {"滴滴"},
+        "forbidden_terms": {"착륙"},
+        "case_source": "2026-06-14 monitor zh->ko Didi mistranslation",
+    },
+    {
+        "source": "另外一个你要到录的app呢，就是那个美团外卖。",
+        "observed": "또 다른 앱은 미국 유출장소입니다.",
+        "expected_terms": {"메이퇀", "美团"},
+        "forbidden_terms": {"미국", "유출장소"},
+        "case_source": "2026-06-14 monitor zh->ko Meituan mistranslation",
+    },
+    {
+        "source": "面可是快速面就是它会比较q一点，这个呢是比快速。",
+        "observed": "하지만 가속면은 q을 조금 더 비교할 수 있고, 이면은 가속보다 더 빠르다.",
+        "expected_terms": {"쫄깃", "Q"},
+        "forbidden_terms": {"가속"},
+        "case_source": "2026-06-14 monitor zh->ko colloquial q mistranslation",
+    },
+    {
+        "source": "如果你们来中国旅游呢，你们要登录好几个app第一。",
+        "observed": "중국을 여행할 때 먼저 여러 앱에 접속해야 합니다.",
+        "expected_terms": {"중국", "앱"},
+        "forbidden_terms": set(),
+        "case_source": "2026-06-14 monitor zh->ko acceptable baseline",
+    },
+    {
+        "source": "他们这里的外卖呢选择非常非常的多。",
+        "observed": "이곳의 배달 선택지는 매우 많습니다.",
+        "expected_terms": {"배달", "많"},
+        "forbidden_terms": set(),
+        "case_source": "synthetic acceptable baseline",
+    },
+]
+
 FINAL_QUALITY_TRACKING_CASES = [
     {"text": "潇洒最好的乳团。", "language": "zh", "expected_flags": {"short_cjk"}, "source": "2026-06-14 monitor chunk 421"},
     {"text": "蒸牛。", "language": "zh", "expected_flags": {"short_cjk"}, "source": "2026-06-14 monitor chunk 441"},
@@ -640,6 +686,16 @@ class WhisperPerformanceTrackingTest(unittest.TestCase):
     def _record(self, domain: str, name: str, matched: bool) -> None:
         self.records.append((domain, name, matched))
 
+
+def _make_translation_quality_tracking_test(index: int, case: dict[str, object]):
+    def test(self: WhisperPerformanceTrackingTest) -> None:
+        observed = str(case["observed"])
+        expected_terms = set(case["expected_terms"])
+        forbidden_terms = set(case["forbidden_terms"])
+        has_expected = any(term in observed for term in expected_terms) if expected_terms else True
+        has_forbidden = any(term in observed for term in forbidden_terms)
+        self._record("translation_quality", f"translation_quality_{index:03d}", has_expected and not has_forbidden)
+    return test
 
 
 def _make_final_quality_tracking_test(index: int, case: dict[str, object]):
@@ -713,6 +769,13 @@ def _make_stability_tracking_test(index: int, sequence: list[str]):
         self._record("stability", f"stability_{index:03d}", matched)
     return test
 
+
+for _index, _case in enumerate(TRANSLATION_QUALITY_TRACKING_CASES, 1):
+    setattr(
+        WhisperPerformanceTrackingTest,
+        f"test_tracking_translation_quality_{_index:03d}",
+        _make_translation_quality_tracking_test(_index, _case),
+    )
 
 for _index, _case in enumerate(FINAL_QUALITY_TRACKING_CASES, 1):
     setattr(
