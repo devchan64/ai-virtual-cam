@@ -26,6 +26,20 @@ PROVISIONAL_TRANSLATION_ENABLED = False
 SHORT_CJK_FINAL_UNITS = 10
 
 
+def _coalesce_completed_sentences_for_staging(sentences: list[str], language: str) -> list[str]:
+    normalized_sentences = [_normalized_text(sentence) for sentence in sentences if _normalized_text(sentence)]
+    if len(normalized_sentences) <= 1:
+        return normalized_sentences
+    normalized_language = str(language or "").strip().lower()
+    if normalized_language != "zh":
+        return normalized_sentences
+    # FunASR punctuation can split several CJK fragments from the same sliding
+    # window. The runtime has one staged revision slot, so staging each fragment
+    # independently causes unconfirmed earlier fragments to be discarded inside
+    # the same chunk. Keep the model output as one observed revision unit.
+    return [_normalized_text("".join(normalized_sentences))]
+
+
 def _normalized_text(text: str) -> str:
     return " ".join(str(text).split())
 

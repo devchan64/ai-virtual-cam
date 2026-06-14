@@ -449,25 +449,6 @@ def build_whisper_tab(
         "m2m100-transformers": nllb_translation_frame,
     }
 
-    download_group, row = _add_group(gui, ttk, tab_whisper, row, "label.whisper_group_model_download", "모델 다운로드")
-    for col in range(4):
-        download_group.columnconfigure(col, weight=1)
-    gui._whisper_model_download_btn = ttk.Button(
-        download_group,
-        text=gui._tr("button.whisper_model_download", "현재 Whisper 모델 다운로드"),
-        command=gui._start_whisper_model_download,
-    )
-    gui._register_localized_widget(gui._whisper_model_download_btn, "button.whisper_model_download", "현재 Whisper 모델 다운로드")
-    gui._whisper_model_download_btn.grid(row=0, column=0, columnspan=4, sticky="ew", padx=4, pady=(4, 4))
-    gui._whisper_model_download_progress = ttk.Progressbar(download_group, mode="determinate", maximum=100)
-    gui._whisper_model_download_progress.grid(row=1, column=0, columnspan=4, sticky="ew", padx=4, pady=(0, 4))
-    gui._whisper_model_download_status_label = ttk.Label(
-        download_group,
-        textvariable=gui._whisper_model_download_status_var,
-        foreground="#666",
-        wraplength=520,
-    )
-    gui._whisper_model_download_status_label.grid(row=2, column=0, columnspan=4, sticky="w", padx=4, pady=(0, 4))
 
     reset_whisper_btn = ttk.Button(
         tab_whisper,

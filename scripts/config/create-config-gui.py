@@ -558,6 +558,9 @@ class ConfigGui:
         self._whisper_model_download_thread: threading.Thread | None = None
         self._whisper_model_download_btn: ttk.Button | None = None
         self._whisper_model_download_progress: ttk.Progressbar | None = None
+        self._whisper_model_download_window: tk.Toplevel | None = None
+        self._whisper_model_download_log_text: tk.Text | None = None
+        self._whisper_model_download_on_success: Callable[[], None] | None = None
         self._whisper_model_download_status_var = tk.StringVar(
             value=self._tr("status.whisper_model_download_idle", "모델 다운로드 대기 중")
         )
@@ -743,6 +746,160 @@ class ConfigGui:
             status_args={"code": str(return_code)},
         )
 
+    def _launch_serve_command(self, cmd: list[str]) -> None:
+        try:
+            self._serve_process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                env=dict(os.environ),
+            )
+        except Exception as exc:
+            self._serve_process = None
+            _log(f"Failed to start serve process: {exc}")
+            self._show_error(
+                self._tr("msg.serve_start_title", "Serve start failed"),
+                str(exc),
+            )
+            self._set_serve_status(
+                self._tr("status.serve_error", "Serve exited with error (code={code})"),
+                running=False,
+                status_key="status.serve_error",
+                status_args={"code": "start_failed"},
+            )
+            return
+
+        self._serve_stop_requested = False
+        self._set_serve_status(
+            self._tr("status.serve_running", "Serve running (pid={pid})"),
+            running=True,
+            status_key="status.serve_running",
+            status_args={"pid": str(self._serve_process.pid)},
+        )
+        self._serve_output_thread = threading.Thread(target=self._serve_output_worker, args=(self._serve_process,), daemon=True)
+        self._serve_output_thread.start()
+
+    def _whisper_enabled_in_config(self, config: dict) -> bool:
+        whisper_cfg = config.get("whisper") if isinstance(config.get("whisper"), dict) else {}
+        return bool(whisper_cfg.get("enabled"))
+
+    def _check_whisper_models_ready_for_serve(self, config: dict, serve_cmd: list[str]) -> bool:
+        if not self._whisper_enabled_in_config(config):
+            _log("Whisper model cache check skipped: whisper.enabled=false")
+            return True
+        check_cmd = self._build_whisper_model_download_command(config, check_only=True)
+        print(f"[avc] Whisper model cache check starting: {' '.join(check_cmd)}", flush=True)
+        try:
+            result = subprocess.run(
+                check_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                cwd=str(ROOT_DIR),
+                env=dict(os.environ),
+                check=False,
+            )
+        except Exception as exc:
+            output = f"Whisper model cache check failed to run: {exc}"
+            print(f"[avc] {output}", flush=True)
+            self._show_whisper_model_download_dialog(config, serve_cmd, output)
+            return False
+        output = result.stdout or ""
+        for line in output.splitlines():
+            print(line, flush=True)
+        if result.returncode == 0:
+            print("[avc] Whisper model cache check ok", flush=True)
+            return True
+        print(f"[avc] Whisper model cache check missing models: code={result.returncode}", flush=True)
+        self._show_whisper_model_download_dialog(config, serve_cmd, output)
+        return False
+
+    def _show_whisper_model_download_dialog(self, config: dict, serve_cmd: list[str], check_output: str) -> None:
+        if self._whisper_model_download_window is not None and self._whisper_model_download_window.winfo_exists():
+            self._whisper_model_download_window.lift()
+            return
+        window = tk.Toplevel(self.root)
+        self._whisper_model_download_window = window
+        window.title(self._tr("title.whisper_model_download", "Whisper 모델 다운로드"))
+        window.transient(self.root)
+        window.columnconfigure(0, weight=1)
+        window.rowconfigure(2, weight=1)
+        window.geometry("720x420")
+        window.protocol("WM_DELETE_WINDOW", lambda: self._close_whisper_model_download_dialog(False))
+
+        ttk.Label(
+            window,
+            text=self._tr(
+                "msg.whisper_model_download_required",
+                "설정에 적용된 Whisper/STT/문장경계/번역 모델 중 로컬 캐시에 없는 모델이 있습니다. 다운로드가 완료될 때까지 Serve는 시작되지 않습니다.",
+            ),
+            wraplength=680,
+        ).grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 6))
+
+        self._whisper_model_download_progress = ttk.Progressbar(window, mode="determinate", maximum=100)
+        self._whisper_model_download_progress.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 6))
+
+        log_text = tk.Text(window, height=12, wrap="word")
+        log_text.grid(row=2, column=0, sticky="nsew", padx=12, pady=(0, 6))
+        if check_output.strip():
+            log_text.insert("end", check_output.strip() + "\n")
+        log_text.configure(state="disabled")
+        self._whisper_model_download_log_text = log_text
+
+        self._whisper_model_download_status_var.set(
+            self._tr("status.whisper_model_download_required", "모델 다운로드가 필요합니다.")
+        )
+        ttk.Label(window, textvariable=self._whisper_model_download_status_var, foreground="#666", wraplength=680).grid(
+            row=3, column=0, sticky="ew", padx=12, pady=(0, 6)
+        )
+
+        button_frame = ttk.Frame(window)
+        button_frame.grid(row=4, column=0, sticky="ew", padx=12, pady=(0, 12))
+        button_frame.columnconfigure(0, weight=1)
+        button_frame.columnconfigure(1, weight=0)
+        button_frame.columnconfigure(2, weight=0)
+        self._whisper_model_download_btn = ttk.Button(
+            button_frame,
+            text=self._tr("button.whisper_model_download", "모델 다운로드"),
+            command=lambda: self._start_whisper_model_download(
+                config=config,
+                on_success=lambda: self._launch_serve_command(serve_cmd),
+            ),
+        )
+        self._whisper_model_download_btn.grid(row=0, column=1, sticky="e", padx=(4, 4))
+        ttk.Button(
+            button_frame,
+            text=self._tr("button.cancel", "취소"),
+            command=lambda: self._close_whisper_model_download_dialog(False),
+        ).grid(row=0, column=2, sticky="e")
+
+    def _close_whisper_model_download_dialog(self, downloaded: bool) -> None:
+        process = self._whisper_model_download_process
+        if process is not None and process.poll() is None:
+            self._set_whisper_model_download_status(
+                self._tr("status.whisper_model_download_running", "모델 다운로드가 이미 진행 중입니다.")
+            )
+            return
+        window = self._whisper_model_download_window
+        self._whisper_model_download_window = None
+        self._whisper_model_download_btn = None
+        self._whisper_model_download_progress = None
+        self._whisper_model_download_log_text = None
+        self._whisper_model_download_on_success = None
+        if window is not None:
+            try:
+                window.destroy()
+            except Exception:
+                pass
+        if not downloaded:
+            self._set_serve_status(
+                self._tr("status.serve_stopped", "Serve: stopped"),
+                running=False,
+                status_key="status.serve_stopped",
+            )
+
     def _start_serve(self) -> None:
         if self._is_serve_running():
             return
@@ -788,45 +945,24 @@ class ConfigGui:
             )
             return
 
-        try:
-            self._serve_process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                env=dict(os.environ),
-            )
-        except Exception as exc:
-            self._serve_process = None
-            _log(f"Failed to start serve process: {exc}")
-            self._show_error(
-                self._tr("msg.serve_start_title", "Serve start failed"),
-                str(exc),
-            )
-            self._set_serve_status(
-                self._tr("status.serve_error", "Serve exited with error (code={code})"),
-                running=False,
-                status_key="status.serve_error",
-                status_args={"code": "start_failed"},
-            )
+        if not self._check_whisper_models_ready_for_serve(config, cmd):
             return
-
-        self._serve_stop_requested = False
-        self._set_serve_status(
-            self._tr("status.serve_running", "Serve running (pid={pid})"),
-            running=True,
-            status_key="status.serve_running",
-            status_args={"pid": str(self._serve_process.pid)},
-        )
-        self._serve_output_thread = threading.Thread(target=self._serve_output_worker, args=(self._serve_process,), daemon=True)
-        self._serve_output_thread.start()
+        self._launch_serve_command(cmd)
 
     def _set_whisper_model_download_status(self, message: str) -> None:
         self._whisper_model_download_status_var.set(message)
 
     def _on_whisper_model_download_line(self, message: str) -> None:
         self._set_whisper_model_download_status(message)
+        log_text = self._whisper_model_download_log_text
+        if log_text is not None:
+            try:
+                log_text.configure(state="normal")
+                log_text.insert("end", message + "\n")
+                log_text.see("end")
+                log_text.configure(state="disabled")
+            except Exception:
+                pass
         progress = self._whisper_model_download_progress
         if progress is None:
             return
@@ -849,47 +985,53 @@ class ConfigGui:
             value = 100
         progress.configure(value=value)
 
-    def _build_whisper_model_download_command(self) -> list[str]:
-        language_var = self.vars.get("whisper_language")
-        language_display = language_var.get().strip() if language_var is not None else "en"
-        language = _whisper_language_raw_from_display(language_display)
-        if language not in {"en", "ko", "zh"}:
-            language = "en"
-
-        stt_backend_key = f"whisper_stt_backend_{language}"
-        stt_model_key = f"whisper_stt_model_{language}"
-        stt_backend = self.vars.get(stt_backend_key).get().strip() if self.vars.get(stt_backend_key) is not None else "faster-whisper"
-        stt_model = self.vars.get(stt_model_key).get().strip() if self.vars.get(stt_model_key) is not None else "large-v3"
-        boundary_backend = self.vars.get("whisper_sentence_boundary_backend").get().strip()
-        boundary_model = self.vars.get("whisper_sentence_boundary_model").get().strip()
-
+    def _build_whisper_model_download_command(self, config: dict | None = None, *, check_only: bool = False) -> list[str]:
+        if config is None:
+            config = self._build_config(validate_audio=False)
+        whisper_cfg = config.get("whisper") if isinstance(config.get("whisper"), dict) else {}
         venv_python = ROOT_DIR / ".venv" / "bin" / "python"
         python_cmd = str(venv_python if venv_python.exists() else Path(sys.executable))
         cmd = [
             python_cmd,
             "-u",
             str(ROOT_DIR / "scripts" / "setup" / "download-whisper-models.py"),
-            "--stt-backend",
-            stt_backend,
-            "--stt-model",
-            stt_model,
-            "--boundary-backend",
-            boundary_backend,
-            "--boundary-model",
-            boundary_model,
         ]
+        if check_only:
+            cmd.append("--check-only")
 
-        translation_enabled_var = self.vars.get("whisper_translation_enabled")
-        translation_enabled = bool(translation_enabled_var.get()) if translation_enabled_var is not None else False
-        if translation_enabled:
-            translation_backend = self.vars.get("whisper_translation_backend").get().strip()
-            translation_model = self.vars.get("whisper_translation_model").get().strip()
+        stt_pairs = (
+            ("backend", "model"),
+            ("sttBackendEn", "sttModelEn"),
+            ("sttBackendKo", "sttModelKo"),
+            ("sttBackendZh", "sttModelZh"),
+        )
+        for backend_key, model_key in stt_pairs:
+            backend = str(whisper_cfg.get(backend_key) or "").strip()
+            model = str(whisper_cfg.get(model_key) or "").strip()
+            if backend and model:
+                cmd.extend(["--stt-backend", backend, "--stt-model", model])
+
+        boundary_pairs = (
+            ("sentenceBoundaryBackend", "sentenceBoundaryModel"),
+            ("sentenceBoundaryBackendEn", "sentenceBoundaryModelEn"),
+            ("sentenceBoundaryBackendKo", "sentenceBoundaryModelKo"),
+            ("sentenceBoundaryBackendZh", "sentenceBoundaryModelZh"),
+        )
+        for backend_key, model_key in boundary_pairs:
+            backend = str(whisper_cfg.get(backend_key) or "").strip()
+            model = str(whisper_cfg.get(model_key) or "").strip()
+            if backend and model:
+                cmd.extend(["--boundary-backend", backend, "--boundary-model", model])
+
+        if bool(whisper_cfg.get("translationEnabled")):
+            translation_backend = str(whisper_cfg.get("translationBackend") or "nllb-transformers").strip()
+            translation_model = str(whisper_cfg.get("translationModel") or "facebook/nllb-200-distilled-600M").strip()
             cmd.extend(["--translation-backend", translation_backend, "--translation-model", translation_model])
         else:
             cmd.append("--skip-translation")
         return cmd
 
-    def _start_whisper_model_download(self) -> None:
+    def _start_whisper_model_download(self, *, config: dict | None = None, on_success: Callable[[], None] | None = None) -> None:
         process = self._whisper_model_download_process
         if process is not None and process.poll() is None:
             self._set_whisper_model_download_status(
@@ -899,13 +1041,14 @@ class ConfigGui:
         self._sync_whisper_runtime_options()
         self._sync_whisper_translation_backend_options()
         try:
-            cmd = self._build_whisper_model_download_command()
+            cmd = self._build_whisper_model_download_command(config)
         except Exception as exc:
             message = f"Whisper model download command build failed: {exc}"
             print(f"[avc] {message}", flush=True)
             self._show_error(self._tr("msg.whisper_model_download_error.title", "모델 다운로드 오류"), str(exc))
             return
 
+        self._whisper_model_download_on_success = on_success
         print(f"[avc] Whisper model download starting: {' '.join(cmd)}", flush=True)
         self._set_whisper_model_download_status(
             self._tr("status.whisper_model_download_starting", "모델 다운로드를 시작합니다.")
@@ -977,11 +1120,21 @@ class ConfigGui:
         if return_code == 0:
             message = self._tr("status.whisper_model_download_done", "모델 다운로드가 완료되었습니다.")
             print(f"[avc] Whisper model download finished", flush=True)
+            on_success = self._whisper_model_download_on_success
+            self._close_whisper_model_download_dialog(True)
+            if on_success is not None:
+                on_success()
+            return
         else:
             message = self._tr("status.whisper_model_download_failed", "모델 다운로드 실패(code={code})").format(code=return_code)
             if last_line:
                 message = f"{message}: {last_line}"
             print(f"[avc] Whisper model download failed: code={return_code} last={last_line}", flush=True)
+            self._set_serve_status(
+                self._tr("status.serve_stopped", "Serve: stopped"),
+                running=False,
+                status_key="status.serve_stopped",
+            )
         self._set_whisper_model_download_status(message)
 
     def _serve_output_worker(self, process: subprocess.Popen[str]) -> None:
@@ -4051,8 +4204,14 @@ class ConfigGui:
             self._set_var("whisper_translation_backend", backend)
 
         frames = getattr(self, "_whisper_translation_backend_frames", {})
-        for name, frame in frames.items():
-            if name == backend:
+        selected_frame = frames.get(backend)
+        seen_frame_ids: set[int] = set()
+        for frame in frames.values():
+            frame_id = id(frame)
+            if frame_id in seen_frame_ids:
+                continue
+            seen_frame_ids.add(frame_id)
+            if frame is selected_frame:
                 frame.grid()
             else:
                 frame.grid_remove()

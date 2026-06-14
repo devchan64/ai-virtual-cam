@@ -25,6 +25,7 @@ from src.app.transcript_revision import append_context as _append_committed_text
 from src.app.whisper_transcript_logic import (
     _collapse_adjacent_repeated_phrase_details,
     _collapse_adjacent_repeated_phrases,
+    _coalesce_completed_sentences_for_staging,
     _diagnostic_tail,
     _final_sentence_diagnostic_flags,
     _forced_sentence_reason,
@@ -908,6 +909,19 @@ class WhisperTranscriptWorker:
                     boundary_complete = boundary_result.boundary_count
                     boundary_soft = boundary_result.soft_boundary_count
                     if completed_sentences:
+                        coalesced_completed_sentences = _coalesce_completed_sentences_for_staging(completed_sentences, str(detected))
+                        if len(coalesced_completed_sentences) != len(completed_sentences):
+                            count_metric("completed_coalesced")
+                            count_metric(f"completed_coalesced_lang_{str(detected).strip().lower() or 'unknown'}")
+                            self._emit(
+                                "status",
+                                "Whisper completed 후보 병합: "
+                                f"chunk={chunks} language={detected} before={len(completed_sentences)} "
+                                f"after={len(coalesced_completed_sentences)} "
+                                f"tail={_diagnostic_tail(coalesced_completed_sentences[0])}",
+                                display=False,
+                            )
+                        completed_sentences = coalesced_completed_sentences
                         pending_chunks = 0
                     elif pending_transcript_text:
                         pending_chunks += 1
@@ -1087,6 +1101,23 @@ class WhisperTranscriptWorker:
                             f"{exc}. 번역을 이번 세션에서 중지합니다. STT 전사는 계속됩니다.",
                         )
                 total_elapsed = time.perf_counter() - chunk_started_at
+                stage_decision_count = sum(
+                    value for key, value in chunk_lifecycle_metrics.items() if key.startswith("stage_replace_decision_")
+                )
+                stage_replace_count = chunk_lifecycle_metrics.get("stage_replace", 0)
+                stage_discard_count = chunk_lifecycle_metrics.get("stage_discard", 0)
+                stage_revision_count = chunk_lifecycle_metrics.get("stage_revision", 0)
+                finalize_count = chunk_lifecycle_metrics.get("finalized", 0)
+                self._emit(
+                    "status",
+                    "Whisper 안정성 지표: "
+                    f"chunk={chunks} replace={stage_replace_count} discard={stage_discard_count} "
+                    f"revision={stage_revision_count} finalized={finalize_count} "
+                    f"replace_discard_rate={stage_discard_count / max(stage_replace_count, 1):.2f} "
+                    f"decision_count={stage_decision_count} "
+                    f"completed_coalesced={chunk_lifecycle_metrics.get('completed_coalesced', 0)}",
+                    display=False,
+                )
                 self._emit(
                     "status",
                     "Whisper 성능: "

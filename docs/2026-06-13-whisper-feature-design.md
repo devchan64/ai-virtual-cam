@@ -587,10 +587,12 @@ unittest 성공은 테스트 코드가 실행되어 지표가 수집되었다는
 | `distinct` | 서로 다른 문장을 잘못된 revision으로 합치지 않는지 | 25 | 95% 이상 |
 | `collapse` | 같은 의미의 인접 반복 문구를 줄일 수 있는지 | 45 | 90% 이상 |
 | `stability` | 연속 partial 전사가 전체 재출력 없이 안정적으로 revision되는지 | 10 | 80% 이상 |
-| `replacement` | staged 후보 교체 시 보존/폐기/확정 결정이 의도와 맞는지 | 9 | 90% 이상 |
-| `pending` | 긴 pending이 확정되지 않는 사유를 지표화해 번역 지연 위험을 추적하는지 | 9 | 90% 이상 |
+| `replacement` | staged 후보 교체 시 보존/폐기/확정 결정이 의도와 맞는지 | 11 | 90% 이상 |
+| `pending` | 긴 pending이 확정되지 않는 사유를 지표화해 번역 지연 위험을 추적하는지 | 10 | 90% 이상 |
+| `coalesce` | 중국어 completed 후보가 같은 STT 윈도우 안에서 여러 개 나올 때 단일 관측 단위로 병합되는지 | 10 | 100% |
+| `translation_quality` | 확정 전사 문장의 번역 품질 회귀를 추적하는지 | 6 | 80% 이상 |
 
-`distinct` 목표율을 더 높게 둔 이유는 서로 다른 문장을 병합하면 원문 손실이 발생하고, 이후 번역도 복구할 수 없기 때문이다. `revision`과 `collapse`는 중복을 줄이는 방향의 품질 지표지만, 과도한 병합보다 손실 위험이 낮으므로 초기 목표율을 90%로 둔다. `stability`는 incremental ASR의 partial hypothesis instability와 revokes 문제를 현재 코드의 revision lifecycle에 맞춘 프록시 지표다. `replacement`는 2026-06-13 30분 운영 로그에서 관측된 staged 교체 손실을 직접 추적하기 위해 추가한 지표이며, `open_korean_clause`와 `partial_preserve` 결정의 회귀를 막는다. `pending`은 영어 장문처럼 경계가 늦게 나오는 구간에서 번역 지연 위험을 추적하기 위한 지표다.
+`distinct` 목표율을 더 높게 둔 이유는 서로 다른 문장을 병합하면 원문 손실이 발생하고, 이후 번역도 복구할 수 없기 때문이다. `revision`과 `collapse`는 중복을 줄이는 방향의 품질 지표지만, 과도한 병합보다 손실 위험이 낮으므로 초기 목표율을 90%로 둔다. `stability`는 incremental ASR의 partial hypothesis instability와 revokes 문제를 현재 코드의 revision lifecycle에 맞춘 프록시 지표다. `replacement`는 2026-06-13 30분 운영 로그에서 관측된 staged 교체 손실을 직접 추적하기 위해 추가한 지표이며, `open_korean_clause`와 `partial_preserve` 결정의 회귀를 막는다. `pending`은 영어 장문처럼 경계가 늦게 나오는 구간에서 번역 지연 위험을 추적하기 위한 지표다. `coalesce`는 중국어 punctuation 모델이 한 STT 윈도우를 여러 completed 후보로 나누면서 단일 staging 슬롯을 반복 교체하는 문제를 추적한다. `translation_quality`는 STT/문장 확정과 분리된 번역 모델 품질 축이다.
 
 ### 12.1 운영 규칙
 
@@ -648,13 +650,44 @@ unittest 성공은 테스트 코드가 실행되어 지표가 수집되었다는
 현재 추적 지표 예시:
 
 ```text
-pending=9/9 rate=1.000 target>=0.90
-replacement=9/9 rate=1.000 target>=0.90
+pending=10/10 rate=1.000 target>=0.90
+replacement=11/11 rate=1.000 target>=0.90
+coalesce=12/12 rate=1.000 target>=1.00
 revision=97/107 rate=0.907 target>=0.90
 distinct=38/38 rate=1.000 target>=0.95
 collapse=49/53 rate=0.925 target>=0.90
 stability=10/10 rate=1.000 target>=0.80
 ```
+
+## 12.4 2026-06-14 중국어 completed 후보 병합 관측
+
+2026-06-14 중국어 운영 로그에서는 `boundary_complete=2~4`가 같은 chunk 안에서 반복 관측되었다. 기존 생명주기는 completed 후보를 순서대로 staging에 넣었기 때문에 같은 STT 윈도우의 첫 번째 후보가 다음 후보에 의해 `stage_discard_reason_unconfirmed_cjk`로 폐기되었다.
+
+대표 관측:
+
+- chunk 241: `Helps笨蛋，我们是笨蛋...` 다음 `我一直以来你以为它是山楂。`가 같은 chunk에서 발생하며 첫 후보가 폐기됨.
+- chunk 242: `你大家不笨蛋...`, `我一直以来你以为它是山楂口味的，很好吃。`, `哎，冰。` 세 후보가 같은 chunk에서 staging을 순차 교체함.
+- chunk 251~252: `好朋友...`, `我们不是还要...`, `贴贴脸吗？` 계열 후보가 같은 윈도우 안에서 반복 교체됨.
+- chunk 269~270: `果是怎么样？`와 `然后我让小哥哥给我拿了几台测试一下...`가 분리되어 앞 후보가 확정 전 폐기됨.
+
+반영 정책:
+
+- 중국어(`language=zh`)에서는 한 STT 윈도우에서 나온 completed 후보들을 같은 관측 단위로 병합한 뒤 staging에 넣는다.
+- 이 병합은 운영 경로의 언어별 문자열 규칙을 늘리는 목적이 아니라, punctuation 모델이 같은 윈도우를 여러 completed fragment로 반환하는 구조를 revision lifecycle에 맞추는 완충 단계다.
+- 비중국어는 기존처럼 completed 후보를 개별 문장 단위로 유지한다.
+- 병합 발생 시 `completed_coalesced`, `completed_coalesced_lang_zh` 지표와 `Whisper completed 후보 병합` 로그를 남긴다.
+- `Whisper 안정성 지표` 로그는 누적 `stage_replace`, `stage_discard`, `stage_revision`, `finalized`, `completed_coalesced`를 함께 출력해 생명주기 안정성을 관측한다.
+
+2026-06-14 검증 결과:
+
+```text
+coalesce=12/12 rate=1.000 target>=1.00
+revision=97/107 rate=0.907 target>=0.90
+collapse=49/53 rate=0.925 target>=0.90
+translation_quality=2/6 rate=0.333 target>=0.80
+```
+
+결론은 STT/staging 생명주기 병목과 번역 모델 품질 병목을 분리해서 본다는 것이다. 중국어 completed 병합은 문장 손실과 stage churn을 줄이기 위한 조치이며, 낮은 `translation_quality`는 중한 번역 백엔드/모델 비교 과제로 남긴다.
 
 ## 13) 점진적 적용 순서
 

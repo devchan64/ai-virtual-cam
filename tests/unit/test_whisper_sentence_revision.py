@@ -4,6 +4,7 @@ from src.app.sentence_boundary import LegacyRegexSentenceBoundaryDetector
 from src.app.whisper_window import (
     _collapse_adjacent_repeated_phrase_details,
     _collapse_adjacent_repeated_phrases,
+    _coalesce_completed_sentences_for_staging,
     _diagnostic_tail,
     _final_sentence_diagnostic_flags,
     _forced_sentence_reason,
@@ -507,6 +508,23 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
 
         self.assertEqual(_replacement_decision_reason(staged, candidate, 3, False, 0), "confirmed")
         self.assertTrue(_should_finalize_replaced_sentence(staged, candidate, 3, False, 0))
+
+    def test_chinese_completed_fragments_from_same_chunk_are_coalesced(self) -> None:
+        # Regression from 2026-06-14 zh monitoring chunks 121-122. FunASR
+        # punctuation can return multiple completed fragments for one sliding
+        # window; staging them one by one discards the earlier fragment before
+        # it can be revised.
+        completed = [
+            "放了放一下吧，自己迷你韩美就是使劲夸夸，我们知道吗？",
+            "魔法师你在吸我。",
+        ]
+
+        self.assertEqual(
+            _coalesce_completed_sentences_for_staging(completed, "zh"),
+            ["放了放一下吧，自己迷你韩美就是使劲夸夸，我们知道吗？魔法师你在吸我。"],
+        )
+        self.assertEqual(_coalesce_completed_sentences_for_staging(completed, "ko"), completed)
+
 
 
 if __name__ == "__main__":

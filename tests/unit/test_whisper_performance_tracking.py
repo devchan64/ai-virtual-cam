@@ -3,6 +3,7 @@ import unittest
 
 from src.app.whisper_window import (
     _collapse_adjacent_repeated_phrase_details,
+    _coalesce_completed_sentences_for_staging,
     _final_sentence_diagnostic_flags,
     _normalized_text,
     _pending_overrun_reason,
@@ -24,6 +25,7 @@ TRACKING_TARGETS = {
     "pending": {"target_cases": 10, "target_rate": 0.90},
     "final_quality": {"target_cases": 8, "target_rate": 0.90},
     "translation_quality": {"target_cases": 6, "target_rate": 0.80},
+    "coalesce": {"target_cases": 10, "target_rate": 1.00},
 }
 
 REVISION_TRACKING_CASES = [
@@ -737,6 +739,91 @@ def _make_collapse_tracking_test(index: int, case: dict[str, object]):
 
 
 
+COALESCE_TRACKING_CASES = [
+    {
+        "language": "zh",
+        "sentences": ["放了放一下吧，自己迷你韩美就是使劲夸夸，我们知道吗？", "魔法师你在吸我。"],
+        "expected_count": 1,
+        "source": "avc-whisper.log chunk 121",
+    },
+    {
+        "language": "zh",
+        "sentences": ["使使夸夸我们，你知道吗？", "魔法师，你在吸我的氧气吗？"],
+        "expected_count": 1,
+        "source": "avc-whisper.log chunk 122",
+    },
+    {
+        "language": "zh",
+        "sentences": ["奎是什么？", "他说他不知道，我又不是。"],
+        "expected_count": 1,
+        "source": "avc-whisper.log chunk 139",
+    },
+    {
+        "language": "zh",
+        "sentences": ["怎么啦？", "但餐厅的每一个角落真的很好看，尤其是中间划分出一个区域。", "中午的阳光透过玻璃洒进来，真。"],
+        "expected_count": 1,
+        "source": "avc-whisper.log chunk 128",
+    },
+    {
+        "language": "zh",
+        "sentences": ["为什么不在九月？", "因为他八月手嘛，然后突破浪截真的有可能。", "哎，现在都十一月。"],
+        "expected_count": 1,
+        "source": "avc-whisper.log chunk 158",
+    },
+    {
+        "language": "zh",
+        "sentences": ["Helps笨蛋，我们是笨蛋，你大家不笨蛋，它是芒果口味的。", "我一直以来你以为它是山楂。"],
+        "expected_count": 1,
+        "source": "avc-whisper.log chunk 241",
+    },
+    {
+        "language": "zh",
+        "sentences": ["你大家不笨蛋，它是芒果口味的。", "我一直以来你以为它是山楂口味的，很好吃。", "哎，冰。"],
+        "expected_count": 1,
+        "source": "avc-whisper.log chunk 242",
+    },
+    {
+        "language": "zh",
+        "sentences": ["唱的很高很高，是好朋友，你怎么容了？", "好朋友，我为什么还是这么猛烈？", "我们不是还要。"],
+        "expected_count": 1,
+        "source": "avc-whisper.log chunk 251",
+    },
+    {
+        "language": "zh",
+        "sentences": ["怎么容了？", "好朋友，我为什么还是这么萌的呀？", "我们不是还要贴贴脸吗？", "你怎。"],
+        "expected_count": 1,
+        "source": "avc-whisper.log chunk 252",
+    },
+    {
+        "language": "zh",
+        "sentences": ["果是怎么样？", "然后我让小哥哥给我拿了几台测试一下，就是室。"],
+        "expected_count": 1,
+        "source": "avc-whisper.log chunk 269",
+    },
+    {
+        "language": "zh",
+        "sentences": ["果是怎么样？", "然后我让小哥哥给我拿了几台测试一下，就是室内室外光线不一样的。"],
+        "expected_count": 1,
+        "source": "avc-whisper.log chunk 270",
+    },
+    {
+        "language": "ko",
+        "sentences": ["첫 번째 문장입니다.", "두 번째 문장입니다."],
+        "expected_count": 2,
+        "source": "non-zh control",
+    },
+]
+
+
+def _make_coalesce_tracking_test(index: int, case: dict[str, object]):
+    def test(self: WhisperPerformanceTrackingTest) -> None:
+        sentences = [str(item) for item in case["sentences"]]
+        actual = _coalesce_completed_sentences_for_staging(sentences, str(case["language"]))
+        matched = len(actual) == int(case["expected_count"])
+        self._record("coalesce", f"coalesce_{index:03d}", matched)
+    return test
+
+
 def _make_pending_tracking_test(index: int, case: dict[str, object]):
     def test(self: WhisperPerformanceTrackingTest) -> None:
         actual = _pending_overrun_reason(str(case["pending"]), int(case["chunks"]))
@@ -768,6 +855,14 @@ def _make_stability_tracking_test(index: int, sequence: list[str]):
         matched = bool(transition_results) and (sum(transition_results) / len(transition_results)) >= 0.80
         self._record("stability", f"stability_{index:03d}", matched)
     return test
+
+
+for _index, _case in enumerate(COALESCE_TRACKING_CASES, 1):
+    setattr(
+        WhisperPerformanceTrackingTest,
+        f"test_tracking_coalesce_{_index:03d}",
+        _make_coalesce_tracking_test(_index, _case),
+    )
 
 
 for _index, _case in enumerate(TRANSLATION_QUALITY_TRACKING_CASES, 1):

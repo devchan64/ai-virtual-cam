@@ -355,16 +355,17 @@ Whisper 활성화:
 - 영어 STT와 한국어 STT는 실제 입력 장치 기반 실행에서 전사 창 갱신과 복사용 출력 동작을 확인했습니다.
 - 한국어 문장 추적과 영어 문장 추적은 슬라이딩 윈도우 기반 revision/final 확정 로그와 전사 창 출력 기준으로 안정화 실험을 진행했습니다.
 - 영한 번역은 확정된 영어 final 전사 문장을 대상으로 별도 번역 창에 한국어 결과를 출력하는 사용 흐름을 확인했습니다.
-- 중국어 STT와 중한 번역은 계속 실험 중인 영역입니다. 특히 중한 번역은 모델 품질과 문장 확정 입력 품질을 분리해 검토합니다.
+- 중국어 STT는 FunASR Paraformer 기반 전사와 FunASR CT punctuation 기반 문장 경계를 실험 중입니다. 2026-06-14 로그에서는 같은 STT 윈도우 안의 중국어 completed 후보가 여러 개 나오며 staging 후보를 갈아치우는 문제가 관측되어, 중국어 completed 후보는 같은 관측 단위로 병합해 확정 생명주기를 추적합니다.
+- 중한 번역은 계속 실험 중인 영역입니다. 특히 중한 번역은 모델 품질과 문장 확정 입력 품질을 분리해 검토합니다.
 
 응답속도 조정:
 
 - `청크/윈도우 길이(초)`(`chunkSeconds`, `windowSeconds`): 최근 몇 초의 오디오 문맥을 Whisper에 전달할지 결정합니다. 길게 잡으면 빠른 발화의 문장 완성도와 앞뒤 문맥 안정성에 유리하지만, tail echo와 후보 리비전 관리 부담이 늘 수 있습니다. 기본 추천값은 `7.5`초입니다.
 - `갱신 주기(초)`(`stepSeconds`): 몇 초마다 새 STT 요청을 만들지 결정합니다. 기본 추천값은 `1.5`초이며, 낮추면 화면 갱신은 빨라지지만 같은 문맥을 반복 처리하는 비율이 커집니다.
-- `확정 지연(초)`(`commitLagSeconds`): 윈도우 끝단의 불안정한 tail을 즉시 확정하지 않기 위한 보류 구간입니다. 기본 추천값은 `0.8`초입니다.
+- `확정 지연(초)`(`commitLagSeconds`): 윈도우 끝단의 불안정한 tail을 즉시 확정하지 않기 위한 보류 구간입니다. 기본 추천값은 `1.5`초입니다.
 - `Beam 크기`(`beamSize`): 디코딩 후보를 몇 갈래로 탐색할지 결정합니다. `1`은 가장 빠른 greedy 디코딩에 가깝고 지연을 줄이는 데 유리합니다. 값을 키우면 후보 탐색이 늘어 일부 발화의 정확도와 안정성이 좋아질 수 있지만, large-v3에서는 GPU 사용량과 디코딩 시간이 늘어 응답이 늦어질 수 있습니다.
-- large-v3에서 빠른 발화와 문장 누락이 문제라면 우선 `windowSeconds=7.5`, `stepSeconds=1.5`, `commitLagSeconds=0.8`, `beamSize=3`, `temperature=0.0` 조합을 시작점으로 사용하세요. `maxNewTokens=96`은 속도 튜닝값이라기보다 긴 출력 생성을 막는 상한값입니다.
-- 문장이 여전히 자주 끊기거나 앞뒤 문맥을 놓치면 `windowSeconds`를 `9.0`까지 늘려 비교합니다. tail echo가 늘면 `commitLagSeconds`를 `1.0`까지 올리거나 `windowSeconds`를 다시 낮춥니다.
+- 빠른 발화와 문장 누락이 문제라면 우선 `windowSeconds=7.5`, `stepSeconds=1.5`, `commitLagSeconds=1.5`, `beamSize=3`, `temperature=0.0` 조합을 시작점으로 사용하세요. `maxNewTokens=96`은 속도 튜닝값이라기보다 긴 출력 생성을 막는 상한값입니다.
+- 문장이 여전히 자주 끊기거나 앞뒤 문맥을 놓치면 `windowSeconds`를 `9.0`까지 늘려 비교합니다. tail echo와 staging 교체가 늘면 `windowSeconds`를 다시 낮추거나 `stepSeconds`를 함께 줄여 같은 후보가 더 자주 재확인되는지 비교합니다.
 - 속도는 충분하지만 고유명사나 짧은 발화 인식이 흔들리면 `beamSize`를 `3` 또는 `5`로 올려 비교합니다. 문장이 실제로 잘릴 때만 `maxNewTokens`를 `128` 또는 `192`로 올립니다. 짧은 청크에서는 이 값이 응답속도에 거의 영향을 주지 않을 수 있습니다.
 - 번역까지 포함한 지연은 NLLB `translationBeamSize`와 `translationMaxNewTokens`의 영향을 받습니다. 실시간 응답성은 `translationBeamSize=1`, `translationMaxNewTokens=128`에서 시작하고, 번역 품질이나 긴 문장 완성도가 부족하면 각각 `3` 또는 `256`으로 올려 비교합니다.
 - 실시간 번역은 기본적으로 확정된 final 전사 문장만 대상으로 합니다. staged/partial 문장은 뒤 청크에서 수정될 가능성이 높아 중복 번역과 premature translation을 만들 수 있으므로 기본값에서 번역하지 않습니다. 상세 설계와 참고 자료는 [`docs/2026-06-13-whisper-feature-design.md`](docs/2026-06-13-whisper-feature-design.md)를 확인합니다.
