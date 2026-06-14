@@ -165,7 +165,7 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         self.assertFalse(stt_visibility[(1, 2)])
         self.assertFalse(stt_visibility[(3, 4)])
         self.assertTrue(stt_visibility[(5, 6)])
-        self.assertIn("funasr-paraformer", gui._widgets["whisper_stt_backend_zh"].values)
+        self.assertEqual(gui._widgets["whisper_stt_backend_zh"].values, ("funasr-paraformer", "funasr-sensevoice", "mock"))
         self.assertEqual(gui._widgets["whisper_stt_model_zh"].values, ("paraformer-zh", "paraformer-zh-streaming"))
         backend_option_visibility = {
             rows: visible for parent, rows, visible in grid_calls if parent is gui._whisper_tab
@@ -179,9 +179,10 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         backend_option_visibility = {
             rows: visible for parent, rows, visible in grid_calls if parent is gui._whisper_tab
         }
-        self.assertTrue(backend_option_visibility[(32,)])
-        self.assertTrue(backend_option_visibility[(33,)])
-        self.assertEqual(gui._widgets["whisper_stt_model_zh"].values, ("large-v3", "medium", "small", "base", "tiny"))
+        self.assertFalse(backend_option_visibility[(32,)])
+        self.assertFalse(backend_option_visibility[(33,)])
+        self.assertEqual(gui.vars["whisper_stt_backend_zh"].get(), "funasr-paraformer")
+        self.assertEqual(gui._widgets["whisper_stt_model_zh"].values, ("paraformer-zh", "paraformer-zh-streaming"))
 
     def test_resolve_and_validate_audio_runtime_devices_maps_display_values(self) -> None:
         with mock.patch.object(self.audio_devices.platform, "system", return_value="Linux"), mock.patch.object(
@@ -424,6 +425,74 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
             self.module._sanitize_window_geometry("900x700+2912+627", width, height),
             "900x700+2912+627",
         )
+
+
+    def test_default_window_geometry_meta_contains_whisper_model_download_window_geometry(self) -> None:
+        self.assertIn("whisperModelDownloadWindowGeometry", self.module.DEFAULT_WINDOW_GEOMETRY_META)
+
+    def test_capture_all_window_geometry_meta_remembers_whisper_model_download_window(self) -> None:
+        root = types.SimpleNamespace(
+            update_idletasks=lambda: None,
+            geometry=lambda: "900x700+120+80",
+            winfo_vrootwidth=lambda: 1920,
+            winfo_vrootheight=lambda: 1080,
+            winfo_screenwidth=lambda: 1920,
+            winfo_screenheight=lambda: 1080,
+        )
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        gui.root = root
+        gui._window_geometry_meta_cache = {}
+        download_window = types.SimpleNamespace()
+        gui._whisper_model_download_window = download_window
+
+        with mock.patch.object(self.module.ConfigGui, "_remember_named_window_geometry") as remember:
+            self.module.ConfigGui._capture_all_window_geometry_meta(gui)
+
+        remember.assert_any_call("whisperModelDownloadWindowGeometry", download_window)
+
+    def test_close_whisper_model_download_dialog_cancels_running_process(self) -> None:
+        process = mock.Mock()
+        process.poll.return_value = None
+        process.send_signal = mock.Mock()
+        download_window = types.SimpleNamespace(destroy=mock.Mock())
+
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        gui._whisper_model_download_process = process
+        gui._whisper_model_download_window = download_window
+        gui._whisper_model_download_btn = None
+        gui._whisper_model_download_progress = None
+        gui._whisper_model_download_log_text = None
+        gui._whisper_model_download_on_success = None
+        gui._i18n = {}
+        gui._whisper_model_download_cancelled = False
+        gui._set_whisper_model_download_status = mock.Mock()
+        gui._set_serve_status = mock.Mock()
+        gui._remember_named_window_geometry = mock.Mock()
+
+        self.module.ConfigGui._close_whisper_model_download_dialog(gui, False)
+
+        self.assertTrue(gui._whisper_model_download_cancelled)
+        process.send_signal.assert_called_once_with(self.module.signal.SIGINT)
+        gui._remember_named_window_geometry.assert_called_once_with(
+            "whisperModelDownloadWindowGeometry",
+            download_window,
+        )
+        download_window.destroy.assert_called_once()
+        gui._set_serve_status.assert_called_once()
+
+    def test_whisper_model_download_finished_reports_cancelled_state(self) -> None:
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        gui._whisper_model_download_progress = types.SimpleNamespace(configure=mock.Mock())
+        gui._whisper_model_download_btn = types.SimpleNamespace(state=mock.Mock())
+        gui._whisper_model_download_cancelled = True
+        gui._set_whisper_model_download_status = mock.Mock()
+        gui._set_serve_status = mock.Mock()
+        gui._tr = lambda key, default: default
+
+        self.module.ConfigGui._whisper_model_download_finished(gui, 1, "error")
+
+        gui._set_whisper_model_download_status.assert_called_once_with("모델 다운로드가 취소되었습니다.")
+        gui._set_serve_status.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -16,7 +16,7 @@ def whisper_stt_backend_options(language: str | None = None) -> list[str]:
     if normalized_language in {"en", "ko"}:
         return ["faster-whisper", "mock"]
     if normalized_language == "zh":
-        return ["faster-whisper", "funasr-paraformer", "funasr-sensevoice", "mock"]
+        return ["funasr-paraformer", "funasr-sensevoice", "mock"]
     return ["faster-whisper", "mock"]
 
 
