@@ -146,5 +146,20 @@ class WhisperRepeatCollapseTest(unittest.TestCase):
 
 
 
+
+    def test_collapse_near_phrase_does_not_remove_chinese_place_name_context_from_log(self) -> None:
+        text = "来 的 吉 隆 坡 对 我 们 是 落 地 吉 隆 坡 然 后 玩 了 几 天"
+        collapsed, rules = _collapse_adjacent_repeated_phrase_details(text)
+
+        self.assertEqual(collapsed, text)
+        self.assertNotIn("near_phrase", rules)
+
+    def test_collapse_adjacent_phrase_still_handles_chinese_exact_duplicate_from_log(self) -> None:
+        text = "那 个 汤 底 那 个 汤 底 真 的 有 一 点 辣"
+        collapsed, rules = _collapse_adjacent_repeated_phrase_details(text)
+
+        self.assertEqual(collapsed, "那 个 汤 底 真 的 有 一 点 辣")
+        self.assertIn("adjacent_phrase", rules)
+
 if __name__ == "__main__":
     unittest.main()

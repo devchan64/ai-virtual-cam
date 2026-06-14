@@ -26,6 +26,7 @@ from src.app.whisper_transcript_logic import (
     _collapse_adjacent_repeated_phrase_details,
     _collapse_adjacent_repeated_phrases,
     _diagnostic_tail,
+    _final_sentence_diagnostic_flags,
     _forced_sentence_reason,
     _new_text_delta,
     _normalized_text,
@@ -663,14 +664,18 @@ class WhisperTranscriptWorker:
                 )
                 return []
             count_metric("finalized")
+            final_quality_flags = _final_sentence_diagnostic_flags(output_sentence, detected)
+            for flag in final_quality_flags:
+                count_metric(f"final_quality_{flag}")
             committed_text = _append_committed_text(committed_text, output_sentence)
             self._remember_transcript(output_sentence)
             self._emit(
                 "status",
                 "Whisper 문장 확정: "
                 f"chunk={chunks} reason={reason} committed_before_chars={committed_before_chars} "
-                f"output_chars={len(_normalized_text(output_sentence))} staged_tail={_diagnostic_tail(staged_before)} "
-                f"text={output_sentence!r}",
+                f"output_chars={len(_normalized_text(output_sentence))} "
+                f"quality_flags={','.join(final_quality_flags) or 'none'} "
+                f"staged_tail={_diagnostic_tail(staged_before)} text={output_sentence!r}",
                 display=False,
             )
             self._emit("transcript", output_sentence, log_text=f"[{detected}] {output_sentence}", final=True)
@@ -1037,6 +1042,16 @@ class WhisperTranscriptWorker:
                                 )
                             translation_elapsed += time.perf_counter() - translation_started_at
                             if translated_text:
+                                self._emit(
+                                    "status",
+                                    "Whisper 번역 진단: "
+                                    f"chunk={chunks} final={is_final_translation} "
+                                    f"source_lang={source_language} target_lang={target_language} "
+                                    f"source_chars={len(_normalized_text(sentence))} "
+                                    f"target_chars={len(_normalized_text(translated_text))} "
+                                    f"backend={self._cfg.translationBackend} model={self._cfg.translationModel}",
+                                    display=False,
+                                )
                                 if is_final_translation:
                                     committed_translation_text = _append_committed_text(committed_translation_text, translated_text)
                                 self._emit(

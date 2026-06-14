@@ -3,6 +3,7 @@ import unittest
 
 from src.app.whisper_window import (
     _collapse_adjacent_repeated_phrase_details,
+    _final_sentence_diagnostic_flags,
     _normalized_text,
     _pending_overrun_reason,
     _replacement_decision_reason,
@@ -21,6 +22,7 @@ TRACKING_TARGETS = {
     "stability": {"target_cases": 10, "target_rate": 0.80},
     "replacement": {"target_cases": 11, "target_rate": 0.90},
     "pending": {"target_cases": 10, "target_rate": 0.90},
+    "final_quality": {"target_cases": 8, "target_rate": 0.90},
 }
 
 REVISION_TRACKING_CASES = [
@@ -595,6 +597,17 @@ COLLAPSE_TRACKING_CASES.extend([
     {"source": "2026-06-13 monitor chunk 1238", "text": "그러면서 당연히 부의 양극화는 더 심화되는 돈을 이용해가지고 정부가 어떻게 돈을 이용해서 정부가 어떻게 보면 자산시장 사재기에 더 집중화시키고 있는 있는 전략일"},
 ])
 
+FINAL_QUALITY_TRACKING_CASES = [
+    {"text": "潇洒最好的乳团。", "language": "zh", "expected_flags": {"short_cjk"}, "source": "2026-06-14 monitor chunk 421"},
+    {"text": "蒸牛。", "language": "zh", "expected_flags": {"short_cjk"}, "source": "2026-06-14 monitor chunk 441"},
+    {"text": "很漂亮的咖啡厅，而且。", "language": "zh", "expected_flags": {"short_cjk"}, "source": "2026-06-14 monitor chunk 537"},
+    {"text": "Good oodbye.", "language": "zh", "expected_flags": {"latin_only_for_zh"}, "source": "2026-06-14 monitor chunk 504"},
+    {"text": "Good morning.", "language": "zh", "expected_flags": {"latin_only_for_zh"}, "source": "2026-06-14 monitor chunk 506"},
+    {"text": "matcha ice cream很好吃。", "language": "zh", "expected_flags": {"mixed_latin_zh"}, "source": "synthetic zh mixed latin"},
+    {"text": "要 去 找", "language": "zh", "expected_flags": {"short_cjk", "no_end_marker"}, "source": "2026-06-14 monitor chunk 354"},
+    {"text": "看起来好好吃啊，你真的有很多小吃呢，我看到。", "language": "zh", "expected_flags": set(), "source": "2026-06-14 monitor chunk 50 stable comparison"},
+]
+
 
 class WhisperPerformanceTrackingTest(unittest.TestCase):
     records: list[tuple[str, str, bool]] = []
@@ -627,6 +640,15 @@ class WhisperPerformanceTrackingTest(unittest.TestCase):
     def _record(self, domain: str, name: str, matched: bool) -> None:
         self.records.append((domain, name, matched))
 
+
+
+def _make_final_quality_tracking_test(index: int, case: dict[str, object]):
+    def test(self: WhisperPerformanceTrackingTest) -> None:
+        actual = set(_final_sentence_diagnostic_flags(str(case["text"]), str(case["language"])))
+        expected = set(case["expected_flags"])
+        matched = expected.issubset(actual) if expected else not actual
+        self._record("final_quality", f"final_quality_{index:03d}", matched)
+    return test
 
 def _make_revision_tracking_test(index: int, case: dict[str, object]):
     def test(self: WhisperPerformanceTrackingTest) -> None:
@@ -691,6 +713,13 @@ def _make_stability_tracking_test(index: int, sequence: list[str]):
         self._record("stability", f"stability_{index:03d}", matched)
     return test
 
+
+for _index, _case in enumerate(FINAL_QUALITY_TRACKING_CASES, 1):
+    setattr(
+        WhisperPerformanceTrackingTest,
+        f"test_tracking_final_quality_{_index:03d}",
+        _make_final_quality_tracking_test(_index, _case),
+    )
 
 for _index, _case in enumerate(REVISION_TRACKING_CASES, 1):
     setattr(

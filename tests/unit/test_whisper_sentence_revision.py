@@ -5,6 +5,7 @@ from src.app.whisper_window import (
     _collapse_adjacent_repeated_phrase_details,
     _collapse_adjacent_repeated_phrases,
     _diagnostic_tail,
+    _final_sentence_diagnostic_flags,
     _forced_sentence_reason,
     _format_transcript_metrics,
     _new_text_delta,
@@ -212,6 +213,17 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         self.assertEqual(
             _replacement_decision_reason("정부가 어떻게 보면은 자산시장 사재기에 더 집중화시키고 있는 전략일 것이다", "전략일 것이다", 1, False, 0),
             "duplicate_or_suffix",
+        )
+
+
+    def test_final_sentence_diagnostic_flags_identify_unstable_chinese_outputs(self) -> None:
+        self.assertIn("short_cjk", _final_sentence_diagnostic_flags("蒸牛。", "zh"))
+        self.assertIn("short_cjk", _final_sentence_diagnostic_flags("潇洒最好的乳团。", "zh"))
+        self.assertIn("latin_only_for_zh", _final_sentence_diagnostic_flags("The.", "zh"))
+        self.assertIn("mixed_latin_zh", _final_sentence_diagnostic_flags("matcha ice cream很好吃。", "zh"))
+        self.assertEqual(
+            _final_sentence_diagnostic_flags("看起来好好吃啊，你真的有很多小吃呢，我看到。", "zh"),
+            (),
         )
 
     def test_transcript_metrics_format_is_stable_for_log_analysis(self) -> None:

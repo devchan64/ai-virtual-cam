@@ -23,6 +23,7 @@ SENTENCE_CONFIRM_MAX_AGE_CHUNKS = 3
 FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS = 4
 MIN_PROVISIONAL_TRANSLATION_WORDS = 6
 PROVISIONAL_TRANSLATION_ENABLED = False
+SHORT_CJK_FINAL_UNITS = 10
 
 
 def _normalized_text(text: str) -> str:
@@ -142,7 +143,18 @@ def _repeated_phrase_key_matches(left_key: list[str], right_key: list[str]) -> b
     return len(left_key) >= 4 and len(left_key) == len(right_key) and left_key[1:] == right_key[1:]
 
 
+def _is_cjk_dominant_unit_stream(units: list[str]) -> bool:
+    keys = [_phrase_key([unit]) for unit in units]
+    flattened = [word for key in keys for word in key]
+    if len(flattened) < 6:
+        return False
+    cjk_count = sum(1 for word in flattened if _has_cjk_words([word]))
+    return cjk_count / max(len(flattened), 1) >= 0.70
+
+
 def _collapse_near_repeated_phrases(units: list[str]) -> bool:
+    if _is_cjk_dominant_unit_stream(units):
+        return False
     for phrase_len in range(min(12, len(units) // 2), 3, -1):
         for left_start in range(0, len(units) - phrase_len):
             left_key = _phrase_key(units[left_start : left_start + phrase_len])
@@ -730,6 +742,28 @@ def _has_cjk_words(words: list[str]) -> bool:
 
 def _is_cjk_text(text: str) -> bool:
     return _has_cjk_words(_word_units(text))
+
+
+def _final_sentence_diagnostic_flags(sentence: str, language: str) -> tuple[str, ...]:
+    normalized = _normalized_text(sentence)
+    words = _word_units(normalized)
+    flags: list[str] = []
+    if not words:
+        return ("empty",)
+    normalized_language = str(language or "").strip().lower()
+    has_cjk = _has_cjk_words(words)
+    has_latin = _has_latin_words(words)
+    if normalized_language == "zh" or has_cjk:
+        cjk_units = [word for word in words if _has_cjk_words([word])]
+        if 0 < len(cjk_units) <= SHORT_CJK_FINAL_UNITS:
+            flags.append("short_cjk")
+    if normalized_language == "zh" and has_latin and not has_cjk:
+        flags.append("latin_only_for_zh")
+    elif normalized_language == "zh" and has_latin and has_cjk:
+        flags.append("mixed_latin_zh")
+    if _boundary_sentence_end_count(normalized) == 0:
+        flags.append("no_end_marker")
+    return tuple(flags)
 
 
 def _should_confirm_staged_sentence(staged_sentence: str, staged_confirmations: int, staged_forced: bool) -> bool:
