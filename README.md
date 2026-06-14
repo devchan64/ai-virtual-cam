@@ -341,7 +341,7 @@ Linux Docker 정책:
 모델/언어 설정:
 
 - 기본 모델은 `large-v3`, CUDA 환경 기본 연산은 `float16`입니다.
-- `./bin/avc setup`은 Linux에서 `faster-whisper`, NLLB 번역용 `transformers`/`sentencepiece`, Qwen3-ASR/FunASR 의존성, CUDA 런타임 의존성을 설치하고, PyTorch는 기본적으로 CUDA 12.8 휠 인덱스에서 설치합니다. SaT 문장 경계용 `wtpsplit`은 `huggingface-hub` 버전 충돌을 피하기 위해 `requirements.txt` resolver 대상에서 제외하고 `--no-deps`로 별도 설치합니다.
+- `./bin/avc setup`은 Linux에서 `faster-whisper`, NLLB 번역용 `transformers`/`sentencepiece`, Qwen3-ASR/FunASR 의존성, CUDA 런타임 의존성을 설치하고, PyTorch는 기본적으로 CUDA 12.8 휠 인덱스에서 설치합니다. Qwen3-ASR는 `qwen-asr==0.0.6`와 `transformers==4.57.6` 조합으로 고정하고, resolver 역추적을 줄이기 위해 qwen-asr UI 의존성인 `gradio==6.17.3`도 함께 고정합니다. SaT 문장 경계용 `wtpsplit`은 `huggingface-hub` 버전 충돌을 피하기 위해 `requirements.txt` resolver 대상에서 제외하고 `--no-deps`로 별도 설치합니다.
 - setup은 오디오 AI/STT 모델을 미리 내려받을지 질의합니다. 비대화형 실행에서는 건너뛰며, `AVC_DOWNLOAD_WHISPER_MODELS=1 ./bin/avc setup` 또는 `./bin/avc setup --download-whisper-models`로 강제 다운로드할 수 있습니다. `AVC_DOWNLOAD_WHISPER_MODELS=0` 또는 `--skip-whisper-models`는 질의와 다운로드를 건너뜁니다. 다운로드 대상은 기본 Whisper 모델, 언어별 STT 모델, 언어별 문장 경계/후처리 모델, 번역 모델입니다.
 - FunASR 모델 다운로드가 느릴 수 있으므로 SenseVoiceSmall은 Hugging Face 공식 미러(`FunAudioLLM/SenseVoiceSmall`)를 우선 사용합니다. `AVC_FUNASR_HF_MIRROR=0`이면 ModelScope만 사용합니다. ModelScope 전용 모델은 `AVC_MODELSCOPE_MAX_WORKERS=8` 기본값을 조정하거나 `AVC_MODELSCOPE_ENDPOINT`로 endpoint를 지정해 비교할 수 있습니다.
 - 인식 언어는 단일 선택이며 자동 감지는 사용하지 않습니다. 현재 입력 언어를 `한국어 (ko)`, `English (en)`, `中文 (zh)` 중 하나로 명시합니다.
