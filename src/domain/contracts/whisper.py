@@ -6,6 +6,7 @@ WHISPER_BACKENDS = ("faster-whisper", "openai-whisper", "whisper.cpp", "mock")
 WHISPER_STT_BACKENDS = (
     "faster-whisper",
     "qwen3-asr-transformers",
+    "qwen3-asr-vllm-streaming",
     "mock",
 )
 WHISPER_LANGUAGES = ("ko", "en", "zh")
@@ -23,6 +24,7 @@ WHISPER_STT_BACKENDS_BY_LANGUAGE = {
     "zh": (
         "faster-whisper",
         "qwen3-asr-transformers",
+        "qwen3-asr-vllm-streaming",
         "mock",
     ),
 }

@@ -303,7 +303,7 @@ class SentenceBoundaryDetector:
 - STT backend/model은 후처리 프로필과 분리한다. 영어/한국어/중국어는 각각 `sttBackendEn`, `sttBackendKo`, `sttBackendZh`와 대응 모델 설정으로 교체 가능하다. config GUI는 `language` 단일 선택값에 맞는 언어의 백엔드/모델만 표시하고, 언어를 바꾸면 해당 언어의 후보 목록으로 전환한다.
 - 현재 영어/한국어의 STT 모델 타입은 `faster-whisper`와 테스트용 `mock`만 제공한다. 영어/한국어용 추가 모델이 검증되면 언어별 backend 후보에 추가한다.
 - 중국어 STT 품질 후보군은 `qwen3-asr-transformers`, 후속 `qwen3-asr-vllm-streaming`, Dolphin-CN-Dialect, WeNet으로 재정리한다. `faster-whisper`는 중국어 정확도가 부족해 비교 기준선으로만 유지한다. FunASR STT 계열은 후보군에서 제외하고 폐기 예정으로 둔다.
-- 백엔드별 실행 속성은 `whisper_stt_backend_runtime_option_keys()`에서 정의한다. `faster-whisper`는 `computeType`, `beamSize`, `maxNewTokens`, `temperature`를 노출하고, `qwen3-asr-transformers`는 `computeType`, `maxNewTokens`를 노출한다. 제거된 FunASR STT 계열 속성은 더 이상 화면에 노출하지 않는다.
+- 백엔드별 실행 속성은 `whisper_stt_backend_runtime_option_keys()`에서 정의한다. `faster-whisper`는 `computeType`, `beamSize`, `maxNewTokens`, `temperature`를 노출하고, `qwen3-asr-transformers`와 `qwen3-asr-vllm-streaming`은 `computeType`, `maxNewTokens`를 노출한다. 제거된 FunASR STT 계열 속성은 더 이상 화면에 노출하지 않는다.
 - config GUI는 후처리 프로필 선택을 제공하지 않는다. `postProcessingProfile`은 계약 호환을 위해 `manual`로 저장하고, 화면에는 실제 운영되는 `sentenceBoundaryBackend`/`sentenceBoundaryModel` 수동 설정만 노출한다.
 - config GUI의 오디오 AI 탭은 `입력/실행`, `STT 언어/모델`, `STT 응답/성능`, `문장 경계`, `번역` 그룹으로 구분한다. 선택 언어와 선택 STT 백엔드에 맞는 설정만 해당 그룹 안에서 표시한다.
 - 중국어 처리는 문자 단위 CJK 토큰화, suffix overlap 같은 언어별 휴리스틱을 운영 로직에 추가하지 않는다. 공백 없는 텍스트의 경계와 구두점은 후처리 모델의 책임으로 둔다.
@@ -311,8 +311,8 @@ class SentenceBoundaryDetector:
 현재 런타임 제약:
 - 모델 준비 순서는 `STT 모델 -> 번역 모델 -> 문장 경계/후처리 모델 -> 입력 장치 열기 -> 전사 루프`다. 입력 캡처와 전사/번역은 모든 모델 준비가 끝난 뒤 시작한다.
 - 모델 다운로드는 serve 시작 전 검사와 config GUI의 모델 다운로드 안내창에서만 수행한다. serve 런타임 모델 로딩은 로컬 캐시 전용이며, 캐시가 없거나 부분 다운로드 상태이면 다운로드하지 않고 Fail-Fast로 중지한다.
-- setup은 `AVC_DOWNLOAD_WHISPER_MODELS=ask|1|0`, `--download-whisper-models`, `--skip-whisper-models`를 지원한다. 비대화형 setup은 기본적으로 모델 다운로드를 건너뛰며, 강제 다운로드는 명시 옵션/환경변수로만 수행한다.
-- 문장 경계 모델 로딩 시작/완료 로그에는 profile, backend, model, device, compute, language를 출력한다. 캐시에 모델이 없으면 런타임 다운로드를 시도하지 않고, 시작 전 다운로드 안내창 또는 setup 사전 다운로드를 사용하라는 오류를 출력한다.
+- setup은 모델 다운로드를 수행하지 않는다. 모델 다운로드는 config GUI의 오디오 AI 모델 다운로드 모달에서만 수행한다.
+- 문장 경계 모델 로딩 시작/완료 로그에는 profile, backend, model, device, compute, language를 출력한다. 캐시에 모델이 없으면 런타임 다운로드를 시도하지 않고, Serve 시작 전 다운로드 안내창 또는 오디오 AI 탭의 모델 다운로드 모달을 사용하라는 오류를 출력한다.
 - 문장 경계 모델 로딩/분절 실패는 Fail-Fast다. legacy regex나 CPU로 자동 전환하지 않는다.
 - `faster-whisper`, SaT, NLLB/M2M100은 serve 런타임에서 로컬 캐시만 사용한다. Hugging Face 네트워크 다운로드는 `scripts/setup/download-whisper-models.py` 경로로만 허용한다. `qwen-asr==0.0.6`은 `transformers==4.57.6`을 요구하므로 두 패키지를 함께 고정한다. qwen-asr의 `gradio` 요구 범위는 넓어 resolver 역추적을 만들 수 있으므로 dry-run에서 확인한 `gradio==6.17.3`도 고정한다. `wtpsplit`은 `huggingface-hub==0.25.2` 메타데이터 제약이 Qwen3-ASR/transformers와 충돌하므로 패키지 자체는 `requirements.txt`에서 직접 해석하지 않고 setup/env sync에서 `--no-deps`로 설치한다. 단, 충돌하지 않는 wtpsplit 런타임 의존성(`cached_property`, `mosestokenizer`, `skops`, `adapters`)은 fresh venv에서도 import가 가능하도록 `requirements.txt`에 명시한다.
 - 후처리 backend/model은 manual 설정만 사용한다. 실행 중 명시 언어가 바뀌어도 후처리 backend/model을 언어별로 암묵 변경하지 않는다.
@@ -479,11 +479,11 @@ STT 모델과 문장 경계 모델의 책임을 분리해 검증한다.
 #### 언어별 STT backend 설계 원칙
 
 - `backend=faster-whisper` 전역값에 중국어를 묶지 않는다. STT backend도 후처리 backend처럼 언어별 설정을 둔다.
-- 예: `sttBackendEn=faster-whisper`, `sttBackendKo=faster-whisper`, `sttBackendZh=qwen3-asr-transformers`. 영어/한국어는 현재 Whisper 계열만 운영 후보로 둔다. 중국어는 Qwen3-ASR를 품질 우선 후보로 두고, Dolphin-CN-Dialect와 WeNet을 후속 streaming 후보로 추적한다. FunASR STT 계열은 폐기 예정이므로 신규 설정 기본값이나 추천 조합에 사용하지 않는다.
+- 예: `sttBackendEn=faster-whisper`, `sttBackendKo=faster-whisper`, `sttBackendZh=qwen3-asr-transformers`. 영어/한국어는 현재 Whisper 계열만 운영 후보로 둔다. 중국어는 Qwen3-ASR를 품질 우선 후보로 두며, `qwen3-asr-vllm-streaming`을 선택형 streaming 후보로 추가한다. Dolphin-CN-Dialect와 WeNet은 후속 streaming 후보로 추적한다. FunASR STT 계열은 폐기 예정이므로 신규 설정 기본값이나 추천 조합에 사용하지 않는다.
 - 중국어 backend 로딩 실패는 Fail-Fast다. CPU fallback, Whisper fallback, 다른 STT backend fallback은 자동 수행하지 않는다.
 - Whisper 언어 자동 감지는 폐기한다. `language`는 `ko`, `en`, `zh` 중 하나로 명시해야 한다.
 - 모델 준비 순서는 `STT 모델 -> 번역 모델 -> 문장 경계/후처리 모델 -> 입력 장치 열기 -> 전사 루프`를 유지한다.
-- setup 사전 다운로드 대상에는 중국어 STT 후보 모델도 포함한다.
+- config GUI 모델 다운로드 대상에는 선택된 중국어 STT 후보 모델도 포함한다.
 
 2026-06-13 구현 상태:
 

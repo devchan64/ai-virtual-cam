@@ -195,7 +195,7 @@ def check_model_assets(assets: list[ModelAsset]) -> list[ModelAsset]:
         if asset.kind == "stt":
             if backend == "faster-whisper":
                 ready = check_faster_whisper_model(asset.model)
-            elif backend == "qwen3-asr-transformers":
+            elif backend in {"qwen3-asr-transformers", "qwen3-asr-vllm-streaming"}:
                 ready = is_qwen_asr_model_cached(asset.model)
             elif backend != "mock":
                 ready = False
@@ -373,7 +373,7 @@ def main() -> int:
         if asset.kind == "stt":
             if backend_name == "faster-whisper":
                 download_faster_whisper_model(asset.model)
-            elif backend_name == "qwen3-asr-transformers":
+            elif backend_name in {"qwen3-asr-transformers", "qwen3-asr-vllm-streaming"}:
                 download_qwen_asr_model(asset.model)
             else:
                 _log(f"Skipping STT model download for backend: {asset.backend}")

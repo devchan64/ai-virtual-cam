@@ -91,6 +91,17 @@ def build_whisper_tab(
     )
     gui._register_localized_widget(whisper_input_meter_btn, "button.whisper_input_meter", "오디오 AI 입력 dB 미터")
     whisper_input_meter_btn.grid(row=input_row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0))
+    input_row += 1
+    whisper_model_download_btn = ttk.Button(
+        input_frame,
+        text=gui._tr("button.whisper_model_download_selected", "선택 모델 다운로드"),
+        command=gui._show_whisper_model_download_dialog_for_current_config,
+    )
+    gui._register_localized_widget(
+        whisper_model_download_btn, "button.whisper_model_download_selected", "선택 모델 다운로드"
+    )
+    whisper_model_download_btn.grid(row=input_row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0))
+    input_row += 1
 
     stt_frame, row = _add_group(gui, ttk, tab_whisper, row, "label.whisper_group_stt", "STT 언어/모델")
     stt_row = 0

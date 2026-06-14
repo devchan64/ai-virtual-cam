@@ -26,8 +26,7 @@ def require_qwen_asr_model_cached(model_name: str, *, purpose: str) -> None:
         return
     raise RuntimeError(
         f"{purpose} 모델이 로컬 캐시에 없습니다: model={model_name} resolvedModel={resolved}. "
-        "Serve 실행 중 다운로드는 허용하지 않습니다. config GUI의 모델 다운로드 안내창 또는 "
-        "./bin/avc setup --download-whisper-models 로 먼저 다운로드하세요."
+        "Serve 실행 중 다운로드는 허용하지 않습니다. config GUI의 모델 다운로드 안내창에서 먼저 다운로드하세요."
     )
 
 
@@ -36,6 +35,5 @@ def require_hf_repo_cached(model_name: str, *, purpose: str) -> None:
         return
     raise RuntimeError(
         f"{purpose} 모델이 로컬 캐시에 없습니다: model={model_name}. "
-        "Serve 실행 중 다운로드는 허용하지 않습니다. config GUI의 모델 다운로드 안내창 또는 "
-        "./bin/avc setup --download-whisper-models 로 먼저 다운로드하세요."
+        "Serve 실행 중 다운로드는 허용하지 않습니다. config GUI의 모델 다운로드 안내창에서 먼저 다운로드하세요."
     )

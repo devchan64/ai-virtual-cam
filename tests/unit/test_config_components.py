@@ -27,6 +27,10 @@ class ConfigComponentsTest(unittest.TestCase):
             ("compute_type", "beam_size", "max_new_tokens", "temperature"),
         )
         self.assertEqual(whisper_stt_backend_runtime_option_keys("qwen3-asr-transformers"), ("compute_type", "max_new_tokens"))
+        self.assertEqual(
+            whisper_stt_backend_runtime_option_keys("qwen3-asr-vllm-streaming"),
+            ("compute_type", "max_new_tokens"),
+        )
 
 
 if __name__ == "__main__":

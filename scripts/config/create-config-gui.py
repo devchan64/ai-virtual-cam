@@ -818,7 +818,18 @@ class ConfigGui:
         self._show_whisper_model_download_dialog(config, serve_cmd, output)
         return False
 
-    def _show_whisper_model_download_dialog(self, config: dict, serve_cmd: list[str], check_output: str) -> None:
+    def _show_whisper_model_download_dialog_for_current_config(self) -> None:
+        try:
+            config = self._build_config()
+            self._apply_persistent_meta(config)
+        except Exception as exc:
+            _log(f"Validation error: {exc}")
+            self._show_error(self._tr("msg.validation_error.title", "Validation error"), str(exc))
+            return
+        print("[avc] Audio AI selected model download dialog opened", flush=True)
+        self._show_whisper_model_download_dialog(config, None, "")
+
+    def _show_whisper_model_download_dialog(self, config: dict, serve_cmd: list[str] | None, check_output: str) -> None:
         if self._whisper_model_download_window is not None and self._whisper_model_download_window.winfo_exists():
             self._whisper_model_download_window.lift()
             return
@@ -834,8 +845,10 @@ class ConfigGui:
         ttk.Label(
             window,
             text=self._tr(
-                "msg.whisper_model_download_required",
-                "설정에 적용된 오디오 AI/STT/문장경계/번역 모델 중 로컬 캐시에 없는 모델이 있습니다. 다운로드가 완료될 때까지 Serve는 시작되지 않습니다.",
+                "msg.whisper_model_download_required" if serve_cmd is not None else "msg.whisper_model_download_selected",
+                "설정에 적용된 오디오 AI/STT/문장경계/번역 모델 중 로컬 캐시에 없는 모델이 있습니다. 다운로드가 완료될 때까지 Serve는 시작되지 않습니다."
+                if serve_cmd is not None
+                else "현재 오디오 AI 설정에서 선택한 STT/문장경계/번역 모델을 다운로드합니다.",
             ),
             wraplength=680,
         ).grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 6))
@@ -867,7 +880,7 @@ class ConfigGui:
             text=self._tr("button.whisper_model_download", "모델 다운로드"),
             command=lambda: self._start_whisper_model_download(
                 config=config,
-                on_success=lambda: self._launch_serve_command(serve_cmd),
+                on_success=(lambda: self._launch_serve_command(serve_cmd)) if serve_cmd is not None else None,
             ),
         )
         self._whisper_model_download_btn.grid(row=0, column=1, sticky="e", padx=(4, 4))

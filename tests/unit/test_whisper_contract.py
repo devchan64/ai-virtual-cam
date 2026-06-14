@@ -24,6 +24,7 @@ class WhisperContractTest(unittest.TestCase):
     def test_contract_exposes_allowed_values(self) -> None:
         self.assertEqual(whisper_allowed("language"), ("ko", "en", "zh"))
         self.assertIn("qwen3-asr-transformers", whisper_allowed("sttBackendZh"))
+        self.assertIn("qwen3-asr-vllm-streaming", whisper_allowed("sttBackendZh"))
         self.assertNotIn("auto", whisper_allowed("language"))
         self.assertEqual(whisper_allowed("postProcessingProfile"), ("manual",))
 
@@ -32,7 +33,10 @@ class WhisperContractTest(unittest.TestCase):
     def test_contract_limits_stt_backends_by_language(self) -> None:
         self.assertEqual(whisper_stt_backends_for_language("en"), ("faster-whisper", "mock"))
         self.assertEqual(whisper_stt_backends_for_language("ko"), ("faster-whisper", "mock"))
-        self.assertEqual(whisper_stt_backends_for_language("zh"), ("faster-whisper", "qwen3-asr-transformers", "mock"))
+        self.assertEqual(
+            whisper_stt_backends_for_language("zh"),
+            ("faster-whisper", "qwen3-asr-transformers", "qwen3-asr-vllm-streaming", "mock"),
+        )
 
     def test_contract_resolves_qwen_asr_model_aliases(self) -> None:
         self.assertEqual(resolve_qwen_asr_model_name("qwen3-asr-0.6b"), "Qwen/Qwen3-ASR-0.6B")

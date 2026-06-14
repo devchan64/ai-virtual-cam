@@ -898,16 +898,20 @@ class WhisperTranscriptWorker:
             staged_translation_pending = False
             try:
                 stt_started_at = time.perf_counter()
-                segments, info = model.transcribe(
-                    audio,
-                    language=language,
-                    task="transcribe",
-                    beam_size=self._cfg.beamSize,
-                    temperature=self._cfg.temperature,
-                    max_new_tokens=self._cfg.maxNewTokens,
-                    without_timestamps=True,
-                    condition_on_previous_text=False,
-                )
+                transcribe_kwargs = {
+                    "language": language,
+                    "task": "transcribe",
+                    "beam_size": self._cfg.beamSize,
+                    "temperature": self._cfg.temperature,
+                    "max_new_tokens": self._cfg.maxNewTokens,
+                    "without_timestamps": True,
+                    "condition_on_previous_text": False,
+                }
+                if getattr(model, "streaming", False):
+                    transcribe_kwargs["stream_audio"] = block.astype(np.float32, copy=False)
+                    transcribe_kwargs["stream_chunk_seconds"] = self._cfg.stepSeconds
+                    transcribe_kwargs["stream_context_seconds"] = self._cfg.windowSeconds
+                segments, info = model.transcribe(audio, **transcribe_kwargs)
                 segment_list = list(segments)
                 accepted_texts, rejected_reasons, boundary_confidence = self._accepted_segment_texts(segment_list)
                 raw_window_text = " ".join(accepted_texts).strip()

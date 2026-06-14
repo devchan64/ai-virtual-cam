@@ -167,7 +167,7 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         self.assertTrue(stt_visibility[(5, 6)])
         self.assertEqual(
             gui._widgets["whisper_stt_backend_zh"].values,
-            ("faster-whisper", "qwen3-asr-transformers", "mock"),
+            ("faster-whisper", "qwen3-asr-transformers", "qwen3-asr-vllm-streaming", "mock"),
         )
         self.assertEqual(gui._widgets["whisper_stt_model_zh"].values, ("qwen3-asr-0.6b", "qwen3-asr-1.7b"))
         backend_option_visibility = {
