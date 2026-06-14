@@ -83,12 +83,12 @@ _WINDOW_TITLES = {
     "en": {
         "transcript": "ai-virtual-cam Audio AI Transcript",
         "translation": "ai-virtual-cam Audio AI Translation",
-        "sttStatus": "ai-virtual-cam Audio AI STT Status",
+        "sttStatus": "ai-virtual-cam Audio AI STT Raw Transcript",
     },
     "ko": {
         "transcript": "ai-virtual-cam 오디오 AI 전사",
         "translation": "ai-virtual-cam 오디오 AI 번역",
-        "sttStatus": "ai-virtual-cam 오디오 AI STT 상태",
+        "sttStatus": "ai-virtual-cam 오디오 AI STT 원문창",
     },
 }
 _WINDOW_GEOMETRY_RE = re.compile(
@@ -1222,7 +1222,6 @@ class WhisperTranscriptWindow:
         self._translation_partial_active = False
         self._events: queue.Queue[TranscriptEvent] = queue.Queue()
         self._worker = WhisperTranscriptWorker(app_config.whisper, self._events)
-        self._stt_status_run_index = 0
         self._thread = threading.Thread(target=self._worker.run, daemon=True)
         self._root = tk.Tk()
         self._root.title(_window_title("transcript", self._ui_language))
@@ -1411,15 +1410,10 @@ class WhisperTranscriptWindow:
         text_widget.tag_configure(PARTIAL_TEXT_TAG, foreground=PARTIAL_TEXT_COLOR)
         text_widget.tag_configure(ERROR_TEXT_TAG, foreground=ERROR_TEXT_COLOR)
 
-    def _next_stt_status_index_label(self) -> str:
-        self._stt_status_run_index = int(getattr(self, "_stt_status_run_index", 0)) + 1
-        return f"{self._stt_status_run_index:03d}"
-
     def _append_stt_status_transcript(self, line: str) -> None:
         if self._stt_status_text is None:
             return
-        index = self._next_stt_status_index_label()
-        self._append(f"[{index}] {line}", self._stt_status_text, final=True)
+        self._append(line, self._stt_status_text, final=True)
 
     def _append(self, line: str, text_widget=None, *, final: bool = True, tag: str | None = None) -> None:
         target = text_widget if text_widget is not None else self._text

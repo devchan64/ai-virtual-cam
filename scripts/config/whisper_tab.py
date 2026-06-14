@@ -185,7 +185,7 @@ def build_whisper_tab(
         runtime_frame,
         runtime_row,
         "whisper_show_stt_status_window",
-        gui._tr("label.whisper_show_stt_status_window", "STT 상태창 보기"),
+        gui._tr("label.whisper_show_stt_status_window", "STT 원문창 보기"),
         whisper_default("showSttStatusWindow"),
         label_key="label.whisper_show_stt_status_window",
     )
