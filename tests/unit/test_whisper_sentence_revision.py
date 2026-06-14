@@ -94,6 +94,7 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         self.assertFalse(_should_translate_final_sentence("Not a.", "zh"))
         self.assertFalse(_should_translate_final_sentence("蒸牛。", "zh"))
         self.assertFalse(_should_translate_final_sentence("要 去 找", "zh"))
+        self.assertTrue(_should_translate_final_sentence("我跟你说，就这一 得脱鞋！哇，它是楼梯好高啊。", "zh"))
         self.assertTrue(_should_translate_final_sentence("第一个呢要登陆的呢就是滴滴，滴滴呢就是来中国，你要搭车的话，你就可以搭滴滴。", "zh"))
         self.assertTrue(_should_translate_final_sentence("面可是快速面就是它会比较q一点，这个呢是比快速。", "zh"))
 
@@ -208,6 +209,22 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         self.assertFalse(_should_confirm_staged_sentence(staged, 3, False))
         self.assertTrue(_should_confirm_staged_sentence(staged, 4, True))
 
+    def test_replaced_confirmed_cjk_without_end_marker_does_not_finalize_from_monitoring(self) -> None:
+        staged = "股东自自食其力啊它这是牛杂锅啊你滋滋声就大锅很香啊说拿这个汤泡饭很顺吃的先尝一小口哦先尝一小口"
+        candidate = "这个汤泡饭很顺吃的先尝一小口哦先尝一小口之后再继续"
+
+        self.assertEqual(_replacement_decision_reason(staged, candidate, 3, False, 0), "confirmed")
+        self.assertFalse(_should_confirm_staged_sentence(staged, 3, False))
+        self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 3, False, 0))
+
+    def test_spaced_cjk_without_end_marker_does_not_finalize_from_monitoring(self) -> None:
+        staged = "见 什 么 都 想 吃 这 可 怎 么 办 呀 我 看 见 大 闸 丸 了 人 刚 才 来 的 啊 肉 丸"
+        candidate = "肉丸来了可以继续吃了"
+
+        self.assertIn("spaced_cjk", _final_sentence_diagnostic_flags(staged, "zh"))
+        self.assertFalse(_should_confirm_staged_sentence(staged, 3, False))
+        self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 3, False, 0))
+
     def test_replacement_keeps_confirmed_open_korean_clause_from_monitoring(self) -> None:
         # Regression from 2026-06-13 30-minute monitoring chunks 7-11.
         # The staged sentence had enough repeated observations to pass the
@@ -241,6 +258,7 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         self.assertIn("short_cjk", _final_sentence_diagnostic_flags("潇洒最好的乳团。", "zh"))
         self.assertIn("latin_only_for_zh", _final_sentence_diagnostic_flags("The.", "zh"))
         self.assertIn("mixed_latin_zh", _final_sentence_diagnostic_flags("matcha ice cream很好吃。", "zh"))
+        self.assertIn("cjk_internal_gap", _final_sentence_diagnostic_flags("我跟你说，就这一 得脱鞋！哇，它是楼梯好高啊。", "zh"))
         self.assertEqual(
             _final_sentence_diagnostic_flags("看起来好好吃啊，你真的有很多小吃呢，我看到。", "zh"),
             (),

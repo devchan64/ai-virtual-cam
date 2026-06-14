@@ -816,6 +816,22 @@ def _is_cjk_text(text: str) -> bool:
     return _has_cjk_words(_word_units(text))
 
 
+def _has_cjk_internal_space_gap(text: str) -> bool:
+    chars = list(text)
+    for index, char in enumerate(chars):
+        if char != " ":
+            continue
+        left_index = index - 1
+        right_index = index + 1
+        if left_index < 0 or right_index >= len(chars):
+            continue
+        left = chars[left_index]
+        right = chars[right_index]
+        if "\u3400" <= left <= "\u9fff" and "\u3400" <= right <= "\u9fff":
+            return True
+    return False
+
+
 def _final_sentence_diagnostic_flags(sentence: str, language: str) -> tuple[str, ...]:
     normalized = _normalized_text(sentence)
     words = _word_units(normalized)
@@ -829,6 +845,13 @@ def _final_sentence_diagnostic_flags(sentence: str, language: str) -> tuple[str,
         cjk_units = [word for word in words if _has_cjk_words([word])]
         if 0 < len(cjk_units) <= SHORT_CJK_FINAL_UNITS:
             flags.append("short_cjk")
+        text_units, separator = _text_units(normalized)
+        cjk_text_units = [unit for unit in text_units if _has_cjk_words(_word_units(unit))]
+        single_cjk_text_units = [unit for unit in cjk_text_units if len(_word_units(unit)) == 1]
+        if separator == " " and len(single_cjk_text_units) >= 8 and len(single_cjk_text_units) / max(len(cjk_text_units), 1) >= 0.70:
+            flags.append("spaced_cjk")
+        if _has_cjk_internal_space_gap(normalized):
+            flags.append("cjk_internal_gap")
     if normalized_language == "zh" and has_latin and not has_cjk:
         flags.append("latin_only_for_zh")
     elif normalized_language == "zh" and has_latin and has_cjk:
@@ -843,6 +866,8 @@ def _should_confirm_staged_sentence(staged_sentence: str, staged_confirmations: 
         return False
     if _is_cjk_text(staged_sentence):
         flags = set(_final_sentence_diagnostic_flags(staged_sentence, "zh"))
+        if "spaced_cjk" in flags:
+            return False
         if {"short_cjk", "no_end_marker"}.issubset(flags):
             return False
         if not staged_forced and "no_end_marker" in flags:
@@ -905,13 +930,16 @@ def _should_finalize_replaced_sentence(
     staged_forced: bool,
     staged_age: int,
 ) -> bool:
-    return _replacement_decision_reason(
+    reason = _replacement_decision_reason(
         staged_sentence,
         candidate,
         staged_confirmations,
         staged_forced,
         staged_age,
-    ) in {"confirmed", "aged", "duplicate_or_suffix", "partial_preserve", "finalize"}
+    )
+    if reason == "confirmed":
+        return _should_confirm_staged_sentence(staged_sentence, staged_confirmations, staged_forced)
+    return reason in {"aged", "duplicate_or_suffix", "partial_preserve", "finalize"}
 
 
 def _should_stage_replacement_candidate(
@@ -952,7 +980,7 @@ def _should_translate_staged_sentence(staged_sentence: str, staged_confirmations
 
 def _should_translate_final_sentence(sentence: str, language: str) -> bool:
     flags = set(_final_sentence_diagnostic_flags(sentence, language))
-    return not flags.intersection({"latin_only_for_zh", "short_cjk", "no_end_marker", "empty"})
+    return not flags.intersection({"latin_only_for_zh", "short_cjk", "no_end_marker", "empty", "spaced_cjk"})
 
 
 def _is_short_staged_suffix_repeat(staged_sentence: str, pending_text: str) -> bool:

@@ -905,6 +905,9 @@ FINAL_QUALITY_TRACKING_CASES = [
     {"text": "Oh, my god,我真的很开心。", "language": "zh", "expected_flags": {"mixed_latin_zh"}, "source": "2026-06-14 avc-whisper.log.4 mixed latin zh"},
     {"text": "I love felelceline baby, baby, you oonly you, oh,你you can.", "language": "zh", "expected_flags": {"mixed_latin_zh"}, "source": "2026-06-14 avc-whisper.log.4 mixed latin zh"},
     {"text": "要 去 找", "language": "zh", "expected_flags": {"short_cjk", "no_end_marker"}, "source": "2026-06-14 monitor chunk 354"},
+    {"text": "见 什 么 都 想 吃 这 可 怎 么 办 呀 我 看 见 大 闸 丸 了 人 刚 才 来 的 啊 肉 丸", "language": "zh", "expected_flags": {"no_end_marker", "spaced_cjk"}, "source": "2026-06-14 monitor chunk 723 spaced CJK output"},
+    {"text": "我跟你说，就这一 得脱鞋！哇，它是楼梯好高啊。Hello，活动们，大家下午好。", "language": "zh", "expected_flags": {"mixed_latin_zh", "cjk_internal_gap"}, "source": "2026-06-14 monitor chunk 890 internal CJK gap"},
+    {"text": "对，他的 了，中国人主打一来了，所以叫我进去走。", "language": "zh", "expected_flags": {"cjk_internal_gap"}, "source": "2026-06-14 monitor chunk 801 internal CJK gap"},
     {"text": "看起来好好吃啊，你真的有很多小吃呢，我看到。", "language": "zh", "expected_flags": set(), "source": "2026-06-14 monitor chunk 50 stable comparison"},
 ]
 
