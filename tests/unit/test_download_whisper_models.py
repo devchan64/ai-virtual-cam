@@ -58,6 +58,22 @@ class DownloadWhisperModelsTest(unittest.TestCase):
             with patch("src.app.model_cache.Path.home", return_value=home):
                 self.assertTrue(module.is_funasr_model_cached("iic/SenseVoiceSmall"))
 
+    def test_funasr_hf_mirror_prefers_sensevoice_mirror(self) -> None:
+        module = _load_module()
+        self.assertEqual(module._funasr_hf_mirror("iic/SenseVoiceSmall"), "FunAudioLLM/SenseVoiceSmall")
+
+    def test_funasr_hf_mirror_can_be_disabled(self) -> None:
+        module = _load_module()
+        with patch.dict(module.os.environ, {"AVC_FUNASR_HF_MIRROR": "0"}):
+            self.assertIsNone(module._funasr_hf_mirror("iic/SenseVoiceSmall"))
+
+    def test_modelscope_max_workers_uses_env_default(self) -> None:
+        module = _load_module()
+        with patch.dict(module.os.environ, {}, clear=True):
+            self.assertEqual(module._modelscope_max_workers(), 8)
+        with patch.dict(module.os.environ, {"AVC_MODELSCOPE_MAX_WORKERS": "3"}):
+            self.assertEqual(module._modelscope_max_workers(), 3)
+
     def test_check_model_assets_marks_missing_qwen_asr_model(self) -> None:
         module = _load_module()
         asset = module.ModelAsset("stt", "qwen3-asr-transformers", "qwen3-asr-0.6b")

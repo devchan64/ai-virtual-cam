@@ -414,6 +414,13 @@ STT 모델과 문장 경계 모델의 책임을 분리해 검증한다.
 }
 ```
 
+#### 모델 다운로드 운영
+
+- ModelScope에서 `model.pt` 단일 대용량 파일을 받을 때 링크 품질에 따라 수십 kB/s로 떨어질 수 있다.
+- SenseVoiceSmall은 Hugging Face 공식 미러 `FunAudioLLM/SenseVoiceSmall`을 우선 사용해 ModelScope 캐시 위치에 저장한다. Serve 런타임은 여전히 로컬 캐시만 사용하며 실행 중 다운로드하지 않는다.
+- `AVC_FUNASR_HF_MIRROR=0`이면 HF 미러를 끄고 ModelScope만 사용한다.
+- ModelScope 전용 모델은 `AVC_MODELSCOPE_MAX_WORKERS`로 snapshot 병렬 worker 수를 조정하고, 필요한 경우 `AVC_MODELSCOPE_ENDPOINT`로 endpoint를 지정한다. 단일 대형 파일은 worker 증가만으로 개선되지 않을 수 있어 미러 선택이 더 중요하다.
+
 #### 후보 3: SenseVoiceSmall
 
 - SenseVoice는 ASR, language identification, speech emotion recognition, audio event detection을 포함하는 speech foundation model이다.

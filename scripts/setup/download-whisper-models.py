@@ -139,6 +139,33 @@ def _funasr_cache_paths(model_name: str) -> list[Path]:
     return [modelscope_model_cache_dir(resolved), modelscope_legacy_cache_dir(resolved)]
 
 
+FUNASR_HF_MIRRORS = {
+    "iic/SenseVoiceSmall": "FunAudioLLM/SenseVoiceSmall",
+}
+
+
+def _funasr_hf_mirror(model_name: str) -> str | None:
+    if os.environ.get("AVC_FUNASR_HF_MIRROR", "1") == "0":
+        return None
+    resolved = resolve_funasr_model_name(model_name)
+    return FUNASR_HF_MIRRORS.get(model_name) or FUNASR_HF_MIRRORS.get(resolved)
+
+
+def _modelscope_max_workers() -> int | None:
+    raw = os.environ.get("AVC_MODELSCOPE_MAX_WORKERS", "8").strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        raise SystemExit(f"AVC_MODELSCOPE_MAX_WORKERS must be an integer: {raw!r}")
+    return max(1, value)
+
+
+def _modelscope_endpoint() -> str | None:
+    return os.environ.get("AVC_MODELSCOPE_ENDPOINT") or None
+
+
 def _progress_monitor(label: str, paths: list[Path], total_size: int | None, stop_event: threading.Event) -> None:
     last_size = -1
     while not stop_event.wait(1.0):
@@ -274,49 +301,65 @@ def download_sat_model(model_name: str) -> None:
     _log(f"SaT sentence boundary model ready: {model_name}")
 
 
-def download_funasr_model(model_name: str) -> None:
-    _log(f"Downloading FunASR punctuation model: {model_name}")
+def _download_funasr_from_hf_mirror(model_name: str, *, label: str) -> bool:
+    mirror = _funasr_hf_mirror(model_name)
+    if not mirror:
+        return False
+    resolved = resolve_funasr_model_name(model_name)
+    target = modelscope_model_cache_dir(resolved)
+    _log(f"Using Hugging Face mirror for FunASR model: {model_name} mirror={mirror} target={target}")
+    from huggingface_hub import snapshot_download
+
+    total_size = _hf_model_total_size(mirror)
+
+    def action() -> None:
+        snapshot_download(mirror, local_dir=str(target), local_dir_use_symlinks=False)
+
+    _run_with_progress(f"{label}:hf-mirror:{model_name}", [target], total_size, action)
+    return True
+
+
+def _download_funasr_from_modelscope(model_name: str, *, label: str) -> None:
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=SyntaxWarning)
-        from funasr import AutoModel
+        from modelscope.hub.snapshot_download import snapshot_download
 
     resolved = resolve_funasr_model_name(model_name)
-    if resolved != model_name:
-        _log(f"Resolved FunASR punctuation model alias: {model_name} -> {resolved}")
+    endpoint = _modelscope_endpoint()
+    max_workers = _modelscope_max_workers()
+    if endpoint:
+        _log(f"ModelScope endpoint configured: {endpoint}")
+    _log(f"ModelScope max workers: {max_workers or 'default'}")
 
     def action() -> None:
         with _with_modelscope_file_lock_disabled_for_download():
-            AutoModel(model=resolved, device="cpu", disable_update=True)
+            snapshot_download(
+                resolved,
+                max_workers=max_workers,
+                endpoint=endpoint,
+                enable_file_lock=False,
+            )
 
-    _run_with_progress(
-        f"funasr-punctuation:{model_name}",
-        _funasr_cache_paths(model_name),
-        None,
-        action
-    )
+    _run_with_progress(label, _funasr_cache_paths(model_name), None, action)
+
+
+def download_funasr_model(model_name: str) -> None:
+    _log(f"Downloading FunASR punctuation model: {model_name}")
+    resolved = resolve_funasr_model_name(model_name)
+    if resolved != model_name:
+        _log(f"Resolved FunASR punctuation model alias: {model_name} -> {resolved}")
+    if not _download_funasr_from_hf_mirror(model_name, label="funasr-punctuation"):
+        _download_funasr_from_modelscope(model_name, label=f"funasr-punctuation:{model_name}")
     _log(f"FunASR punctuation model ready: {model_name} resolved={resolved}")
 
 
 def download_funasr_stt_model(model_name: str) -> None:
     _log(f"Downloading FunASR STT model: {model_name}")
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", category=SyntaxWarning)
-        from funasr import AutoModel
-
     resolved = resolve_funasr_model_name(model_name)
     if resolved != model_name:
         _log(f"Resolved FunASR STT model alias: {model_name} -> {resolved}")
-
-    def action() -> None:
-        with _with_modelscope_file_lock_disabled_for_download():
-            AutoModel(model=resolved, device="cpu", disable_update=True)
-
-    _run_with_progress(
-        f"funasr-stt:{model_name}",
-        _funasr_cache_paths(model_name),
-        None,
-        action
-    )
+    if not _download_funasr_from_hf_mirror(model_name, label="funasr-stt"):
+        _download_funasr_from_modelscope(model_name, label=f"funasr-stt:{model_name}")
     _log(f"FunASR STT model ready: {model_name} resolved={resolved}")
 
 
