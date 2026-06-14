@@ -217,6 +217,18 @@ class WhisperTranscriptDeltaTest(unittest.TestCase):
         self.assertTrue(_sentences_are_revisions(committed, sentence))
         self.assertEqual(_sentence_output_delta(committed, sentence), "이제 만약에 그렇게")
 
+    def test_sentence_output_delta_trims_chinese_window_prefix_reuse_from_log(self) -> None:
+        committed = "我要的是一个四合一的大份十七，小份十六，还是非常丰 边的第一顿，必须得吃这个裤带面。你们看了吗？它超级的宽，因为它很像裤带，所以它叫裤带面。我要的是一个四合一的大份儿十七，小份儿十六，还是非常丰富的。"
+        sentence = "鸡蛋西红柿有剁椒，还有肉，还有土豆丁、胡萝卜丁，这儿 它很像裤带，所以它叫裤带面。我要的是一个四合一的大份儿十七，小份儿十六，还是非常丰富的。鸡蛋西红柿有剁椒，还有肉，还有土豆丁、胡萝卜丁，这儿还有点韭菜。"
+
+        self.assertEqual(_sentence_output_delta(committed, sentence), "鸡蛋西红柿有剁椒还有肉还有土豆丁胡萝卜丁这儿还有点韭菜")
+
+    def test_sentence_output_delta_trims_chinese_revised_prefix_before_overlap_from_log(self) -> None:
+        committed = "韩国汤匙它是扁的，然后很长800块芝麻喔，它这个机器好酷喔，他们给我一点试吃。"
+        sentence = "它是扁的，然后很长800块芝麻，它这个机器好酷喔，他们给我一点试吃，它感觉有去炒过耶超香的。"
+
+        self.assertEqual(_sentence_output_delta(committed, sentence), "它感觉有去炒过耶超香的")
+
 
 if __name__ == "__main__":
     unittest.main()

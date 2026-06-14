@@ -964,6 +964,19 @@ def _make_collapse_tracking_test(index: int, case: dict[str, object]):
     return test
 
 
+REVISION_TRACKING_CASES.extend([
+    {
+        "left": "我要的是一个四合一的大份十七，小份十六，还是非常丰 边的第一顿，必须得吃这个裤带面。你们看了吗？它超级的宽，因为它很像裤带，所以它叫裤带面。我要的是一个四合一的大份儿十七，小份儿十六，还是非常丰富的。",
+        "right": "鸡蛋西红柿有剁椒，还有肉，还有土豆丁、胡萝卜丁，这儿 它很像裤带，所以它叫裤带面。我要的是一个四合一的大份儿十七，小份儿十六，还是非常丰富的。鸡蛋西红柿有剁椒，还有肉，还有土豆丁、胡萝卜丁，这儿还有点韭菜。",
+        "source": "2026-06-14 avc-whisper.log chunks 48-49 Chinese window prefix reuse",
+    },
+    {
+        "left": "韩国汤匙它是扁的，然后很长800块芝麻喔，它这个机器好酷喔，他们给我一点试吃。",
+        "right": "它是扁的，然后很长800块芝麻，它这个机器好酷喔，他们给我一点试吃，它感觉有去炒过耶超香的。",
+        "source": "2026-06-14 avc-whisper.log chunks 6-7 Chinese revised prefix before overlap",
+    },
+])
+
 
 COALESCE_TRACKING_CASES = [
     {

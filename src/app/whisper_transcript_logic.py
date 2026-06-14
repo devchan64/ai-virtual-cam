@@ -542,6 +542,30 @@ def _korean_revision_delta(committed_words: list[str], sentence_words: list[str]
     return None
 
 
+def _cjk_delta_from_words(words: list[str]) -> str:
+    return _trim_leading_boundary_noise("".join(words).strip())
+
+
+def _cjk_revision_delta(committed_words: list[str], sentence_words: list[str]) -> str | None:
+    if not _has_cjk_words(committed_words) or not _has_cjk_words(sentence_words):
+        return None
+    committed_cjk_count = sum(1 for word in committed_words if _has_cjk_words([word]))
+    sentence_cjk_count = sum(1 for word in sentence_words if _has_cjk_words([word]))
+    if committed_cjk_count < 12 or sentence_cjk_count < 12:
+        return None
+
+    best_i, best_j, best_len = _best_common_word_run(committed_words, sentence_words)
+    if best_len < 12:
+        return None
+    suffix_words = sentence_words[best_j + best_len :]
+    if best_i + best_len == len(committed_words):
+        return _cjk_delta_from_words(suffix_words) if suffix_words else ""
+    coverage = best_len / max(len(sentence_words), 1)
+    if coverage >= 0.85:
+        return ""
+    return None
+
+
 def _is_numeric_fragment_echo(candidate_words: list[str], committed_words: list[str]) -> bool:
     if len(candidate_words) > 4 or not candidate_words:
         return False
@@ -582,6 +606,9 @@ def _sentence_output_delta(committed_text: str, sentence: str) -> str:
     korean_delta = _korean_revision_delta(committed_words, sentence_words)
     if korean_delta is not None:
         return korean_delta
+    cjk_delta = _cjk_revision_delta(committed_words, sentence_words)
+    if cjk_delta is not None:
+        return cjk_delta
     if len(sentence_words) <= len(committed_words):
         for start in range(0, len(committed_words) - len(sentence_words) + 1):
             if _is_subsequence_at(committed_words, sentence_words, start):

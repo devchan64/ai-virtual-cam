@@ -34,6 +34,7 @@ from src.app.whisper_transcript_logic import (
     _pending_new_text_combined,
     _pending_overrun_reason,
     _format_transcript_metrics,
+    _is_cjk_text,
     _prefer_sentence_revision,
     _sentence_end_count,
     _sentence_max_age_chunks,
@@ -714,7 +715,12 @@ class WhisperTranscriptWorker:
 
         def stage_completed_sentence(sentence: str, detected: str, *, forced: bool = False) -> list[str]:
             nonlocal staged_sentence, staged_confirmations, staged_age, staged_translation_pending, staged_forced
+            normalized_sentence = _normalized_text(sentence)
             candidate = _sentence_output_delta(committed_text, sentence)
+            if candidate and candidate != normalized_sentence:
+                count_metric("candidate_delta_trimmed")
+                if _is_cjk_text(normalized_sentence):
+                    count_metric("candidate_delta_trimmed_cjk")
             if not candidate:
                 count_metric("candidate_duplicate_suppressed")
                 self._emit("status", f"Whisper 중복 문장 무시: chunk={chunks} text={sentence!r}", display=False)
