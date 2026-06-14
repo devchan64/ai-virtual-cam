@@ -63,6 +63,7 @@ DEFAULT_WINDOW_GEOMETRY = "780x420"
 DEFAULT_WINDOW_GEOMETRY_META = {
     "whisperWindowGeometry": "780x420+50+119",
     "whisperTranslationWindowGeometry": "780x420+860+119",
+    "whisperSttStatusWindowGeometry": "780x420+50+560",
 }
 MIN_WINDOW_WIDTH = 520
 MIN_WINDOW_HEIGHT = 280
@@ -82,10 +83,12 @@ _WINDOW_TITLES = {
     "en": {
         "transcript": "ai-virtual-cam Audio AI Transcript",
         "translation": "ai-virtual-cam Audio AI Translation",
+        "sttStatus": "ai-virtual-cam Audio AI STT Status",
     },
     "ko": {
         "transcript": "ai-virtual-cam 오디오 AI 전사",
         "translation": "ai-virtual-cam 오디오 AI 번역",
+        "sttStatus": "ai-virtual-cam 오디오 AI STT 상태",
     },
 }
 _WINDOW_GEOMETRY_RE = re.compile(
@@ -1197,8 +1200,11 @@ class WhisperTranscriptWindow:
         self._whisper_config = app_config.whisper
         self._geometry_save_after_id: str | None = None
         self._translation_geometry_save_after_id: str | None = None
+        self._stt_status_geometry_save_after_id: str | None = None
         self._translation_root = None
         self._translation_text = None
+        self._stt_status_root = None
+        self._stt_status_text = None
         self._line_number_widgets = {}
         self._context_text = None
         self._transcript_partial_active = False
@@ -1234,11 +1240,60 @@ class WhisperTranscriptWindow:
         clear_btn = ttk.Button(actions, text="Clear", command=lambda: self._clear(self._text))
         clear_btn.grid(row=0, column=2, sticky="e")
 
+        self._create_stt_status_window()
+
         if self._whisper_config.translationEnabled:
             self._create_translation_window()
 
         self._root.bind("<Configure>", self._on_configure)
         self._root.protocol("WM_DELETE_WINDOW", self._close)
+
+    def _create_stt_status_window(self) -> None:
+        tk = self._tk
+        ttk = self._ttk
+        self._stt_status_root = tk.Toplevel(self._root)
+        self._stt_status_root.title(_window_title("sttStatus", self._ui_language))
+        restored_geometry = _load_window_geometry(
+            self._config_path, "whisperSttStatusWindowGeometry", self._stt_status_root
+        )
+        self._stt_status_root.geometry(restored_geometry or DEFAULT_WINDOW_GEOMETRY)
+        self._stt_status_root.minsize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
+        self._stt_status_root.columnconfigure(0, weight=1)
+        self._stt_status_root.rowconfigure(0, weight=1)
+
+        frame = ttk.Frame(self._stt_status_root, padding=10)
+        frame.grid(row=0, column=0, sticky="nsew")
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(0, weight=1)
+
+        self._stt_status_text = tk.Text(frame, wrap="word", undo=False)
+        self._configure_transcript_text_tags(self._stt_status_text)
+        self._stt_status_text.grid(row=0, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self._stt_status_text.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+
+        def yscroll(first: str, last: str) -> None:
+            scrollbar.set(first, last)
+
+        self._stt_status_text.configure(yscrollcommand=yscroll)
+        self._stt_status_text.bind("<Key>", self._on_text_key)
+        self._stt_status_text.bind("<Button-3>", self._show_context_menu)
+        self._stt_status_text.bind("<Control-Button-1>", self._show_context_menu)
+
+        actions = ttk.Frame(frame)
+        actions.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        actions.columnconfigure(0, weight=1)
+        copy_btn = ttk.Button(
+            actions, text="Copy All", command=lambda: self._copy_all(self._stt_status_text)
+        )
+        copy_btn.grid(row=0, column=1, sticky="e", padx=(0, 6))
+        clear_btn = ttk.Button(
+            actions, text="Clear", command=lambda: self._clear(self._stt_status_text)
+        )
+        clear_btn.grid(row=0, column=2, sticky="e")
+
+        self._stt_status_root.bind("<Configure>", self._on_stt_status_configure)
+        self._stt_status_root.protocol("WM_DELETE_WINDOW", self._hide_stt_status_window)
 
 
     def _create_translation_window(self) -> None:
@@ -1363,6 +1418,8 @@ class WhisperTranscriptWindow:
             partial_attr = "_transcript_partial_active"
         elif target is self._translation_text:
             partial_attr = "_translation_partial_active"
+        elif target is self._stt_status_text:
+            partial_attr = None
         if partial_attr is not None and getattr(self, partial_attr):
             target.delete("end-1c linestart", "end-1c")
         if final:
@@ -1386,6 +1443,9 @@ class WhisperTranscriptWindow:
                 event = self._events.get_nowait()
             except queue.Empty:
                 break
+            if event.kind == "status" and self._stt_status_text is not None and event.display:
+                self._append(event.text, self._stt_status_text, final=event.final)
+                continue
             if not _is_modal_output_event(event):
                 continue
             if event.kind == "translation" and self._translation_text is not None:
@@ -1418,6 +1478,18 @@ class WhisperTranscriptWindow:
                 pass
         self._translation_geometry_save_after_id = self._translation_root.after(600, self._save_translation_geometry)
 
+    def _on_stt_status_configure(self, event) -> None:
+        if self._stt_status_root is None or event.widget != self._stt_status_root:
+            return
+        if self._stt_status_geometry_save_after_id is not None:
+            try:
+                self._stt_status_root.after_cancel(self._stt_status_geometry_save_after_id)
+            except Exception:
+                pass
+        self._stt_status_geometry_save_after_id = self._stt_status_root.after(
+            600, self._save_stt_status_geometry
+        )
+
     def _current_geometry(self) -> str:
         try:
             self._root.update_idletasks()
@@ -1443,6 +1515,17 @@ class WhisperTranscriptWindow:
             "whisperTranslationWindowGeometry",
             _window_manager_geometry(self._translation_root),
             *_window_restore_extent(self._translation_root),
+        )
+
+    def _save_stt_status_geometry(self) -> None:
+        self._stt_status_geometry_save_after_id = None
+        if self._stt_status_root is None:
+            return
+        _save_window_geometry(
+            self._config_path,
+            "whisperSttStatusWindowGeometry",
+            _window_manager_geometry(self._stt_status_root),
+            *_window_restore_extent(self._stt_status_root),
         )
 
     def _show_context_menu(self, event) -> str:
@@ -1479,6 +1562,11 @@ class WhisperTranscriptWindow:
         elif target is self._translation_text:
             self._translation_partial_active = False
 
+    def _hide_stt_status_window(self) -> None:
+        if self._stt_status_root is not None:
+            self._save_stt_status_geometry()
+            self._stt_status_root.withdraw()
+
     def _hide_translation_window(self) -> None:
         if self._translation_root is not None:
             self._save_translation_geometry()
@@ -1497,12 +1585,24 @@ class WhisperTranscriptWindow:
             except Exception:
                 pass
             self._translation_geometry_save_after_id = None
+        if self._stt_status_geometry_save_after_id is not None and self._stt_status_root is not None:
+            try:
+                self._stt_status_root.after_cancel(self._stt_status_geometry_save_after_id)
+            except Exception:
+                pass
+            self._stt_status_geometry_save_after_id = None
         self._save_geometry()
         self._save_translation_geometry()
+        self._save_stt_status_geometry()
         self._worker.stop()
         if self._translation_root is not None:
             try:
                 self._translation_root.destroy()
+            except Exception:
+                pass
+        if self._stt_status_root is not None:
+            try:
+                self._stt_status_root.destroy()
             except Exception:
                 pass
         self._root.after(100, self._root.destroy)

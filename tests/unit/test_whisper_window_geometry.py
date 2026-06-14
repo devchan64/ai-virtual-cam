@@ -88,6 +88,7 @@ class WhisperWindowGeometryTest(unittest.TestCase):
         self.assertEqual(language, "ko")
         self.assertEqual(_window_title("transcript", language), "ai-virtual-cam 오디오 AI 전사")
         self.assertEqual(_window_title("translation", language), "ai-virtual-cam 오디오 AI 번역")
+        self.assertEqual(_window_title("sttStatus", language), "ai-virtual-cam 오디오 AI STT 상태")
 
     def test_window_titles_fallback_to_english_for_unknown_language(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -99,6 +100,7 @@ class WhisperWindowGeometryTest(unittest.TestCase):
         self.assertEqual(language, "en")
         self.assertEqual(_window_title("transcript", language), "ai-virtual-cam Audio AI Transcript")
         self.assertEqual(_window_title("translation", language), "ai-virtual-cam Audio AI Translation")
+        self.assertEqual(_window_title("sttStatus", language), "ai-virtual-cam Audio AI STT Status")
 
     def test_skips_invalid_geometry_cache_log(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -251,6 +253,31 @@ class WhisperWindowGeometryTest(unittest.TestCase):
 
         self.assertEqual(geometry, DEFAULT_WINDOW_GEOMETRY_META["whisperWindowGeometry"])
         self.assertIn("window geometry defaulted: key=whisperWindowGeometry", stdout.getvalue())
+
+    def test_load_stt_status_window_geometry_uses_default_when_saved_value_missing(self) -> None:
+        class Root:
+            def winfo_vrootwidth(self) -> int:
+                return 1920
+
+            def winfo_vrootheight(self) -> int:
+                return 1080
+
+            def winfo_screenwidth(self) -> int:
+                return 1920
+
+            def winfo_screenheight(self) -> int:
+                return 1080
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "setting.json"
+            path.write_text(json.dumps({"meta": {}}), encoding="utf-8")
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                geometry = _load_window_geometry(path, "whisperSttStatusWindowGeometry", Root())
+
+        self.assertEqual(geometry, DEFAULT_WINDOW_GEOMETRY_META["whisperSttStatusWindowGeometry"])
+        self.assertIn("window geometry defaulted: key=whisperSttStatusWindowGeometry", stdout.getvalue())
 
     def test_load_window_geometry_uses_saved_value_before_default(self) -> None:
         class Root:
