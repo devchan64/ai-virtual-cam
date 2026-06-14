@@ -259,12 +259,62 @@ def _collapse_numeric_value_revisions(text: str) -> str:
     )
 
 
+_CJK_CLAUSE_SEPARATORS = set("，,。！？!?；;")
+
+
+def _split_cjk_clauses(text: str) -> list[tuple[str, str]]:
+    parts: list[tuple[str, str]] = []
+    buffer: list[str] = []
+    for char in text:
+        if char in _CJK_CLAUSE_SEPARATORS:
+            clause = "".join(buffer).strip()
+            if clause:
+                parts.append((clause, char))
+            buffer = []
+        else:
+            buffer.append(char)
+    tail = "".join(buffer).strip()
+    if tail:
+        parts.append((tail, ""))
+    return parts
+
+
+def _collapse_adjacent_repeated_cjk_clauses(text: str) -> tuple[str, bool]:
+    clauses = _split_cjk_clauses(text)
+    if len(clauses) < 3:
+        return text, False
+    collapsed: list[tuple[str, str]] = []
+    changed = False
+    index = 0
+    while index < len(clauses):
+        clause, separator = clauses[index]
+        key = _word_units(clause)
+        run_end = index + 1
+        while run_end < len(clauses) and key and _word_units(clauses[run_end][0]) == key:
+            run_end += 1
+        run_len = run_end - index
+        cjk_units = [word for word in key if _has_cjk_words([word])]
+        should_collapse = run_len >= 3 or (run_len >= 2 and len(cjk_units) >= 4)
+        if should_collapse:
+            collapsed.append((clause, clauses[run_end - 1][1] or separator))
+            changed = True
+        else:
+            collapsed.extend(clauses[index:run_end])
+        index = run_end
+    if not changed:
+        return text, False
+    return "".join(clause + separator for clause, separator in collapsed), True
+
+
 def _collapse_adjacent_repeated_phrase_details(text: str) -> tuple[str, list[str]]:
     normalized_input = _normalized_text(text)
     normalized = _collapse_numeric_value_revisions(normalized_input)
     rules: list[str] = []
     if normalized != normalized_input:
         rules.append("numeric_value")
+    normalized, cjk_clause_changed = _collapse_adjacent_repeated_cjk_clauses(normalized)
+    if cjk_clause_changed:
+        rules.append("cjk_clause")
     units, separator = _text_units(normalized)
     if separator == "" or len(units) < 6:
         return normalized, rules

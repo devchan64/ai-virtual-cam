@@ -161,5 +161,19 @@ class WhisperRepeatCollapseTest(unittest.TestCase):
         self.assertEqual(collapsed, "那 个 汤 底 真 的 有 一 点 辣")
         self.assertIn("adjacent_phrase", rules)
 
+    def test_collapse_repeated_chinese_clause_from_monitoring(self) -> None:
+        text = "这吃五里鸡王。香香香香香香香香。这吃五里鸡王。这吃五里鸡王。"
+        collapsed, rules = _collapse_adjacent_repeated_phrase_details(text)
+
+        self.assertEqual(collapsed, "这吃五里鸡王。香香香香香香香香。这吃五里鸡王。")
+        self.assertIn("cjk_clause", rules)
+
+    def test_collapse_repeated_short_chinese_clause_run_from_monitoring(self) -> None:
+        text = "豆浆，豆浆，豆浆，豆浆。哇，好大一份啊。"
+        collapsed, rules = _collapse_adjacent_repeated_phrase_details(text)
+
+        self.assertEqual(collapsed, "豆浆。哇，好大一份啊。")
+        self.assertIn("cjk_clause", rules)
+
 if __name__ == "__main__":
     unittest.main()

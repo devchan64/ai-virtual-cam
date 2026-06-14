@@ -285,7 +285,10 @@ DISTINCT_TRACKING_CASES = [
   'right': '정부의 관계 이런 모든 투자 사이클이라든지 이런 부분들에서 다 나타나고 있다는 왜냐하면 연준은 금리 이상',
   'source': 'avc-whisper.log'}]
 
-COLLAPSE_TRACKING_CASES = [{'source': 'avc-whisper.log', 'text': '그래서 그 시나리오 대로라면 그래서 그 시나리오대로라면.'},
+COLLAPSE_TRACKING_CASES = [
+    {"source": "2026-06-14 monitor chunk 936 repeated Chinese clause", "text": "这吃五里鸡王。香香香香香香香香。这吃五里鸡王。这吃五里鸡王。"},
+    {"source": "2026-06-14 monitor chunk 947 repeated Chinese short clause", "text": "豆浆，豆浆，豆浆，豆浆。哇，好大一份啊。"},
+{'source': 'avc-whisper.log', 'text': '그래서 그 시나리오 대로라면 그래서 그 시나리오대로라면.'},
  {'source': 'avc-whisper.log', 'text': '미국 같은 경우는 일단은 빛은 연준보고 빚은 연준보고 갚으라고 할 건데 연준이 할건데 연준이 안해준다면 반반을'},
  {'source': 'avc-whisper.log', 'text': '미국 같은 경우는 일단은 빛은 연준보고 빚은 연준보고 갚으라고 할 건데 연준이 할건데 연준이 안해준다면 반반을 해준다면 반반을 하겠죠'},
  {'source': 'avc-whisper.log', 'text': '내가 1등 할 거야 관련돼서 지금 패권 전쟁을 하고 있잖아요 내가 일 등 할 거야 라고 지금 달리고 거야라고 지금 달리고 있고 이제 삼 등을 한국이'},
