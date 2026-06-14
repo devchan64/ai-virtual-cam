@@ -230,7 +230,7 @@ def build_whisper_tab(
         gui._tr("label.whisper_window_seconds", "컨텍스트 윈도우(초)"),
         whisper_default("windowSeconds"),
         1.0,
-        15.0,
+        30.0,
         resolution=0.5,
         label_key="label.whisper_window_seconds",
     )

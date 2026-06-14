@@ -412,7 +412,7 @@ STT 모델과 문장 경계 모델의 책임을 분리해 검증한다.
 실험 설계:
 
 1. 중국어 기준선은 `windowSeconds=9.0`, `stepSeconds=1.5`, `commitLagSeconds=2.0`으로 둔다.
-2. 비교군은 `windowSeconds=12.0`, `15.0`을 사용하고 `stepSeconds`는 먼저 고정한다.
+2. 비교군은 `windowSeconds=12.0`, `15.0`, `30.0`을 사용하고 `stepSeconds`는 먼저 고정한다. 30초는 중국어 장문 문맥 실험용 상한이며, 실시간 UX 기본값으로 보지 않는다.
 3. 각 비교군에서 `raw_stt_window` CER, mixed-script ratio, repeated final count, pending overrun, final latency를 기록한다.
 4. `total_rtf`가 1.0 미만이어도 final latency가 커지면 실시간 자막 UX 실패로 판단한다.
 5. 계산 지연과 정책 지연을 분리하기 위해 성능 로그에는 `stt`, `translation`, `total` 외에 `effective_latency_estimate=windowSeconds+commitLagSeconds+total`을 추가하는 것을 검토한다.
