@@ -229,6 +229,25 @@ class WhisperTranscriptDeltaTest(unittest.TestCase):
 
         self.assertEqual(_sentence_output_delta(committed, sentence), "它感觉有去炒过耶超香的")
 
+    def test_sentence_output_delta_trims_chinese_committed_tail_block_from_monitoring(self) -> None:
+        committed = "它这个膜很结实，它是用了西北秦川的黄牛肉来制作的，就是吃着不是很柴， 在我看来，那优质就是瘦一点，对吧？然后这普通就有点肥，你看里边那肥的，吃一口啊。这膜跟刚搬进膜是一个膜，大白膜。都叫脱脱膜，脱膜。 来 你看里边那肥的，吃一口啊。这馍跟刚搬进馍是一个馍。大白馍。都叫脱脱馍。脱馍。它这个馍很结实。它是用了西北秦川的黄牛肉来制作的，就是吃着不是很柴，吃着非常的嫩的那种牛肉。"
+        sentence = "它 馍跟刚拌进馍是一个馍，大白馍。都叫脱脱馍。脱馍。它这个馍很结实。它是用了西北秦川的黄牛肉来制作的，就是吃的不是很柴，吃的非常的嫩的那种牛肉。来了您的羊肉泡馍。谢谢。羊肉泡馍来了。哇，好香啊。"
+
+        self.assertTrue(_sentences_are_revisions(committed, sentence))
+        self.assertEqual(_sentence_output_delta(committed, sentence), "来了您的羊肉泡馍谢谢羊肉泡馍来了哇好香啊")
+
+    def test_sentence_output_delta_suppresses_chinese_internal_committed_overlap_from_monitoring(self) -> None:
+        committed = "漫步下号里老街巷，触摸着重庆的旧时光；再搭乘长江索道，穿梭在两江上空， 皇冠大扶梯，超多层立交桥，还有令人难忘的绝美夜景和数也数不尽的江湖美食。今天就让我们奔赴一场山城盛宴，行程与美食双双拉满，体验一下当轻轨吃进嘴里是一种什么感觉。"
+        sentence = "当你看着满街霓虹点亮这座赛博山城的时候，味 山城盛宴，行程与美食双双拉满，体验一下当轻轨吃进嘴里是一种什么感觉。漫步下号里老街巷，触摸着重庆的旧时光。再搭乘长江索道，穿梭在两江上空，眼底高楼林立的错落感与重庆的老字形成了鲜明的对比。"
+
+        self.assertEqual(_sentence_output_delta(committed, sentence), "")
+
+    def test_sentence_output_delta_suppresses_chinese_late_internal_committed_overlap_from_monitoring(self) -> None:
+        committed = "漫步下号里老街巷，触摸着重庆的旧时光；再搭乘长江索道，穿梭在两江上空， 皇冠大扶梯，超多层立交桥，还有令人难忘的绝美夜景和数也数不尽的江湖美食。今天就让我们奔赴一场山城盛宴，行程与美食双双拉满，体验一下当轻轨吃进嘴里是一种什么感觉。 当你看着满街霓虹点亮这座赛博山城的时候，味 山城盛宴，行程与美食双双拉满，体验一下当轻轨吃进嘴里是一种什么感觉。漫步下号里老街巷，触摸着重庆的旧时光。再搭乘长江索道，穿梭在两江上空，眼底高楼林立的错落感与重庆的老字形成了鲜明的对比。 一碗劲道的重庆小面，一条焦香的巫山烤鱼，一锅火辣的美蛙鱼头，重庆的每一道美食都能在你 都淋漓的错落感，与重庆的老字形成了鲜明的对比。当你看着满街霓虹点亮这座赛博山城的时候，味道晕头转向的你，才会发现乌都真正的灵魂藏在烟火弥漫的后厨中。"
+        sentence = "山水有灵，十味留香， 赛博山城的时候，味道晕头转向的你，才会发现乌都真正的灵魂藏在烟火弥漫的后厨中。一碗劲道的重庆小面，一条焦香的巫山烤鱼，一锅火辣的美蛙鱼头。重庆的每一道美食都能在你饥肠辘辘的时候把你拯救回来。"
+
+        self.assertEqual(_sentence_output_delta(committed, sentence), "")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -554,6 +554,29 @@ def _cjk_revision_delta(committed_words: list[str], sentence_words: list[str]) -
     if committed_cjk_count < 12 or sentence_cjk_count < 12:
         return None
 
+    internal_blocks = [
+        block
+        for block in SequenceMatcher(None, committed_words, sentence_words, autojunk=False).get_matching_blocks()
+        if (
+            block.size >= 24
+            and block.b >= 8
+            and block.a + block.size < len(committed_words)
+            and block.size / max(len(sentence_words), 1) >= 0.25
+        )
+    ]
+    if internal_blocks:
+        return ""
+
+    tail_blocks = [
+        block
+        for block in SequenceMatcher(None, committed_words, sentence_words, autojunk=False).get_matching_blocks()
+        if block.size >= 8 and block.a + block.size == len(committed_words)
+    ]
+    if tail_blocks:
+        block = max(tail_blocks, key=lambda item: (item.size, item.b))
+        suffix_words = sentence_words[block.b + block.size :]
+        return _cjk_delta_from_words(suffix_words) if suffix_words else ""
+
     best_i, best_j, best_len = _best_common_word_run(committed_words, sentence_words)
     if best_len < 12:
         return None
@@ -732,6 +755,14 @@ def _sentences_are_revisions(left: str, right: str) -> bool:
     shorter = min(len(left_words), len(right_words))
     best_i, best_j, common_run = _best_common_word_run(left_words, right_words)
     prefix_run = _longest_prefix_revision_run(left_words, right_words)
+    if _has_cjk_words(left_words) and _has_cjk_words(right_words):
+        tail_blocks = [
+            block
+            for block in SequenceMatcher(None, left_words, right_words, autojunk=False).get_matching_blocks()
+            if block.size >= 8 and block.a + block.size == len(left_words)
+        ]
+        if tail_blocks:
+            return True
     if common_run >= 8 and best_i + common_run == len(left_words) and best_j <= 3:
         return True
     if prefix_run >= 5 and common_run >= 5 and len(right_words) >= len(left_words):
@@ -810,6 +841,12 @@ def _final_sentence_diagnostic_flags(sentence: str, language: str) -> tuple[str,
 def _should_confirm_staged_sentence(staged_sentence: str, staged_confirmations: int, staged_forced: bool) -> bool:
     if _is_open_korean_clause(staged_sentence):
         return False
+    if _is_cjk_text(staged_sentence):
+        flags = set(_final_sentence_diagnostic_flags(staged_sentence, "zh"))
+        if {"short_cjk", "no_end_marker"}.issubset(flags):
+            return False
+        if not staged_forced and "no_end_marker" in flags:
+            return False
     return staged_confirmations >= _sentence_required_confirmations(staged_forced)
 
 

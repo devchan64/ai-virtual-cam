@@ -198,6 +198,16 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         self.assertFalse(_should_confirm_staged_sentence("그런데 보면 최치PD가 등장하기", 4, True))
         self.assertTrue(_should_confirm_staged_sentence("신규 채용을 안 하고 있습니다.", 3, False))
 
+    def test_short_cjk_without_end_marker_does_not_confirm_from_monitoring(self) -> None:
+        self.assertFalse(_should_confirm_staged_sentence("哇哇它为什么老麻", 3, False))
+        self.assertTrue(_should_confirm_staged_sentence("哇哇它为什么老麻。", 3, False))
+
+    def test_cjk_without_end_marker_waits_for_forced_confirmation_from_monitoring(self) -> None:
+        staged = "好大一棵果然皇上的园子里都是不一般的植物我觉得大家如果来西安的话可以到这个兴庆宫逛一逛"
+
+        self.assertFalse(_should_confirm_staged_sentence(staged, 3, False))
+        self.assertTrue(_should_confirm_staged_sentence(staged, 4, True))
+
     def test_replacement_keeps_confirmed_open_korean_clause_from_monitoring(self) -> None:
         # Regression from 2026-06-13 30-minute monitoring chunks 7-11.
         # The staged sentence had enough repeated observations to pass the
