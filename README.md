@@ -50,7 +50,7 @@ AVC_TENSORRT_ENGINE_URL="https://example.com/person-segmentation.engine" ./bin/a
 - 영상: 입력 카메라, 출력 해상도/FPS, 세그멘테이션, 배경, 프레이밍
 - 화질/비식별: 세그멘테이션 경계 기반 화질 보정, `비식별 처리(눈가림)` 옵션
 - 오디오: `audio.enabled`, 입/출력 장치, 게이트/노이즈캔슬
-- Whisper STT: 입력 장치, 로컬 모델, 인식 언어, 응답속도 파라미터
+- 오디오 AI: STT 입력 장치, 언어별 로컬 STT 모델, 문장 추적, 번역, 응답속도 파라미터
 - 선택한 언어는 `setting.json`의 `meta.language`에 저장됩니다.
 
 설정 GUI 샘플:
@@ -60,10 +60,10 @@ AVC_TENSORRT_ENGINE_URL="https://example.com/person-segmentation.engine" ./bin/a
 
 ![config gui sample](docs/images/config-preview-sample-anon.png)
 
-Whisper 실행/번역 테스트 설정 GUI 샘플:
+오디오 AI 실행/번역 테스트 설정 GUI 샘플:
 
 - 샘플 파일: [`docs/images/whisper-config-runtime-sample.png`](docs/images/whisper-config-runtime-sample.png)
-- 설명: `Whisper` 탭에서 STT 입력 장치, `faster-whisper` 모델, 단일 인식 언어, NLLB 번역 백엔드, 번역 대상 언어, CUDA 장치/연산 타입, 청크 길이/Beam 크기를 함께 설정하고 실행 결과 창을 확인하는 예시입니다.
+- 설명: `오디오 AI` 탭에서 STT 입력 장치, 언어별 STT 백엔드/모델, 단일 인식 언어, NLLB 번역 백엔드, 번역 대상 언어, CUDA 장치/연산 타입, 청크 길이/Beam 크기를 함께 설정하고 실행 결과 창을 확인하는 예시입니다.
 - 테스트 설정 의도: STT와 번역 모두 로컬 모델로 처리하며, 실시간성 확보를 위해 GPU 실행(`cuda`)과 반정밀도 연산(`float16`)을 사용합니다.
 
 ![whisper runtime config sample](docs/images/whisper-config-runtime-sample.png)
@@ -312,29 +312,29 @@ Linux Docker 정책:
 - 누락 시 자동 탐색/대체 없이 즉시 종료
 - X11, Pulse/PipeWire 소켓도 누락 시 즉시 종료 또는 기능 실패로 반환
 
-## Whisper STT 운영 가이드
+## 오디오 AI 운영 가이드
 
-Whisper 활성화:
+오디오 AI 활성화:
 
 ```bash
 ./bin/avc config
 ```
 
-- `Whisper` 탭에서 `Whisper STT`를 켜고 입력 장치를 선택합니다.
-- `Whisper 입력 dB 미터`로 선택한 장치에 실제 신호가 들어오는지 확인합니다.
+- `오디오 AI` 탭에서 `오디오 AI 전사`를 켜고 입력 장치를 선택합니다.
+- `오디오 AI 입력 dB 미터`로 선택한 장치에 실제 신호가 들어오는지 확인합니다.
 - `번역 창`을 켠 뒤 `번역 백엔드`를 선택합니다. `whisper`는 영어 번역만 지원하고, `nllb-transformers`는 `facebook/nllb-200-distilled-600M` 로컬 모델로 한국어/영어/중국어 대상 번역을 지원합니다.
 - Linux PulseAudio/PipeWire 장치는 `alsa_input...`, `*.monitor`, `ai-virtual-cam` 같은 원본 ID를 설정값으로 저장합니다.
-- Whisper 탭의 설정값은 `setting.json`의 `whisper` 블록에 저장됩니다. 주요 키는 `enabled`, `inputDevice`, `backend`, `model`, `language`, `translationEnabled`, `translationBackend`, `translationTargetLanguage`, `translationModel`, `translationDevice`, `translationComputeType`, `translationBeamSize`, `translationMaxNewTokens`, `device`, `computeType`, `chunkSeconds`, `stepSeconds`, `windowSeconds`, `commitLagSeconds`, `beamSize`, `maxNewTokens`, `temperature`입니다.
+- 오디오 AI 탭의 설정값은 호환성을 위해 `setting.json`의 `whisper` 블록에 저장됩니다. 사용자 기능명은 오디오 AI이며, `whisper`는 기존 설정/코드 호환 키입니다. 주요 키는 `enabled`, `inputDevice`, `backend`, `model`, `language`, `translationEnabled`, `translationBackend`, `translationTargetLanguage`, `translationModel`, `translationDevice`, `translationComputeType`, `translationBeamSize`, `translationMaxNewTokens`, `device`, `computeType`, `chunkSeconds`, `stepSeconds`, `windowSeconds`, `commitLagSeconds`, `beamSize`, `maxNewTokens`, `temperature`입니다.
 
 실행 동작:
 
-- config GUI의 `Serve 시작`으로 실행하면 별도 Whisper 전사 창이 열립니다.
-- CLI `./bin/avc serve`는 기본적으로 Whisper 창을 열지 않습니다.
+- config GUI의 `Serve 시작`으로 실행하면 별도 오디오 AI 전사 창이 열립니다.
+- CLI `./bin/avc serve`는 기본적으로 오디오 AI 창을 열지 않습니다.
 - 전사 창은 텍스트 선택, `Ctrl+C`, `Ctrl+A`, 우클릭 `Copy`/`Copy All`을 지원합니다.
 - `번역 창`을 켜면 원문 전사 창과 별도로 번역 창이 열립니다. 창 제목은 `meta.language` 설정에 따라 한글/영문으로 표시됩니다.
 - 전사/번역 창에는 복사용 텍스트만 표시합니다. 시간, `[ko]` 같은 언어 태그, `전사 결과 없음` 같은 추적 로그는 표시하지 않습니다.
 - stdout/stderr 로그에는 시간 prefix와 함께 모델 로딩, 입력 장치, chunk 처리, 오류 상태가 출력됩니다.
-- Whisper 실행은 STT 모델, 번역 모델, 문장 경계/후처리 모델 준비가 모두 끝난 뒤 입력 장치를 열고 전사를 시작합니다. 모델 다운로드가 필요하면 준비 단계에서 완료될 때까지 대기합니다.
+- 오디오 AI 실행은 STT 모델, 번역 모델, 문장 경계/후처리 모델 준비가 모두 끝난 뒤 입력 장치를 열고 전사를 시작합니다. 모델 다운로드는 Serve 시작 전 캐시 검사와 모델 다운로드 안내창에서만 수행하며, Serve 런타임은 로컬 캐시만 사용합니다.
 - 전사 창의 위치와 크기는 `setting.json`의 `meta.whisperWindowGeometry`, 번역 창의 위치와 크기는 `meta.whisperTranslationWindowGeometry`에 저장되고 다음 실행 때 재사용됩니다.
 - 설정 GUI 자체의 위치와 크기는 `meta.windowGeometry`, 카메라 미리보기 창은 `meta.previewWindowGeometry`, 설정 모달은 `meta.audioTuneWindowGeometry`/`meta.audioGateTestWindowGeometry`/`meta.inputMeterWindowGeometry`로 `JSON 저장` 시 `setting.json`에 저장됩니다.
 
@@ -342,13 +342,14 @@ Whisper 활성화:
 
 - 기본 모델은 `large-v3`, CUDA 환경 기본 연산은 `float16`입니다.
 - `./bin/avc setup`은 Linux에서 `faster-whisper`, NLLB 번역용 `transformers`/`sentencepiece`, CUDA 런타임 의존성을 설치하고, PyTorch는 기본적으로 CUDA 12.8 휠 인덱스에서 설치합니다.
-- setup은 Whisper/STT 모델을 미리 내려받을지 질의합니다. 비대화형 실행에서는 건너뛰며, `AVC_DOWNLOAD_WHISPER_MODELS=1 ./bin/avc setup` 또는 `./bin/avc setup --download-whisper-models`로 강제 다운로드할 수 있습니다. `AVC_DOWNLOAD_WHISPER_MODELS=0` 또는 `--skip-whisper-models`는 질의와 다운로드를 건너뜁니다. 다운로드 대상은 기본 Whisper 모델, 언어별 문장 경계/후처리 모델, NLLB 번역 모델입니다.
+- setup은 오디오 AI/STT 모델을 미리 내려받을지 질의합니다. 비대화형 실행에서는 건너뛰며, `AVC_DOWNLOAD_WHISPER_MODELS=1 ./bin/avc setup` 또는 `./bin/avc setup --download-whisper-models`로 강제 다운로드할 수 있습니다. `AVC_DOWNLOAD_WHISPER_MODELS=0` 또는 `--skip-whisper-models`는 질의와 다운로드를 건너뜁니다. 다운로드 대상은 기본 Whisper 모델, 언어별 STT 모델, 언어별 문장 경계/후처리 모델, 번역 모델입니다.
 - 인식 언어는 단일 선택이며 자동 감지는 사용하지 않습니다. 현재 입력 언어를 `한국어 (ko)`, `English (en)`, `中文 (zh)` 중 하나로 명시합니다.
 - `whisper` 번역 백엔드는 Whisper의 `translate` 경로를 사용하므로 영어 번역만 지원합니다. 한국어/영어/중국어 대상 번역은 `nllb-transformers` 백엔드를 사용합니다.
 - `nllb-transformers` 번역을 선택하면 Whisper는 STT 전사(`task=transcribe`)만 수행하고, 번역은 외부 NLLB 텍스트 번역 경로에서만 수행합니다. 이때 `task=translate` 설정은 유효하지 않습니다.
 - NLLB 번역은 실시간 성능을 위해 `translationDevice=cuda`, `translationComputeType=float16`, `translationBeamSize=1`, `translationMaxNewTokens=128`을 기본 테스트값으로 사용하며 실행 단계의 자동 CPU fallback은 허용하지 않습니다.
 - 테스트 설정은 STT 장치와 번역 장치를 모두 `cuda`로 두고, 연산 타입을 `float16`으로 맞춥니다. Whisper large-v3와 NLLB 600M은 CPU/float32에서 지연이 커질 수 있으므로, 실시간 회의 자막처럼 짧은 주기로 전사/번역 창을 갱신하려면 GPU 텐서코어를 쓰는 반정밀도 실행이 유리합니다.
 - `float16`은 메모리 사용량과 연산량을 줄여 응답성을 높이는 대신, GPU와 PyTorch/CUDA 빌드가 해당 아키텍처를 지원해야 합니다. 지원하지 않으면 자동 CPU fallback 대신 즉시 실패하도록 두고, CUDA 빌드나 설정을 명확히 수정합니다.
+- config GUI의 `Serve 시작`은 저장된 설정에 적용된 모든 오디오 AI/STT/문장경계/번역 모델의 로컬 캐시를 먼저 검사합니다. 누락되거나 부분 다운로드 상태인 모델이 있으면 Serve를 시작하지 않고 모델 다운로드 안내창을 표시합니다.
 
 안정화 확인 범위:
 
@@ -360,7 +361,7 @@ Whisper 활성화:
 
 응답속도 조정:
 
-- `청크/윈도우 길이(초)`(`chunkSeconds`, `windowSeconds`): 최근 몇 초의 오디오 문맥을 Whisper에 전달할지 결정합니다. 길게 잡으면 빠른 발화의 문장 완성도와 앞뒤 문맥 안정성에 유리하지만, tail echo와 후보 리비전 관리 부담이 늘 수 있습니다. 기본 추천값은 `7.5`초입니다.
+- `청크/윈도우 길이(초)`(`chunkSeconds`, `windowSeconds`): 최근 몇 초의 오디오 문맥을 STT 모델에 전달할지 결정합니다. 길게 잡으면 빠른 발화의 문장 완성도와 앞뒤 문맥 안정성에 유리하지만, tail echo와 후보 리비전 관리 부담이 늘 수 있습니다. 기본 추천값은 `7.5`초입니다.
 - `갱신 주기(초)`(`stepSeconds`): 몇 초마다 새 STT 요청을 만들지 결정합니다. 기본 추천값은 `1.5`초이며, 낮추면 화면 갱신은 빨라지지만 같은 문맥을 반복 처리하는 비율이 커집니다.
 - `확정 지연(초)`(`commitLagSeconds`): 윈도우 끝단의 불안정한 tail을 즉시 확정하지 않기 위한 보류 구간입니다. 기본 추천값은 `1.5`초입니다.
 - `Beam 크기`(`beamSize`): 디코딩 후보를 몇 갈래로 탐색할지 결정합니다. `1`은 가장 빠른 greedy 디코딩에 가깝고 지연을 줄이는 데 유리합니다. 값을 키우면 후보 탐색이 늘어 일부 발화의 정확도와 안정성이 좋아질 수 있지만, large-v3에서는 GPU 사용량과 디코딩 시간이 늘어 응답이 늦어질 수 있습니다.
@@ -368,7 +369,7 @@ Whisper 활성화:
 - 문장이 여전히 자주 끊기거나 앞뒤 문맥을 놓치면 `windowSeconds`를 `9.0`까지 늘려 비교합니다. tail echo와 staging 교체가 늘면 `windowSeconds`를 다시 낮추거나 `stepSeconds`를 함께 줄여 같은 후보가 더 자주 재확인되는지 비교합니다.
 - 속도는 충분하지만 고유명사나 짧은 발화 인식이 흔들리면 `beamSize`를 `3` 또는 `5`로 올려 비교합니다. 문장이 실제로 잘릴 때만 `maxNewTokens`를 `128` 또는 `192`로 올립니다. 짧은 청크에서는 이 값이 응답속도에 거의 영향을 주지 않을 수 있습니다.
 - 번역까지 포함한 지연은 NLLB `translationBeamSize`와 `translationMaxNewTokens`의 영향을 받습니다. 실시간 응답성은 `translationBeamSize=1`, `translationMaxNewTokens=128`에서 시작하고, 번역 품질이나 긴 문장 완성도가 부족하면 각각 `3` 또는 `256`으로 올려 비교합니다.
-- 실시간 번역은 기본적으로 확정된 final 전사 문장만 대상으로 합니다. staged/partial 문장은 뒤 청크에서 수정될 가능성이 높아 중복 번역과 premature translation을 만들 수 있으므로 기본값에서 번역하지 않습니다. 상세 설계와 참고 자료는 [`docs/2026-06-13-whisper-feature-design.md`](docs/2026-06-13-whisper-feature-design.md)를 확인합니다.
+- 실시간 번역은 기본적으로 확정된 final 전사 문장만 대상으로 합니다. staged/partial 문장은 뒤 청크에서 수정될 가능성이 높아 중복 번역과 premature translation을 만들 수 있으므로 기본값에서 번역하지 않습니다. 상세 설계와 참고 자료는 [`docs/2026-06-13-audio-ai-feature-design.md`](docs/2026-06-13-audio-ai-feature-design.md)를 확인합니다.
 
 성능 추적 테스트:
 
@@ -376,9 +377,9 @@ Whisper 활성화:
 python3 -m unittest tests.unit.test_whisper_performance_tracking
 ```
 
-- `test_whisper_performance_tracking.py`는 누적 Whisper 로그에서 수집한 revision, distinct, collapse, stability 관측 케이스를 성능 추적용으로 실행합니다.
+- `test_whisper_performance_tracking.py`는 누적 오디오 AI 로그에서 수집한 revision, distinct, collapse, stability 관측 케이스를 성능 추적용으로 실행합니다.
 - 이 테스트의 unittest 성공/실패는 품질 통과율을 의미하지 않습니다. 테스트가 실행되면 `[whisper-tracking] ... rate=... target>=... rate_gap=...` 지표를 출력하고, 이 지표를 올려가는 것을 개선 목표로 삼습니다.
-- 새 로그에서 중복/누락/잘못된 revision 사례가 보이면 tracking case를 추가하고, 이후 알고리즘 변경으로 rate가 오르고 gap이 줄어드는지 비교합니다. 상세 기준과 근거는 [`docs/2026-06-13-whisper-feature-design.md`](docs/2026-06-13-whisper-feature-design.md)를 따릅니다.
+- 새 로그에서 중복/누락/잘못된 revision 사례가 보이면 tracking case를 추가하고, 이후 알고리즘 변경으로 rate가 오르고 gap이 줄어드는지 비교합니다. 상세 기준과 근거는 [`docs/2026-06-13-audio-ai-feature-design.md`](docs/2026-06-13-audio-ai-feature-design.md)를 따릅니다.
 
 ## 오디오 운영 가이드
 
@@ -463,8 +464,8 @@ python3 -m unittest tests.unit.test_whisper_performance_tracking
 - 카메라 입력 모드 후보 기반(해상도/FPS 세트)
 - 화질 탭: 감마/오프셋/채도/강도 보정(세그멘테이션 경계 기준 적용)
 - `오디오 게이트 테스트`, 각 탭별 기본값 복원 버튼
-- `Whisper` 탭: STT 입력 장치, dB 미터, 모델/언어, 응답속도 조정
-- 탭 순서: `입출력 -> 세그멘테이션 -> 배경 -> 프레이밍 -> 화질 -> 오디오 -> Whisper`
+- `오디오 AI` 탭: STT 입력 장치, dB 미터, 모델/언어, 문장 추적, 번역, 응답속도 조정
+- 탭 순서: `입출력 -> 세그멘테이션 -> 배경 -> 프레이밍 -> 화질 -> 오디오 -> 오디오 AI`
 - `faceEnhance` 구키(`brightness`, `blend`, `minSizeRatio`, `edgeDither`) 하위호환은 지원하지 않음
 
 ## 설정 예시

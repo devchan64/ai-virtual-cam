@@ -7,6 +7,7 @@ import warnings
 from dataclasses import dataclass
 from typing import Protocol
 
+from src.app.model_cache import require_funasr_model_cached, require_hf_repo_cached
 from src.domain.contracts.whisper import resolve_funasr_model_name
 
 
@@ -175,6 +176,7 @@ class SatSentenceBoundaryDetector:
                 "sentence boundary backend 'sat' requires wtpsplit. "
                 "Run ./bin/avc setup or install wtpsplit; regex fallback is intentionally disabled."
             ) from exc
+        require_hf_repo_cached(self.model, purpose="SaT sentence boundary")
         try:
             with warnings.catch_warnings():
                 warnings.filterwarnings(
@@ -274,6 +276,7 @@ class FunasrCtPuncSentenceBoundaryDetector:
                 "fallback is intentionally disabled."
             ) from exc
         self.resolved_model = resolve_funasr_model_name(self.model)
+        require_funasr_model_cached(self.model, purpose="FunASR sentence boundary")
         try:
             self._model = AutoModel(model=self.resolved_model, device=self.device, disable_update=True)
         except Exception as exc:

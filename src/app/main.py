@@ -69,7 +69,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--with-whisper-window",
         action="store_true",
-        help="Open the selectable Whisper transcript window when whisper.enabled=true.",
+        help="Open the selectable Audio AI transcript window when whisper.enabled=true.",
     )
     return parser.parse_args()
 
@@ -112,17 +112,17 @@ def main() -> int:
         whisper_cmd = [sys.executable, "-m", "src.app.whisper_window", "--config", str(config_path)]
         try:
             whisper_process = subprocess.Popen(whisper_cmd, env=_child_env_with_nvidia_libraries())
-            _log(f"[avc] whisper transcript window started (pid={whisper_process.pid})")
+            _log(f"[avc] audio AI transcript window started (pid={whisper_process.pid})")
         except Exception as exc:
             raise RuntimeError(
-                "Whisper 출력 창을 시작하지 못했습니다. "
+                "오디오 AI 출력 창을 시작하지 못했습니다. "
                 f"config whisper={config.whisper}. 실패 원인: {exc}. "
-                "DISPLAY/Tkinter/CUDA/faster-whisper 설치 상태를 확인하세요."
+                "DISPLAY/Tkinter/CUDA/STT 모델 설치 상태를 확인하세요."
             ) from exc
     elif args.with_whisper_window:
-        _log("[avc] whisper transcript window disabled by config (whisper.enabled=false)")
+        _log("[avc] audio AI transcript window disabled by config (whisper.enabled=false)")
     else:
-        _log("[avc] whisper transcript window disabled for CLI serve (use config GUI Serve to open it)")
+        _log("[avc] audio AI transcript window disabled for CLI serve (use config GUI Serve to open it)")
 
     audio_mixer: VirtualAudioMixer | None = None
     audio_thread: threading.Thread | None = None

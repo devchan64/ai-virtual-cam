@@ -1,8 +1,22 @@
-# Whisper 기능 설계
+# 오디오 AI 기능 설계
 
-> Whisper 전사, 번역, 출력, 성능 기준을 운영/배포 관점에서 정리한 기능 설계 문서입니다.
+> 오디오 AI의 STT, 문장 추적, 번역, 출력, 성능 기준을 운영/배포 관점에서 정리한 기능 설계 문서입니다.
 
 작성일: 2026-06-13
+
+## 기능 도메인 분류
+
+프로젝트의 사용자 기능명은 규모와 책임을 기준으로 다음처럼 구분한다.
+
+| 규모 | 도메인 | 책임 |
+| --- | --- | --- |
+| 1차 기능 | 카메라 | 입력 캡처, 세그멘테이션, 배경 합성, 프레이밍, 가상 카메라 출력 |
+| 1차 기능 | 오디오 | 오디오 입력/출력, 믹서, 게이트, 노이즈 처리, 가상 오디오 출력 |
+| 2차 기능 | 오디오 AI | 오디오 입력 기반 STT, 문장 경계/리비전 관리, 번역, 전사/번역 창, 모델 캐시/다운로드 검사 |
+| 구현 기술 | Whisper/faster-whisper | 오디오 AI에서 선택 가능한 STT 또는 영어 번역 백엔드 |
+| 구현 기술 | FunASR/SaT/NLLB/M2M100 | 오디오 AI에서 선택 가능한 STT, 문장 경계, 번역 백엔드 |
+
+따라서 사용자에게 보이는 탭/창/문서 제목은 `오디오 AI`를 사용한다. 기존 `setting.json`의 `whisper` 블록, `WhisperConfig`, 일부 파일명은 호환성 유지를 위한 내부 계약 이름으로 남긴다. 내부 키를 즉시 변경하면 기존 설정 파일과 테스트 자산을 깨뜨리므로, 별도 마이그레이션 설계 전까지는 사용자 노출 이름과 내부 호환 키를 분리한다.
 
 ## 0) 개정 배포 배경
 
@@ -12,12 +26,12 @@
 
 ## 1) 왜 이 문서가 필요한가 (개편 목적)
 
-이 문서는 위스퍼 기반 스트리밍 STT를 영상회의 지원 도구로 운영하기 위한 문서입니다.
+이 문서는 오디오 AI를 영상회의 지원 도구로 운영하기 위한 문서입니다. 프로젝트의 큰 기능 축은 카메라와 오디오이며, 오디오 AI는 오디오 영역 안에서 STT, 문장 추적, 번역, 모델 준비를 담당하는 하위 도메인입니다. Whisper는 이 도메인의 이름이 아니라 사용할 수 있는 STT/번역 백엔드 중 하나입니다.
 
 - 1차 목표: 영상회의에서 발생하는 음성 텍스트를 수집해 실시간 번역(회의 지원)으로 제공
 - 2차 목표: 자막이 지원되지 않는 영상 스트리밍 환경에서 실시간 스크립트를 생성해 화면 자막을 보완
 
-이 문서는 위스퍼 기능의 전사, 번역, 출력, 성능 기준을 정리한다. 슬라이딩 윈도우는 중복/리비전(문장 덮어쓰기)을 줄이고 정확도·지연·안정성을 개선하기 위한 구현 방법 중 하나로 다룬다.
+이 문서는 오디오 AI의 전사, 문장 경계, 번역, 출력, 성능 기준을 정리한다. 슬라이딩 윈도우는 중복/리비전(문장 덮어쓰기)을 줄이고 정확도·지연·안정성을 개선하기 위한 구현 방법 중 하나로 다룬다.
 
 ## 2) 현재 운영 문제
 
@@ -75,7 +89,7 @@
 audio 입력
   -> ring buffer 누적
   -> 매 stepSeconds 마다 windowSeconds 구간 채택
-  -> Whisper STT 실행
+  -> STT backend 실행
   -> 직전 윈도우 대비 pending/candidate 비교
   -> 안정 구간만 confirmed로 확정
   -> 최종 출력(모달) 및 번역 큐 투입
@@ -116,7 +130,7 @@ audio 입력
 
 ### 4.2 확정/임시 텍스트 분리의 핵심 규칙
 
-WhisperKit/Streaming 경험을 반영해, 모달은 항상 `confirmed`만 노출한다.
+WhisperKit/Streaming 경험을 반영해, 오디오 AI 모달은 항상 `confirmed`만 노출한다.
 
 - `hypothesis_text`: 최신 청크에서 즉시 생성되는 임시 텍스트(내부 비교 전용)
 - `confirmed_text`: LCP/경계 기반으로 확정된 텍스트만 노출
@@ -252,7 +266,7 @@ new:      "in the United States to take delivery"
 
 ### 8.4 경계 인터페이스(코드 기준)
 
-문장 경계 검출은 Whisper 실행 루프에서 분리되며, 구현은 `src/app/sentence_boundary.py`로 관리한다.
+문장 경계 검출은 오디오 AI 실행 루프에서 분리되며, 구현은 `src/app/sentence_boundary.py`로 관리한다.
 현재 코드 기준 인터페이스는 다음 형태를 따른다.
 
 ```python
@@ -292,15 +306,17 @@ class SentenceBoundaryDetector:
 - 중국어는 `faster-whisper`, `funasr-paraformer`, `funasr-sensevoice`, `mock` 후보를 제공한다.
 - 백엔드별 실행 속성은 `whisper_stt_backend_runtime_option_keys()`에서 정의한다. `faster-whisper`는 `computeType`, `beamSize`, `maxNewTokens`, `temperature`를 노출하고, FunASR 계열은 현재 공통 스트리밍 설정과 백엔드/모델 선택만 노출한다.
 - config GUI는 후처리 프로필 선택을 제공하지 않는다. `postProcessingProfile`은 계약 호환을 위해 `manual`로 저장하고, 화면에는 실제 운영되는 `sentenceBoundaryBackend`/`sentenceBoundaryModel` 수동 설정만 노출한다.
-- config GUI의 Whisper 탭은 `입력/실행`, `STT 언어/모델`, `STT 응답/성능`, `문장 경계`, `번역` 그룹으로 구분한다. 선택 언어와 선택 STT 백엔드에 맞는 설정만 해당 그룹 안에서 표시한다.
+- config GUI의 오디오 AI 탭은 `입력/실행`, `STT 언어/모델`, `STT 응답/성능`, `문장 경계`, `번역` 그룹으로 구분한다. 선택 언어와 선택 STT 백엔드에 맞는 설정만 해당 그룹 안에서 표시한다.
 - 중국어 처리는 문자 단위 CJK 토큰화, suffix overlap 같은 언어별 휴리스틱을 운영 로직에 추가하지 않는다. 공백 없는 텍스트의 경계와 구두점은 후처리 모델의 책임으로 둔다.
 
 현재 런타임 제약:
-- 모델 준비 순서는 `Whisper STT 모델 -> 번역 모델 -> 문장 경계/후처리 모델 -> 입력 장치 열기 -> 전사 루프`다. 입력 캡처와 전사/번역은 모든 모델 준비가 끝난 뒤 시작한다.
-- 모델 다운로드가 필요한 경우 setup 사전 다운로드 또는 런타임 모델 준비 단계에서 완료될 때까지 대기한다. 다운로드 중에는 전사 루프와 번역 job을 시작하지 않는다.
+- 모델 준비 순서는 `STT 모델 -> 번역 모델 -> 문장 경계/후처리 모델 -> 입력 장치 열기 -> 전사 루프`다. 입력 캡처와 전사/번역은 모든 모델 준비가 끝난 뒤 시작한다.
+- 모델 다운로드는 serve 시작 전 검사와 config GUI의 모델 다운로드 안내창에서만 수행한다. serve 런타임 모델 로딩은 로컬 캐시 전용이며, 캐시가 없거나 부분 다운로드 상태이면 다운로드하지 않고 Fail-Fast로 중지한다.
 - setup은 `AVC_DOWNLOAD_WHISPER_MODELS=ask|1|0`, `--download-whisper-models`, `--skip-whisper-models`를 지원한다. 비대화형 setup은 기본적으로 모델 다운로드를 건너뛰며, 강제 다운로드는 명시 옵션/환경변수로만 수행한다.
-- 문장 경계 모델 로딩 시작/완료 로그에는 profile, backend, model, device, compute, language를 출력한다. 캐시에 모델이 없으면 Hugging Face 또는 FunASR/ModelScope 다운로드가 발생할 수 있음을 stdout 로그로 남긴다.
+- 문장 경계 모델 로딩 시작/완료 로그에는 profile, backend, model, device, compute, language를 출력한다. 캐시에 모델이 없으면 런타임 다운로드를 시도하지 않고, 시작 전 다운로드 안내창 또는 setup 사전 다운로드를 사용하라는 오류를 출력한다.
 - 문장 경계 모델 로딩/분절 실패는 Fail-Fast다. legacy regex나 CPU로 자동 전환하지 않는다.
+- `faster-whisper`, SaT, NLLB/M2M100, FunASR STT/문장경계 모델은 serve 런타임에서 로컬 캐시만 사용한다. Hugging Face 또는 ModelScope 네트워크 다운로드는 `scripts/setup/download-whisper-models.py` 경로로만 허용한다.
+- FunASR/ModelScope 캐시는 디렉터리 존재만으로 완료로 보지 않는다. `configuration.json` 또는 `config.json`과 모델 가중치 파일이 모두 있어야 캐시 완료로 판단한다.
 - 후처리 backend/model은 manual 설정만 사용한다. 실행 중 명시 언어가 바뀌어도 후처리 backend/model을 언어별로 암묵 변경하지 않는다.
 
 ### 8.5 경계 진단 신호(운영 지표)
@@ -577,7 +593,7 @@ STT 모델과 문장 경계 모델의 책임을 분리해 검증한다.
 
 ## 12) 성능 추적 목표
 
-Whisper 실시간 전사/번역 경로의 품질은 unittest의 성공/실패만으로 판단하지 않는다. `tests/unit/test_whisper_performance_tracking.py`는 누적 운영 로그에서 관측한 중복, 누락, revision, stability 사례를 실행해 현재 로직의 성능 추이를 출력하는 추적 하네스다.
+오디오 AI 실시간 전사/번역 경로의 품질은 unittest의 성공/실패만으로 판단하지 않는다. `tests/unit/test_whisper_performance_tracking.py`는 누적 운영 로그에서 관측한 중복, 누락, revision, stability 사례를 실행해 현재 로직의 성능 추이를 출력하는 추적 하네스다.
 
 unittest 성공은 테스트 코드가 실행되어 지표가 수집되었다는 의미만 갖는다. 품질 개선 목표는 실행 끝에 출력되는 `[whisper-tracking]`의 `rate`를 올리고 `rate_gap`을 줄이는 것이다.
 
@@ -675,8 +691,8 @@ stability=10/10 rate=1.000 target>=0.80
 - 중국어(`language=zh`)에서는 한 STT 윈도우에서 나온 completed 후보들을 같은 관측 단위로 병합한 뒤 staging에 넣는다.
 - 이 병합은 운영 경로의 언어별 문자열 규칙을 늘리는 목적이 아니라, punctuation 모델이 같은 윈도우를 여러 completed fragment로 반환하는 구조를 revision lifecycle에 맞추는 완충 단계다.
 - 비중국어는 기존처럼 completed 후보를 개별 문장 단위로 유지한다.
-- 병합 발생 시 `completed_coalesced`, `completed_coalesced_lang_zh` 지표와 `Whisper completed 후보 병합` 로그를 남긴다.
-- `Whisper 안정성 지표` 로그는 누적 `stage_replace`, `stage_discard`, `stage_revision`, `finalized`, `completed_coalesced`를 함께 출력해 생명주기 안정성을 관측한다.
+- 병합 발생 시 `completed_coalesced`, `completed_coalesced_lang_zh` 지표와 `오디오 AI completed 후보 병합` 로그를 남긴다.
+- `오디오 AI 안정성 지표` 로그는 누적 `stage_replace`, `stage_discard`, `stage_revision`, `finalized`, `completed_coalesced`를 함께 출력해 생명주기 안정성을 관측한다.
 
 2026-06-14 검증 결과:
 

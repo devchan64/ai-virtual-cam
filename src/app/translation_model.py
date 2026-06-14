@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from src.app.model_cache import require_hf_repo_cached
+
 
 NLLB_LANGUAGE_CODES = {
     "en": "eng_Latn",
@@ -53,9 +55,10 @@ class NllbTransformersTranslator(LocalTextTranslator):
         self._requested_compute_type = str(compute_type or "auto").strip()
         self._beam_size = _validate_generation_int("whisper.translationBeamSize", beam_size, 1, 8)
         self._max_new_tokens = _validate_generation_int("whisper.translationMaxNewTokens", max_new_tokens, 16, 512)
+        require_hf_repo_cached(model_name, purpose="NLLB translation")
         try:
-            self._tokenizer = AutoTokenizer.from_pretrained(model_name)
-            self._model = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=torch_dtype)
+            self._tokenizer = AutoTokenizer.from_pretrained(model_name, local_files_only=True)
+            self._model = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=torch_dtype, local_files_only=True)
             self._model.to(resolved_device)
             self._model.eval()
         except Exception as exc:
@@ -151,9 +154,10 @@ class M2M100TransformersTranslator(LocalTextTranslator):
         self._requested_compute_type = str(compute_type or "auto").strip()
         self._beam_size = _validate_generation_int("whisper.translationBeamSize", beam_size, 1, 8)
         self._max_new_tokens = _validate_generation_int("whisper.translationMaxNewTokens", max_new_tokens, 16, 512)
+        require_hf_repo_cached(model_name, purpose="M2M100 translation")
         try:
-            self._tokenizer = M2M100Tokenizer.from_pretrained(model_name)
-            self._model = M2M100ForConditionalGeneration.from_pretrained(model_name, torch_dtype=torch_dtype)
+            self._tokenizer = M2M100Tokenizer.from_pretrained(model_name, local_files_only=True)
+            self._model = M2M100ForConditionalGeneration.from_pretrained(model_name, torch_dtype=torch_dtype, local_files_only=True)
             self._model.to(resolved_device)
             self._model.eval()
         except Exception as exc:

@@ -5,6 +5,7 @@ import io
 from dataclasses import dataclass
 from typing import Iterable
 
+from src.app.model_cache import require_funasr_model_cached
 from src.domain.contracts.whisper import resolve_funasr_model_name
 
 
@@ -51,7 +52,7 @@ class FasterWhisperSttModel:
             raise RuntimeError(
                 "faster-whisper 모듈이 없습니다. 로컬 Whisper를 사용하려면 faster-whisper와 CUDA 런타임을 설치하세요."
             ) from exc
-        self._model = WhisperModel(model_name, device=device, compute_type=compute_type)
+        self._model = WhisperModel(model_name, device=device, compute_type=compute_type, local_files_only=True)
 
     def transcribe(self, audio, **kwargs):
         return self._model.transcribe(audio, **kwargs)
@@ -79,6 +80,7 @@ class FunasrSttModel:
                 f"model={model_name} device={device}. 원인: {exc}"
             ) from exc
         _emit_captured_output(status_callback, "FunASR STT import", captured.getvalue())
+        require_funasr_model_cached(model_name, purpose="FunASR STT")
         try:
             with _capture_model_output() as captured:
                 self._model = AutoModel(model=self.resolved_model_name, device=device, disable_update=True)

@@ -67,20 +67,24 @@ MIN_WINDOW_WIDTH = 520
 MIN_WINDOW_HEIGHT = 280
 FINAL_TEXT_TAG = "final_text"
 PARTIAL_TEXT_TAG = "partial_text"
+ERROR_TEXT_TAG = "error_text"
 FINAL_TEXT_COLOR = "black"
 PARTIAL_TEXT_COLOR = "#008000"
+ERROR_TEXT_COLOR = "#b00020"
 MIN_SEGMENT_AVG_LOGPROB = -1.0
 MAX_SEGMENT_NO_SPEECH_PROB = 0.75
+MAX_SEGMENT_NO_SPEECH_CJK_OVERRIDE_PROB = 0.90
+MIN_CJK_CHARS_FOR_NO_SPEECH_OVERRIDE = 12
 RECENT_TRANSCRIPT_WINDOW = 8
 MAX_RECENT_SHORT_TEXT_REPEATS = 2
 _WINDOW_TITLES = {
     "en": {
-        "transcript": "ai-virtual-cam Whisper Transcript",
-        "translation": "ai-virtual-cam Whisper Translation",
+        "transcript": "ai-virtual-cam Audio AI Transcript",
+        "translation": "ai-virtual-cam Audio AI Translation",
     },
     "ko": {
-        "transcript": "ai-virtual-cam 위스퍼 전사",
-        "translation": "ai-virtual-cam 위스퍼 번역",
+        "transcript": "ai-virtual-cam 오디오 AI 전사",
+        "translation": "ai-virtual-cam 오디오 AI 번역",
     },
 }
 _WINDOW_GEOMETRY_RE = re.compile(
@@ -280,7 +284,7 @@ def _is_exact_pulse_source(configured: str) -> bool:
 
 
 def _is_modal_output_event(event: TranscriptEvent) -> bool:
-    return event.display and event.kind in {"transcript", "translation"}
+    return event.display and event.kind in {"transcript", "translation", "error"}
 
 
 class WhisperTranscriptWorker:
@@ -376,6 +380,19 @@ class WhisperTranscriptWorker:
         self._sentence_boundary_detector = self._build_sentence_boundary_detector(normalized)
         self._boundary_detector_language = normalized
 
+    def _cjk_char_count(self, text: str) -> int:
+        return sum(1 for char in str(text or "") if "\u3400" <= char <= "\u9fff" or "\uf900" <= char <= "\ufaff")
+
+    def _should_accept_high_no_speech_segment(self, text: str, avg_logprob: float, no_speech_prob: float) -> bool:
+        language = str(getattr(self._cfg, "language", "en") or "en").strip().lower()
+        if language != "zh":
+            return False
+        if no_speech_prob >= MAX_SEGMENT_NO_SPEECH_CJK_OVERRIDE_PROB:
+            return False
+        if avg_logprob <= MIN_SEGMENT_AVG_LOGPROB:
+            return False
+        return self._cjk_char_count(text) >= MIN_CJK_CHARS_FOR_NO_SPEECH_OVERRIDE
+
     def _accepted_segment_texts(self, segments) -> tuple[list[str], list[str], float | None]:
         texts: list[str] = []
         accepted_scores: list[tuple[float, float]] = []
@@ -386,7 +403,9 @@ class WhisperTranscriptWorker:
                 continue
             avg_logprob = float(getattr(segment, "avg_logprob", 0.0) or 0.0)
             no_speech_prob = float(getattr(segment, "no_speech_prob", 0.0) or 0.0)
-            if no_speech_prob >= MAX_SEGMENT_NO_SPEECH_PROB:
+            if no_speech_prob >= MAX_SEGMENT_NO_SPEECH_PROB and not self._should_accept_high_no_speech_segment(
+                text, avg_logprob, no_speech_prob
+            ):
                 rejected.append(f"no_speech text={text!r} prob={no_speech_prob:.2f}")
                 continue
             if avg_logprob <= MIN_SEGMENT_AVG_LOGPROB:
@@ -529,7 +548,7 @@ class WhisperTranscriptWorker:
                 try:
                     self._audio_queue.put_nowait(mono.copy())
                 except queue.Full:
-                    self._emit("status", "Whisper 입력 버퍼가 가득 차 오디오 프레임을 건너뜁니다.")
+                    self._emit("status", "오디오 AI 입력 버퍼가 가득 차 오디오 프레임을 건너뜁니다.")
 
             device = _sounddevice_device_name(self._cfg.inputDevice)
             self._emit("status", f"sounddevice 캡처 시작: runtime_device={device or 'default'}")
@@ -576,7 +595,7 @@ class WhisperTranscriptWorker:
                     samples = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
                     self._audio_queue.put(samples, timeout=0.2)
                 except queue.Full:
-                    self._emit("status", "Whisper 입력 버퍼가 가득 차 Pulse 프레임을 건너뜁니다.")
+                    self._emit("status", "오디오 AI 입력 버퍼가 가득 차 Pulse 프레임을 건너뜁니다.")
                 except Exception as exc:
                     self._emit("error", f"Pulse 캡처 처리 실패: {exc}")
                     break
@@ -915,7 +934,7 @@ class WhisperTranscriptWorker:
                             count_metric(f"completed_coalesced_lang_{str(detected).strip().lower() or 'unknown'}")
                             self._emit(
                                 "status",
-                                "Whisper completed 후보 병합: "
+                                "오디오 AI completed 후보 병합: "
                                 f"chunk={chunks} language={detected} before={len(completed_sentences)} "
                                 f"after={len(coalesced_completed_sentences)} "
                                 f"tail={_diagnostic_tail(coalesced_completed_sentences[0])}",
@@ -1148,7 +1167,7 @@ class WhisperTranscriptWorker:
 class WhisperTranscriptWindow:
     def __init__(self, app_config: AppConfig, config_path: Path) -> None:
         if not app_config.whisper.enabled:
-            raise RuntimeError("whisper.enabled=false 입니다. config에서 Whisper STT를 켠 뒤 serve를 실행하세요.")
+            raise RuntimeError("whisper.enabled=false 입니다. config에서 오디오 AI 전사를 켠 뒤 serve를 실행하세요.")
         try:
             import tkinter as tk
             from tkinter import ttk
@@ -1319,8 +1338,9 @@ class WhisperTranscriptWindow:
     def _configure_transcript_text_tags(self, text_widget) -> None:
         text_widget.tag_configure(FINAL_TEXT_TAG, foreground=FINAL_TEXT_COLOR)
         text_widget.tag_configure(PARTIAL_TEXT_TAG, foreground=PARTIAL_TEXT_COLOR)
+        text_widget.tag_configure(ERROR_TEXT_TAG, foreground=ERROR_TEXT_COLOR)
 
-    def _append(self, line: str, text_widget=None, *, final: bool = True) -> None:
+    def _append(self, line: str, text_widget=None, *, final: bool = True, tag: str | None = None) -> None:
         target = text_widget if text_widget is not None else self._text
         partial_attr = None
         if target is self._text:
@@ -1330,7 +1350,7 @@ class WhisperTranscriptWindow:
         if partial_attr is not None and getattr(self, partial_attr):
             target.delete("end-1c linestart", "end-1c")
         if final:
-            target.insert("end", f"{line}\n", FINAL_TEXT_TAG)
+            target.insert("end", f"{line}\n", tag or FINAL_TEXT_TAG)
             if partial_attr is not None:
                 setattr(self, partial_attr, False)
         else:
@@ -1339,6 +1359,10 @@ class WhisperTranscriptWindow:
                 setattr(self, partial_attr, True)
         self._update_line_numbers(target)
         target.see("end")
+
+    def _format_error_for_modal(self, message: str) -> str:
+        prefix = "오류" if self._ui_language == "ko" else "Error"
+        return f"{prefix}: {message}"
 
     def _poll_events(self) -> None:
         while True:
@@ -1350,6 +1374,10 @@ class WhisperTranscriptWindow:
                 continue
             if event.kind == "translation" and self._translation_text is not None:
                 self._append(event.text, self._translation_text, final=event.final)
+            elif event.kind == "error":
+                self._append(self._format_error_for_modal(event.text), self._text, final=True, tag=ERROR_TEXT_TAG)
+                if self._translation_text is not None:
+                    self._append(self._format_error_for_modal(event.text), self._translation_text, final=True, tag=ERROR_TEXT_TAG)
             elif event.kind == "transcript":
                 self._append(event.text, self._text, final=event.final)
         self._root.after(100, self._poll_events)

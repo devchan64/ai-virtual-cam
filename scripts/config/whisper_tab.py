@@ -56,7 +56,7 @@ def build_whisper_tab(
         input_frame,
         input_row,
         "whisper_enabled",
-        gui._tr("label.whisper_enabled", "Whisper 음성 인식"),
+        gui._tr("label.whisper_enabled", "오디오 AI 전사"),
         False,
         label_key="label.whisper_enabled",
     )
@@ -86,10 +86,10 @@ def build_whisper_tab(
 
     whisper_input_meter_btn = ttk.Button(
         input_frame,
-        text=gui._tr("button.whisper_input_meter", "Whisper 입력 dB 미터"),
+        text=gui._tr("button.whisper_input_meter", "오디오 AI 입력 dB 미터"),
         command=gui._run_whisper_input_meter,
     )
-    gui._register_localized_widget(whisper_input_meter_btn, "button.whisper_input_meter", "Whisper 입력 dB 미터")
+    gui._register_localized_widget(whisper_input_meter_btn, "button.whisper_input_meter", "오디오 AI 입력 dB 미터")
     whisper_input_meter_btn.grid(row=input_row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0))
 
     stt_frame, row = _add_group(gui, ttk, tab_whisper, row, "label.whisper_group_stt", "STT 언어/모델")
@@ -110,7 +110,7 @@ def build_whisper_tab(
         stt_frame,
         stt_row,
         "hint.whisper_language",
-        "Whisper는 한 번에 하나의 인식 언어를 사용합니다. 자동 감지는 사용하지 않으며, 현재 입력 언어를 한국어/영어/중국어 중 하나로 명시하세요.",
+        "오디오 AI 전사는 한 번에 하나의 인식 언어를 사용합니다. 자동 감지는 사용하지 않으며, 현재 입력 언어를 한국어/영어/중국어 중 하나로 명시하세요.",
     )
 
     global_backend_row = stt_row
@@ -118,7 +118,7 @@ def build_whisper_tab(
         stt_frame,
         stt_row,
         "whisper_backend",
-        gui._tr("label.whisper_backend", "Whisper 백엔드"),
+        gui._tr("label.whisper_backend", "기본 STT 백엔드"),
         whisper_backend_options(),
         whisper_default("backend"),
         label_key="label.whisper_backend",
@@ -129,7 +129,7 @@ def build_whisper_tab(
         stt_frame,
         stt_row,
         "whisper_model",
-        gui._tr("label.whisper_model", "Whisper 모델"),
+        gui._tr("label.whisper_model", "기본 STT 모델"),
         whisper_model_options(),
         whisper_default("model"),
         label_key="label.whisper_model",
@@ -361,7 +361,7 @@ def build_whisper_tab(
         whisper_translation_frame,
         0,
         "hint.whisper_translation_whisper_backend",
-        "Whisper 번역은 영어 출력만 지원하며 외부 번역 모델 설정을 사용하지 않습니다.",
+        "Whisper 내장 번역은 영어 출력만 지원하며 외부 번역 모델 설정을 사용하지 않습니다.",
     )
     translation_row += 1
 
@@ -452,8 +452,8 @@ def build_whisper_tab(
 
     reset_whisper_btn = ttk.Button(
         tab_whisper,
-        text=gui._tr("button.reset_whisper_settings", "Whisper 기본값 복원"),
+        text=gui._tr("button.reset_whisper_settings", "오디오 AI 기본값 복원"),
         command=gui._reset_whisper_settings,
     )
-    gui._register_localized_widget(reset_whisper_btn, "button.reset_whisper_settings", "Whisper 기본값 복원")
+    gui._register_localized_widget(reset_whisper_btn, "button.reset_whisper_settings", "오디오 AI 기본값 복원")
     reset_whisper_btn.grid(row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0))

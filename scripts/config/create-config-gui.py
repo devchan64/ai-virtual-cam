@@ -822,7 +822,7 @@ class ConfigGui:
             return
         window = tk.Toplevel(self.root)
         self._whisper_model_download_window = window
-        window.title(self._tr("title.whisper_model_download", "Whisper 모델 다운로드"))
+        window.title(self._tr("title.whisper_model_download", "오디오 AI 모델 다운로드"))
         window.transient(self.root)
         window.columnconfigure(0, weight=1)
         window.rowconfigure(2, weight=1)
@@ -833,7 +833,7 @@ class ConfigGui:
             window,
             text=self._tr(
                 "msg.whisper_model_download_required",
-                "설정에 적용된 Whisper/STT/문장경계/번역 모델 중 로컬 캐시에 없는 모델이 있습니다. 다운로드가 완료될 때까지 Serve는 시작되지 않습니다.",
+                "설정에 적용된 오디오 AI/STT/문장경계/번역 모델 중 로컬 캐시에 없는 모델이 있습니다. 다운로드가 완료될 때까지 Serve는 시작되지 않습니다.",
             ),
             wraplength=680,
         ).grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 6))
@@ -969,7 +969,14 @@ class ConfigGui:
         lower = message.lower()
         current = float(progress.cget("value") or 0)
         value = current
-        if "downloading faster-whisper" in lower or "downloading funasr stt" in lower:
+        progress_match = re.search(r"download progress: .*downloaded=(?P<downloaded>\S+) total=(?P<total>\S+)(?: percent=(?P<percent>[0-9.]+))?", lower)
+        if progress_match:
+            percent = progress_match.group("percent")
+            if percent is not None:
+                value = max(current, min(99.0, float(percent)))
+            else:
+                value = max(current, 20)
+        elif "downloading faster-whisper" in lower or "downloading funasr stt" in lower:
             value = max(current, 15)
         elif "faster-whisper model ready" in lower or "funasr stt model ready" in lower:
             value = max(current, 35)
@@ -1437,7 +1444,7 @@ class ConfigGui:
             (tab_crop, "title.tab.crop", "Framing"),
             (tab_face, "title.tab.face", "Face"),
             (tab_audio, "title.tab.audio", "Audio"),
-            (tab_whisper, "title.tab.whisper", "Whisper"),
+            (tab_whisper, "title.tab.whisper", "오디오 AI"),
         ]
         for tab, key, default in self._tab_meta:
             notebook.add(tab, text=self._tr(key, default))
@@ -3370,9 +3377,9 @@ class ConfigGui:
             input_device_requested = _audio_default_input_device()
         self._run_input_meter(
             title_key="title.whisper_input_meter",
-            title_default="Whisper input dB meter",
+            title_default="Audio AI input dB meter",
             error_title_key="title.whisper_input_meter_error",
-            error_title_default="Whisper input meter error",
+            error_title_default="Audio AI input meter error",
             input_device_requested=input_device_requested,
             sample_rate=48000,
             frame_ms=20,

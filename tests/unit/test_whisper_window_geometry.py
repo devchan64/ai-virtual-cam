@@ -86,8 +86,8 @@ class WhisperWindowGeometryTest(unittest.TestCase):
             language = _load_ui_language(path)
 
         self.assertEqual(language, "ko")
-        self.assertEqual(_window_title("transcript", language), "ai-virtual-cam 위스퍼 전사")
-        self.assertEqual(_window_title("translation", language), "ai-virtual-cam 위스퍼 번역")
+        self.assertEqual(_window_title("transcript", language), "ai-virtual-cam 오디오 AI 전사")
+        self.assertEqual(_window_title("translation", language), "ai-virtual-cam 오디오 AI 번역")
 
     def test_window_titles_fallback_to_english_for_unknown_language(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -97,8 +97,8 @@ class WhisperWindowGeometryTest(unittest.TestCase):
             language = _load_ui_language(path)
 
         self.assertEqual(language, "en")
-        self.assertEqual(_window_title("transcript", language), "ai-virtual-cam Whisper Transcript")
-        self.assertEqual(_window_title("translation", language), "ai-virtual-cam Whisper Translation")
+        self.assertEqual(_window_title("transcript", language), "ai-virtual-cam Audio AI Transcript")
+        self.assertEqual(_window_title("translation", language), "ai-virtual-cam Audio AI Translation")
 
     def test_skips_invalid_geometry_cache_log(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -274,11 +274,11 @@ class WhisperWindowGeometryTest(unittest.TestCase):
 
         self.assertEqual(geometry, "820x460+120+80")
 
-    def test_modal_output_only_allows_transcript_and_translation(self) -> None:
+    def test_modal_output_allows_results_and_errors(self) -> None:
         self.assertTrue(_is_modal_output_event(TranscriptEvent("transcript", "hello")))
         self.assertTrue(_is_modal_output_event(TranscriptEvent("translation", "안녕")))
         self.assertFalse(_is_modal_output_event(TranscriptEvent("status", "loading")))
-        self.assertFalse(_is_modal_output_event(TranscriptEvent("error", "failed")))
+        self.assertTrue(_is_modal_output_event(TranscriptEvent("error", "failed")))
         self.assertFalse(_is_modal_output_event(TranscriptEvent("transcript", "hidden", display=False)))
 
     def test_sanitizes_geometry_before_restore(self) -> None:
@@ -332,6 +332,34 @@ class WhisperWindowGeometryTest(unittest.TestCase):
         self.assertIn("no_speech", rejected[0])
         self.assertIn("low_logprob", rejected[1])
         self.assertIsNotNone(boundary_confidence)
+
+
+    def test_accepts_long_chinese_segment_with_borderline_no_speech(self) -> None:
+        worker = WhisperTranscriptWorker(WhisperConfig.from_dict({"inputDevice": "default", "language": "zh"}), queue.Queue())
+        segments = [
+            SimpleNamespace(
+                text="到我和朋友兩個人臨陣起手直接唱陰謀歌好吧不陰謀的完全不點阻擋",
+                avg_logprob=-0.2,
+                no_speech_prob=0.86,
+            ),
+        ]
+
+        texts, rejected, boundary_confidence = worker._accepted_segment_texts(segments)
+
+        self.assertEqual(texts, [segments[0].text])
+        self.assertEqual(rejected, [])
+        self.assertIsNotNone(boundary_confidence)
+
+    def test_rejects_short_chinese_segment_with_high_no_speech(self) -> None:
+        worker = WhisperTranscriptWorker(WhisperConfig.from_dict({"inputDevice": "default", "language": "zh"}), queue.Queue())
+        segments = [SimpleNamespace(text="片。", avg_logprob=-0.2, no_speech_prob=0.86)]
+
+        texts, rejected, boundary_confidence = worker._accepted_segment_texts(segments)
+
+        self.assertEqual(texts, [])
+        self.assertEqual(len(rejected), 1)
+        self.assertIn("no_speech", rejected[0])
+        self.assertIsNone(boundary_confidence)
 
     def test_rejects_repeated_short_transcripts(self) -> None:
         worker = WhisperTranscriptWorker(WhisperConfig.from_dict({"inputDevice": "default"}), queue.Queue())
