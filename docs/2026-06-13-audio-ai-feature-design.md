@@ -412,7 +412,7 @@ STT 모델과 문장 경계 모델의 책임을 분리해 검증한다.
 실험 설계:
 
 1. 중국어 기준선은 `windowSeconds=9.0`, `stepSeconds=1.5`, `commitLagSeconds=2.0`으로 둔다.
-2. 비교군은 `windowSeconds=12.0`, `15.0`, `30.0`을 사용하고 `stepSeconds`는 먼저 고정한다. 2026-06-15 로그 기준으로 30초 윈도우는 중국어 장문 문맥 안정성에 유리했고, `stepSeconds=2.0`, `commitLagSeconds=3.0`, `maxNewTokens=192`와 함께 안정성 우선 기본값으로 전환한다.
+2. 비교군은 `windowSeconds=12.0`, `15.0`, `30.0`을 사용하고 `stepSeconds`는 먼저 고정한다. 2026-06-15 로그 기준으로 30초 윈도우는 중국어 장문 문맥 안정성에 유리했지만 final script가 긴 문장 단위로 늦게 갱신되는 비용이 컸다. 기본값은 응답성 균형형인 `windowSeconds=15.0`, `stepSeconds=2.0`, `commitLagSeconds=2.0`, `maxNewTokens=160`으로 두고, 30초는 장문 안정성 실험값으로 유지한다.
 3. 각 비교군에서 `raw_stt_window` CER, mixed-script ratio, repeated final count, pending overrun, final latency를 기록한다.
 4. `total_rtf`가 1.0 미만이어도 final latency가 커지면 실시간 자막 UX 실패로 판단한다.
 5. 계산 지연과 정책 지연을 분리하기 위해 성능 로그에는 `stt`, `translation`, `total` 외에 `effective_latency_estimate=windowSeconds+commitLagSeconds+total`을 추가하는 것을 검토한다.
@@ -811,7 +811,7 @@ unit test discover: 567 passed
 ./bin/avc test: passed, integration skipped=1
 ```
 
-운영 파라미터(`windowSeconds=30`, `stepSeconds=2`, `commitLagSeconds=3`, `maxNewTokens=192`)는 이번 관측에서 병목으로 보이지 않았다. 따라서 기본 계약값을 이 운영값으로 정렬한다. 우선순위는 STT 모델 품질과 pending/revision 생명주기 지표 개선이며, `final_quality_cjk_internal_gap`는 공백 없는 CJK 출력에서 false positive가 있을 수 있으므로 hard fail이 아니라 추세 지표로만 사용한다. 안정성 로그에는 `duplicate_suppressed`, `delta_trimmed`, `final_quality`, `translation_skip`을 추가해 중복 억제와 후보 흔들림을 분리해서 본다.
+운영 파라미터 비교에서 `windowSeconds=20`은 응답성은 좋지만 중국어 STT 후보가 크게 흔들렸고, `windowSeconds=30`은 문맥 안정성은 상대적으로 좋지만 final script 갱신이 늦고 긴 문장 확정 비용이 커졌다. 2026-06-15 현재 기본 계약값은 중간 실험값인 `windowSeconds=24`, `stepSeconds=2`, `commitLagSeconds=2`, `maxNewTokens=192`로 둔다. 20초는 저지연 비교군, 30초는 중국어 장문 STT 안정성 비교군으로 남긴다. 우선순위는 STT 모델 품질과 pending/revision 생명주기 지표 개선이며, `final_quality_cjk_internal_gap`는 공백 없는 CJK 출력에서 false positive가 있을 수 있으므로 hard fail이 아니라 추세 지표로만 사용한다. 안정성 로그에는 `duplicate_suppressed`, `delta_trimmed`, `final_quality`, `translation_skip`, `revision_changed`, `revision_reset`을 추가해 중복 억제와 후보 흔들림을 분리해서 본다. CJK revision 내용이 실제로 바뀐 경우 confirmations를 1부터 다시 세어 흔들리는 후보가 누적 확인만으로 확정되지 않도록 한다.
 
 ## 13) 점진적 적용 순서
 

@@ -1078,6 +1078,12 @@ def _prefer_sentence_revision(left: str, right: str) -> str:
     return _normalized_text(left)
 
 
+def _next_revision_confirmation_count(previous: str, preferred: str, current_confirmations: int) -> int:
+    if preferred != _normalized_text(previous) and (_is_cjk_text(previous) or _is_cjk_text(preferred)):
+        return 1
+    return current_confirmations + 1
+
+
 
 def _pending_new_text_combined(pending_text: str, new_text: str) -> str:
     from src.app.sentence_boundary import pending_new_text_combined
@@ -1137,4 +1143,3 @@ def _diagnostic_tail(text: str, limit: int = 90) -> str:
     if len(normalized) > limit:
         normalized = "..." + normalized[-limit:]
     return repr(normalized)
-

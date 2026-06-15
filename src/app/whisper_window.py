@@ -30,6 +30,7 @@ from src.app.whisper_transcript_logic import (
     _final_sentence_diagnostic_flags,
     _forced_sentence_reason,
     _new_text_delta,
+    _next_revision_confirmation_count,
     _normalized_text,
     _pending_new_text_combined,
     _pending_overrun_reason,
@@ -746,10 +747,17 @@ class WhisperTranscriptWorker:
                 count_metric("stage_revision")
                 staged_before = staged_sentence
                 preferred = _prefer_sentence_revision(staged_sentence, candidate)
-                if preferred != staged_before:
+                preferred_changed = preferred != staged_before
+                if preferred_changed:
                     count_metric("stage_revision_changed")
+                    if _is_cjk_text(staged_before) or _is_cjk_text(preferred):
+                        count_metric("stage_revision_confirmation_reset")
                 staged_sentence = preferred
-                staged_confirmations += 1
+                staged_confirmations = _next_revision_confirmation_count(
+                    staged_before,
+                    preferred,
+                    staged_confirmations,
+                )
                 staged_age = 0
                 staged_forced = staged_forced or forced
                 required_confirmations = _sentence_required_confirmations(staged_forced)
@@ -757,7 +765,7 @@ class WhisperTranscriptWorker:
                     "status",
                     "Whisper stage 리비전: "
                     f"chunk={chunks} confirmations={staged_confirmations}/{required_confirmations} "
-                    f"forced={staged_forced} preferred_changed={preferred != staged_before} "
+                    f"forced={staged_forced} preferred_changed={preferred_changed} "
                     f"staged_before={_diagnostic_tail(staged_before)} candidate={_diagnostic_tail(candidate)} "
                     f"preferred={_diagnostic_tail(preferred)}",
                     display=False,
@@ -1003,10 +1011,10 @@ class WhisperTranscriptWorker:
                                 pending_chunks = 0
                     if pending_transcript_text and not forced_candidate_pending:
                         self._emit(
-                            "transcript",
-                            pending_transcript_text,
-                            log_text=f"[{detected}] {pending_transcript_text}",
-                            final=False,
+                            "status",
+                            "Whisper pending tail: "
+                            f"chunk={chunks} language={detected} text={pending_transcript_text!r}",
+                            display=False,
                         )
                     elif not completed_sentences:
                         final_sentences.extend(age_staged_sentence(detected, pending_transcript_text))
@@ -1166,6 +1174,8 @@ class WhisperTranscriptWorker:
                 stage_replace_count = chunk_lifecycle_metrics.get("stage_replace", 0)
                 stage_discard_count = chunk_lifecycle_metrics.get("stage_discard", 0)
                 stage_revision_count = chunk_lifecycle_metrics.get("stage_revision", 0)
+                stage_revision_changed_count = chunk_lifecycle_metrics.get("stage_revision_changed", 0)
+                stage_revision_reset_count = chunk_lifecycle_metrics.get("stage_revision_confirmation_reset", 0)
                 finalize_count = chunk_lifecycle_metrics.get("finalized", 0)
                 duplicate_suppressed_count = chunk_lifecycle_metrics.get("candidate_duplicate_suppressed", 0)
                 delta_trimmed_count = chunk_lifecycle_metrics.get("candidate_delta_trimmed", 0)
@@ -1177,7 +1187,8 @@ class WhisperTranscriptWorker:
                     "status",
                     "Whisper 안정성 지표: "
                     f"chunk={chunks} replace={stage_replace_count} discard={stage_discard_count} "
-                    f"revision={stage_revision_count} finalized={finalize_count} "
+                    f"revision={stage_revision_count} revision_changed={stage_revision_changed_count} "
+                    f"revision_reset={stage_revision_reset_count} finalized={finalize_count} "
                     f"duplicate_suppressed={duplicate_suppressed_count} delta_trimmed={delta_trimmed_count} "
                     f"final_quality={final_quality_count} translation_skip={translation_skip_count} "
                     f"replace_discard_rate={stage_discard_count / max(stage_replace_count, 1):.2f} "
@@ -1193,6 +1204,7 @@ class WhisperTranscriptWorker:
                     f"stt={stt_elapsed:.2f}s stt_rtf={stt_elapsed / max(chunk_audio_seconds, 0.001):.2f} "
                     f"translation={translation_elapsed:.2f}s translation_enabled={self._cfg.translationEnabled and not translation_failed} "
                     f"total={total_elapsed:.2f}s total_rtf={total_elapsed / max(chunk_audio_seconds, 0.001):.2f} "
+                    f"effective_latency_estimate={window_seconds + commit_lag_seconds + total_elapsed:.2f}s "
                     f"beam={self._cfg.beamSize} max_tokens={self._cfg.maxNewTokens} text_chars={len(text)}",
                     display=False,
                 )

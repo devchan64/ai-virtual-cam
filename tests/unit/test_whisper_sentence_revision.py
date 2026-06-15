@@ -10,6 +10,7 @@ from src.app.whisper_window import (
     _forced_sentence_reason,
     _format_transcript_metrics,
     _new_text_delta,
+    _next_revision_confirmation_count,
     _pending_new_text_combined,
     _prefer_sentence_revision,
     _replacement_decision_reason,
@@ -41,6 +42,16 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
             _prefer_sentence_revision("Now it is telling me.", "Now it is telling me 52 second."),
             "Now it is telling me 52 second.",
         )
+
+    def test_cjk_revision_content_change_resets_confirmation_count_from_monitoring(self) -> None:
+        # Regression from 2026-06-15 Chinese monitoring around chunks 112-114.
+        # The content kept changing, but confirmations continued to accumulate and allowed
+        # an unstable candidate to be finalized.
+        previous = "宝宝真的是啊一看到这东西直抢趁着我这几天还能吃冰了赶紧吃"
+        preferred = "宝宝真的是啊一看到这东西直抢趁着我这几天还能吃冰了赶紧吃你就比平时不能吃的时候你没少吃啊关键"
+
+        self.assertEqual(_next_revision_confirmation_count(previous, preferred, 4), 1)
+        self.assertEqual(_next_revision_confirmation_count(preferred, preferred, 4), 5)
 
     def test_sentence_revision_detects_short_prefix_expansion_from_log(self) -> None:
         # Regression from avc-whisper.log chunks 283-295.

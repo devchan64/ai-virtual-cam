@@ -29,7 +29,7 @@ TRACKING_TARGETS = {
     "coalesce": {"target_cases": 10, "target_rate": 1.00},
     "stage_candidate": {"target_cases": 4, "target_rate": 1.00},
     "duplicate_suppression": {"target_cases": 4, "target_rate": 1.00},
-    "runtime_metrics": {"target_cases": 3, "target_rate": 1.00},
+    "runtime_metrics": {"target_cases": 4, "target_rate": 1.00},
 }
 
 REVISION_TRACKING_CASES = [
@@ -432,6 +432,13 @@ REPLACEMENT_TRACKING_CASES = [
         "candidate": "there are probably, I don't know, three to five robots in industry for every one that's a personal robot.",
         "expected": "open_latin_clause",
         "source": "whisper-monitor-20260613-5 chunk 433",
+    },
+    {
+        "staged": "第一期有吃过。",
+        "candidate": "第一期我吃过哎不对第一期我去过没吃到对没买到卖光了",
+        "expected": "unconfirmed_cjk",
+        "confirmations": 2,
+        "source": "2026-06-15 Chinese monitor 20s chunk 131",
     },
 ]
 
@@ -910,6 +917,7 @@ FINAL_QUALITY_TRACKING_CASES = [
     {"text": "I love felelceline baby, baby, you oonly you, oh,你you can.", "language": "zh", "expected_flags": {"mixed_latin_zh"}, "source": "2026-06-14 avc-whisper.log.4 mixed latin zh"},
     {"text": "要 去 找", "language": "zh", "expected_flags": {"short_cjk", "no_end_marker"}, "source": "2026-06-14 monitor chunk 354"},
     {"text": "见 什 么 都 想 吃 这 可 怎 么 办 呀 我 看 见 大 闸 丸 了 人 刚 才 来 的 啊 肉 丸", "language": "zh", "expected_flags": {"no_end_marker", "spaced_cjk"}, "source": "2026-06-14 monitor chunk 723 spaced CJK output"},
+    {"text": "一 看 到 这 东 西 直 抢 趁 着 我 这 几 天 还 能 吃 冰 了 我 赶 紧 吃", "language": "zh", "expected_flags": {"no_end_marker", "spaced_cjk"}, "source": "2026-06-15 Chinese monitor 20s chunk 113"},
     {"text": "我跟你说，就这一 得脱鞋！哇，它是楼梯好高啊。Hello，活动们，大家下午好。", "language": "zh", "expected_flags": {"mixed_latin_zh", "cjk_internal_gap"}, "source": "2026-06-14 monitor chunk 890 internal CJK gap"},
     {"text": "对，他的 了，中国人主打一来了，所以叫我进去走。", "language": "zh", "expected_flags": {"cjk_internal_gap"}, "source": "2026-06-14 monitor chunk 801 internal CJK gap"},
     {"text": "真的，吃这个干热午茶必须得是这半肥瘦，就是宽肉带皮的还 汤的，有油饭吗？", "language": "zh", "expected_flags": {"cjk_internal_gap"}, "source": "2026-06-14 avc-whisper.log.1 chunk 1817 internal gap"},
@@ -934,6 +942,11 @@ RUNTIME_METRIC_TRACKING_CASES = [
         "metrics": {"final_quality_cjk_internal_gap": 1, "translation_skip_final_quality": 1},
         "expected": {"final_quality": 1, "translation_skip": 1},
         "source": "2026-06-14 translation skip quality diagnostic",
+    },
+    {
+        "metrics": {"stage_revision": 1, "stage_revision_changed": 1, "stage_revision_confirmation_reset": 1},
+        "expected": {"revision_changed": 1, "revision_reset": 1},
+        "source": "2026-06-15 Chinese monitor CJK revision reset",
     },
 ]
 
@@ -1006,6 +1019,8 @@ def _runtime_metric_summary(metrics: dict[str, int]) -> dict[str, int]:
         "final_quality": sum(value for key, value in metrics.items() if key.startswith("final_quality_")),
         "translation_skip": int(metrics.get("translation_skip_final_quality", 0)),
         "completed_coalesced": int(metrics.get("completed_coalesced", 0)),
+        "revision_changed": int(metrics.get("stage_revision_changed", 0)),
+        "revision_reset": int(metrics.get("stage_revision_confirmation_reset", 0)),
     }
 
 

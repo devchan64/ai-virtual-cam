@@ -489,6 +489,42 @@ class WhisperWindowGeometryTest(unittest.TestCase):
 
         self.assertEqual(window._stt_status_text.lines, [])
 
+    def test_hidden_partial_transcript_not_forwarded_to_stt_status_window(self) -> None:
+        class FakeRoot:
+            def after(self, delay, callback):
+                self.delay = delay
+                self.callback = callback
+
+        class FakeText:
+            def __init__(self) -> None:
+                self.lines = []
+
+            def insert(self, index, text, tag=None) -> None:
+                self.lines.append((index, text, tag))
+
+            def delete(self, start, end) -> None:
+                self.lines.append((start, end, "DELETE"))
+
+            def see(self, index) -> None:
+                self.lines.append((index, "SEE"))
+
+        window = WhisperTranscriptWindow.__new__(WhisperTranscriptWindow)
+        window._stt_status_text = FakeText()
+        window._text = FakeText()
+        window._translation_text = None
+        window._transcript_partial_active = False
+        window._translation_partial_active = False
+        window._root = FakeRoot()
+        window._events = queue.Queue()
+        window._update_line_numbers = lambda _widget: None
+
+        window._events.put(TranscriptEvent("transcript", "pending tail", display=False, final=False))
+        window._events.put(TranscriptEvent("transcript", "staged candidate", display=True, final=False))
+        window._poll_events()
+
+        self.assertNotIn(("end", "pending tail\n", FINAL_TEXT_TAG), window._stt_status_text.lines)
+        self.assertIn(("end", "staged candidate\n", FINAL_TEXT_TAG), window._stt_status_text.lines)
+
 
     def test_sanitizes_geometry_before_restore(self) -> None:
         self.assertEqual(
