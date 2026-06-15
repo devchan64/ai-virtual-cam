@@ -125,12 +125,16 @@ Whisper 계열 모델은 강력한 오프라인 전사 성능을 보이지만, �
 
 본 연구는 다국어 실시간 전사 및 번역 시스템에서 리비전 인지 확정 계층의 필요성을 제시했다. STT 모델의 원시 정확도, 문장 경계 검출, 확정 생명주기, 번역 품질은 서로 다른 실패 원인을 갖기 때문에 분리 평가되어야 한다. 특히 CJK 언어에서는 긴 문맥이 STT 안정성을 높일 수 있지만 final transcript 지연과 긴 문장 확정 문제를 유발한다. 따라서 실시간 전사 시스템은 문맥 윈도우와 확정 단위를 분리하고, 중복 억제와 리비전 생명주기를 명시적으로 계측해야 한다.
 
-## 참고 문헌 정리 예정
+## 참고 문헌
 
-- Whisper-Streaming: local agreement policy, self-adaptive latency
-- WhisperPipe: overlapping context window, dynamic buffering
+상세 참고 문헌과 프레젠테이션 긴 발화 세그먼트 설계 근거는 [`docs/2026-06-15-presentation-dictation-segmentation-references.md`](../2026-06-15-presentation-dictation-segmentation-references.md)에 별도로 정리한다. 핵심 근거는 다음과 같다.
+
+- Whisper-Streaming: local agreement policy와 self-adaptive latency
+- WhisperPipe: overlapping context window와 dynamic buffering
 - CarelessWhisper: encoder-decoder ASR의 causal streaming 전환 한계
 - Segment Any Text / wtpsplit SaT: 다국어 문장 분절
-- ASR punctuation restoration 연구
+- Streaming punctuation: 긴 받아쓰기에서 dynamic decoding window와 bounded lookahead 기반 문장부호/경계 후보
+- Speech translation segmentation: VAD/pause 기반 세그먼트가 문장/번역 단위와 불일치할 수 있다는 근거
+- Turn-taking / VAP: 발화 종료 보조 feature로만 사용하고 프레젠테이션 세그먼트 final의 주 결정 기준으로 사용하지 않는 비교군
 - Qwen3-ASR Technical Report 및 모델 카드
 - WeNet streaming/non-streaming E2E ASR
