@@ -30,7 +30,7 @@ TRACKING_TARGETS = {
     "translation_quality": {"target_cases": 8, "target_rate": 0.80},
     "coalesce": {"target_cases": 10, "target_rate": 1.00},
     "duplicate_suppression": {"target_cases": 4, "target_rate": 1.00},
-    "runtime_metrics": {"target_cases": 7, "target_rate": 1.00},
+    "runtime_metrics": {"target_cases": 9, "target_rate": 1.00},
 }
 
 REVISION_TRACKING_CASES = [
@@ -940,6 +940,16 @@ RUNTIME_METRIC_TRACKING_CASES = [
         "expected": {"raw_without_final": 1},
         "source": "2026-06-15 Chinese monitor raw STT present but no final output",
     },
+    {
+        "metrics": {"stage_finalize_before_replace": 1},
+        "expected": {"finalize_before_replace": 1},
+        "source": "2026-06-16 Chinese monitor completed candidate replaced stable staged before final",
+    },
+    {
+        "metrics": {"finalize_recent_echo_suppressed": 1},
+        "expected": {"recent_echo_suppressed": 1},
+        "source": "2026-06-16 Chinese monitor similar final alternative suppressed after committed final",
+    },
 ]
 
 
@@ -1016,6 +1026,8 @@ def _runtime_metric_summary(metrics: dict[str, int]) -> dict[str, int]:
         "input_queue_drops": int(metrics.get("input_queue_drops", 0)),
         "revision_candidate_quality_blocked": int(metrics.get("stage_revision_candidate_quality_blocked", 0)),
         "raw_without_final": int(metrics.get("raw_without_final", 0)),
+        "finalize_before_replace": int(metrics.get("stage_finalize_before_replace", 0)),
+        "recent_echo_suppressed": int(metrics.get("finalize_recent_echo_suppressed", 0)),
     }
 
 
@@ -1081,79 +1093,79 @@ COALESCE_TRACKING_CASES = [
     {
         "language": "zh",
         "sentences": ["放了放一下吧，自己迷你韩美就是使劲夸夸，我们知道吗？", "魔法师你在吸我。"],
-        "expected_count": 2,
+        "expected_count": 1,
         "source": "avc-whisper.log chunk 121",
     },
     {
         "language": "zh",
         "sentences": ["使使夸夸我们，你知道吗？", "魔法师，你在吸我的氧气吗？"],
-        "expected_count": 2,
+        "expected_count": 1,
         "source": "avc-whisper.log chunk 122",
     },
     {
         "language": "zh",
         "sentences": ["奎是什么？", "他说他不知道，我又不是。"],
-        "expected_count": 2,
+        "expected_count": 1,
         "source": "avc-whisper.log chunk 139",
     },
     {
         "language": "zh",
         "sentences": ["怎么啦？", "但餐厅的每一个角落真的很好看，尤其是中间划分出一个区域。", "中午的阳光透过玻璃洒进来，真。"],
-        "expected_count": 3,
+        "expected_count": 1,
         "source": "avc-whisper.log chunk 128",
     },
     {
         "language": "zh",
         "sentences": ["为什么不在九月？", "因为他八月手嘛，然后突破浪截真的有可能。", "哎，现在都十一月。"],
-        "expected_count": 3,
+        "expected_count": 1,
         "source": "avc-whisper.log chunk 158",
     },
     {
         "language": "zh",
         "sentences": ["Helps笨蛋，我们是笨蛋，你大家不笨蛋，它是芒果口味的。", "我一直以来你以为它是山楂。"],
-        "expected_count": 2,
+        "expected_count": 1,
         "source": "avc-whisper.log chunk 241",
     },
     {
         "language": "zh",
         "sentences": ["你大家不笨蛋，它是芒果口味的。", "我一直以来你以为它是山楂口味的，很好吃。", "哎，冰。"],
-        "expected_count": 3,
+        "expected_count": 1,
         "source": "avc-whisper.log chunk 242",
     },
     {
         "language": "zh",
         "sentences": ["唱的很高很高，是好朋友，你怎么容了？", "好朋友，我为什么还是这么猛烈？", "我们不是还要。"],
-        "expected_count": 3,
+        "expected_count": 1,
         "source": "avc-whisper.log chunk 251",
     },
     {
         "language": "zh",
         "sentences": ["怎么容了？", "好朋友，我为什么还是这么萌的呀？", "我们不是还要贴贴脸吗？", "你怎。"],
-        "expected_count": 4,
+        "expected_count": 1,
         "source": "avc-whisper.log chunk 252",
     },
     {
         "language": "zh",
         "sentences": ["果是怎么样？", "然后我让小哥哥给我拿了几台测试一下，就是室。"],
-        "expected_count": 2,
+        "expected_count": 1,
         "source": "avc-whisper.log chunk 269",
     },
     {
         "language": "zh",
         "sentences": ["果是怎么样？", "然后我让小哥哥给我拿了几台测试一下，就是室内室外光线不一样的。"],
-        "expected_count": 2,
+        "expected_count": 1,
         "source": "avc-whisper.log chunk 270",
     },
     {
         "language": "zh",
         "sentences": ["他们都会就是跟你拿你的包包然。", "后给你换上相对应的。"],
-        "expected_count": 2,
+        "expected_count": 1,
         "source": "avc-whisper.log.3 chunk 15722 unprocessed multi-completed zh",
     },
     {
         "language": "zh",
         "sentences": ["有一种莫名的熟悉感。", "第一次来韩国的时候是solo trip,去年是跟助理们一起来。"],
-        "expected_count": 2,
+        "expected_count": 1,
         "source": "avc-whisper.log.3 chunk 15777 unprocessed mixed zh-latin multi-completed",
     },
     {

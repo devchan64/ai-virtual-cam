@@ -47,6 +47,8 @@ from src.app.dictation_transcript_logic import (
     _should_finalize_replaced_sentence,
     _should_confirm_staged_sentence,
     _should_age_staged_sentence,
+    _should_finalize_before_replacement,
+    _is_recent_final_echo,
     _should_translate_staged_sentence,
     _should_translate_final_sentence,
     _split_completed_sentences,
@@ -640,6 +642,7 @@ class WhisperTranscriptWorker:
         step_seconds = float(self._cfg.stepSeconds)
         window_seconds = float(self._cfg.windowSeconds)
         commit_lag_seconds = float(self._cfg.commitLagSeconds)
+        sentence_finalize_age = int(getattr(self._cfg, "sentenceFinalizeAge", 3))
         step_samples = int(SAMPLE_RATE * step_seconds)
         window_samples = int(SAMPLE_RATE * window_seconds)
         language = self._cfg.language
@@ -671,6 +674,7 @@ class WhisperTranscriptWorker:
             f"translation_backend={self._cfg.translationBackend} "
             f"translation_target={self._cfg.translationTargetLanguage} beam_size={self._cfg.beamSize} "
             f"max_new_tokens={self._cfg.maxNewTokens} temperature={self._cfg.temperature} "
+            f"sentence_finalize_age={sentence_finalize_age} "
             f"without_timestamps=True translation_beam_size={self._cfg.translationBeamSize} "
             f"translation_max_new_tokens={self._cfg.translationMaxNewTokens}",
         )
@@ -707,6 +711,23 @@ class WhisperTranscriptWorker:
                 self._emit(
                     "status",
                     f"받아쓰기 AI 확정 후보 중복 무시: chunk={chunks} reason={reason} text={staged_before!r}",
+                    display=False,
+                )
+                return []
+            echo_source = next(
+                (
+                    recent
+                    for recent in reversed(self._recent_transcripts)
+                    if _is_recent_final_echo(output_sentence, recent, detected)
+                ),
+                None,
+            )
+            if echo_source is not None:
+                count_metric("finalize_recent_echo_suppressed")
+                self._emit(
+                    "status",
+                    "받아쓰기 AI 확정 후보 유사 대안 무시: "
+                    f"chunk={chunks} reason={reason} text={output_sentence!r} recent={echo_source!r}",
                     display=False,
                 )
                 return []
@@ -801,6 +822,7 @@ class WhisperTranscriptWorker:
                 staged_confirmations,
                 staged_forced,
                 staged_age,
+                sentence_finalize_age,
             )
             count_metric(f"stage_replace_decision_{replacement_reason}")
             self._emit(
@@ -811,8 +833,25 @@ class WhisperTranscriptWorker:
                 f"staged_tail={_diagnostic_tail(staged_sentence)} candidate_tail={_diagnostic_tail(candidate)}",
                 display=False,
             )
-            if _should_finalize_replaced_sentence(staged_sentence, candidate, staged_confirmations, staged_forced, staged_age):
+            if _should_finalize_replaced_sentence(
+                staged_sentence,
+                candidate,
+                staged_confirmations,
+                staged_forced,
+                staged_age,
+                sentence_finalize_age,
+            ):
                 finalized = finalize_staged_sentence(detected, f"replaced_{replacement_reason}")
+            elif _should_finalize_before_replacement(
+                staged_sentence,
+                detected,
+                staged_confirmations,
+                staged_age,
+                sentence_finalize_age,
+                staged_forced,
+            ):
+                count_metric("stage_finalize_before_replace")
+                finalized = finalize_staged_sentence(detected, "next_completed")
             else:
                 count_metric("stage_replaced_unconfirmed")
                 self._emit(
@@ -872,7 +911,7 @@ class WhisperTranscriptWorker:
                 return []
             staged_age += 1
             count_metric("stage_age_tick")
-            max_age = _sentence_max_age_chunks(staged_forced)
+            max_age = _sentence_max_age_chunks(staged_forced, sentence_finalize_age)
             if staged_age >= max_age:
                 count_metric("stage_age_finalize")
                 return finalize_staged_sentence(detected, "aged_forced" if staged_forced else "aged")
@@ -1186,8 +1225,10 @@ class WhisperTranscriptWorker:
                 stage_revision_count = chunk_lifecycle_metrics.get("stage_revision", 0)
                 stage_revision_changed_count = chunk_lifecycle_metrics.get("stage_revision_changed", 0)
                 stage_revision_reset_count = chunk_lifecycle_metrics.get("stage_revision_confirmation_reset", 0)
+                stage_finalize_before_replace_count = chunk_lifecycle_metrics.get("stage_finalize_before_replace", 0)
                 finalize_count = chunk_lifecycle_metrics.get("finalized", 0)
                 duplicate_suppressed_count = chunk_lifecycle_metrics.get("candidate_duplicate_suppressed", 0)
+                recent_echo_suppressed_count = chunk_lifecycle_metrics.get("finalize_recent_echo_suppressed", 0)
                 delta_trimmed_count = chunk_lifecycle_metrics.get("candidate_delta_trimmed", 0)
                 final_quality_count = sum(
                     value for key, value in chunk_lifecycle_metrics.items() if key.startswith("final_quality_")
@@ -1202,7 +1243,9 @@ class WhisperTranscriptWorker:
                     f"chunk={chunks} replace={stage_replace_count} replaced_unconfirmed={stage_replaced_unconfirmed_count} "
                     f"revision={stage_revision_count} revision_changed={stage_revision_changed_count} "
                     f"revision_reset={stage_revision_reset_count} finalized={finalize_count} "
-                    f"duplicate_suppressed={duplicate_suppressed_count} delta_trimmed={delta_trimmed_count} "
+                    f"finalize_before_replace={stage_finalize_before_replace_count} "
+                    f"duplicate_suppressed={duplicate_suppressed_count} recent_echo_suppressed={recent_echo_suppressed_count} "
+                    f"delta_trimmed={delta_trimmed_count} "
                     f"final_quality={final_quality_count} translation_skip={translation_skip_count} "
                     f"raw_without_final={raw_without_final_count} "
                     f"replace_unconfirmed_rate={stage_replaced_unconfirmed_count / max(stage_replace_count, 1):.2f} "

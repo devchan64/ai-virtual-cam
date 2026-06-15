@@ -1,7 +1,11 @@
 import unittest
 
 from src.app.sentence_boundary import LegacyRegexSentenceBoundaryDetector
-from src.app.dictation_transcript_logic import _should_finalize_boundary_candidate
+from src.app.dictation_transcript_logic import (
+    _is_recent_final_echo,
+    _should_finalize_before_replacement,
+    _should_finalize_boundary_candidate,
+)
 from src.app.dictation_window import (
     _collapse_adjacent_repeated_phrase_details,
     _collapse_adjacent_repeated_phrases,
@@ -371,7 +375,7 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
     def test_transcript_metrics_format_is_stable_for_log_analysis(self) -> None:
         self.assertEqual(_format_transcript_metrics({}), "none")
         self.assertEqual(
-            _format_transcript_metrics({"stage_revision": 2, "stage_start": 3, "stage_discard": 0}),
+            _format_transcript_metrics({"stage_revision": 2, "stage_start": 3, "stage_replaced_unconfirmed": 0}),
             "stage_revision=2,stage_start=3",
         )
 
@@ -427,7 +431,7 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
                 self.assertEqual(_replacement_decision_reason(staged, candidate, 1, False, 0), "partial_preserve")
                 self.assertTrue(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
 
-    def test_unconfirmed_replaced_stage_discards_tail_echo_from_log(self) -> None:
+    def test_unconfirmed_replaced_stage_suppresses_tail_echo_from_log(self) -> None:
         # Regression from avc-whisper.log chunk 76. The first candidate contains prior-sentence tail echo.
         staged = "근데 우리가 그런 얘기하지 골적으로 얘기하지 않죠"
         candidate = "우리가 그런 얘기하지 않습니다"
@@ -609,18 +613,122 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         self.assertEqual(_prefer_sentence_revision(staged, revised), revised)
         self.assertNotEqual(_replacement_decision_reason(staged, revised, 1, False, 0), "empty")
 
-    def test_chinese_unconfirmed_stage_does_not_age_finalize_from_no_speech_gap(self) -> None:
-        # Regression from 2026-06-13 zh monitoring chunk 94. Repeated no_speech
-        # gaps must not finalize a single-observation Chinese fragment.
+    def test_chinese_unconfirmed_stage_can_age_finalize_from_no_speech_gap(self) -> None:
+        # 2026-06-16 policy: CJK staged sentences also age. Otherwise replacement
+        # churn keeps most Chinese sentences provisional and prevents final output.
         staged = "他给出了两个拒绝绑匪要求的理由，从。"
 
-        self.assertFalse(_should_age_staged_sentence(staged, ""))
+        self.assertTrue(_should_age_staged_sentence(staged, ""))
         self.assertEqual(
             _replacement_decision_reason(staged, "保羅蓋蒂的這個說法是對的從古到今。", 1, False, 2),
             "unconfirmed_cjk",
         )
         self.assertFalse(
             _should_finalize_replaced_sentence(staged, "保羅蓋蒂的這個說法是對的從古到今。", 1, False, 2)
+        )
+        self.assertTrue(
+            _should_finalize_replaced_sentence(staged, "保羅蓋蒂的這個說法是對的從古到今。", 1, False, 3)
+        )
+
+    def test_chinese_short_fragment_waits_for_age_before_replacement_finalize(self) -> None:
+        # Regression from 2026-06-16 zh monitoring. The simplified lifecycle
+        # improved final generation but over-finalized short fragments before a
+        # better replacement had time to appear.
+        short_fragments = ["就是他", "个 吗", "排 排 排 这 个 吗"]
+        for fragment in short_fragments:
+            with self.subTest(fragment=fragment):
+                self.assertFalse(_should_finalize_before_replacement(fragment, "zh"))
+                self.assertFalse(
+                    _should_finalize_replaced_sentence(
+                        fragment,
+                        "那个枕头有点太硬了，就是是不是以后都要自己带自己的枕头？",
+                        1,
+                        False,
+                        2,
+                    )
+                )
+                self.assertTrue(
+                    _should_finalize_replaced_sentence(
+                        fragment,
+                        "那个枕头有点太硬了，就是是不是以后都要自己带自己的枕头？",
+                        1,
+                        False,
+                        3,
+                    )
+                )
+
+    def test_chinese_complete_sentence_can_finalize_before_replacement(self) -> None:
+        self.assertFalse(
+            _should_finalize_before_replacement(
+                "那个枕头有点太硬了，就是是不是以后都要自己带自己的枕头？",
+                "zh",
+            )
+        )
+        self.assertTrue(
+            _should_finalize_before_replacement(
+                "那个枕头有点太硬了，就是是不是以后都要自己带自己的枕头？",
+                "zh",
+                staged_confirmations=3,
+                staged_age=0,
+                sentence_finalize_age=3,
+            )
+        )
+        self.assertTrue(
+            _should_finalize_before_replacement(
+                "不重要，这种东西不用管它什么时候用得到。",
+                "zh",
+                staged_confirmations=1,
+                staged_age=3,
+                sentence_finalize_age=3,
+            )
+        )
+
+    def test_chinese_complete_sentence_does_not_finalize_before_replacement_on_first_observation(self) -> None:
+        # Regression from 2026-06-16 zh monitoring chunks 119 and 126.
+        # A completed-looking candidate can be a bad splice from the same
+        # sliding window, so it must survive the configured observation age
+        # before a following completed candidate can force it into final.
+        self.assertFalse(
+            _should_finalize_before_replacement(
+                "对啊，你会发现他每七百而已。",
+                "zh",
+                staged_confirmations=1,
+                staged_age=0,
+                sentence_finalize_age=3,
+            )
+        )
+        self.assertFalse(
+            _should_finalize_before_replacement(
+                "我靠柯南跟不二家的联名，他的脚步好可爱哦。",
+                "zh",
+                staged_confirmations=1,
+                staged_age=0,
+                sentence_finalize_age=3,
+            )
+        )
+
+    def test_chinese_similar_final_alternative_is_recent_echo_from_log(self) -> None:
+        cases = [
+            (
+                "这个也是，这个是，这也是，这个是上面是扁的。",
+                "哎，大家这边可以这个也是，这个是，这个是，这个是上面是扁的。",
+            ),
+            (
+                "哎，那你看你刚刚帮我刷，你哇，这很有诚意吧？",
+                "哎，那你要你刚刚帮我刷，你你看到台啊，这很有诚意吧？",
+            ),
+        ]
+        for recent, candidate in cases:
+            with self.subTest(candidate=candidate):
+                self.assertTrue(_is_recent_final_echo(candidate, recent, "zh"))
+
+    def test_distinct_chinese_sentence_is_not_recent_echo(self) -> None:
+        self.assertFalse(
+            _is_recent_final_echo(
+                "六百八这样子一杯，好啦，就是当做在喝星巴克啊。",
+                "对啊，星巴克的概念。",
+                "zh",
+            )
         )
 
 
@@ -646,11 +754,11 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         self.assertEqual(_replacement_decision_reason(staged, candidate, 3, False, 0), "confirmed")
         self.assertTrue(_should_finalize_replaced_sentence(staged, candidate, 3, False, 0))
 
-    def test_chinese_completed_fragments_from_same_chunk_preserve_boundary_units(self) -> None:
+    def test_chinese_completed_fragments_from_same_chunk_use_one_observation_unit(self) -> None:
         # Regression from 2026-06-14 zh monitoring chunks 121-122. Prior Chinese STT
         # punctuation can return multiple completed fragments for one sliding
-        # window. Preserve detector output so finalization can happen more
-        # frequently at model-provided boundaries.
+        # window. Treat them as one lifecycle observation so a later fragment in
+        # the same raw window cannot force a first-observation fragment to final.
         completed = [
             "放了放一下吧，自己迷你韩美就是使劲夸夸，我们知道吗？",
             "魔法师你在吸我。",
@@ -658,7 +766,7 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
 
         self.assertEqual(
             _coalesce_completed_sentences_for_staging(completed, "zh"),
-            completed,
+            ["放了放一下吧，自己迷你韩美就是使劲夸夸，我们知道吗？魔法师你在吸我。"],
         )
         self.assertEqual(_coalesce_completed_sentences_for_staging(completed, "ko"), completed)
 

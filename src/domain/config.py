@@ -774,24 +774,28 @@ class DictationAiConfig:
     stepSeconds: float
     windowSeconds: float
     commitLagSeconds: float
+    sentenceFinalizeAge: int
     beamSize: int
     maxNewTokens: int
     temperature: float
     stepSecondsEn: float
     windowSecondsEn: float
     commitLagSecondsEn: float
+    sentenceFinalizeAgeEn: int
     beamSizeEn: int
     maxNewTokensEn: int
     temperatureEn: float
     stepSecondsKo: float
     windowSecondsKo: float
     commitLagSecondsKo: float
+    sentenceFinalizeAgeKo: int
     beamSizeKo: int
     maxNewTokensKo: int
     temperatureKo: float
     stepSecondsZh: float
     windowSecondsZh: float
     commitLagSecondsZh: float
+    sentenceFinalizeAgeZh: int
     beamSizeZh: int
     maxNewTokensZh: int
     temperatureZh: float
@@ -831,18 +835,21 @@ class DictationAiConfig:
         step_seconds_en = float(lang_value("stepSeconds", "en", "stepSeconds"))
         window_seconds_en = float(lang_value("windowSeconds", "en", "windowSeconds"))
         commit_lag_seconds_en = float(lang_value("commitLagSeconds", "en", "commitLagSeconds"))
+        sentence_finalize_age_en = int(lang_value("sentenceFinalizeAge", "en", "sentenceFinalizeAge"))
         beam_size_en = int(lang_value("beamSize", "en", "beamSize"))
         max_new_tokens_en = int(lang_value("maxNewTokens", "en", "maxNewTokens"))
         temperature_en = float(lang_value("temperature", "en", "temperature"))
         step_seconds_ko = float(lang_value("stepSeconds", "ko", "stepSeconds"))
         window_seconds_ko = float(lang_value("windowSeconds", "ko", "windowSeconds"))
         commit_lag_seconds_ko = float(lang_value("commitLagSeconds", "ko", "commitLagSeconds"))
+        sentence_finalize_age_ko = int(lang_value("sentenceFinalizeAge", "ko", "sentenceFinalizeAge"))
         beam_size_ko = int(lang_value("beamSize", "ko", "beamSize"))
         max_new_tokens_ko = int(lang_value("maxNewTokens", "ko", "maxNewTokens"))
         temperature_ko = float(lang_value("temperature", "ko", "temperature"))
         step_seconds_zh = float(lang_value("stepSeconds", "zh", "stepSeconds"))
         window_seconds_zh = float(lang_value("windowSeconds", "zh", "windowSeconds"))
         commit_lag_seconds_zh = float(lang_value("commitLagSeconds", "zh", "commitLagSeconds"))
+        sentence_finalize_age_zh = int(lang_value("sentenceFinalizeAge", "zh", "sentenceFinalizeAge"))
         beam_size_zh = int(lang_value("beamSize", "zh", "beamSize"))
         max_new_tokens_zh = int(lang_value("maxNewTokens", "zh", "maxNewTokens"))
         temperature_zh = float(lang_value("temperature", "zh", "temperature"))
@@ -851,6 +858,7 @@ class DictationAiConfig:
                 step_seconds_en,
                 window_seconds_en,
                 commit_lag_seconds_en,
+                sentence_finalize_age_en,
                 beam_size_en,
                 max_new_tokens_en,
                 temperature_en,
@@ -859,6 +867,7 @@ class DictationAiConfig:
                 step_seconds_ko,
                 window_seconds_ko,
                 commit_lag_seconds_ko,
+                sentence_finalize_age_ko,
                 beam_size_ko,
                 max_new_tokens_ko,
                 temperature_ko,
@@ -867,6 +876,7 @@ class DictationAiConfig:
                 step_seconds_zh,
                 window_seconds_zh,
                 commit_lag_seconds_zh,
+                sentence_finalize_age_zh,
                 beam_size_zh,
                 max_new_tokens_zh,
                 temperature_zh,
@@ -979,24 +989,28 @@ class DictationAiConfig:
             stepSeconds=selected_runtime[0],
             windowSeconds=selected_runtime[1],
             commitLagSeconds=selected_runtime[2],
-            beamSize=selected_runtime[3],
-            maxNewTokens=selected_runtime[4],
-            temperature=selected_runtime[5],
+            sentenceFinalizeAge=selected_runtime[3],
+            beamSize=selected_runtime[4],
+            maxNewTokens=selected_runtime[5],
+            temperature=selected_runtime[6],
             stepSecondsEn=step_seconds_en,
             windowSecondsEn=window_seconds_en,
             commitLagSecondsEn=commit_lag_seconds_en,
+            sentenceFinalizeAgeEn=sentence_finalize_age_en,
             beamSizeEn=beam_size_en,
             maxNewTokensEn=max_new_tokens_en,
             temperatureEn=temperature_en,
             stepSecondsKo=step_seconds_ko,
             windowSecondsKo=window_seconds_ko,
             commitLagSecondsKo=commit_lag_seconds_ko,
+            sentenceFinalizeAgeKo=sentence_finalize_age_ko,
             beamSizeKo=beam_size_ko,
             maxNewTokensKo=max_new_tokens_ko,
             temperatureKo=temperature_ko,
             stepSecondsZh=step_seconds_zh,
             windowSecondsZh=window_seconds_zh,
             commitLagSecondsZh=commit_lag_seconds_zh,
+            sentenceFinalizeAgeZh=sentence_finalize_age_zh,
             beamSizeZh=beam_size_zh,
             maxNewTokensZh=max_new_tokens_zh,
             temperatureZh=temperature_zh,
@@ -1162,6 +1176,9 @@ class DictationAiConfig:
                     f"dictationAi.commitLagSeconds{selected_suffix} must be between 0.0 and less than dictationAi.windowSeconds{selected_suffix}"
                 )
             raise ValueError("dictationAi.commitLagSeconds must be between 0.0 and less than dictationAi.windowSeconds")
+        dictation_ai_spec("sentenceFinalizeAge").validate_range(
+            config.sentenceFinalizeAge, path="dictationAi.sentenceFinalizeAge"
+        )
         dictation_ai_spec("beamSize").validate_range(config.beamSize, path="dictationAi.beamSize")
         dictation_ai_spec("maxNewTokens").validate_range(config.maxNewTokens, path="dictationAi.maxNewTokens")
         dictation_ai_spec("temperature").validate_range(config.temperature, path="dictationAi.temperature")
@@ -1177,6 +1194,9 @@ class DictationAiConfig:
                 raise ValueError(
                     f"dictationAi.commitLagSeconds{suffix} must be between 0.0 and less than dictationAi.windowSeconds{suffix}"
                 )
+            dictation_ai_spec(f"sentenceFinalizeAge{suffix}").validate_range(
+                getattr(config, f"sentenceFinalizeAge{suffix}"), path=f"dictationAi.sentenceFinalizeAge{suffix}"
+            )
             dictation_ai_spec(f"beamSize{suffix}").validate_range(getattr(config, f"beamSize{suffix}"), path=f"dictationAi.beamSize{suffix}")
             dictation_ai_spec(f"maxNewTokens{suffix}").validate_range(
                 getattr(config, f"maxNewTokens{suffix}"), path=f"dictationAi.maxNewTokens{suffix}"

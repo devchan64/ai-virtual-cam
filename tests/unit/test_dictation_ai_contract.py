@@ -28,6 +28,10 @@ class WhisperContractTest(unittest.TestCase):
         self.assertEqual(defaults["stepSecondsZh"], 1.0)
         self.assertEqual(defaults["windowSecondsZh"], 12.0)
         self.assertEqual(defaults["commitLagSeconds"], 1.0)
+        self.assertEqual(defaults["sentenceFinalizeAge"], 3)
+        self.assertEqual(defaults["sentenceFinalizeAgeEn"], 3)
+        self.assertEqual(defaults["sentenceFinalizeAgeKo"], 3)
+        self.assertEqual(defaults["sentenceFinalizeAgeZh"], 3)
         self.assertEqual(defaults["maxNewTokens"], 192)
         self.assertEqual(defaults["postProcessingProfile"], "manual")
         self.assertEqual(dictation_ai_default("sentenceBoundaryBackendZh"), "sat")
@@ -63,6 +67,9 @@ class WhisperContractTest(unittest.TestCase):
         dictation_ai_spec("beamSize").validate_range(3, path="dictationAi.beamSize")
         with self.assertRaisesRegex(ValueError, "dictationAi.beamSize"):
             dictation_ai_spec("beamSize").validate_range(0, path="dictationAi.beamSize")
+        dictation_ai_spec("sentenceFinalizeAge").validate_range(3, path="dictationAi.sentenceFinalizeAge")
+        with self.assertRaisesRegex(ValueError, "dictationAi.sentenceFinalizeAge"):
+            dictation_ai_spec("sentenceFinalizeAge").validate_range(0, path="dictationAi.sentenceFinalizeAge")
 
 
 if __name__ == "__main__":

@@ -109,6 +109,7 @@ class DictationAiConfigTest(unittest.TestCase):
             dictation_ai_step_seconds=1.0,
             dictation_ai_window_seconds=4.0,
             dictation_ai_commit_lag_seconds=1.0,
+            dictation_ai_sentence_finalize_age=2,
             dictation_ai_beam_size=1,
             dictation_ai_max_new_tokens=128,
             dictation_ai_temperature=0.2,
@@ -162,24 +163,28 @@ class DictationAiConfigTest(unittest.TestCase):
                 "stepSeconds": 1.0,
                 "windowSeconds": 4.0,
                 "commitLagSeconds": 1.0,
+                "sentenceFinalizeAge": 2,
                 "beamSize": 1,
                 "maxNewTokens": 128,
                 "temperature": 0.2,
                 "stepSecondsEn": 1.0,
                 "windowSecondsEn": 4.0,
                 "commitLagSecondsEn": 1.0,
+                "sentenceFinalizeAgeEn": 2,
                 "beamSizeEn": 1,
                 "maxNewTokensEn": 128,
                 "temperatureEn": 0.2,
                 "stepSecondsKo": 1.0,
                 "windowSecondsKo": 7.0,
                 "commitLagSecondsKo": 1.0,
+                "sentenceFinalizeAgeKo": 3,
                 "beamSizeKo": 3,
                 "maxNewTokensKo": 192,
                 "temperatureKo": 0.0,
                 "stepSecondsZh": 1.0,
                 "windowSecondsZh": 12.0,
                 "commitLagSecondsZh": 1.0,
+                "sentenceFinalizeAgeZh": 3,
                 "beamSizeZh": 3,
                 "maxNewTokensZh": 192,
                 "temperatureZh": 0.0,
@@ -248,6 +253,7 @@ class DictationAiConfigTest(unittest.TestCase):
             dictation_ai_window_seconds_ko=7.0,
             dictation_ai_window_seconds_zh=12.0,
             dictation_ai_step_seconds_zh=1.0,
+            dictation_ai_sentence_finalize_age_zh=4,
         )
 
         self.assertEqual(config["dictationAi"]["windowSeconds"], 12.0)
@@ -257,6 +263,7 @@ class DictationAiConfigTest(unittest.TestCase):
         self.assertEqual(config["dictationAi"]["stepSecondsEn"], 1.0)
         self.assertEqual(config["dictationAi"]["stepSecondsKo"], 1.0)
         self.assertEqual(config["dictationAi"]["stepSecondsZh"], 1.0)
+        self.assertEqual(config["dictationAi"]["sentenceFinalizeAgeZh"], 4)
 
     def test_app_config_loads_whisper_settings(self) -> None:
         config = build_config(

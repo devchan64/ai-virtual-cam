@@ -28,6 +28,9 @@ SHORT_CJK_FINAL_UNITS = 10
 
 def _coalesce_completed_sentences_for_staging(sentences: list[str], language: str) -> list[str]:
     normalized_sentences = [_normalized_text(sentence) for sentence in sentences if _normalized_text(sentence)]
+    normalized_language = str(language or "").strip().lower()
+    if normalized_language == "zh" and len(normalized_sentences) > 1:
+        return ["".join(normalized_sentences)]
     return normalized_sentences
 
 
@@ -822,8 +825,11 @@ def _sentence_required_confirmations(forced: bool) -> int:
     return FORCED_SENTENCE_CONFIRM_CHUNKS if forced else SENTENCE_CONFIRM_CHUNKS
 
 
-def _sentence_max_age_chunks(forced: bool) -> int:
-    return FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS if forced else SENTENCE_CONFIRM_MAX_AGE_CHUNKS
+def _sentence_max_age_chunks(forced: bool, base_age: int | None = None) -> int:
+    if base_age is None:
+        return FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS if forced else SENTENCE_CONFIRM_MAX_AGE_CHUNKS
+    normalized_base_age = max(1, int(base_age))
+    return normalized_base_age + 1 if forced else normalized_base_age
 
 
 _KOREAN_FINAL_WORD_SUFFIXES = ("다", "요", "죠", "까")
@@ -961,6 +967,7 @@ def _replacement_decision_reason(
     staged_confirmations: int,
     staged_forced: bool,
     staged_age: int,
+    sentence_finalize_age: int | None = None,
 ) -> str:
     staged_words = _word_units(staged_sentence)
     if not staged_words:
@@ -971,10 +978,10 @@ def _replacement_decision_reason(
         return "open_latin_clause"
     if staged_confirmations >= _sentence_required_confirmations(staged_forced):
         return "confirmed"
+    if staged_age >= _sentence_max_age_chunks(staged_forced, sentence_finalize_age):
+        return "aged"
     if _has_cjk_words(staged_words):
         return "unconfirmed_cjk"
-    if staged_age >= _sentence_max_age_chunks(staged_forced):
-        return "aged"
 
     candidate_delta = _sentence_output_delta(staged_sentence, candidate)
     if candidate_delta == "":
@@ -992,6 +999,7 @@ def _should_finalize_replaced_sentence(
     staged_confirmations: int,
     staged_forced: bool,
     staged_age: int,
+    sentence_finalize_age: int | None = None,
 ) -> bool:
     reason = _replacement_decision_reason(
         staged_sentence,
@@ -999,6 +1007,7 @@ def _should_finalize_replaced_sentence(
         staged_confirmations,
         staged_forced,
         staged_age,
+        sentence_finalize_age,
     )
     if reason == "confirmed":
         return _should_confirm_staged_sentence(staged_sentence, staged_confirmations, staged_forced)
@@ -1037,6 +1046,50 @@ def _should_finalize_boundary_candidate(
     return not flags.intersection({"empty", "spaced_cjk", "cjk_repeated_ngram", "latin_only_for_zh"})
 
 
+def _should_finalize_before_replacement(
+    sentence: str,
+    language: str,
+    staged_confirmations: int = 0,
+    staged_age: int = 0,
+    sentence_finalize_age: int | None = None,
+    staged_forced: bool = False,
+) -> bool:
+    if not _should_finalize_replaced_sentence(
+        sentence,
+        "",
+        staged_confirmations,
+        staged_forced,
+        staged_age,
+        sentence_finalize_age,
+    ):
+        return False
+    flags = set(_final_sentence_diagnostic_flags(sentence, language))
+    if flags.intersection({"empty", "spaced_cjk", "cjk_repeated_ngram", "latin_only_for_zh"}):
+        return False
+    if _is_cjk_text(sentence) and flags.intersection({"short_cjk", "cjk_internal_gap", "no_end_marker"}):
+        return False
+    return True
+
+
+def _is_recent_final_echo(candidate: str, recent_sentence: str, language: str) -> bool:
+    normalized_language = str(language or "").strip().lower()
+    if normalized_language != "zh" and not (_is_cjk_text(candidate) and _is_cjk_text(recent_sentence)):
+        return False
+    candidate_words = _word_units(candidate)
+    recent_words = _word_units(recent_sentence)
+    if min(len(candidate_words), len(recent_words)) < 8:
+        return False
+    ratio = SequenceMatcher(None, recent_words, candidate_words, autojunk=False).ratio()
+    if ratio >= 0.78:
+        return True
+    _best_i, _best_j, common_run = _best_common_word_run(recent_words, candidate_words)
+    shorter = min(len(candidate_words), len(recent_words))
+    longer = max(len(candidate_words), len(recent_words))
+    if common_run / max(shorter, 1) >= 0.65 and (longer - common_run) <= max(8, int(longer * 0.35)):
+        return True
+    return False
+
+
 def _is_short_staged_suffix_repeat(staged_sentence: str, pending_text: str) -> bool:
     staged_words = _word_units(staged_sentence)
     pending_words = _word_units(pending_text)
@@ -1049,8 +1102,6 @@ def _is_short_staged_suffix_repeat(staged_sentence: str, pending_text: str) -> b
 
 def _should_age_staged_sentence(staged_sentence: str, pending_text: str) -> bool:
     if not staged_sentence:
-        return False
-    if _is_cjk_text(staged_sentence):
         return False
     if pending_text and _is_short_staged_suffix_repeat(staged_sentence, pending_text):
         return True

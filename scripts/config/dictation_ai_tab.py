@@ -303,7 +303,7 @@ def build_whisper_tab(
         runtime_frame,
         runtime_row,
         "hint.dictation_ai_speed",
-        "업데이트 간격/컨텍스트/확정 지연은 공통 STT 스트리밍 설정입니다. 확정 지연은 윈도우 끝의 불안정한 tail을 잠시 보류하는 값이며, STT 결과 문장 경계 처리 모델이 찾은 후보도 별도 재확인 과정을 거친 뒤 final로 출력됩니다. Beam, 최대 토큰, temperature, 연산 타입은 선택한 STT 모델 타입이 지원할 때만 표시됩니다.",
+        "업데이트 간격/컨텍스트/확정 지연은 공통 STT 스트리밍 설정입니다. 확정 지연은 윈도우 끝의 불안정한 tail을 잠시 보류하는 값입니다. Beam, 최대 토큰, temperature, 연산 타입은 선택한 STT 모델 타입이 지원할 때만 표시됩니다.",
     )
     gui._dictation_ai_backend_option_parent = runtime_frame
     gui._dictation_ai_backend_option_rows = {
@@ -338,6 +338,18 @@ def build_whisper_tab(
         label_key="label.dictation_ai_sentence_boundary_model",
     )
     boundary_row += 1
+    gui._add_slider(
+        boundary_frame,
+        boundary_row,
+        "dictation_ai_sentence_finalize_age",
+        gui._tr("label.dictation_ai_sentence_finalize_age", "문장 확정 관찰 횟수"),
+        dictation_ai_default("sentenceFinalizeAge"),
+        1,
+        8,
+        resolution=1,
+        label_key="label.dictation_ai_sentence_finalize_age",
+    )
+    boundary_row += 1
     stt_boundary_hint_row = boundary_row
     _add_hint(
         gui,
@@ -345,7 +357,7 @@ def build_whisper_tab(
         boundary_frame,
         boundary_row,
         "hint.dictation_ai_sentence_boundary",
-        "STT 결과 문장 경계 처리는 STT가 만든 텍스트를 completed/pending 후보로 나누는 단계입니다. 모든 STT 언어에서 이 backend/model을 사용합니다.",
+        "STT 결과 문장 경계 처리는 STT가 만든 텍스트를 completed/pending 후보로 나누고, 문장 확정 관찰 횟수에 따라 후보를 final로 확정하는 단계입니다. 모든 STT 언어에서 이 backend/model을 사용합니다.",
     )
     gui._dictation_ai_stt_boundary_parent = boundary_frame
     gui._dictation_ai_stt_boundary_rows = [stt_boundary_backend_row, stt_boundary_model_row, stt_boundary_hint_row]

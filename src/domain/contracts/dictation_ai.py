@@ -166,6 +166,7 @@ DICTATION_AI_CONTRACT: dict[str, ConfigFieldSpec] = {
     "stepSeconds": ConfigFieldSpec("stepSeconds", 2.0, float, min_value=0.5, max_value=5.0),
     "windowSeconds": ConfigFieldSpec("windowSeconds", 7.0, float, min_value=1.0, max_value=30.0),
     "commitLagSeconds": ConfigFieldSpec("commitLagSeconds", 1.0, float, min_value=0.0),
+    "sentenceFinalizeAge": ConfigFieldSpec("sentenceFinalizeAge", 3, int, min_value=1, max_value=8),
     "beamSize": ConfigFieldSpec("beamSize", 3, int, min_value=1, max_value=8),
     "maxNewTokens": ConfigFieldSpec("maxNewTokens", 192, int, min_value=16, max_value=512),
     "temperature": ConfigFieldSpec("temperature", 0.0, float, min_value=0.0, max_value=1.0),
@@ -173,6 +174,9 @@ DICTATION_AI_CONTRACT: dict[str, ConfigFieldSpec] = {
     "windowSecondsEn": ConfigFieldSpec("windowSecondsEn", 7.0, float, min_value=1.0, max_value=30.0, ui_group="runtime.en"),
     "commitLagSecondsEn": ConfigFieldSpec(
         "commitLagSecondsEn", 1.0, float, min_value=0.0, ui_group="runtime.en"
+    ),
+    "sentenceFinalizeAgeEn": ConfigFieldSpec(
+        "sentenceFinalizeAgeEn", 3, int, min_value=1, max_value=8, ui_group="runtime.en"
     ),
     "beamSizeEn": ConfigFieldSpec("beamSizeEn", 3, int, min_value=1, max_value=8, ui_group="runtime.en"),
     "maxNewTokensEn": ConfigFieldSpec("maxNewTokensEn", 192, int, min_value=16, max_value=512, ui_group="runtime.en"),
@@ -182,6 +186,9 @@ DICTATION_AI_CONTRACT: dict[str, ConfigFieldSpec] = {
     "commitLagSecondsKo": ConfigFieldSpec(
         "commitLagSecondsKo", 1.0, float, min_value=0.0, ui_group="runtime.ko"
     ),
+    "sentenceFinalizeAgeKo": ConfigFieldSpec(
+        "sentenceFinalizeAgeKo", 3, int, min_value=1, max_value=8, ui_group="runtime.ko"
+    ),
     "beamSizeKo": ConfigFieldSpec("beamSizeKo", 3, int, min_value=1, max_value=8, ui_group="runtime.ko"),
     "maxNewTokensKo": ConfigFieldSpec("maxNewTokensKo", 192, int, min_value=16, max_value=512, ui_group="runtime.ko"),
     "temperatureKo": ConfigFieldSpec("temperatureKo", 0.0, float, min_value=0.0, max_value=1.0, ui_group="runtime.ko"),
@@ -189,6 +196,9 @@ DICTATION_AI_CONTRACT: dict[str, ConfigFieldSpec] = {
     "windowSecondsZh": ConfigFieldSpec("windowSecondsZh", 12.0, float, min_value=1.0, max_value=30.0, ui_group="runtime.zh"),
     "commitLagSecondsZh": ConfigFieldSpec(
         "commitLagSecondsZh", 1.0, float, min_value=0.0, ui_group="runtime.zh"
+    ),
+    "sentenceFinalizeAgeZh": ConfigFieldSpec(
+        "sentenceFinalizeAgeZh", 3, int, min_value=1, max_value=8, ui_group="runtime.zh"
     ),
     "beamSizeZh": ConfigFieldSpec("beamSizeZh", 3, int, min_value=1, max_value=8, ui_group="runtime.zh"),
     "maxNewTokensZh": ConfigFieldSpec("maxNewTokensZh", 192, int, min_value=16, max_value=512, ui_group="runtime.zh"),

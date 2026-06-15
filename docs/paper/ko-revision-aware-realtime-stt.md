@@ -65,17 +65,19 @@ Whisper 계열 모델은 강력한 오프라인 전사 성능을 보이지만, �
 - `stage_start`: 새 후보가 staged 상태로 진입한다.
 - `stage_revision`: 다음 윈도우의 후보가 기존 staged 후보의 리비전으로 판정된다.
 - `stage_replace`: 다음 후보가 리비전이 아닌 별도 후보로 판정된다.
-- `stage_discard`: 기존 staged 후보가 확정되지 못하고 폐기된다.
+- `stage_replaced_unconfirmed`: 기존 staged 후보가 확정 기준에 도달하지 못한 상태에서 새 관찰 후보로 교체된다.
+- `stage_finalize_before_replace`: 새 completed 후보가 들어오기 전에 관찰 횟수 기준을 통과한 기존 staged 후보를 먼저 확정한다.
+- `finalize_recent_echo_suppressed`: 이미 final로 확정한 문장과 유사한 대체 후보가 같은 위치에서 다시 등장해 중복 출력을 억제한다.
 - `finalized`: 후보가 final transcript로 확정된다.
 - `candidate_duplicate_suppressed`: 이미 committed된 내용과 중복되어 출력하지 않는다.
 
-일반 후보는 여러 chunk에서 재확인된 뒤 확정된다. 강제 확정은 pending 길이와 pending 관측 횟수가 임계치를 넘을 때만 제한적으로 사용한다. 한국어의 열린 절(open Korean clause), 중국어의 짧은 CJK fragment, 문장부호 없는 후보는 확정 조건을 더 보수적으로 적용한다.
+일반 후보는 여러 chunk에서 재확인된 뒤 확정된다. 현재 운영 계약은 `sentenceFinalizeAge`로 staged 후보의 관찰 횟수를 정의하고, 기본값 3회를 기준으로 한다. 중국어에서 한 STT 윈도우가 여러 completed 후보를 반환하면 하나의 관찰 단위로 병합해 같은 chunk 안 후속 후보가 첫 관찰 후보를 즉시 확정시키지 않도록 한다. 강제 확정은 pending 길이와 pending 관측 횟수가 임계치를 넘을 때만 제한적으로 사용한다. 한국어의 열린 절(open Korean clause), 중국어의 짧은 CJK fragment, 문장부호 없는 후보는 확정 조건을 더 보수적으로 적용한다.
 
 ## 6. 문맥 윈도우와 확정 단위
 
 문맥 윈도우는 STT 모델에 전달되는 오디오 범위를 의미한다. 긴 문맥 윈도우는 모델이 더 많은 문맥을 보고 동음어와 문장 구조를 판단하게 해 전사 안정성을 높일 수 있다. 그러나 final transcript는 사용자가 보는 텍스트이므로 낮은 지연과 적절한 문장 길이가 필요하다.
 
-운영 관측에서는 중국어 `windowSeconds=30`이 raw STT 안정성을 높이는 경향을 보였지만, final transcript가 긴 문장으로 묶이고 갱신이 늦어지는 문제가 관측되었다. 이후 원문창이 raw STT가 아니라 staged 후보를 표시하던 문제를 수정하면서 작은 윈도우 품질에 대한 해석을 재검토했다. 현재 기본 계약은 STT 언어별로 분리하며, 영어/한국어는 `windowSeconds=7`, `stepSeconds=1`, `commitLagSeconds=2`, `maxNewTokens=192`를 기준으로 하고, 중국어는 `windowSeconds=12`, `stepSeconds=1`, `commitLagSeconds=2`, `maxNewTokens=192`를 기준으로 한다. 16초, 20초, 24초, 30초 윈도우는 중국어 장문 안정성 비교 실험값으로 유지한다.
+운영 관측에서는 중국어 `windowSeconds=30`이 raw STT 안정성을 높이는 경향을 보였지만, final transcript가 긴 문장으로 묶이고 갱신이 늦어지는 문제가 관측되었다. 이후 원문창이 raw STT가 아니라 staged 후보를 표시하던 문제를 수정하면서 작은 윈도우 품질에 대한 해석을 재검토했다. 현재 기본 계약은 STT 언어별로 분리하며, 영어/한국어는 `windowSeconds=7`, `stepSeconds=1`, `commitLagSeconds=1`, `sentenceFinalizeAge=3`, `maxNewTokens=192`를 기준으로 하고, 중국어는 `windowSeconds=12`, `stepSeconds=1`, `commitLagSeconds=1`, `sentenceFinalizeAge=3`, `maxNewTokens=192`를 기준으로 한다. 16초, 20초, 24초, 30초 윈도우는 중국어 장문 안정성 비교 실험값으로 유지한다.
 
 ## 7. 평가 지표
 
@@ -88,9 +90,9 @@ Whisper 계열 모델은 강력한 오프라인 전사 성능을 보이지만, �
 | `revision` | 이전 partial/final 문장이 새 STT 윈도우에서 올바르게 갱신되는지 |
 | `distinct` | 서로 다른 문장을 잘못된 revision으로 병합하지 않는지 |
 | `collapse` | 같은 의미의 인접 반복 문구를 줄이는지 |
-| `replacement` | staged 후보 교체 시 보존/폐기/확정 결정이 의도와 맞는지 |
+| `replacement` | staged 후보 교체 시 교체/확정/중복 억제 결정이 의도와 맞는지 |
 | `pending` | 긴 pending이 확정되지 않는 사유를 추적하는지 |
-| `coalesce` | 중국어 completed 후보를 같은 관측 단위로 병합하는지 |
+| `coalesce` | 중국어 completed 후보를 같은 STT 윈도우 관찰 단위로 병합하고 영어/한국어 경계 단위는 보존하는지 |
 | `duplicate_suppression` | 이미 확정된 문장의 재출력을 억제하는지 |
 | `final_quality` | final 후보가 CJK 반복 n-gram, 내부 공백, 과도한 fragment 같은 품질 위험을 갖는지 |
 | `pending_quality` | pending 버퍼가 다음 STT 윈도우와 잘못 접합되거나 반복 누적되는지 |
@@ -103,7 +105,7 @@ Whisper 계열 모델은 강력한 오프라인 전사 성능을 보이지만, �
 
 한국어와 영어에서는 Whisper large-v3 기반 전사가 상대적으로 안정적이었다. 중국어에서는 Whisper/faster-whisper의 의미 보존과 문장 구조가 부족했고, Qwen3-ASR 0.6B가 더 나은 후보로 관측되었다. FunASR 계열은 처리 속도는 빠르지만 의미 보존, stage churn, 확정률에서 불리했다.
 
-2026-06-14 중국어 30분 모니터링에서는 stage replace/discard가 많이 발생했고, 계산 시간보다 후보 생명주기가 병목으로 나타났다. `windowSeconds=30`은 raw STT 흔들림을 줄였지만, 긴 문장 확정과 final 지연을 증가시켰다.
+2026-06-14 중국어 30분 모니터링에서는 stage replace/unconfirmed replacement가 많이 발생했고, 계산 시간보다 후보 생명주기가 병목으로 나타났다. `windowSeconds=30`은 raw STT 흔들림을 줄였지만, 긴 문장 확정과 final 지연을 증가시켰다. 2026-06-16 로그에서는 한 STT chunk 안의 후속 completed 후보가 첫 관찰 후보를 `next_completed`로 즉시 final 확정시키는 사례가 관측되어, 중국어 multi-completed 후보를 하나의 관찰 단위로 병합하고 교체 직전 확정에 `sentenceFinalizeAge` 기준을 적용했다.
 
 2026-06-15 로그에서는 pending 텍스트와 다음 STT 윈도우가 같은 CJK 구간을 내부 중간부터 다시 내보내는 현상이 관측되었다. 이 문제는 문장 경계 모델의 실패라기보다 pending/new 접합 단계의 문제였다. 이에 따라 CJK no-space 텍스트에서 긴 내부 prefix overlap이 확인되면 `pending prefix + new_text`로 병합하는 접합 무결성 보정을 적용했다.
 
