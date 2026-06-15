@@ -7,6 +7,7 @@ from src.app.whisper_window import (
     _final_sentence_diagnostic_flags,
     _normalized_text,
     _pending_overrun_reason,
+    _pending_text_diagnostic_flags,
     _replacement_decision_reason,
     _should_stage_replacement_candidate,
     _sentence_output_delta,
@@ -24,12 +25,13 @@ TRACKING_TARGETS = {
     "stability": {"target_cases": 10, "target_rate": 0.80},
     "replacement": {"target_cases": 11, "target_rate": 0.90},
     "pending": {"target_cases": 10, "target_rate": 0.90},
+    "pending_quality": {"target_cases": 1, "target_rate": 1.00},
     "final_quality": {"target_cases": 8, "target_rate": 0.90},
     "translation_quality": {"target_cases": 8, "target_rate": 0.80},
     "coalesce": {"target_cases": 10, "target_rate": 1.00},
     "stage_candidate": {"target_cases": 4, "target_rate": 1.00},
     "duplicate_suppression": {"target_cases": 4, "target_rate": 1.00},
-    "runtime_metrics": {"target_cases": 4, "target_rate": 1.00},
+    "runtime_metrics": {"target_cases": 5, "target_rate": 1.00},
 }
 
 REVISION_TRACKING_CASES = [
@@ -506,6 +508,20 @@ PENDING_TRACKING_CASES = [
     },
 ]
 
+PENDING_QUALITY_TRACKING_CASES = [
+    {
+        "pending": (
+            "干里面得这么吃，把干里面盛勺子里，进我这吃的就是像那觉得乒乓球一样，"
+            "干面得这么吃，把干面盛勺子里，进去再快点汤手一样，干面得这么吃，"
+            "把干面盛勺子里，进去再快点汤，干粒面得这么吃，把干粒面盛勺子里，进去再快点汤，"
+        ),
+        "language": "zh",
+        "chunks": 4,
+        "expected_flags": {"cjk_repeated_ngram"},
+        "source": "2026-06-15 16s/1s Chinese monitor pending chunks 26-28",
+    },
+]
+
 STABILITY_TRACKING_SEQUENCES = [
     [
         "이자 비용 줄어들면서 얘는 자동적으로 또 떨어지는 시스템이 구축이 된다는 거죠 지금과는",
@@ -922,6 +938,12 @@ FINAL_QUALITY_TRACKING_CASES = [
     {"text": "对，他的 了，中国人主打一来了，所以叫我进去走。", "language": "zh", "expected_flags": {"cjk_internal_gap"}, "source": "2026-06-14 monitor chunk 801 internal CJK gap"},
     {"text": "真的，吃这个干热午茶必须得是这半肥瘦，就是宽肉带皮的还 汤的，有油饭吗？", "language": "zh", "expected_flags": {"cjk_internal_gap"}, "source": "2026-06-14 avc-whisper.log.1 chunk 1817 internal gap"},
     {"text": "它是先做成一个寿司条，然后把这米再切断了，摆成四个墩墩，然后就是火山的底座，然后上面这个撒的就更像熔岩 他们这儿还有这个特殊菜单。", "language": "zh", "expected_flags": {"cjk_internal_gap"}, "source": "2026-06-15 avc-whisper.log chunk 3039 suppressed duplicate gap"},
+    {
+        "text": "招牌咖喱面，然后再喝一个阿玛胡药招牌咖喱面，然后再喝一个阿玛胡耀诗，石耀虎胡耀诗，米然后再喝一个阿玛胡耀诗，师耀虎胡耀诗，米粉餐面，两餐，好，我再给胡药师，师咬虎胡药师，米粉掺面，两餐，好，我再给你找一家吃的啊，咱现白老师，米粉掺面，两掺。好，我再给你找一家吃的啊。咱现在还差一家，现找。",
+        "language": "zh",
+        "expected_flags": {"cjk_repeated_ngram"},
+        "source": "2026-06-15 10s Chinese monitor chunk 83 repeated CJK span",
+    },
     {"text": "妈呀，隐形眼镜掉这午茶里了。又是没吃过的味道。嗯。", "language": "zh", "expected_flags": set(), "source": "2026-06-14 avc-whisper.log.1 chunk 1820 stable final"},
     {"text": "看起来好好吃啊，你真的有很多小吃呢，我看到。", "language": "zh", "expected_flags": set(), "source": "2026-06-14 monitor chunk 50 stable comparison"},
 ]
@@ -947,6 +969,11 @@ RUNTIME_METRIC_TRACKING_CASES = [
         "metrics": {"stage_revision": 1, "stage_revision_changed": 1, "stage_revision_confirmation_reset": 1},
         "expected": {"revision_changed": 1, "revision_reset": 1},
         "source": "2026-06-15 Chinese monitor CJK revision reset",
+    },
+    {
+        "metrics": {"input_queue_drops": 5},
+        "expected": {"input_queue_drops": 5},
+        "source": "2026-06-15 30s/1s Chinese monitor Pulse queue saturation",
     },
 ]
 
@@ -1021,6 +1048,7 @@ def _runtime_metric_summary(metrics: dict[str, int]) -> dict[str, int]:
         "completed_coalesced": int(metrics.get("completed_coalesced", 0)),
         "revision_changed": int(metrics.get("stage_revision_changed", 0)),
         "revision_reset": int(metrics.get("stage_revision_confirmation_reset", 0)),
+        "input_queue_drops": int(metrics.get("input_queue_drops", 0)),
     }
 
 
@@ -1186,6 +1214,22 @@ def _make_pending_tracking_test(index: int, case: dict[str, object]):
         self._record("pending", f"pending_{index:03d}", matched)
     return test
 
+
+def _make_pending_quality_tracking_test(index: int, case: dict[str, object]):
+    def test(self: WhisperPerformanceTrackingTest) -> None:
+        actual = set(
+            _pending_text_diagnostic_flags(
+                str(case["pending"]),
+                str(case["language"]),
+                int(case["chunks"]),
+            )
+        )
+        expected = set(case["expected_flags"])
+        matched = expected.issubset(actual)
+        self._record("pending_quality", f"pending_quality_{index:03d}", matched)
+    return test
+
+
 def _make_replacement_tracking_test(index: int, case: dict[str, object]):
     def test(self: WhisperPerformanceTrackingTest) -> None:
         actual = _replacement_decision_reason(
@@ -1267,6 +1311,13 @@ for _index, _case in enumerate(RUNTIME_METRIC_TRACKING_CASES, 1):
         WhisperPerformanceTrackingTest,
         f"test_tracking_runtime_metrics_{_index:03d}",
         _make_runtime_metric_tracking_test(_index, _case),
+    )
+
+for _index, _case in enumerate(PENDING_QUALITY_TRACKING_CASES, 1):
+    setattr(
+        WhisperPerformanceTrackingTest,
+        f"test_tracking_pending_quality_{_index:03d}",
+        _make_pending_quality_tracking_test(_index, _case),
     )
 
 for _index, _case in enumerate(REVISION_TRACKING_CASES, 1):

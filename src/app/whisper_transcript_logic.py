@@ -882,6 +882,23 @@ def _has_cjk_internal_space_gap(text: str) -> bool:
     return False
 
 
+def _has_repeated_cjk_ngram(words: list[str]) -> bool:
+    cjk_units = [word for word in words if _has_cjk_words([word])]
+    if len(cjk_units) < 40:
+        return False
+    for size in (14, 12, 10, 8):
+        seen: dict[tuple[str, ...], int] = {}
+        for index in range(0, len(cjk_units) - size + 1):
+            ngram = tuple(cjk_units[index : index + size])
+            if len(set(ngram)) < max(4, size // 3):
+                continue
+            previous = seen.get(ngram)
+            if previous is not None and index - previous >= size:
+                return True
+            seen.setdefault(ngram, index)
+    return False
+
+
 def _final_sentence_diagnostic_flags(sentence: str, language: str) -> tuple[str, ...]:
     normalized = _normalized_text(sentence)
     words = _word_units(normalized)
@@ -902,6 +919,8 @@ def _final_sentence_diagnostic_flags(sentence: str, language: str) -> tuple[str,
             flags.append("spaced_cjk")
         if _has_cjk_internal_space_gap(normalized):
             flags.append("cjk_internal_gap")
+        if _has_repeated_cjk_ngram(words):
+            flags.append("cjk_repeated_ngram")
     if normalized_language == "zh" and has_latin and not has_cjk:
         flags.append("latin_only_for_zh")
     elif normalized_language == "zh" and has_latin and has_cjk:
@@ -917,6 +936,8 @@ def _should_confirm_staged_sentence(staged_sentence: str, staged_confirmations: 
     if _is_cjk_text(staged_sentence):
         flags = set(_final_sentence_diagnostic_flags(staged_sentence, "zh"))
         if "spaced_cjk" in flags:
+            return False
+        if "cjk_repeated_ngram" in flags:
             return False
         if {"short_cjk", "no_end_marker"}.issubset(flags):
             return False
@@ -992,6 +1013,31 @@ def _should_finalize_replaced_sentence(
     return reason in {"aged", "duplicate_or_suffix", "partial_preserve", "finalize"}
 
 
+def _is_quality_blocked_confirmed_replacement(
+    staged_sentence: str,
+    candidate: str,
+    staged_confirmations: int,
+    staged_forced: bool,
+    staged_age: int,
+) -> bool:
+    reason = _replacement_decision_reason(
+        staged_sentence,
+        candidate,
+        staged_confirmations,
+        staged_forced,
+        staged_age,
+    )
+    if reason != "confirmed":
+        return False
+    return not _should_finalize_replaced_sentence(
+        staged_sentence,
+        candidate,
+        staged_confirmations,
+        staged_forced,
+        staged_age,
+    )
+
+
 def _should_stage_replacement_candidate(
     staged_sentence: str,
     candidate: str,
@@ -1030,7 +1076,9 @@ def _should_translate_staged_sentence(staged_sentence: str, staged_confirmations
 
 def _should_translate_final_sentence(sentence: str, language: str) -> bool:
     flags = set(_final_sentence_diagnostic_flags(sentence, language))
-    return not flags.intersection({"latin_only_for_zh", "short_cjk", "no_end_marker", "empty", "spaced_cjk"})
+    return not flags.intersection(
+        {"latin_only_for_zh", "short_cjk", "no_end_marker", "empty", "spaced_cjk", "cjk_repeated_ngram"}
+    )
 
 
 def _is_short_staged_suffix_repeat(staged_sentence: str, pending_text: str) -> bool:
@@ -1055,7 +1103,62 @@ def _should_age_staged_sentence(staged_sentence: str, pending_text: str) -> bool
     return True
 
 
+def _find_word_sequence(words: list[str], needle: list[str], start: int) -> int:
+    if not needle or start >= len(words):
+        return -1
+    end = len(words) - len(needle) + 1
+    for index in range(max(0, start), max(start, end)):
+        if words[index : index + len(needle)] == needle:
+            return index
+    return -1
+
+
+def _strip_leading_word_units(text: str, count: int) -> str:
+    if count <= 0:
+        return text
+    seen = 0
+    for match in _WORD_UNIT_RE.finditer(text):
+        seen += 1
+        if seen == count:
+            return text[match.end() :].lstrip(" ，,")
+    return text
+
+
+def _trim_repeated_cjk_revision_prefix(left: str, right: str) -> str:
+    normalized = _normalized_text(right)
+    if not (_is_cjk_text(left) and _is_cjk_text(normalized)):
+        return normalized
+    left_words = _word_units(left)
+    right_words = _word_units(normalized)
+    if len(left_words) < 24 or len(right_words) <= len(left_words):
+        return normalized
+
+    blocks = [
+        block
+        for block in SequenceMatcher(None, left_words, right_words, autojunk=False).get_matching_blocks()
+        if block.size >= 16 and block.b > 0
+    ]
+    if not blocks:
+        return normalized
+    block = min(blocks, key=lambda item: item.b)
+    prefix_words = right_words[: block.b]
+    if not (4 <= len(prefix_words) <= 48):
+        return normalized
+    if not all(_has_cjk_words([word]) for word in prefix_words):
+        return normalized
+    repeated_at = _find_word_sequence(right_words, prefix_words, block.b + block.size)
+    if repeated_at < 0:
+        return normalized
+
+    prefix_text = "".join(prefix_words)
+    normalized_prefix = "".join(_word_units(normalized[: max(len(prefix_text) * 2, len(prefix_text))]))
+    if not normalized_prefix.startswith(prefix_text):
+        return normalized
+    return _strip_leading_word_units(normalized, len(prefix_words))
+
+
 def _prefer_sentence_revision(left: str, right: str) -> str:
+    right = _trim_repeated_cjk_revision_prefix(left, right)
     left_words = _word_units(left)
     right_words = _word_units(right)
     left_signature = _short_revision_signature(left_words)
@@ -1118,6 +1221,21 @@ def _pending_overrun_reason(pending_text: str, pending_chunks: int) -> str:
     if _has_unstable_numeric_tail(normalized):
         return "unstable_numeric_tail"
     return "long_no_boundary"
+
+
+def _pending_text_diagnostic_flags(pending_text: str, language: str, pending_chunks: int) -> tuple[str, ...]:
+    normalized = _normalized_text(pending_text)
+    if not normalized:
+        return ()
+    flags: list[str] = []
+    normalized_language = str(language or "").strip().lower()
+    words = _word_units(normalized)
+    if (normalized_language == "zh" or _has_cjk_words(words)) and _has_repeated_cjk_ngram(words):
+        flags.append("cjk_repeated_ngram")
+    overrun = _pending_overrun_reason(normalized, pending_chunks)
+    if overrun:
+        flags.append(f"overrun_{overrun}")
+    return tuple(flags)
 
 
 def _forced_sentence_reason(pending_text: str, pending_chunks: int) -> str:

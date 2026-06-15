@@ -9,9 +9,11 @@ from src.app.whisper_window import (
     _final_sentence_diagnostic_flags,
     _forced_sentence_reason,
     _format_transcript_metrics,
+    _is_quality_blocked_confirmed_replacement,
     _new_text_delta,
     _next_revision_confirmation_count,
     _pending_new_text_combined,
+    _pending_text_diagnostic_flags,
     _prefer_sentence_revision,
     _replacement_decision_reason,
     _sentence_end_count,
@@ -52,6 +54,42 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
 
         self.assertEqual(_next_revision_confirmation_count(previous, preferred, 4), 1)
         self.assertEqual(_next_revision_confirmation_count(preferred, preferred, 4), 5)
+
+    def test_cjk_revision_trims_repeated_pending_prefix_from_monitoring(self) -> None:
+        # Regression from 2026-06-15 20s Chinese monitoring chunks 1-2.
+        # A pending tail was prepended before the next overlapping window, then
+        # repeated again at the natural continuation point.
+        previous = (
+            "都是豆。所以我们之前吃的那些价格比较高的，可能都是游客点，对吧？都是网上推的。"
+            "嗯。现在是十点五十，我们等到十一点的时候，隔壁那个甜甜圈都开门了，我们去买甜甜圈吃。"
+        )
+        candidate = (
+            "你们知道小伙伴为什么那么之前吃的那些价格比较高的，可能都是游客店，对吧？都是网上推的。"
+            "嗯。现在是十点五十，我们等到十一点的时候，隔壁那个甜甜圈都开门了，我们去买甜甜圈吃。"
+            "你们知道小伙伴为什么那么爱撸一天九顿吗？咋了？"
+        )
+
+        preferred = _prefer_sentence_revision(previous, candidate)
+
+        self.assertFalse(preferred.startswith("你们知道小伙伴为什么那么之前"))
+        self.assertIn("你们知道小伙伴为什么那么爱撸一天九顿吗", preferred)
+
+    def test_cjk_revision_trims_long_repeated_pending_prefix_from_monitoring(self) -> None:
+        # Regression from 2026-06-15 20s Chinese monitoring chunks 47-48.
+        previous = (
+            "哇，提前一天约都吃不上啊，因为我约的时候，我约的后两一样，我能走。好好好好。已经打车了，"
+            "五块钱打过去。五五块钱。省着命。我们下一站打算去吃大众薄饼，那个呢是得提前预约。我提前三天约。"
+        )
+        candidate = (
+            "哇，提前一天约都吃不上啊，因为我约的时候，我约的后两天已经满了，所以好好好好。已经打车了，"
+            "五块钱打过去。五五块钱。省着命。我们下一家打算去吃大众薄饼，那个那是得提前预约。我提前三天约。"
+            "哇，提前一天约都吃不上啊，因为我约的时候，我约的后两天已经满了，所以就只约到了今天。真火。"
+        )
+
+        preferred = _prefer_sentence_revision(previous, candidate)
+
+        self.assertFalse(preferred.startswith("哇，提前一天约都吃不上啊"))
+        self.assertIn("哇，提前一天约都吃不上啊，因为我约的时候，我约的后两天已经满了，所以就只约到了今天", preferred)
 
     def test_sentence_revision_detects_short_prefix_expansion_from_log(self) -> None:
         # Regression from avc-whisper.log chunks 283-295.
@@ -227,6 +265,18 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         self.assertEqual(_replacement_decision_reason(staged, candidate, 3, False, 0), "confirmed")
         self.assertFalse(_should_confirm_staged_sentence(staged, 3, False))
         self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 3, False, 0))
+        self.assertTrue(_is_quality_blocked_confirmed_replacement(staged, candidate, 3, False, 0))
+
+    def test_quality_blocked_confirmed_cjk_replacement_is_preserved_from_monitoring(self) -> None:
+        # Regression from 2026-06-15 20:27 chunk 24. The staged CJK candidate
+        # had enough observations, but lacked a sentence end marker. Replacing
+        # it with another unstable candidate loses revision history.
+        staged = "盐面包呢它不能单买它就是一口气你就是一定要买四颗它四颗就是一个外包装的袋子自然到盐面包圣水洞的人气王他们呢曾经创下一天哦"
+        candidate = "盐面包呢它认单买它就是一口气你就是一定要买四颗它四颗就是一个外包装的袋子自然道盐面包圣水洞的人气王他们曾经创下一天哦"
+
+        self.assertEqual(_replacement_decision_reason(staged, candidate, 6, False, 0), "confirmed")
+        self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 6, False, 0))
+        self.assertTrue(_is_quality_blocked_confirmed_replacement(staged, candidate, 6, False, 0))
 
     def test_spaced_cjk_without_end_marker_does_not_finalize_from_monitoring(self) -> None:
         staged = "见 什 么 都 想 吃 这 可 怎 么 办 呀 我 看 见 大 闸 丸 了 人 刚 才 来 的 啊 肉 丸"
@@ -235,6 +285,35 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         self.assertIn("spaced_cjk", _final_sentence_diagnostic_flags(staged, "zh"))
         self.assertFalse(_should_confirm_staged_sentence(staged, 3, False))
         self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 3, False, 0))
+
+    def test_repeated_cjk_ngram_does_not_confirm_from_monitoring(self) -> None:
+        # Regression from 2026-06-15 10s Chinese monitoring chunk 83.
+        # The STT candidate repeated long internal spans and should not be
+        # treated as a clean final sentence only because it was observed enough.
+        staged = (
+            "招牌咖喱面，然后再喝一个阿玛胡药招牌咖喱面，然后再喝一个阿玛胡耀诗，石耀虎胡耀诗，"
+            "米然后再喝一个阿玛胡耀诗，师耀虎胡耀诗，米粉餐面，两餐，好，我再给胡药师，师咬虎胡药师，"
+            "米粉掺面，两餐，好，我再给你找一家吃的啊，咱现白老师，米粉掺面，两掺。好，我再给你找一家吃的啊。"
+            "咱现在还差一家，现找。"
+        )
+
+        self.assertIn("cjk_repeated_ngram", _final_sentence_diagnostic_flags(staged, "zh"))
+        self.assertFalse(_should_confirm_staged_sentence(staged, 3, False))
+        self.assertFalse(_should_translate_final_sentence(staged, "zh"))
+
+    def test_pending_cjk_ngram_repetition_is_diagnosed_from_monitoring(self) -> None:
+        # Regression from 2026-06-15 16s/1s Chinese monitoring chunks 26-28.
+        # No completed sentence was produced, while the pending tail kept
+        # accumulating repeated CJK spans.
+        pending = (
+            "干里面得这么吃，把干里面盛勺子里，进我这吃的就是像那觉得乒乓球一样，"
+            "干面得这么吃，把干面盛勺子里，进去再快点汤手一样，干面得这么吃，"
+            "把干面盛勺子里，进去再快点汤，干粒面得这么吃，把干粒面盛勺子里，进去再快点汤，"
+        )
+
+        flags = _pending_text_diagnostic_flags(pending, "zh", 4)
+
+        self.assertIn("cjk_repeated_ngram", flags)
 
     def test_replacement_keeps_confirmed_open_korean_clause_from_monitoring(self) -> None:
         # Regression from 2026-06-13 30-minute monitoring chunks 7-11.

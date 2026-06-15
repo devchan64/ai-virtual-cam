@@ -146,6 +146,24 @@ class WhisperConfigTest(unittest.TestCase):
                 "beamSize": 1,
                 "maxNewTokens": 128,
                 "temperature": 0.2,
+                "stepSecondsEn": 1.0,
+                "windowSecondsEn": 4.0,
+                "commitLagSecondsEn": 1.0,
+                "beamSizeEn": 1,
+                "maxNewTokensEn": 128,
+                "temperatureEn": 0.2,
+                "stepSecondsKo": 2.0,
+                "windowSecondsKo": 7.0,
+                "commitLagSecondsKo": 2.0,
+                "beamSizeKo": 3,
+                "maxNewTokensKo": 192,
+                "temperatureKo": 0.0,
+                "stepSecondsZh": 2.0,
+                "windowSecondsZh": 20.0,
+                "commitLagSecondsZh": 2.0,
+                "beamSizeZh": 3,
+                "maxNewTokensZh": 192,
+                "temperatureZh": 0.0,
                 "postProcessingProfile": "manual",
                 "sentenceBoundaryBackend": "sat",
                 "sentenceBoundaryModel": "sat-3l-sm",
@@ -185,6 +203,39 @@ class WhisperConfigTest(unittest.TestCase):
 
         self.assertEqual(config["whisper"]["chunkSeconds"], 2.5)
         self.assertEqual(config["whisper"]["windowSeconds"], 2.5)
+
+    def test_build_config_persists_language_specific_runtime_settings(self) -> None:
+        config = build_config(
+            input_device="0",
+            input_width=1280,
+            input_height=720,
+            input_fps=30,
+            output_device="output.mp4",
+            output_width=1280,
+            output_height=720,
+            output_fps=30,
+            output_backend="opencv",
+            segmentation_backend="mock",
+            segmentation_threshold=0.5,
+            background={"mode": "chroma", "chromaColor": [0, 0, 0]},
+            crop_margin=0.25,
+            crop_pan_smoothing=0.85,
+            audio_input_device="default",
+            audio_output_device="default",
+            whisper_backend="mock",
+            whisper_language="zh",
+            whisper_window_seconds=20.0,
+            whisper_window_seconds_en=7.0,
+            whisper_window_seconds_ko=7.0,
+            whisper_window_seconds_zh=20.0,
+            whisper_step_seconds_zh=1.0,
+        )
+
+        self.assertEqual(config["whisper"]["windowSeconds"], 20.0)
+        self.assertEqual(config["whisper"]["windowSecondsEn"], 7.0)
+        self.assertEqual(config["whisper"]["windowSecondsKo"], 7.0)
+        self.assertEqual(config["whisper"]["windowSecondsZh"], 20.0)
+        self.assertEqual(config["whisper"]["stepSecondsZh"], 1.0)
 
     def test_app_config_loads_whisper_settings(self) -> None:
         config = build_config(
@@ -377,6 +428,24 @@ class WhisperConfigTest(unittest.TestCase):
         self.assertEqual(loaded.chunkSeconds, 3.5)
         self.assertEqual(loaded.windowSeconds, 3.5)
 
+    def test_whisper_uses_language_specific_runtime_defaults(self) -> None:
+        zh = WhisperConfig.from_dict({"language": "zh"})
+        en = WhisperConfig.from_dict({"language": "en"})
+        ko = WhisperConfig.from_dict({"language": "ko"})
+
+        self.assertEqual(zh.windowSeconds, 20.0)
+        self.assertEqual(zh.chunkSeconds, 20.0)
+        self.assertEqual(en.windowSeconds, 7.0)
+        self.assertEqual(ko.windowSeconds, 7.0)
+
+    def test_whisper_selected_language_migrates_legacy_runtime_values(self) -> None:
+        loaded = WhisperConfig.from_dict({"language": "zh", "windowSeconds": 24.0, "stepSeconds": 1.0})
+
+        self.assertEqual(loaded.windowSeconds, 24.0)
+        self.assertEqual(loaded.windowSecondsZh, 24.0)
+        self.assertEqual(loaded.stepSecondsZh, 1.0)
+        self.assertEqual(loaded.windowSecondsEn, 7.0)
+
     def test_whisper_rejects_invalid_speed_parameters(self) -> None:
         with self.assertRaisesRegex(ValueError, "whisper.chunkSeconds"):
             WhisperConfig.from_dict({"chunkSeconds": 0.5})
@@ -388,6 +457,10 @@ class WhisperConfigTest(unittest.TestCase):
             WhisperConfig.from_dict({"stepSeconds": 5.0, "windowSeconds": 4.0})
         with self.assertRaisesRegex(ValueError, "whisper.commitLagSeconds"):
             WhisperConfig.from_dict({"commitLagSeconds": 4.0, "windowSeconds": 4.0})
+        with self.assertRaisesRegex(ValueError, "whisper.stepSecondsZh"):
+            WhisperConfig.from_dict({"language": "zh", "stepSecondsZh": 5.0, "windowSecondsZh": 4.0})
+        with self.assertRaisesRegex(ValueError, "whisper.commitLagSecondsZh"):
+            WhisperConfig.from_dict({"language": "zh", "commitLagSecondsZh": 20.0, "windowSecondsZh": 20.0})
         with self.assertRaisesRegex(ValueError, "whisper.beamSize"):
             WhisperConfig.from_dict({"beamSize": 0})
         with self.assertRaisesRegex(ValueError, "whisper.maxNewTokens"):

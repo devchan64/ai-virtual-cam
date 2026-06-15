@@ -475,6 +475,24 @@ def build_config(
     whisper_beam_size: int = whisper_default("beamSize"),
     whisper_max_new_tokens: int = whisper_default("maxNewTokens"),
     whisper_temperature: float = whisper_default("temperature"),
+    whisper_step_seconds_en: float | None = None,
+    whisper_window_seconds_en: float | None = None,
+    whisper_commit_lag_seconds_en: float | None = None,
+    whisper_beam_size_en: int | None = None,
+    whisper_max_new_tokens_en: int | None = None,
+    whisper_temperature_en: float | None = None,
+    whisper_step_seconds_ko: float | None = None,
+    whisper_window_seconds_ko: float | None = None,
+    whisper_commit_lag_seconds_ko: float | None = None,
+    whisper_beam_size_ko: int | None = None,
+    whisper_max_new_tokens_ko: int | None = None,
+    whisper_temperature_ko: float | None = None,
+    whisper_step_seconds_zh: float | None = None,
+    whisper_window_seconds_zh: float | None = None,
+    whisper_commit_lag_seconds_zh: float | None = None,
+    whisper_beam_size_zh: int | None = None,
+    whisper_max_new_tokens_zh: int | None = None,
+    whisper_temperature_zh: float | None = None,
     whisper_post_processing_profile: str = whisper_default("postProcessingProfile"),
     whisper_sentence_boundary_backend: str = whisper_default("sentenceBoundaryBackend"),
     whisper_sentence_boundary_model: str = whisper_default("sentenceBoundaryModel"),
@@ -506,6 +524,39 @@ def build_config(
 
     if whisper_window_seconds is None:
         whisper_window_seconds = whisper_chunk_seconds
+    selected_whisper_language = str(whisper_language).strip().lower()
+
+    def runtime_value(value, lang: str, default_key: str, selected_value):
+        if value is not None:
+            return value
+        if selected_whisper_language == lang:
+            return selected_value
+        return whisper_default(default_key)
+
+    whisper_step_seconds_en = runtime_value(whisper_step_seconds_en, "en", "stepSecondsEn", whisper_step_seconds)
+    whisper_window_seconds_en = runtime_value(whisper_window_seconds_en, "en", "windowSecondsEn", whisper_window_seconds)
+    whisper_commit_lag_seconds_en = runtime_value(
+        whisper_commit_lag_seconds_en, "en", "commitLagSecondsEn", whisper_commit_lag_seconds
+    )
+    whisper_beam_size_en = runtime_value(whisper_beam_size_en, "en", "beamSizeEn", whisper_beam_size)
+    whisper_max_new_tokens_en = runtime_value(whisper_max_new_tokens_en, "en", "maxNewTokensEn", whisper_max_new_tokens)
+    whisper_temperature_en = runtime_value(whisper_temperature_en, "en", "temperatureEn", whisper_temperature)
+    whisper_step_seconds_ko = runtime_value(whisper_step_seconds_ko, "ko", "stepSecondsKo", whisper_step_seconds)
+    whisper_window_seconds_ko = runtime_value(whisper_window_seconds_ko, "ko", "windowSecondsKo", whisper_window_seconds)
+    whisper_commit_lag_seconds_ko = runtime_value(
+        whisper_commit_lag_seconds_ko, "ko", "commitLagSecondsKo", whisper_commit_lag_seconds
+    )
+    whisper_beam_size_ko = runtime_value(whisper_beam_size_ko, "ko", "beamSizeKo", whisper_beam_size)
+    whisper_max_new_tokens_ko = runtime_value(whisper_max_new_tokens_ko, "ko", "maxNewTokensKo", whisper_max_new_tokens)
+    whisper_temperature_ko = runtime_value(whisper_temperature_ko, "ko", "temperatureKo", whisper_temperature)
+    whisper_step_seconds_zh = runtime_value(whisper_step_seconds_zh, "zh", "stepSecondsZh", whisper_step_seconds)
+    whisper_window_seconds_zh = runtime_value(whisper_window_seconds_zh, "zh", "windowSecondsZh", whisper_window_seconds)
+    whisper_commit_lag_seconds_zh = runtime_value(
+        whisper_commit_lag_seconds_zh, "zh", "commitLagSecondsZh", whisper_commit_lag_seconds
+    )
+    whisper_beam_size_zh = runtime_value(whisper_beam_size_zh, "zh", "beamSizeZh", whisper_beam_size)
+    whisper_max_new_tokens_zh = runtime_value(whisper_max_new_tokens_zh, "zh", "maxNewTokensZh", whisper_max_new_tokens)
+    whisper_temperature_zh = runtime_value(whisper_temperature_zh, "zh", "temperatureZh", whisper_temperature)
 
     tilt_smoothing = float(crop_pan_smoothing if crop_tilt_smoothing is None else crop_tilt_smoothing)
     tilt_kp = float(crop_pan_pid_kp if crop_tilt_pid_kp is None else crop_tilt_pid_kp)
@@ -626,6 +677,24 @@ def build_config(
             "beamSize": int(whisper_beam_size),
             "maxNewTokens": int(whisper_max_new_tokens),
             "temperature": float(whisper_temperature),
+            "stepSecondsEn": float(whisper_step_seconds_en),
+            "windowSecondsEn": float(whisper_window_seconds_en),
+            "commitLagSecondsEn": float(whisper_commit_lag_seconds_en),
+            "beamSizeEn": int(whisper_beam_size_en),
+            "maxNewTokensEn": int(whisper_max_new_tokens_en),
+            "temperatureEn": float(whisper_temperature_en),
+            "stepSecondsKo": float(whisper_step_seconds_ko),
+            "windowSecondsKo": float(whisper_window_seconds_ko),
+            "commitLagSecondsKo": float(whisper_commit_lag_seconds_ko),
+            "beamSizeKo": int(whisper_beam_size_ko),
+            "maxNewTokensKo": int(whisper_max_new_tokens_ko),
+            "temperatureKo": float(whisper_temperature_ko),
+            "stepSecondsZh": float(whisper_step_seconds_zh),
+            "windowSecondsZh": float(whisper_window_seconds_zh),
+            "commitLagSecondsZh": float(whisper_commit_lag_seconds_zh),
+            "beamSizeZh": int(whisper_beam_size_zh),
+            "maxNewTokensZh": int(whisper_max_new_tokens_zh),
+            "temperatureZh": float(whisper_temperature_zh),
             "postProcessingProfile": str(whisper_post_processing_profile),
             "sentenceBoundaryBackend": str(whisper_sentence_boundary_backend),
             "sentenceBoundaryModel": str(whisper_sentence_boundary_model),

@@ -324,7 +324,7 @@ Linux Docker 정책:
 - `오디오 AI 입력 dB 미터`로 선택한 장치에 실제 신호가 들어오는지 확인합니다.
 - `번역 창`을 켠 뒤 `번역 백엔드`를 선택합니다. `whisper`는 영어 번역만 지원하고, `nllb-transformers`는 `facebook/nllb-200-distilled-600M` 로컬 모델로 한국어/영어/중국어 대상 번역을 지원합니다.
 - Linux PulseAudio/PipeWire 장치는 `alsa_input...`, `*.monitor`, `ai-virtual-cam` 같은 원본 ID를 설정값으로 저장합니다.
-- 오디오 AI 탭의 설정값은 호환성을 위해 `setting.json`의 `whisper` 블록에 저장됩니다. 사용자 기능명은 오디오 AI이며, `whisper`는 기존 설정/코드 호환 키입니다. 주요 키는 `enabled`, `inputDevice`, `backend`, `model`, `language`, `translationEnabled`, `translationBackend`, `translationTargetLanguage`, `translationModel`, `translationDevice`, `translationComputeType`, `translationBeamSize`, `translationMaxNewTokens`, `device`, `computeType`, `chunkSeconds`, `stepSeconds`, `windowSeconds`, `commitLagSeconds`, `beamSize`, `maxNewTokens`, `temperature`입니다.
+- 오디오 AI 탭의 설정값은 호환성을 위해 `setting.json`의 `whisper` 블록에 저장됩니다. 사용자 기능명은 오디오 AI이며, `whisper`는 기존 설정/코드 호환 키입니다. 주요 키는 `enabled`, `inputDevice`, `backend`, `model`, `language`, `translationEnabled`, `translationBackend`, `translationTargetLanguage`, `translationModel`, `translationDevice`, `translationComputeType`, `translationBeamSize`, `translationMaxNewTokens`, `device`, `computeType`, `chunkSeconds`, `stepSeconds`, `windowSeconds`, `commitLagSeconds`, `beamSize`, `maxNewTokens`, `temperature`입니다. STT 응답/성능 파라미터는 언어별로도 저장되며, 예를 들어 `windowSecondsEn`, `windowSecondsKo`, `windowSecondsZh`, `stepSecondsZh`, `maxNewTokensZh` 같은 키가 선택 언어별 실행값의 기준입니다.
 
 실행 동작:
 
@@ -361,13 +361,15 @@ Linux Docker 정책:
 
 응답속도 조정:
 
-- `청크/윈도우 길이(초)`(`chunkSeconds`, `windowSeconds`): 최근 몇 초의 오디오 문맥을 STT 모델에 전달할지 결정합니다. 길게 잡으면 빠른 발화의 문장 완성도와 앞뒤 문맥 안정성에 유리하지만, tail echo와 후보 리비전 관리 부담이 늘 수 있습니다. 기본 추천값은 `9.0`초입니다.
-- `갱신 주기(초)`(`stepSeconds`): 몇 초마다 새 STT 요청을 만들지 결정합니다. 기본 추천값은 `1.5`초이며, 낮추면 화면 갱신은 빨라지지만 같은 문맥을 반복 처리하는 비율이 커집니다.
+- `청크/윈도우 길이(초)`(`chunkSeconds`, `windowSeconds`): 최근 몇 초의 오디오 문맥을 STT 모델에 전달할지 결정합니다. 길게 잡으면 빠른 발화의 문장 완성도와 앞뒤 문맥 안정성에 유리하지만, tail echo와 후보 리비전 관리 부담이 늘 수 있습니다. 영어/한국어는 7초가 실시간성과 품질의 균형점으로 관측되어 기본 추천값은 `7.0`초입니다. 중국어/Qwen3-ASR는 16초에서 STT 후보 흔들림이 컸고 20초부터 준수한 품질이 관측되어 `20.0`초를 시작점으로 사용합니다.
+- `갱신 주기(초)`(`stepSeconds`): 몇 초마다 새 STT 요청을 만들지 결정합니다. 기본 추천값은 `2.0`초이며, 낮추면 화면 갱신은 빨라지지만 같은 문맥을 반복 처리하는 비율이 커집니다. `1.0`초는 20초 윈도우에서도 계산 부하가 `stt_step_load=0.7~0.9` 수준까지 올라갈 수 있으므로 실험값으로 둡니다.
+- 성능 로그의 `stt_step_load` 또는 `total_step_load`가 `1.0`을 넘거나 `input_queue_drops`가 1 이상이면 실시간 처리량을 초과한 상태입니다. 특히 중국어 `windowSeconds=30.0`, `stepSeconds=1.0` 조합은 입력 큐 드롭이 관측되었으므로 품질 평가용 기본값으로 쓰지 않습니다.
 - `Tail 확정 지연(초)`(`commitLagSeconds`): 윈도우 끝단의 불안정한 tail을 즉시 확정하지 않기 위한 보류 구간입니다. 기본 추천값은 `2.0`초입니다. 이 값은 문장 경계 모델의 성능을 보완하는 전부가 아니라, 아직 STT가 다시 고쳐 쓸 수 있는 마지막 구간을 입력에서 잠시 제외하는 장치입니다.
 - 문장 후보 재확인: 문장 경계 모델이 완료 문장을 제안해도 즉시 final로 출력하지 않고, 다음 STT 윈도우에서 같은 후보가 다시 관측되는지 확인합니다. 이 단계는 `commitLagSeconds`와 별개이며, 문장 경계가 맞더라도 STT 후보 텍스트 자체가 뒤 청크에서 바뀌는 문제를 줄이기 위한 생명주기입니다.
 - `Beam 크기`(`beamSize`): 디코딩 후보를 몇 갈래로 탐색할지 결정합니다. `1`은 가장 빠른 greedy 디코딩에 가깝고 지연을 줄이는 데 유리합니다. 값을 키우면 후보 탐색이 늘어 일부 발화의 정확도와 안정성이 좋아질 수 있지만, large-v3에서는 GPU 사용량과 디코딩 시간이 늘어 응답이 늦어질 수 있습니다.
-- 빠른 발화와 문장 누락이 문제라면 우선 `windowSeconds=9.0`, `stepSeconds=1.5`, `commitLagSeconds=2.0`, `beamSize=3`, `temperature=0.0` 조합을 시작점으로 사용하세요. `maxNewTokens=96`은 속도 튜닝값이라기보다 긴 출력 생성을 막는 상한값입니다.
-- 문장이 여전히 자주 끊기거나 앞뒤 문맥을 놓치면 `windowSeconds`를 `12.0`, `15.0`, 최대 `30.0`까지 단계적으로 늘려 비교합니다. 중국어처럼 긴 문맥이 필요한 언어에서 우선 실험하며, tail echo와 staging 교체가 늘면 `windowSeconds`를 다시 낮추거나 `stepSeconds`를 함께 줄여 같은 후보가 더 자주 재확인되는지 비교합니다.
+- 영어/한국어 빠른 발화와 문장 누락이 문제라면 우선 `windowSeconds=7.0`, `stepSeconds=2.0`, `commitLagSeconds=2.0`, `beamSize=3`, `temperature=0.0`, `maxNewTokens=192` 조합을 시작점으로 사용하세요.
+- 중국어는 `windowSeconds=20.0`, `stepSeconds=2.0`, `commitLagSeconds=2.0`, `beamSize=3`, `temperature=0.0`, `maxNewTokens=192`를 시작점으로 사용합니다. 문장이 여전히 흔들리면 `windowSeconds`를 `24.0`, 최대 `30.0`까지 단계적으로 늘려 비교합니다. 30초는 장문 문맥 안정성에는 유리하지만 final script 갱신이 늦고 긴 문장 확정 비용이 커질 수 있습니다.
+- GUI에서는 현재 선택한 STT 언어의 파라미터만 표시합니다. 언어를 바꾸면 이전 언어의 값은 메모리에 보존되고, `JSON 저장` 시 `setting.json`의 언어별 키로 함께 저장됩니다.
 - 속도는 충분하지만 고유명사나 짧은 발화 인식이 흔들리면 `beamSize`를 `3` 또는 `5`로 올려 비교합니다. 문장이 실제로 잘릴 때만 `maxNewTokens`를 `128` 또는 `192`로 올립니다. 짧은 청크에서는 이 값이 응답속도에 거의 영향을 주지 않을 수 있습니다.
 - 번역까지 포함한 지연은 NLLB `translationBeamSize`와 `translationMaxNewTokens`의 영향을 받습니다. 실시간 응답성은 `translationBeamSize=1`, `translationMaxNewTokens=128`에서 시작하고, 번역 품질이나 긴 문장 완성도가 부족하면 각각 `3` 또는 `256`으로 올려 비교합니다.
 - 실시간 번역은 기본적으로 확정된 final 전사 문장만 대상으로 합니다. staged/partial 문장은 뒤 청크에서 수정될 가능성이 높아 중복 번역과 premature translation을 만들 수 있으므로 기본값에서 번역하지 않습니다. 상세 설계와 참고 자료는 [`docs/2026-06-13-audio-ai-feature-design.md`](docs/2026-06-13-audio-ai-feature-design.md)를 확인합니다.
@@ -588,13 +590,31 @@ python3 -m unittest tests.unit.test_whisper_performance_tracking
     "translationMaxNewTokens": 128,
     "device": "cuda",
     "computeType": "float16",
-    "chunkSeconds": 9.0,
-    "stepSeconds": 1.5,
-    "windowSeconds": 9.0,
+    "chunkSeconds": 7.0,
+    "stepSeconds": 2.0,
+    "windowSeconds": 7.0,
     "commitLagSeconds": 2.0,
     "beamSize": 3,
-    "maxNewTokens": 96,
-    "temperature": 0.0
+    "maxNewTokens": 192,
+    "temperature": 0.0,
+    "windowSecondsEn": 7.0,
+    "windowSecondsKo": 7.0,
+    "windowSecondsZh": 20.0,
+    "stepSecondsEn": 2.0,
+    "stepSecondsKo": 2.0,
+    "stepSecondsZh": 2.0,
+    "commitLagSecondsEn": 2.0,
+    "commitLagSecondsKo": 2.0,
+    "commitLagSecondsZh": 2.0,
+    "beamSizeEn": 3,
+    "beamSizeKo": 3,
+    "beamSizeZh": 3,
+    "maxNewTokensEn": 192,
+    "maxNewTokensKo": 192,
+    "maxNewTokensZh": 192,
+    "temperatureEn": 0.0,
+    "temperatureKo": 0.0,
+    "temperatureZh": 0.0
   }
 }
 ```

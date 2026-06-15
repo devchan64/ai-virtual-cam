@@ -344,7 +344,7 @@ class WhisperWindowGeometryTest(unittest.TestCase):
         self.assertIn(("end", "안녕하세요\n", FINAL_TEXT_TAG), window._text.lines)
 
 
-    def test_stt_status_window_allows_plain_lines_for_each_partial_transcript(self) -> None:
+    def test_stt_status_window_allows_plain_lines_for_each_raw_transcript(self) -> None:
         class FakeRoot:
             def after(self, delay, callback):
                 self.delay = delay
@@ -372,14 +372,14 @@ class WhisperWindowGeometryTest(unittest.TestCase):
         window._root = FakeRoot()
         window._events = queue.Queue()
         window._update_line_numbers = lambda _widget: None
-        window._events.put(TranscriptEvent("transcript", "첫 문장", display=True, final=False))
-        window._events.put(TranscriptEvent("transcript", "둘째 문장", display=True, final=False))
+        window._events.put(TranscriptEvent("stt_raw", "첫 원문", display=True, final=True))
+        window._events.put(TranscriptEvent("stt_raw", "둘째 원문", display=True, final=True))
         window._poll_events()
 
-        self.assertIn(("end", "첫 문장\n", FINAL_TEXT_TAG), window._stt_status_text.lines)
-        self.assertIn(("end", "둘째 문장\n", FINAL_TEXT_TAG), window._stt_status_text.lines)
+        self.assertIn(("end", "첫 원문\n", FINAL_TEXT_TAG), window._stt_status_text.lines)
+        self.assertIn(("end", "둘째 원문\n", FINAL_TEXT_TAG), window._stt_status_text.lines)
 
-    def test_partial_transcript_shown_in_stt_status_window(self) -> None:
+    def test_partial_transcript_not_shown_in_stt_status_window(self) -> None:
         class FakeRoot:
             def after(self, delay, callback):
                 self.delay = delay
@@ -411,7 +411,7 @@ class WhisperWindowGeometryTest(unittest.TestCase):
         window._events.put(TranscriptEvent("transcript", "임시 문장", display=True, final=False))
         window._poll_events()
 
-        self.assertIn(("end", "임시 문장\n", FINAL_TEXT_TAG), window._stt_status_text.lines)
+        self.assertNotIn(("end", "임시 문장\n", FINAL_TEXT_TAG), window._stt_status_text.lines)
         self.assertNotIn(("end", "임시 문장", PARTIAL_TEXT_TAG), window._text.lines)
 
     def test_partial_transcript_not_shown_in_main_transcript_window(self) -> None:
@@ -489,7 +489,7 @@ class WhisperWindowGeometryTest(unittest.TestCase):
 
         self.assertEqual(window._stt_status_text.lines, [])
 
-    def test_hidden_partial_transcript_not_forwarded_to_stt_status_window(self) -> None:
+    def test_only_raw_transcript_is_forwarded_to_stt_status_window(self) -> None:
         class FakeRoot:
             def after(self, delay, callback):
                 self.delay = delay
@@ -520,10 +520,12 @@ class WhisperWindowGeometryTest(unittest.TestCase):
 
         window._events.put(TranscriptEvent("transcript", "pending tail", display=False, final=False))
         window._events.put(TranscriptEvent("transcript", "staged candidate", display=True, final=False))
+        window._events.put(TranscriptEvent("stt_raw", "raw window text", display=True, final=True))
         window._poll_events()
 
         self.assertNotIn(("end", "pending tail\n", FINAL_TEXT_TAG), window._stt_status_text.lines)
-        self.assertIn(("end", "staged candidate\n", FINAL_TEXT_TAG), window._stt_status_text.lines)
+        self.assertNotIn(("end", "staged candidate\n", FINAL_TEXT_TAG), window._stt_status_text.lines)
+        self.assertIn(("end", "raw window text\n", FINAL_TEXT_TAG), window._stt_status_text.lines)
 
 
     def test_sanitizes_geometry_before_restore(self) -> None:

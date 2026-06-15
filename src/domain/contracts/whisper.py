@@ -117,13 +117,37 @@ WHISPER_CONTRACT: dict[str, ConfigFieldSpec] = {
     "translationMaxNewTokens": ConfigFieldSpec("translationMaxNewTokens", 128, int, min_value=16, max_value=512),
     "device": ConfigFieldSpec("device", "cuda", str),
     "computeType": ConfigFieldSpec("computeType", "float16", str),
-    "chunkSeconds": ConfigFieldSpec("chunkSeconds", 24.0, float, min_value=1.0, max_value=30.0),
+    "chunkSeconds": ConfigFieldSpec("chunkSeconds", 7.0, float, min_value=1.0, max_value=30.0),
     "stepSeconds": ConfigFieldSpec("stepSeconds", 2.0, float, min_value=0.5, max_value=5.0),
-    "windowSeconds": ConfigFieldSpec("windowSeconds", 24.0, float, min_value=1.0, max_value=30.0),
+    "windowSeconds": ConfigFieldSpec("windowSeconds", 7.0, float, min_value=1.0, max_value=30.0),
     "commitLagSeconds": ConfigFieldSpec("commitLagSeconds", 2.0, float, min_value=0.0),
     "beamSize": ConfigFieldSpec("beamSize", 3, int, min_value=1, max_value=8),
     "maxNewTokens": ConfigFieldSpec("maxNewTokens", 192, int, min_value=16, max_value=512),
     "temperature": ConfigFieldSpec("temperature", 0.0, float, min_value=0.0, max_value=1.0),
+    "stepSecondsEn": ConfigFieldSpec("stepSecondsEn", 2.0, float, min_value=0.5, max_value=5.0, ui_group="runtime.en"),
+    "windowSecondsEn": ConfigFieldSpec("windowSecondsEn", 7.0, float, min_value=1.0, max_value=30.0, ui_group="runtime.en"),
+    "commitLagSecondsEn": ConfigFieldSpec(
+        "commitLagSecondsEn", 2.0, float, min_value=0.0, ui_group="runtime.en"
+    ),
+    "beamSizeEn": ConfigFieldSpec("beamSizeEn", 3, int, min_value=1, max_value=8, ui_group="runtime.en"),
+    "maxNewTokensEn": ConfigFieldSpec("maxNewTokensEn", 192, int, min_value=16, max_value=512, ui_group="runtime.en"),
+    "temperatureEn": ConfigFieldSpec("temperatureEn", 0.0, float, min_value=0.0, max_value=1.0, ui_group="runtime.en"),
+    "stepSecondsKo": ConfigFieldSpec("stepSecondsKo", 2.0, float, min_value=0.5, max_value=5.0, ui_group="runtime.ko"),
+    "windowSecondsKo": ConfigFieldSpec("windowSecondsKo", 7.0, float, min_value=1.0, max_value=30.0, ui_group="runtime.ko"),
+    "commitLagSecondsKo": ConfigFieldSpec(
+        "commitLagSecondsKo", 2.0, float, min_value=0.0, ui_group="runtime.ko"
+    ),
+    "beamSizeKo": ConfigFieldSpec("beamSizeKo", 3, int, min_value=1, max_value=8, ui_group="runtime.ko"),
+    "maxNewTokensKo": ConfigFieldSpec("maxNewTokensKo", 192, int, min_value=16, max_value=512, ui_group="runtime.ko"),
+    "temperatureKo": ConfigFieldSpec("temperatureKo", 0.0, float, min_value=0.0, max_value=1.0, ui_group="runtime.ko"),
+    "stepSecondsZh": ConfigFieldSpec("stepSecondsZh", 2.0, float, min_value=0.5, max_value=5.0, ui_group="runtime.zh"),
+    "windowSecondsZh": ConfigFieldSpec("windowSecondsZh", 20.0, float, min_value=1.0, max_value=30.0, ui_group="runtime.zh"),
+    "commitLagSecondsZh": ConfigFieldSpec(
+        "commitLagSecondsZh", 2.0, float, min_value=0.0, ui_group="runtime.zh"
+    ),
+    "beamSizeZh": ConfigFieldSpec("beamSizeZh", 3, int, min_value=1, max_value=8, ui_group="runtime.zh"),
+    "maxNewTokensZh": ConfigFieldSpec("maxNewTokensZh", 192, int, min_value=16, max_value=512, ui_group="runtime.zh"),
+    "temperatureZh": ConfigFieldSpec("temperatureZh", 0.0, float, min_value=0.0, max_value=1.0, ui_group="runtime.zh"),
     "postProcessingProfile": ConfigFieldSpec(
         "postProcessingProfile", "manual", str, allowed=WHISPER_POST_PROCESSING_PROFILES
     ),

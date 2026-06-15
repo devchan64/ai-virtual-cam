@@ -759,6 +759,24 @@ class WhisperConfig:
     beamSize: int
     maxNewTokens: int
     temperature: float
+    stepSecondsEn: float
+    windowSecondsEn: float
+    commitLagSecondsEn: float
+    beamSizeEn: int
+    maxNewTokensEn: int
+    temperatureEn: float
+    stepSecondsKo: float
+    windowSecondsKo: float
+    commitLagSecondsKo: float
+    beamSizeKo: int
+    maxNewTokensKo: int
+    temperatureKo: float
+    stepSecondsZh: float
+    windowSecondsZh: float
+    commitLagSecondsZh: float
+    beamSizeZh: int
+    maxNewTokensZh: int
+    temperatureZh: float
     postProcessingProfile: str
     sentenceBoundaryBackend: str
     sentenceBoundaryModel: str
@@ -776,6 +794,66 @@ class WhisperConfig:
         legacy_translate_task = raw.get("task") == "translate"
         translation_backend_default = "whisper" if legacy_translate_task else whisper_default("translationBackend")
         translation_target_default = "en" if legacy_translate_task else whisper_default("translationTargetLanguage")
+        language = str(raw.get("language", whisper_default("language"))).strip()
+
+        def lang_key(base: str, lang: str) -> str:
+            return f"{base}{lang.title()}"
+
+        def lang_value(base: str, lang: str, legacy_key: str | None = None):
+            key = lang_key(base, lang)
+            if key in raw:
+                return raw[key]
+            if language == lang and legacy_key and legacy_key in raw:
+                return raw[legacy_key]
+            if language == lang and base == "windowSeconds" and "chunkSeconds" in raw:
+                return raw["chunkSeconds"]
+            return whisper_default(key)
+
+        step_seconds_en = float(lang_value("stepSeconds", "en", "stepSeconds"))
+        window_seconds_en = float(lang_value("windowSeconds", "en", "windowSeconds"))
+        commit_lag_seconds_en = float(lang_value("commitLagSeconds", "en", "commitLagSeconds"))
+        beam_size_en = int(lang_value("beamSize", "en", "beamSize"))
+        max_new_tokens_en = int(lang_value("maxNewTokens", "en", "maxNewTokens"))
+        temperature_en = float(lang_value("temperature", "en", "temperature"))
+        step_seconds_ko = float(lang_value("stepSeconds", "ko", "stepSeconds"))
+        window_seconds_ko = float(lang_value("windowSeconds", "ko", "windowSeconds"))
+        commit_lag_seconds_ko = float(lang_value("commitLagSeconds", "ko", "commitLagSeconds"))
+        beam_size_ko = int(lang_value("beamSize", "ko", "beamSize"))
+        max_new_tokens_ko = int(lang_value("maxNewTokens", "ko", "maxNewTokens"))
+        temperature_ko = float(lang_value("temperature", "ko", "temperature"))
+        step_seconds_zh = float(lang_value("stepSeconds", "zh", "stepSeconds"))
+        window_seconds_zh = float(lang_value("windowSeconds", "zh", "windowSeconds"))
+        commit_lag_seconds_zh = float(lang_value("commitLagSeconds", "zh", "commitLagSeconds"))
+        beam_size_zh = int(lang_value("beamSize", "zh", "beamSize"))
+        max_new_tokens_zh = int(lang_value("maxNewTokens", "zh", "maxNewTokens"))
+        temperature_zh = float(lang_value("temperature", "zh", "temperature"))
+        runtime_by_language = {
+            "en": (
+                step_seconds_en,
+                window_seconds_en,
+                commit_lag_seconds_en,
+                beam_size_en,
+                max_new_tokens_en,
+                temperature_en,
+            ),
+            "ko": (
+                step_seconds_ko,
+                window_seconds_ko,
+                commit_lag_seconds_ko,
+                beam_size_ko,
+                max_new_tokens_ko,
+                temperature_ko,
+            ),
+            "zh": (
+                step_seconds_zh,
+                window_seconds_zh,
+                commit_lag_seconds_zh,
+                beam_size_zh,
+                max_new_tokens_zh,
+                temperature_zh,
+            ),
+        }
+        selected_runtime = runtime_by_language.get(language, runtime_by_language["en"])
         config = cls(
             enabled=bool(raw.get("enabled", whisper_default("enabled"))),
             inputDevice=str(raw.get("inputDevice", _default_audio_input_device())).strip(),
@@ -787,7 +865,7 @@ class WhisperConfig:
             sttModelKo=str(raw.get("sttModelKo", whisper_default("sttModelKo"))).strip(),
             sttBackendZh=str(raw.get("sttBackendZh", whisper_default("sttBackendZh"))).strip(),
             sttModelZh=str(raw.get("sttModelZh", whisper_default("sttModelZh"))).strip(),
-            language=str(raw.get("language", whisper_default("language"))).strip(),
+            language=language,
             task=str(raw.get("task", whisper_default("task"))).strip(),
             translationEnabled=bool(raw.get("translationEnabled", raw.get("task") == "translate")),
             showSttStatusWindow=bool(raw.get("showSttStatusWindow", whisper_default("showSttStatusWindow"))),
@@ -800,13 +878,31 @@ class WhisperConfig:
             translationMaxNewTokens=int(raw.get("translationMaxNewTokens", whisper_default("translationMaxNewTokens"))),
             device=str(raw.get("device", whisper_default("device"))).strip(),
             computeType=str(raw.get("computeType", whisper_default("computeType"))).strip(),
-            chunkSeconds=float(raw.get("chunkSeconds", whisper_default("chunkSeconds"))),
-            stepSeconds=float(raw.get("stepSeconds", whisper_default("stepSeconds"))),
-            windowSeconds=float(raw.get("windowSeconds", raw.get("chunkSeconds", whisper_default("windowSeconds")))),
-            commitLagSeconds=float(raw.get("commitLagSeconds", whisper_default("commitLagSeconds"))),
-            beamSize=int(raw.get("beamSize", whisper_default("beamSize"))),
-            maxNewTokens=int(raw.get("maxNewTokens", whisper_default("maxNewTokens"))),
-            temperature=float(raw.get("temperature", whisper_default("temperature"))),
+            chunkSeconds=selected_runtime[1],
+            stepSeconds=selected_runtime[0],
+            windowSeconds=selected_runtime[1],
+            commitLagSeconds=selected_runtime[2],
+            beamSize=selected_runtime[3],
+            maxNewTokens=selected_runtime[4],
+            temperature=selected_runtime[5],
+            stepSecondsEn=step_seconds_en,
+            windowSecondsEn=window_seconds_en,
+            commitLagSecondsEn=commit_lag_seconds_en,
+            beamSizeEn=beam_size_en,
+            maxNewTokensEn=max_new_tokens_en,
+            temperatureEn=temperature_en,
+            stepSecondsKo=step_seconds_ko,
+            windowSecondsKo=window_seconds_ko,
+            commitLagSecondsKo=commit_lag_seconds_ko,
+            beamSizeKo=beam_size_ko,
+            maxNewTokensKo=max_new_tokens_ko,
+            temperatureKo=temperature_ko,
+            stepSecondsZh=step_seconds_zh,
+            windowSecondsZh=window_seconds_zh,
+            commitLagSecondsZh=commit_lag_seconds_zh,
+            beamSizeZh=beam_size_zh,
+            maxNewTokensZh=max_new_tokens_zh,
+            temperatureZh=temperature_zh,
             postProcessingProfile=str(raw.get("postProcessingProfile", whisper_default("postProcessingProfile"))).strip(),
             sentenceBoundaryBackend=str(raw.get("sentenceBoundaryBackend", whisper_default("sentenceBoundaryBackend"))).strip(),
             sentenceBoundaryModel=str(raw.get("sentenceBoundaryModel", whisper_default("sentenceBoundaryModel"))).strip(),
@@ -879,16 +975,48 @@ class WhisperConfig:
             raise ValueError("whisper.device is required")
         if not config.computeType:
             raise ValueError("whisper.computeType is required")
+        if "windowSeconds" in raw:
+            whisper_spec("windowSeconds").validate_range(config.windowSeconds, path="whisper.windowSeconds")
         whisper_spec("chunkSeconds").validate_range(config.chunkSeconds, path="whisper.chunkSeconds")
         whisper_spec("stepSeconds").validate_range(config.stepSeconds, path="whisper.stepSeconds")
         whisper_spec("windowSeconds").validate_range(config.windowSeconds, path="whisper.windowSeconds")
         if config.stepSeconds > config.windowSeconds:
+            selected_suffix = config.language.title()
+            if f"stepSeconds{selected_suffix}" in raw or f"windowSeconds{selected_suffix}" in raw:
+                raise ValueError(
+                    f"whisper.stepSeconds{selected_suffix} must be less than or equal to whisper.windowSeconds{selected_suffix}"
+                )
             raise ValueError("whisper.stepSeconds must be less than or equal to whisper.windowSeconds")
         if not 0.0 <= config.commitLagSeconds < config.windowSeconds:
+            selected_suffix = config.language.title()
+            if f"commitLagSeconds{selected_suffix}" in raw or f"windowSeconds{selected_suffix}" in raw:
+                raise ValueError(
+                    f"whisper.commitLagSeconds{selected_suffix} must be between 0.0 and less than whisper.windowSeconds{selected_suffix}"
+                )
             raise ValueError("whisper.commitLagSeconds must be between 0.0 and less than whisper.windowSeconds")
         whisper_spec("beamSize").validate_range(config.beamSize, path="whisper.beamSize")
         whisper_spec("maxNewTokens").validate_range(config.maxNewTokens, path="whisper.maxNewTokens")
         whisper_spec("temperature").validate_range(config.temperature, path="whisper.temperature")
+        for lang, suffix in (("en", "En"), ("ko", "Ko"), ("zh", "Zh")):
+            step = getattr(config, f"stepSeconds{suffix}")
+            window = getattr(config, f"windowSeconds{suffix}")
+            commit_lag = getattr(config, f"commitLagSeconds{suffix}")
+            whisper_spec(f"stepSeconds{suffix}").validate_range(step, path=f"whisper.stepSeconds{suffix}")
+            whisper_spec(f"windowSeconds{suffix}").validate_range(window, path=f"whisper.windowSeconds{suffix}")
+            if step > window:
+                raise ValueError(f"whisper.stepSeconds{suffix} must be less than or equal to whisper.windowSeconds{suffix}")
+            if not 0.0 <= commit_lag < window:
+                raise ValueError(
+                    f"whisper.commitLagSeconds{suffix} must be between 0.0 and less than whisper.windowSeconds{suffix}"
+                )
+            whisper_spec(f"beamSize{suffix}").validate_range(getattr(config, f"beamSize{suffix}"), path=f"whisper.beamSize{suffix}")
+            whisper_spec(f"maxNewTokens{suffix}").validate_range(
+                getattr(config, f"maxNewTokens{suffix}"), path=f"whisper.maxNewTokens{suffix}"
+            )
+            whisper_spec(f"temperature{suffix}").validate_range(
+                getattr(config, f"temperature{suffix}"), path=f"whisper.temperature{suffix}"
+            )
+            del lang
         whisper_spec("postProcessingProfile").validate_allowed(
             config.postProcessingProfile, path="whisper.postProcessingProfile"
         )

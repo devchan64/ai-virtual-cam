@@ -34,8 +34,10 @@ from src.app.whisper_transcript_logic import (
     _normalized_text,
     _pending_new_text_combined,
     _pending_overrun_reason,
+    _pending_text_diagnostic_flags,
     _format_transcript_metrics,
     _is_cjk_text,
+    _is_quality_blocked_confirmed_replacement,
     _prefer_sentence_revision,
     _sentence_end_count,
     _sentence_max_age_chunks,
@@ -304,12 +306,23 @@ class WhisperTranscriptWorker:
         self._capture_process: subprocess.Popen[bytes] | None = None
         self._capture_thread: threading.Thread | None = None
         self._recent_transcripts: deque[str] = deque(maxlen=RECENT_TRANSCRIPT_WINDOW)
+        self._audio_queue_drops = 0
+        self._audio_queue_drop_lock = threading.Lock()
         self._sentence_boundary_backend = str(getattr(config, "sentenceBoundaryBackend", "sat")).strip() or "sat"
         self._sentence_boundary_model = getattr(config, "sentenceBoundaryModel", None)
         self._boundary_detector_language = str(getattr(config, "language", "en")).strip().lower()
         self._boundary_detector_backend = self._sentence_boundary_backend
         self._boundary_detector_model = self._sentence_boundary_model
         self._sentence_boundary_detector = None
+
+    def _record_audio_queue_drop(self) -> int:
+        with self._audio_queue_drop_lock:
+            self._audio_queue_drops += 1
+            return self._audio_queue_drops
+
+    def _audio_queue_drop_count(self) -> int:
+        with self._audio_queue_drop_lock:
+            return self._audio_queue_drops
 
     def _stt_settings_for_language(self) -> tuple[str, str]:
         language = str(getattr(self._cfg, "language", "en")).strip().lower()
@@ -556,6 +569,7 @@ class WhisperTranscriptWorker:
                 try:
                     self._audio_queue.put_nowait(mono.copy())
                 except queue.Full:
+                    self._record_audio_queue_drop()
                     self._emit("status", "오디오 AI 입력 버퍼가 가득 차 오디오 프레임을 건너뜁니다.")
 
             device = _sounddevice_device_name(self._cfg.inputDevice)
@@ -603,6 +617,7 @@ class WhisperTranscriptWorker:
                     samples = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
                     self._audio_queue.put(samples, timeout=0.2)
                 except queue.Full:
+                    self._record_audio_queue_drop()
                     self._emit("status", "오디오 AI 입력 버퍼가 가득 차 Pulse 프레임을 건너뜁니다.")
                 except Exception as exc:
                     self._emit("error", f"Pulse 캡처 처리 실패: {exc}")
@@ -643,6 +658,7 @@ class WhisperTranscriptWorker:
         staged_forced = False
         lifecycle_metrics: dict[str, int] = {}
         chunk_lifecycle_metrics: dict[str, int] = {}
+        last_audio_queue_drops = self._audio_queue_drop_count()
 
         def count_metric(name: str, amount: int = 1) -> None:
             lifecycle_metrics[name] = lifecycle_metrics.get(name, 0) + amount
@@ -798,7 +814,16 @@ class WhisperTranscriptWorker:
                 count_metric("stage_discard")
                 count_metric(f"stage_discard_reason_{replacement_reason}")
                 max_age = _sentence_max_age_chunks(staged_forced)
-                should_stage_candidate = _should_stage_replacement_candidate(
+                quality_blocked_confirmed = _is_quality_blocked_confirmed_replacement(
+                    staged_sentence,
+                    candidate,
+                    staged_confirmations,
+                    staged_forced,
+                    staged_age,
+                )
+                if quality_blocked_confirmed:
+                    count_metric("stage_candidate_suppressed_reason_confirmed_quality_blocked")
+                should_stage_candidate = False if quality_blocked_confirmed else _should_stage_replacement_candidate(
                     staged_sentence,
                     candidate,
                     replacement_reason,
@@ -808,9 +833,10 @@ class WhisperTranscriptWorker:
                 self._emit(
                     "status",
                     "Whisper stage 폐기: "
-                    f"chunk={chunks} reason=replaced_unconfirmed "
+                    f"chunk={chunks} reason=replaced_{replacement_reason} "
                     f"staged_confirmations={staged_confirmations} required={_sentence_required_confirmations(staged_forced)} "
                     f"staged_age={staged_age} max_age={max_age} "
+                    f"quality_blocked_confirmed={quality_blocked_confirmed} "
                     f"staged_forced={staged_forced} staged_tail={_diagnostic_tail(staged_sentence)} "
                     f"candidate_tail={_diagnostic_tail(candidate)} candidate_stage={should_stage_candidate}",
                     display=False,
@@ -929,6 +955,13 @@ class WhisperTranscriptWorker:
                 segment_list = list(segments)
                 accepted_texts, rejected_reasons, boundary_confidence = self._accepted_segment_texts(segment_list)
                 raw_window_text = " ".join(accepted_texts).strip()
+                if raw_window_text:
+                    self._emit(
+                        "stt_raw",
+                        raw_window_text,
+                        log_text=f"[{language} raw] {raw_window_text}",
+                        final=True,
+                    )
                 window_text, repeat_collapse_rules = _collapse_adjacent_repeated_phrase_details(raw_window_text)
                 log_collapse_diagnostic("window", raw_window_text, window_text, repeat_collapse_rules)
                 repeat_collapse_chars = max(0, len(_normalized_text(raw_window_text)) - len(_normalized_text(window_text)))
@@ -1052,11 +1085,15 @@ class WhisperTranscriptWorker:
                 if pending_overrun_reason:
                     count_metric("pending_overrun")
                     count_metric(f"pending_overrun_reason_{pending_overrun_reason}")
+                pending_quality_flags = _pending_text_diagnostic_flags(pending_transcript_text, detected, pending_chunks)
+                for flag in pending_quality_flags:
+                    count_metric(f"pending_quality_{flag}")
                 self._emit(
                     "status",
                     "Whisper 문장 진단: "
                     f"chunk={chunks} completed={len(completed_sentences)} final={len(final_sentences)} forced_by={forced_by or 'none'} "
                     f"pending_overrun={pending_overrun_reason or 'none'} "
+                    f"pending_quality={','.join(pending_quality_flags) or 'none'} "
                     f"boundary_backend={self._sentence_boundary_detector.backend} "
                     f"boundary_complete={boundary_complete} boundary_soft={boundary_soft} boundary_conf={boundary_confidence_display} "
                     f"pending_chars={len(pending_transcript_text)} pending_chunks={pending_chunks} "
@@ -1168,6 +1205,12 @@ class WhisperTranscriptWorker:
                             f"{exc}. 번역을 이번 세션에서 중지합니다. STT 전사는 계속됩니다.",
                         )
                 total_elapsed = time.perf_counter() - chunk_started_at
+                current_audio_queue_drops = self._audio_queue_drop_count()
+                chunk_audio_queue_drops = current_audio_queue_drops - last_audio_queue_drops
+                last_audio_queue_drops = current_audio_queue_drops
+                if chunk_audio_queue_drops:
+                    chunk_lifecycle_metrics["input_queue_drops"] = chunk_audio_queue_drops
+                    lifecycle_metrics["input_queue_drops"] = lifecycle_metrics.get("input_queue_drops", 0) + chunk_audio_queue_drops
                 stage_decision_count = sum(
                     value for key, value in chunk_lifecycle_metrics.items() if key.startswith("stage_replace_decision_")
                 )
@@ -1202,9 +1245,13 @@ class WhisperTranscriptWorker:
                     f"chunk={chunks} step={step_seconds:.2f}s window={window_seconds:.2f}s "
                     f"commit_lag={commit_lag_seconds:.2f}s audio={chunk_audio_seconds:.2f}s "
                     f"stt={stt_elapsed:.2f}s stt_rtf={stt_elapsed / max(chunk_audio_seconds, 0.001):.2f} "
+                    f"stt_step_load={stt_elapsed / max(step_seconds, 0.001):.2f} "
                     f"translation={translation_elapsed:.2f}s translation_enabled={self._cfg.translationEnabled and not translation_failed} "
                     f"total={total_elapsed:.2f}s total_rtf={total_elapsed / max(chunk_audio_seconds, 0.001):.2f} "
+                    f"total_step_load={total_elapsed / max(step_seconds, 0.001):.2f} "
                     f"effective_latency_estimate={window_seconds + commit_lag_seconds + total_elapsed:.2f}s "
+                    f"input_queue_drops={chunk_audio_queue_drops} input_queue_drops_total={current_audio_queue_drops} "
+                    f"queue_size={self._audio_queue.qsize()} "
                     f"beam={self._cfg.beamSize} max_tokens={self._cfg.maxNewTokens} text_chars={len(text)}",
                     display=False,
                 )
@@ -1478,10 +1525,12 @@ class WhisperTranscriptWindow:
             except queue.Empty:
                 break
             if event.kind == "transcript":
-                if event.display and not event.final:
-                    self._append_stt_status_transcript(event.text)
                 if not event.final:
                     continue
+            if event.kind == "stt_raw":
+                if event.display:
+                    self._append_stt_status_transcript(event.text)
+                continue
             if not _is_modal_output_event(event):
                 continue
             if event.kind == "translation" and self._translation_text is not None:

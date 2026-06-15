@@ -578,6 +578,12 @@ class ConfigGui:
         self._scrollbar_update_after_id = None
         self._window_geometry_save_after_id: str | None = None
         self._window_geometry_meta_cache: dict[str, str] = {}
+        self._whisper_selected_stt_language: str | None = None
+        self._whisper_runtime_by_language = {
+            "en": self._default_whisper_runtime_for_language("en"),
+            "ko": self._default_whisper_runtime_for_language("ko"),
+            "zh": self._default_whisper_runtime_for_language("zh"),
+        }
         self._tab_meta: list[tuple[ttk.Frame, str, str]] = []
         self._grid_row_cache = {}
         self._input_device_label: ttk.Label | None = None
@@ -607,6 +613,53 @@ class ConfigGui:
         ):
             if key not in self.vars:
                 self.vars[key] = tk.StringVar(value=str(defaults[key]))
+
+    def _default_whisper_runtime_for_language(self, language: str) -> dict[str, float]:
+        suffix = {"en": "En", "ko": "Ko", "zh": "Zh"}[language]
+        return {
+            "stepSeconds": float(whisper_default(f"stepSeconds{suffix}")),
+            "windowSeconds": float(whisper_default(f"windowSeconds{suffix}")),
+            "commitLagSeconds": float(whisper_default(f"commitLagSeconds{suffix}")),
+            "beamSize": float(whisper_default(f"beamSize{suffix}")),
+            "maxNewTokens": float(whisper_default(f"maxNewTokens{suffix}")),
+            "temperature": float(whisper_default(f"temperature{suffix}")),
+        }
+
+    def _current_whisper_runtime_values(self) -> dict[str, float]:
+        return {
+            "stepSeconds": float(self.vars["whisper_step_seconds"].get()),
+            "windowSeconds": float(self.vars["whisper_window_seconds"].get()),
+            "commitLagSeconds": float(self.vars["whisper_commit_lag_seconds"].get()),
+            "beamSize": float(self.vars["whisper_beam_size"].get()),
+            "maxNewTokens": float(self.vars["whisper_max_new_tokens"].get()),
+            "temperature": float(self.vars["whisper_temperature"].get()),
+        }
+
+    def _set_whisper_runtime_values(self, values: dict[str, float]) -> None:
+        self._set_var("whisper_chunk_seconds", values["windowSeconds"])
+        self._set_var("whisper_step_seconds", values["stepSeconds"])
+        self._set_var("whisper_window_seconds", values["windowSeconds"])
+        self._set_var("whisper_commit_lag_seconds", values["commitLagSeconds"])
+        self._set_var("whisper_beam_size", values["beamSize"])
+        self._set_var("whisper_max_new_tokens", values["maxNewTokens"])
+        self._set_var("whisper_temperature", values["temperature"])
+
+    def _store_visible_whisper_runtime_for_language(self, language: str | None = None) -> None:
+        if not self.vars or "whisper_window_seconds" not in self.vars:
+            return
+        lang = language or self._whisper_selected_stt_language
+        if lang not in {"en", "ko", "zh"}:
+            return
+        try:
+            self._whisper_runtime_by_language[lang] = self._current_whisper_runtime_values()
+        except (KeyError, ValueError, tk.TclError):
+            return
+
+    def _load_visible_whisper_runtime_for_language(self, language: str) -> None:
+        if language not in {"en", "ko", "zh"}:
+            language = "en"
+        values = self._whisper_runtime_by_language.get(language) or self._default_whisper_runtime_for_language(language)
+        self._set_whisper_runtime_values(values)
 
     def _is_serve_running(self) -> bool:
         process = self._serve_process
@@ -2022,6 +2075,24 @@ class ConfigGui:
             "whisper_beam_size": whisper["beamSize"],
             "whisper_max_new_tokens": whisper["maxNewTokens"],
             "whisper_temperature": whisper["temperature"],
+            "whisper_step_seconds_en": whisper["stepSecondsEn"],
+            "whisper_window_seconds_en": whisper["windowSecondsEn"],
+            "whisper_commit_lag_seconds_en": whisper["commitLagSecondsEn"],
+            "whisper_beam_size_en": whisper["beamSizeEn"],
+            "whisper_max_new_tokens_en": whisper["maxNewTokensEn"],
+            "whisper_temperature_en": whisper["temperatureEn"],
+            "whisper_step_seconds_ko": whisper["stepSecondsKo"],
+            "whisper_window_seconds_ko": whisper["windowSecondsKo"],
+            "whisper_commit_lag_seconds_ko": whisper["commitLagSecondsKo"],
+            "whisper_beam_size_ko": whisper["beamSizeKo"],
+            "whisper_max_new_tokens_ko": whisper["maxNewTokensKo"],
+            "whisper_temperature_ko": whisper["temperatureKo"],
+            "whisper_step_seconds_zh": whisper["stepSecondsZh"],
+            "whisper_window_seconds_zh": whisper["windowSecondsZh"],
+            "whisper_commit_lag_seconds_zh": whisper["commitLagSecondsZh"],
+            "whisper_beam_size_zh": whisper["beamSizeZh"],
+            "whisper_max_new_tokens_zh": whisper["maxNewTokensZh"],
+            "whisper_temperature_zh": whisper["temperatureZh"],
             "whisper_sentence_boundary_backend": whisper["sentenceBoundaryBackend"],
             "whisper_sentence_boundary_model": whisper["sentenceBoundaryModel"],
             "whisper_sentence_boundary_backend_en": whisper["sentenceBoundaryBackendEn"],
@@ -2371,6 +2442,11 @@ class ConfigGui:
 
     def _reset_whisper_settings(self) -> None:
         defaults = self._build_video_defaults()
+        self._whisper_runtime_by_language = {
+            "en": self._default_whisper_runtime_for_language("en"),
+            "ko": self._default_whisper_runtime_for_language("ko"),
+            "zh": self._default_whisper_runtime_for_language("zh"),
+        }
         for key in (
             "whisper_enabled",
             "whisper_input_device",
@@ -2401,6 +2477,9 @@ class ConfigGui:
             "whisper_sentence_boundary_compute_type",
         ):
             self._set_var(key, defaults.get(key))
+        selected_language = _whisper_language_raw_from_display(self.vars["whisper_language"].get())
+        self._whisper_selected_stt_language = selected_language
+        self._load_visible_whisper_runtime_for_language(selected_language)
         self._sync_whisper_translation_backend_options()
 
     def _load_existing_config(self):
@@ -2633,6 +2712,46 @@ class ConfigGui:
         self._set_var("whisper_beam_size", whisper_cfg.get("beamSize", defaults["whisper_beam_size"]))
         self._set_var("whisper_max_new_tokens", whisper_cfg.get("maxNewTokens", defaults["whisper_max_new_tokens"]))
         self._set_var("whisper_temperature", whisper_cfg.get("temperature", defaults["whisper_temperature"]))
+        selected_language = _whisper_language_raw_from_display(self.vars["whisper_language"].get())
+        for lang, suffix in (("en", "En"), ("ko", "Ko"), ("zh", "Zh")):
+            lang_defaults = self._default_whisper_runtime_for_language(lang)
+            use_legacy = selected_language == lang
+            self._whisper_runtime_by_language[lang] = {
+                "stepSeconds": float(
+                    whisper_cfg.get(f"stepSeconds{suffix}", whisper_cfg.get("stepSeconds", lang_defaults["stepSeconds"]) if use_legacy else lang_defaults["stepSeconds"])
+                ),
+                "windowSeconds": float(
+                    whisper_cfg.get(
+                        f"windowSeconds{suffix}",
+                        whisper_cfg.get("windowSeconds", whisper_cfg.get("chunkSeconds", lang_defaults["windowSeconds"]))
+                        if use_legacy
+                        else lang_defaults["windowSeconds"],
+                    )
+                ),
+                "commitLagSeconds": float(
+                    whisper_cfg.get(
+                        f"commitLagSeconds{suffix}",
+                        whisper_cfg.get("commitLagSeconds", lang_defaults["commitLagSeconds"]) if use_legacy else lang_defaults["commitLagSeconds"],
+                    )
+                ),
+                "beamSize": float(
+                    whisper_cfg.get(f"beamSize{suffix}", whisper_cfg.get("beamSize", lang_defaults["beamSize"]) if use_legacy else lang_defaults["beamSize"])
+                ),
+                "maxNewTokens": float(
+                    whisper_cfg.get(
+                        f"maxNewTokens{suffix}",
+                        whisper_cfg.get("maxNewTokens", lang_defaults["maxNewTokens"]) if use_legacy else lang_defaults["maxNewTokens"],
+                    )
+                ),
+                "temperature": float(
+                    whisper_cfg.get(
+                        f"temperature{suffix}",
+                        whisper_cfg.get("temperature", lang_defaults["temperature"]) if use_legacy else lang_defaults["temperature"],
+                    )
+                ),
+            }
+        self._whisper_selected_stt_language = selected_language
+        self._load_visible_whisper_runtime_for_language(selected_language)
         self._set_var("whisper_sentence_boundary_backend", whisper_cfg.get("sentenceBoundaryBackend", defaults["whisper_sentence_boundary_backend"]))
         self._set_var("whisper_sentence_boundary_model", whisper_cfg.get("sentenceBoundaryModel", defaults["whisper_sentence_boundary_model"]))
         self._set_var("whisper_sentence_boundary_device", whisper_cfg.get("sentenceBoundaryDevice", defaults["whisper_sentence_boundary_device"]))
@@ -4192,6 +4311,13 @@ class ConfigGui:
         selected_language = _whisper_language_raw_from_display(language_var.get()) if language_var is not None else "en"
         if selected_language not in {"en", "ko", "zh"}:
             selected_language = "en"
+        if self._whisper_selected_stt_language is None:
+            self._whisper_selected_stt_language = selected_language
+            self._load_visible_whisper_runtime_for_language(selected_language)
+        elif selected_language != self._whisper_selected_stt_language:
+            self._store_visible_whisper_runtime_for_language(self._whisper_selected_stt_language)
+            self._whisper_selected_stt_language = selected_language
+            self._load_visible_whisper_runtime_for_language(selected_language)
         global_stt_parent = getattr(self, "_whisper_global_stt_parent", getattr(self, "_whisper_tab", None))
         for row in getattr(self, "_whisper_global_stt_rows", []):
             self._grid_rows(global_stt_parent, [row], False)
@@ -4369,6 +4495,15 @@ class ConfigGui:
                 getattr(self, "_audio_output_display_to_raw", {}),
             )
         seg_engine_options = self._collect_seg_engine_options_from_form()
+        selected_whisper_language = _whisper_language_raw_from_display(iv["whisper_language"].get())
+        self._store_visible_whisper_runtime_for_language(selected_whisper_language)
+        runtime_en = self._whisper_runtime_by_language.get("en", self._default_whisper_runtime_for_language("en"))
+        runtime_ko = self._whisper_runtime_by_language.get("ko", self._default_whisper_runtime_for_language("ko"))
+        runtime_zh = self._whisper_runtime_by_language.get("zh", self._default_whisper_runtime_for_language("zh"))
+        runtime_selected = self._whisper_runtime_by_language.get(
+            selected_whisper_language,
+            self._default_whisper_runtime_for_language(selected_whisper_language if selected_whisper_language in {"en", "ko", "zh"} else "en"),
+        )
 
         return build_config(
             input_device=iv["input_device"].get(),
@@ -4443,7 +4578,7 @@ class ConfigGui:
             whisper_stt_model_ko=iv["whisper_stt_model_ko"].get().strip(),
             whisper_stt_backend_zh=iv["whisper_stt_backend_zh"].get().strip(),
             whisper_stt_model_zh=iv["whisper_stt_model_zh"].get().strip(),
-            whisper_language=_whisper_language_raw_from_display(iv["whisper_language"].get()),
+            whisper_language=selected_whisper_language,
             whisper_task="transcribe",
             whisper_translation_enabled=self._parse_bool(iv["whisper_translation_enabled"].get()),
             whisper_show_stt_status_window=self._parse_bool(iv["whisper_show_stt_status_window"].get()),
@@ -4458,13 +4593,31 @@ class ConfigGui:
             whisper_translation_max_new_tokens=int(round(float(iv["whisper_translation_max_new_tokens"].get()))),
             whisper_device=iv["whisper_device"].get().strip(),
             whisper_compute_type=iv["whisper_compute_type"].get().strip(),
-            whisper_chunk_seconds=float(iv["whisper_window_seconds"].get()),
-            whisper_step_seconds=float(iv["whisper_step_seconds"].get()),
-            whisper_window_seconds=float(iv["whisper_window_seconds"].get()),
-            whisper_commit_lag_seconds=float(iv["whisper_commit_lag_seconds"].get()),
-            whisper_beam_size=int(round(float(iv["whisper_beam_size"].get()))),
-            whisper_max_new_tokens=int(round(float(iv["whisper_max_new_tokens"].get()))),
-            whisper_temperature=float(iv["whisper_temperature"].get()),
+            whisper_chunk_seconds=float(runtime_selected["windowSeconds"]),
+            whisper_step_seconds=float(runtime_selected["stepSeconds"]),
+            whisper_window_seconds=float(runtime_selected["windowSeconds"]),
+            whisper_commit_lag_seconds=float(runtime_selected["commitLagSeconds"]),
+            whisper_beam_size=int(round(float(runtime_selected["beamSize"]))),
+            whisper_max_new_tokens=int(round(float(runtime_selected["maxNewTokens"]))),
+            whisper_temperature=float(runtime_selected["temperature"]),
+            whisper_step_seconds_en=float(runtime_en["stepSeconds"]),
+            whisper_window_seconds_en=float(runtime_en["windowSeconds"]),
+            whisper_commit_lag_seconds_en=float(runtime_en["commitLagSeconds"]),
+            whisper_beam_size_en=int(round(float(runtime_en["beamSize"]))),
+            whisper_max_new_tokens_en=int(round(float(runtime_en["maxNewTokens"]))),
+            whisper_temperature_en=float(runtime_en["temperature"]),
+            whisper_step_seconds_ko=float(runtime_ko["stepSeconds"]),
+            whisper_window_seconds_ko=float(runtime_ko["windowSeconds"]),
+            whisper_commit_lag_seconds_ko=float(runtime_ko["commitLagSeconds"]),
+            whisper_beam_size_ko=int(round(float(runtime_ko["beamSize"]))),
+            whisper_max_new_tokens_ko=int(round(float(runtime_ko["maxNewTokens"]))),
+            whisper_temperature_ko=float(runtime_ko["temperature"]),
+            whisper_step_seconds_zh=float(runtime_zh["stepSeconds"]),
+            whisper_window_seconds_zh=float(runtime_zh["windowSeconds"]),
+            whisper_commit_lag_seconds_zh=float(runtime_zh["commitLagSeconds"]),
+            whisper_beam_size_zh=int(round(float(runtime_zh["beamSize"]))),
+            whisper_max_new_tokens_zh=int(round(float(runtime_zh["maxNewTokens"]))),
+            whisper_temperature_zh=float(runtime_zh["temperature"]),
             whisper_post_processing_profile=whisper_default("postProcessingProfile"),
             whisper_sentence_boundary_backend=iv["whisper_sentence_boundary_backend"].get().strip(),
             whisper_sentence_boundary_model=iv["whisper_sentence_boundary_model"].get().strip(),

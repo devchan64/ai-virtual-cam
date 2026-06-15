@@ -321,7 +321,8 @@ class SentenceBoundaryDetector:
 
 2026-06-13 중국어 전사 시도에서 관측된 핵심 지표는 다음과 같다.
 
-- 설정: `language=zh`, `model=large-v3`, `device=cuda`, `compute=float16`, `stepSeconds=1.5`, `windowSeconds=7.5`, `commitLagSeconds=1.5`, `beamSize=3`, `sentenceBoundaryBackend=sat`.
+- 당시 설정: `language=zh`, `model=large-v3`, `device=cuda`, `compute=float16`, `stepSeconds=1.5`, `windowSeconds=7.5`, `commitLagSeconds=1.5`, `beamSize=3`, `sentenceBoundaryBackend=sat`. 이 값은 초기 실험 조건이며 현재 기본값이 아니다.
+- 현재 기본 계약은 STT 언어별로 분리한다. 영어/한국어는 `windowSeconds=7.0`, `stepSeconds=2.0`, `commitLagSeconds=2.0`, `maxNewTokens=192`를 기준으로 하고, 중국어는 `windowSeconds=20.0`, `stepSeconds=2.0`, `commitLagSeconds=2.0`, `maxNewTokens=192`를 기준으로 한다.
 - 최근 중국어 구간: `perf=125`, `diag=125`, `zh_transcripts=163`, `errors=0`.
 - 속도: `stt_rtf avg=0.075`, `p95=0.100`; 계산 성능은 병목이 아님.
 - STT 신뢰도: `low_logprob` 후보 무시 12회. STT 자체 품질 문제도 일부 존재한다.
@@ -411,8 +412,8 @@ STT 모델과 문장 경계 모델의 책임을 분리해 검증한다.
 
 실험 설계:
 
-1. 중국어 기준선은 `windowSeconds=9.0`, `stepSeconds=1.5`, `commitLagSeconds=2.0`으로 둔다.
-2. 비교군은 `windowSeconds=12.0`, `15.0`, `30.0`을 사용하고 `stepSeconds`는 먼저 고정한다. 2026-06-15 로그 기준으로 30초 윈도우는 중국어 장문 문맥 안정성에 유리했지만 final script가 긴 문장 단위로 늦게 갱신되는 비용이 컸다. 기본값은 응답성 균형형인 `windowSeconds=15.0`, `stepSeconds=2.0`, `commitLagSeconds=2.0`, `maxNewTokens=160`으로 두고, 30초는 장문 안정성 실험값으로 유지한다.
+1. 영어/한국어 기준선은 `windowSeconds=7.0`, `stepSeconds=2.0`, `commitLagSeconds=2.0`으로 둔다.
+2. 중국어 기준선은 `windowSeconds=20.0`, `stepSeconds=2.0`, `commitLagSeconds=2.0`, `maxNewTokens=192`로 둔다. `windowSeconds=16.0`은 후보 흔들림이 컸으므로 저지연 한계 비교군으로만 유지한다. `windowSeconds=24.0`, `30.0`은 중국어 장문 안정성 비교군으로 사용한다.
 3. 각 비교군에서 `raw_stt_window` CER, mixed-script ratio, repeated final count, pending overrun, final latency를 기록한다.
 4. `total_rtf`가 1.0 미만이어도 final latency가 커지면 실시간 자막 UX 실패로 판단한다.
 5. 계산 지연과 정책 지연을 분리하기 위해 성능 로그에는 `stt`, `translation`, `total` 외에 `effective_latency_estimate=windowSeconds+commitLagSeconds+total`을 추가하는 것을 검토한다.
@@ -485,7 +486,7 @@ STT 모델과 문장 경계 모델의 책임을 분리해 검증한다.
 - 중국어 backend 로딩 실패는 Fail-Fast다. CPU fallback, Whisper fallback, 다른 STT backend fallback은 자동 수행하지 않는다.
 - Whisper 언어 자동 감지는 폐기한다. `language`는 `ko`, `en`, `zh` 중 하나로 명시해야 한다.
 - 모델 준비 순서는 `STT 모델 -> 번역 모델 -> 문장 경계/후처리 모델 -> 입력 장치 열기 -> 전사 루프`를 유지한다.
-- config GUI 모델 다운로드 대상에는 선택된 중국어 STT 후보 모델도 포함한다.
+- config GUI의 오디오 AI 모델 다운로드 모달은 현재 설정에 적용된 STT/문장 경계/번역 모델을 대상으로 한다. `./bin/avc setup`은 런타임 의존성 설치만 담당하고 모델 다운로드를 수행하지 않는다.
 
 2026-06-13 구현 상태:
 
@@ -494,7 +495,7 @@ STT 모델과 문장 경계 모델의 책임을 분리해 검증한다.
 - 영어/한국어 기본 STT는 `faster-whisper` + `large-v3`를 유지한다.
 - `src/app/stt_model.py`가 faster-whisper와 Qwen3-ASR를 동일한 `transcribe()` 인터페이스로 감싼다. FunASR STT 경로는 제거했다.
 - 중국어 STT가 Whisper 내장 번역을 지원하지 않는 backend일 때 `translationBackend=whisper` 조합은 Fail-Fast로 중지한다. 중국어 번역은 NLLB/M2M100 등 외부 번역 경로를 사용한다.
-- `./bin/avc setup`의 모델 사전 다운로드 대상에 언어별 STT 모델을 포함했다.
+- `./bin/avc setup`의 모델 사전 다운로드 기능은 제거했다. 모델 캐시는 config GUI의 오디오 AI 모델 다운로드 모달에서 준비한다.
 
 #### 검증 지표
 
@@ -658,11 +659,15 @@ unittest 성공은 테스트 코드가 실행되어 지표가 수집되었다는
 | `stability` | 연속 partial 전사가 전체 재출력 없이 안정적으로 revision되는지 | 10 | 80% 이상 |
 | `replacement` | staged 후보 교체 시 보존/폐기/확정 결정이 의도와 맞는지 | 11 | 90% 이상 |
 | `pending` | 긴 pending이 확정되지 않는 사유를 지표화해 번역 지연 위험을 추적하는지 | 10 | 90% 이상 |
+| `pending_quality` | pending 버퍼에 CJK 반복 n-gram 같은 오염 신호가 누적되는지 | 1 | 100% |
+| `final_quality` | final 확정 후보의 짧은 CJK, 언어 불일치, 반복 n-gram 등 품질 플래그를 추적하는지 | 8 | 90% 이상 |
 | `coalesce` | 중국어 completed 후보가 같은 STT 윈도우 안에서 여러 개 나올 때 단일 관측 단위로 병합되는지 | 10 | 100% |
+| `duplicate_suppression` | 이미 확정/관측된 후보가 중복 출력되지 않도록 억제되는지 | 4 | 100% |
+| `runtime_metrics` | 런타임 누적 지표가 안정성 요약으로 올바르게 집계되는지 | 5 | 100% |
 | `translation_quality` | 관측된 번역 출력 샘플에서 고유명사/도메인 용어/명백한 환각 회귀를 추적하는지 | 8 | 80% 이상 |
 | `stage_candidate` | 중국어 staged 후보를 보류/전환하는 결정이 장기 보류 없이 동작하는지 | 4 | 100% |
 
-`distinct` 목표율을 더 높게 둔 이유는 서로 다른 문장을 병합하면 원문 손실이 발생하고, 이후 번역도 복구할 수 없기 때문이다. `revision`과 `collapse`는 중복을 줄이는 방향의 품질 지표지만, 과도한 병합보다 손실 위험이 낮으므로 초기 목표율을 90%로 둔다. `stability`는 incremental ASR의 partial hypothesis instability와 revokes 문제를 현재 코드의 revision lifecycle에 맞춘 프록시 지표다. `replacement`는 2026-06-13 30분 운영 로그에서 관측된 staged 교체 손실을 직접 추적하기 위해 추가한 지표이며, `open_korean_clause`와 `partial_preserve` 결정의 회귀를 막는다. `pending`은 영어 장문처럼 경계가 늦게 나오는 구간에서 번역 지연 위험을 추적하고, 중국어 no-space STT 윈도우의 내부 재시작이 pending에 중복 접합되는지 확인하기 위한 지표다. `coalesce`는 중국어 punctuation 모델이 한 STT 윈도우를 여러 completed 후보로 나누면서 단일 staging 슬롯을 반복 교체하는 문제를 추적한다. `translation_quality`는 STT/문장 확정과 분리된 번역 모델 품질 축이다. 이 값은 실제 모델을 실행하는 패스 기준이 아니라, 운영 로그에서 관측한 source/observed 쌍을 기준으로 고유명사 보존, 도메인 용어 보존, 금지 오역을 확인하는 회귀 샘플 지표다. `stage_candidate`는 중국어 짧은 fragment를 즉시 stage하지 않되, 보류 age가 한계에 도달하고 후보가 충분히 성장했을 때 새 관찰 후보로 전환하는지를 추적한다.
+`distinct` 목표율을 더 높게 둔 이유는 서로 다른 문장을 병합하면 원문 손실이 발생하고, 이후 번역도 복구할 수 없기 때문이다. `revision`과 `collapse`는 중복을 줄이는 방향의 품질 지표지만, 과도한 병합보다 손실 위험이 낮으므로 초기 목표율을 90%로 둔다. `stability`는 incremental ASR의 partial hypothesis instability와 revokes 문제를 현재 코드의 revision lifecycle에 맞춘 프록시 지표다. `replacement`는 2026-06-13 30분 운영 로그에서 관측된 staged 교체 손실을 직접 추적하기 위해 추가한 지표이며, `open_korean_clause`와 `partial_preserve` 결정의 회귀를 막는다. `pending`은 영어 장문처럼 경계가 늦게 나오는 구간에서 번역 지연 위험을 추적하고, `pending_quality`는 중국어 no-space STT 윈도우의 내부 재시작이 pending에 반복 접합되는 오염 신호를 분리해서 본다. `final_quality`는 final 후보 자체가 번역/복사 대상으로 적합한지 확인하는 품질 축이고, `coalesce`는 중국어 punctuation 모델이 한 STT 윈도우를 여러 completed 후보로 나누면서 단일 staging 슬롯을 반복 교체하는 문제를 추적한다. `translation_quality`는 STT/문장 확정과 분리된 번역 모델 품질 축이다. 이 값은 실제 모델을 실행하는 패스 기준이 아니라, 운영 로그에서 관측한 source/observed 쌍을 기준으로 고유명사 보존, 도메인 용어 보존, 금지 오역을 확인하는 회귀 샘플 지표다. `stage_candidate`는 중국어 짧은 fragment를 즉시 stage하지 않되, 보류 age가 한계에 도달하고 후보가 충분히 성장했을 때 새 관찰 후보로 전환하는지를 추적한다. `runtime_metrics`는 로그 집계 경로가 새 지표를 누락하지 않는지 확인하는 계약 지표다. 2026-06-15 `windowSeconds=30`, `stepSeconds=1` 중국어 모니터링에서는 `stt_step_load > 1`과 Pulse 입력 큐 드롭이 함께 관측되어 `input_queue_drops`를 runtime metric에 추가했다.
 
 ### 12.1 운영 규칙
 
@@ -764,7 +769,7 @@ replace=570 discard=568 suppressed=266 revision=327 finalized=137 no_result=20
 perf_samples=1064 max_stt=0.350s max_total=0.370s avg_total_rtf=0.010 translation=0
 ```
 
-이 관측에서는 CUDA/FunASR STT 처리 속도는 충분히 빠르며, `chunkSeconds=9.0`, `stepSeconds=1.5`, `commitLagSeconds=2.0` 기본값을 더 공격적으로 줄일 근거는 부족했다. 병목은 성능 파라미터보다 중국어 stage 후보 생명주기였다. 특히 짧은 CJK 후보를 보류하는 정책이 필요한 동시에, 보류 age가 `SENTENCE_CONFIRM_MAX_AGE_CHUNKS`에 도달하고 후보가 기존 stage보다 충분히 길어진 경우에는 새 관찰 후보로 전환해야 장기 보류가 줄어든다.
+이 관측에서는 CUDA/FunASR STT 처리 속도는 충분히 빨랐지만, FunASR STT 품질은 충분하지 않았다. 당시 `chunkSeconds=9.0`, `stepSeconds=1.5`, `commitLagSeconds=2.0` 조합은 과거 실험값이며 현재 기본값이 아니다. 병목은 단순 성능 파라미터보다 중국어 STT 품질과 stage 후보 생명주기였다. 특히 짧은 CJK 후보를 보류하는 정책이 필요한 동시에, 보류 age가 `SENTENCE_CONFIRM_MAX_AGE_CHUNKS`에 도달하고 후보가 기존 stage보다 충분히 길어진 경우에는 새 관찰 후보로 전환해야 장기 보류가 줄어든다.
 
 2026-06-14 추가 비교에서는 `windowSeconds=30`에서 raw STT가 덜 흔들리는 경향이 관측되었다. 다만 backend별 의미는 다르다. FunASR Paraformer는 인접 전사 유사도가 높고 처리시간이 빠르지만 stage 교체/폐기가 많고 확정률이 낮았다. Qwen3-ASR 0.6B는 처리시간이 더 길지만 FunASR보다 의미 보존과 문장 구조가 자연스럽고 확정률도 높았다. Whisper/faster-whisper는 중국어 정확도가 부족해 이 비교의 품질 후보가 아니라 baseline으로만 둔다.
 
@@ -811,7 +816,7 @@ unit test discover: 567 passed
 ./bin/avc test: passed, integration skipped=1
 ```
 
-운영 파라미터 비교에서 `windowSeconds=20`은 응답성은 좋지만 중국어 STT 후보가 크게 흔들렸고, `windowSeconds=30`은 문맥 안정성은 상대적으로 좋지만 final script 갱신이 늦고 긴 문장 확정 비용이 커졌다. 2026-06-15 현재 기본 계약값은 중간 실험값인 `windowSeconds=24`, `stepSeconds=2`, `commitLagSeconds=2`, `maxNewTokens=192`로 둔다. 20초는 저지연 비교군, 30초는 중국어 장문 STT 안정성 비교군으로 남긴다. 우선순위는 STT 모델 품질과 pending/revision 생명주기 지표 개선이며, `final_quality_cjk_internal_gap`는 공백 없는 CJK 출력에서 false positive가 있을 수 있으므로 hard fail이 아니라 추세 지표로만 사용한다. 안정성 로그에는 `duplicate_suppressed`, `delta_trimmed`, `final_quality`, `translation_skip`, `revision_changed`, `revision_reset`을 추가해 중복 억제와 후보 흔들림을 분리해서 본다. CJK revision 내용이 실제로 바뀐 경우 confirmations를 1부터 다시 세어 흔들리는 후보가 누적 확인만으로 확정되지 않도록 한다.
+운영 파라미터 비교에서 영어/한국어는 `windowSeconds=7`이 실시간성과 품질의 균형점으로 관측되었다. 반면 중국어/Qwen3-ASR는 `windowSeconds=16`에서 STT 후보가 크게 흔들렸고, `windowSeconds=20`부터 준수한 품질이 관측되었다. `windowSeconds=30`은 문맥 안정성은 상대적으로 좋지만 final script 갱신이 늦고 긴 문장 확정 비용이 커졌다. 또한 `stepSeconds=1`과 결합하면 `stt_step_load`가 1을 초과하고 Pulse 입력 큐 드롭이 발생해 실시간 입력을 잃을 수 있다. 따라서 30초 윈도우는 장문 STT 안정성 비교군일 뿐이며, 1초 갱신 주기와 결합한 품질 평가는 신뢰하지 않는다. 2026-06-15 현재 기본 계약값은 언어별로 분리한다. 영어/한국어는 `windowSecondsEn=7`, `windowSecondsKo=7`, 중국어는 `windowSecondsZh=20`, `stepSecondsZh=2`를 시작점으로 둔다. 우선순위는 STT 모델 품질과 pending/revision 생명주기 지표 개선이며, `final_quality_cjk_internal_gap`는 공백 없는 CJK 출력에서 false positive가 있을 수 있으므로 hard fail이 아니라 추세 지표로만 사용한다. 안정성 로그에는 `duplicate_suppressed`, `delta_trimmed`, `final_quality`, `translation_skip`, `revision_changed`, `revision_reset`, `pending_quality`, `input_queue_drops`를 추가해 중복 억제, 후보 흔들림, pending 버퍼 오염, 처리량 초과를 분리해서 본다. CJK revision 내용이 실제로 바뀐 경우 confirmations를 1부터 다시 세어 흔들리는 후보가 누적 확인만으로 확정되지 않도록 한다.
 
 ## 13) 점진적 적용 순서
 
