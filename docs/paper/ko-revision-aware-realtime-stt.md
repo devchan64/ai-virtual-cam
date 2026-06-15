@@ -77,7 +77,7 @@ Whisper 계열 모델은 강력한 오프라인 전사 성능을 보이지만, �
 
 문맥 윈도우는 STT 모델에 전달되는 오디오 범위를 의미한다. 긴 문맥 윈도우는 모델이 더 많은 문맥을 보고 동음어와 문장 구조를 판단하게 해 전사 안정성을 높일 수 있다. 그러나 final transcript는 사용자가 보는 텍스트이므로 낮은 지연과 적절한 문장 길이가 필요하다.
 
-운영 관측에서는 중국어 `windowSeconds=30`이 raw STT 안정성을 높이는 경향을 보였지만, final transcript가 긴 문장으로 묶이고 갱신이 늦어지는 문제가 관측되었다. 이후 원문창이 raw STT가 아니라 staged 후보를 표시하던 문제를 수정하면서 작은 윈도우 품질에 대한 해석을 재검토했다. 현재 기본 계약은 STT 언어별로 분리하며, 영어/한국어는 `windowSeconds=7`, `stepSeconds=1`, `commitLagSeconds=1`, `sentenceFinalizeAge=3`, `maxNewTokens=192`를 기준으로 하고, 중국어는 `windowSeconds=12`, `stepSeconds=1`, `commitLagSeconds=1`, `sentenceFinalizeAge=3`, `maxNewTokens=192`를 기준으로 한다. 16초, 20초, 24초, 30초 윈도우는 중국어 장문 안정성 비교 실험값으로 유지한다.
+운영 관측에서는 중국어 `windowSeconds=30`이 raw STT 안정성을 높이는 경향을 보였지만, final transcript가 긴 문장으로 묶이고 갱신이 늦어지는 문제가 관측되었다. 이후 원문창이 raw STT가 아니라 staged 후보를 표시하던 문제를 수정하면서 작은 윈도우 품질에 대한 해석을 재검토했다. 현재 기본 계약은 STT 언어별로 분리하며, 영어/한국어는 `windowSeconds=7`, `stepSeconds=1`, `sentenceFinalizeAge=3`, `maxNewTokens=192`를 기준으로 하고, 중국어는 `windowSeconds=12`, `stepSeconds=1`, `sentenceFinalizeAge=3`, `maxNewTokens=192`를 기준으로 한다. 16초, 20초, 24초, 30초 윈도우는 중국어 장문 안정성 비교 실험값으로 유지한다.
 
 ## 7. 평가 지표
 

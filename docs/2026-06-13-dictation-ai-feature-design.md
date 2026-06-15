@@ -101,7 +101,7 @@ audio 입력
 {
   "stepSeconds": 1.5,
   "windowSeconds": 9.0,
-  "commitLagSeconds": 1.0,
+  "sentenceFinalizeAge": 3,
   "beamSize": 3,
   "maxNewTokens": 96,
   "temperature": 0.0,
@@ -115,7 +115,7 @@ audio 입력
 운영 체크
 - `0.5 <= stepSeconds <= 5.0`
 - `stepSeconds <= windowSeconds`
-- `0.0 <= commitLagSeconds < windowSeconds`
+- `1 <= sentenceFinalizeAge <= 8`
 - `sentenceBoundaryBackend` 운영값은 `sat`, 테스트/격리값은 `mock`만 허용
 - `sentenceBoundaryDevice=cuda`, `sentenceBoundaryComputeType=float16`은 운영 기본 경로이며 실패 시 CPU/regex로 자동 전환하지 않음
 
@@ -149,7 +149,7 @@ new:      "in the United States to take delivery"
 초기 구현 원칙:
 - 이전/현재 결과의 최장 공통 접두사를 찾아 겹친 부분을 고정 문맥으로 본다.
 - 겹치지 않는 신규 부분만 `candidate_text`로 계산한다.
-- `commitLagSeconds` 구간은 즉시 확정하지 않는다. 이 값은 STT 윈도우 끝단의 불안정한 tail을 보류하는 입력 안정화 장치이며, STT 결과 문장 경계 처리 모델의 신뢰도와는 별개의 시간 보류값이다. 2026-06-15 운영 로그에서는 1초 설정에서도 큐 드롭 없이 동작했으므로 기본값은 1초로 낮춘다.
+- STT 윈도우 tail을 별도 시간값으로 잘라내지 않는다. 확정 안정성은 `sentenceFinalizeAge`와 staged revision 생명주기로 판단한다.
 - 동일 후보 재확인 횟수(`staged_confirmations`)를 만족할 때만 `confirmed`를 확장한다. STT 결과 문장 경계 처리 모델이 `completed` 후보를 반환해도 STT 가설 텍스트는 다음 윈도우에서 고쳐질 수 있으므로, 후보 재확인은 ASR revision 안정성을 확인하는 생명주기다.
 - 현재 기본 확정 기준은 일반 후보 3회, 강제 후보 4회 재확인이다. STT 결과 문장 경계 처리 모델이 중국어에서 여러 completed 후보를 반환하면 같은 STT 윈도우의 하나의 관찰 단위로 병합해 staged 생명주기에 넣는다. 이전 staged 후보가 재확인 기준이나 `sentenceFinalizeAge`를 만족하면 먼저 확정하고, 만족하지 못하면 새 후보로 교체해 다음 윈도우에서 다시 관찰한다. 이는 같은 chunk 안의 후속 completed 후보가 첫 관찰 후보를 `next_completed`로 즉시 final 확정시키던 문제를 줄이기 위한 단순 정책이다.
 - 구두점 없는 한글 열린 절(`이 두 직업은`, `저녁에 퇴근하고` 등)은 반복 관측만으로 확정하지 않고 다음 revision 기회를 유지한다.
@@ -322,8 +322,8 @@ STT 결과 문장 경계 처리:
 
 2026-06-13 중국어 전사 시도에서 관측된 핵심 지표는 다음과 같다.
 
-- 당시 설정: `language=zh`, `model=large-v3`, `device=cuda`, `compute=float16`, `stepSeconds=1.5`, `windowSeconds=7.5`, `commitLagSeconds=1.5`, `beamSize=3`, `sentenceBoundaryBackend=sat`. 이 값은 초기 실험 조건이며 현재 기본값이 아니다.
-- 현재 기본 계약은 STT 언어별로 분리한다. 영어/한국어는 `windowSeconds=7.0`, `stepSeconds=1.0`, `commitLagSeconds=1.0`, `maxNewTokens=192`를 기준으로 하고, 중국어는 `windowSeconds=12.0`, `stepSeconds=1.0`, `commitLagSeconds=1.0`, `maxNewTokens=192`를 기준으로 한다.
+- 당시 설정은 `language=zh`, `model=large-v3`, `device=cuda`, `compute=float16`, `stepSeconds=1.5`, `windowSeconds=7.5`, tail 지연 1.5초, `beamSize=3`, `sentenceBoundaryBackend=sat`였다. tail 지연은 현재 제거된 초기 실험 조건이며 현재 기본값이 아니다.
+- 현재 기본 계약은 STT 언어별로 분리한다. 영어/한국어는 `windowSeconds=7.0`, `stepSeconds=1.0`, `sentenceFinalizeAge=3`, `maxNewTokens=192`를 기준으로 하고, 중국어는 `windowSeconds=12.0`, `stepSeconds=1.0`, `sentenceFinalizeAge=3`, `maxNewTokens=192`를 기준으로 한다.
 - 최근 중국어 구간: `perf=125`, `diag=125`, `zh_transcripts=163`, `errors=0`.
 - 속도: `stt_rtf avg=0.075`, `p95=0.100`; 계산 성능은 병목이 아님.
 - STT 신뢰도: `low_logprob` 후보 무시 12회. STT 자체 품질 문제도 일부 존재한다.
@@ -352,13 +352,12 @@ STT 결과 문장 경계 처리:
 현재 운영 규칙은 최적화 관점에서 확정에 직접 기여하는 규칙만 남긴다.
 
 1. 이전 committed 출력과 겹치는 prefix/suffix는 제거하고 신규 후보만 staged 후보로 관찰한다.
-2. `commitLagSeconds` 구간(윈도우 끝단)은 즉시 확정하지 않는다.
-3. 동일 후보 또는 더 나은 revision 후보가 요구 재확인 횟수(`staged_confirmations`)를 채우면 확정한다.
-4. 명백한 final 품질 오류(`empty`, `spaced_cjk`, `cjk_repeated_ngram`, `latin_only_for_zh`)가 있는 후보만 확정하지 않는다.
-5. STT 결과 문장 경계 처리 모델이 중국어에서 여러 completed 후보를 반환하면, 같은 STT 윈도우의 하나의 관찰 단위로 병합한다. 영어/한국어는 경계 모델 출력 단위를 보존한다.
-6. 새 completed 후보가 들어와 이전 staged 후보를 교체해야 할 때, 이전 staged 후보가 `sentenceFinalizeAge` 또는 재확인 횟수 기준을 통과했으면 먼저 확정한다. CJK의 짧은 fragment, 내부 공백, 끝표지 없는 후보는 이 경로에서도 제외하고 추가 관찰을 기다린다.
-7. 이전 staged 후보가 확정 기준을 통과하지 못하면 폐기/보류하지 않고 새 후보로 교체해 관찰을 계속한다.
-8. pending이 길이/관측 횟수 임계치를 넘으면 `forced_by` 후보로 stage에 올리되, forced 후보도 별도 재확인 기준과 명백한 final 품질 게이트를 통과해야 확정한다.
+2. 동일 후보 또는 더 나은 revision 후보가 요구 재확인 횟수(`staged_confirmations`)를 채우면 확정한다.
+3. 명백한 final 품질 오류(`empty`, `spaced_cjk`, `cjk_repeated_ngram`, `latin_only_for_zh`)가 있는 후보만 확정하지 않는다.
+4. STT 결과 문장 경계 처리 모델이 중국어에서 여러 completed 후보를 반환하면, 같은 STT 윈도우의 하나의 관찰 단위로 병합한다. 영어/한국어는 경계 모델 출력 단위를 보존한다.
+5. 새 completed 후보가 들어와 이전 staged 후보를 교체해야 할 때, 이전 staged 후보가 `sentenceFinalizeAge` 또는 재확인 횟수 기준을 통과했으면 먼저 확정한다. CJK의 짧은 fragment, 내부 공백, 끝표지 없는 후보는 이 경로에서도 제외하고 추가 관찰을 기다린다.
+6. 이전 staged 후보가 확정 기준을 통과하지 못하면 폐기/보류하지 않고 새 후보로 교체해 관찰을 계속한다.
+7. pending이 길이/관측 횟수 임계치를 넘으면 `forced_by` 후보로 stage에 올리되, forced 후보도 별도 재확인 기준과 명백한 final 품질 게이트를 통과해야 확정한다.
 
 제거한 규칙:
 
@@ -405,7 +404,7 @@ STT 모델과 STT 결과 문장 경계 처리 모델의 책임을 분리해 검�
 
 1. 중국어는 `stepSeconds`만 낮춰 빠르게 갱신하면 오히려 동음 후보가 짧은 fragment로 확정되어 중복/오인식이 늘 수 있다.
 2. `windowSeconds`는 영어/한국어보다 길게 잡아 비교해야 한다. 최소 9초 기준선, 12초/15초 비교군을 둔다.
-3. `commitLagSeconds`와 staged confirmation은 중국어에서 더 중요하다. tail의 마지막 1~2초가 다음 윈도우에서 글자 선택을 바꾸는 사례를 별도 지표로 추적한다.
+3. `sentenceFinalizeAge`와 staged confirmation은 중국어에서 더 중요하다. 같은 발화가 다음 윈도우에서 글자 선택을 바꾸는 사례를 별도 지표로 추적한다.
 4. raw STT가 불안정하면 STT 결과 문장 경계 처리 모델로 해결할 수 없다. 중국어는 `raw_stt_window`의 CER, mixed-script ratio, homophone-like substitution 사례를 먼저 본 뒤 boundary 품질을 평가한다.
 5. 후속 개선 후보는 단순 regex가 아니라 pronunciation-aware ASR/error-correction 또는 Pinyin-aware correction 모델이다.
 
@@ -423,16 +422,16 @@ STT 모델과 STT 결과 문장 경계 처리 모델의 책임을 분리해 검�
 운영 판단:
 
 - `windowSeconds` 확대는 raw STT 품질과 staged 후보 안정성을 개선할 수 있다.
-- 그러나 `windowSeconds + commitLagSeconds + staged confirmation`이 체감 확정 지연의 하한을 만든다. 계산 시간이 충분히 빨라도 자막은 늦게 보일 수 있다.
+- 그러나 `windowSeconds + staged confirmation`이 체감 확정 지연의 하한을 만든다. 계산 시간이 충분히 빨라도 자막은 늦게 보일 수 있다.
 - `windowSeconds`를 무작정 키우면 중복 후보, tail echo, pending overrun, GPU 메모리 사용량이 늘 수 있다.
 
 실험 설계:
 
-1. 영어/한국어 기준선은 `windowSeconds=7.0`, `stepSeconds=1.0`, `commitLagSeconds=1.0`으로 둔다.
-2. 중국어 기준선은 `windowSeconds=12.0`, `stepSeconds=1.0`, `commitLagSeconds=1.0`, `maxNewTokens=192`로 둔다. 원문창이 staged 후보를 표시하던 시기의 해석 오류를 제거한 뒤 12초도 유효한 비교값으로 확인했다. `windowSeconds=16.0`, `20.0`, `24.0`, `30.0`은 중국어 장문 안정성 비교군으로 사용한다.
+1. 영어/한국어 기준선은 `windowSeconds=7.0`, `stepSeconds=1.0`, `sentenceFinalizeAge=3`으로 둔다.
+2. 중국어 기준선은 `windowSeconds=12.0`, `stepSeconds=1.0`, `sentenceFinalizeAge=3`, `maxNewTokens=192`로 둔다. 원문창이 staged 후보를 표시하던 시기의 해석 오류를 제거한 뒤 12초도 유효한 비교값으로 확인했다. `windowSeconds=16.0`, `20.0`, `24.0`, `30.0`은 중국어 장문 안정성 비교군으로 사용한다.
 3. 각 비교군에서 `raw_stt_window` CER, mixed-script ratio, repeated final count, pending overrun, final latency를 기록한다.
 4. `total_rtf`가 1.0 미만이어도 final latency가 커지면 실시간 자막 UX 실패로 판단한다.
-5. 계산 지연과 정책 지연을 분리하기 위해 성능 로그에는 `stt`, `translation`, `total` 외에 `effective_latency_estimate=windowSeconds+commitLagSeconds+total`을 추가하는 것을 검토한다.
+5. 계산 지연과 정책 지연을 분리하기 위해 성능 로그에는 `stt`, `translation`, `total` 외에 `effective_latency_estimate=windowSeconds+total`을 기록한다.
 
 ### 9.5 중국어 STT backend 교체 검토
 
@@ -593,7 +592,7 @@ STT 모델과 STT 결과 문장 경계 처리 모델의 책임을 분리해 검�
 #### 11.3.1 로그 입력(필수 필드)
 
 - `split event`: `chunk`, `completed`, `final`, `pending_text`, `forced_by`, `pending_overrun`, `boundary_backend`, `pending_chars`, `pending_chunks`, `pending_chars_per_chunk`
-- `commit event`: `step`, `window`, `commit_lag`, `stt_elapsed`, `stt_rtf`, `translation_elapsed`, `total_elapsed`, `total_rtf`, `beam`, `max_tokens`, `text_chars`
+- `commit event`: `step`, `window`, `stt_elapsed`, `stt_rtf`, `translation_elapsed`, `total_elapsed`, `total_rtf`, `beam`, `max_tokens`, `text_chars`
 - `transcript fragment`: `delta_text`, `state(confirmed|pending|partial)`, `revision_id`(있으면)
 
 #### 11.3.2 핵심 KPI 공식
@@ -726,7 +725,7 @@ unittest 성공은 테스트 코드가 실행되어 지표가 수집되었다는
 
 - 일반 후보 확정 기준을 2회에서 3회 재확인으로 조정했다.
 - forced 후보 확정 기준은 4회 재확인을 유지한다.
-- `commitLagSeconds` 기본/운영값은 1.0초로 정렬한다. 1초 설정은 최근 중국어 로그에서 `input_queue_drops=0`, `stt_step_load < 1` 범위로 관측되어 처리량 문제를 만들지 않았다.
+- tail 확정 지연 설정은 제거한다. 확정 안정성은 `sentenceFinalizeAge`와 staged confirmation으로 일원화한다.
 - VAD 기반 필터링은 현재 슬라이딩 윈도우 확정 정책과 충돌해 운영 경로에서 제거한다.
 - `chunk_metrics`를 추가해 해당 chunk에서 발생한 `stage_start`, `stage_revision`, `stage_replace`, `stage_replaced_unconfirmed`, `finalized` 등을 즉시 확인한다.
 - `pending_overrun`을 추가해 긴 pending이 `long_no_boundary`, `with_end_mark`, `unstable_numeric_tail` 중 어떤 상태인지 추적한다.
@@ -790,7 +789,7 @@ replace=570 discard=568 suppressed=266 revision=327 finalized=137 no_result=20
 perf_samples=1064 max_stt=0.350s max_total=0.370s avg_total_rtf=0.010 translation=0
 ```
 
-이 관측에서는 CUDA/FunASR STT 처리 속도는 충분히 빨랐지만, FunASR STT 품질은 충분하지 않았다. 당시 `chunkSeconds=9.0`, `stepSeconds=1.5`, `commitLagSeconds=2.0` 조합은 과거 실험값이며 현재 기본값이 아니다. 병목은 단순 성능 파라미터보다 중국어 STT 품질과 stage 후보 생명주기였다. 특히 짧은 CJK 후보를 보류하는 정책이 필요한 동시에, 보류 age가 `SENTENCE_CONFIRM_MAX_AGE_CHUNKS`에 도달하고 후보가 기존 stage보다 충분히 길어진 경우에는 새 관찰 후보로 전환해야 장기 보류가 줄어든다.
+이 관측에서는 CUDA/FunASR STT 처리 속도는 충분히 빨랐지만, FunASR STT 품질은 충분하지 않았다. 당시 `chunkSeconds=9.0`, `stepSeconds=1.5`, tail 지연 2.0초 조합은 과거 실험값이며 현재 tail 지연 설정은 제거되었다. 병목은 단순 성능 파라미터보다 중국어 STT 품질과 stage 후보 생명주기였다. 특히 짧은 CJK 후보를 보류하는 정책이 필요한 동시에, 보류 age가 `SENTENCE_CONFIRM_MAX_AGE_CHUNKS`에 도달하고 후보가 기존 stage보다 충분히 길어진 경우에는 새 관찰 후보로 전환해야 장기 보류가 줄어든다.
 
 2026-06-14 추가 비교에서는 `windowSeconds=30`에서 raw STT가 덜 흔들리는 경향이 관측되었다. 다만 backend별 의미는 다르다. FunASR Paraformer는 인접 전사 유사도가 높고 처리시간이 빠르지만 stage 교체/폐기가 많고 확정률이 낮았다. Qwen3-ASR 0.6B는 처리시간이 더 길지만 FunASR보다 의미 보존과 문장 구조가 자연스럽고 확정률도 높았다. Whisper/faster-whisper는 중국어 정확도가 부족해 이 비교의 품질 후보가 아니라 baseline으로만 둔다.
 
@@ -837,7 +836,7 @@ unit test discover: 567 passed
 ./bin/avc test: passed, integration skipped=1
 ```
 
-운영 파라미터 비교에서 영어/한국어는 `windowSeconds=7`이 실시간성과 품질의 균형점으로 관측되었다. 중국어/Qwen3-ASR는 원문창이 staged 후보를 표시하던 시기의 로그 해석 오류 때문에 작은 윈도우의 raw STT 품질을 과소평가했다. 원문창을 `stt_raw` 기반 raw STT window 출력으로 분리한 뒤에는 `windowSeconds=12`도 유효한 시작점으로 본다. `windowSeconds=30`은 문맥 안정성은 상대적으로 좋지만 final script 갱신이 늦고 긴 문장 확정 비용이 커졌다. 또한 `stepSeconds=1`과 결합하면 `stt_step_load`가 1을 초과하고 Pulse 입력 큐 드롭이 발생할 수 있으므로 성능 로그를 함께 확인해야 한다. 2026-06-15 현재 기본 계약값은 언어별로 분리한다. 영어/한국어는 `windowSecondsEn=7`, `windowSecondsKo=7`, `stepSecondsEn=1`, `stepSecondsKo=1`, `commitLagSecondsEn=1`, `commitLagSecondsKo=1`, 중국어는 `windowSecondsZh=12`, `stepSecondsZh=1`, `commitLagSecondsZh=1`을 시작점으로 둔다. 우선순위는 STT 모델 품질과 pending/revision 생명주기 지표 개선이며, 운영 지표는 `finalized`, `raw_without_final`, `stage_replaced_unconfirmed`, `revision_changed`, `input_queue_drops`를 먼저 본다. 후보 차단/폐기 규칙이 늘어나면 final 생성률이 급격히 낮아질 수 있으므로, 명백한 오류 후보만 막고 나머지는 staged 교체와 재확인으로 처리한다. CJK revision 내용이 실제로 바뀐 경우 confirmations를 1부터 다시 세어 흔들리는 후보가 누적 확인만으로 확정되지 않도록 한다. 2026-06-15 12초/1초 중국어 모니터링에서는 `stt_step_load`가 대체로 0.4~0.7이고 `input_queue_drops=0`이라 처리량은 충분했지만, 복잡한 stage 보류/폐기 규칙이 누적되면서 `raw_without_final`이 증가했다. 2026-06-16 로그에서는 같은 STT chunk 안의 여러 중국어 completed 후보가 첫 관찰 후보를 `next_completed`로 즉시 final 확정시키는 문제가 관측되어, 중국어 multi-completed 후보는 하나의 관찰 단위로 병합하고 교체 직전 확정은 `sentenceFinalizeAge` 또는 재확인 횟수 기준을 통과한 후보에만 허용한다. 같은 모니터링에서 Qwen3-ASR가 빈 `ASRTranscription` 객체를 반환했을 때 객체 표현 문자열이 raw STT로 유입되는 경로도 확인되었으므로, STT 어댑터는 `.text` 속성이 존재하면 빈 값도 명시 결과로 처리하고 객체를 문자열화하지 않는다.
+운영 파라미터 비교에서 영어/한국어는 `windowSeconds=7`이 실시간성과 품질의 균형점으로 관측되었다. 중국어/Qwen3-ASR는 원문창이 staged 후보를 표시하던 시기의 로그 해석 오류 때문에 작은 윈도우의 raw STT 품질을 과소평가했다. 원문창을 `stt_raw` 기반 raw STT window 출력으로 분리한 뒤에는 `windowSeconds=12`도 유효한 시작점으로 본다. `windowSeconds=30`은 문맥 안정성은 상대적으로 좋지만 final script 갱신이 늦고 긴 문장 확정 비용이 커졌다. 또한 `stepSeconds=1`과 결합하면 `stt_step_load`가 1을 초과하고 Pulse 입력 큐 드롭이 발생할 수 있으므로 성능 로그를 함께 확인해야 한다. 현재 기본 계약값은 언어별로 분리한다. 영어/한국어는 `windowSecondsEn=7`, `windowSecondsKo=7`, `stepSecondsEn=1`, `stepSecondsKo=1`, `sentenceFinalizeAgeEn=3`, `sentenceFinalizeAgeKo=3`, 중국어는 `windowSecondsZh=12`, `stepSecondsZh=1`, `sentenceFinalizeAgeZh=3`을 시작점으로 둔다. 우선순위는 STT 모델 품질과 pending/revision 생명주기 지표 개선이며, 운영 지표는 `finalized`, `raw_without_final`, `stage_replaced_unconfirmed`, `revision_changed`, `input_queue_drops`를 먼저 본다. 후보 차단/폐기 규칙이 늘어나면 final 생성률이 급격히 낮아질 수 있으므로, 명백한 오류 후보만 막고 나머지는 staged 교체와 재확인으로 처리한다. CJK revision 내용이 실제로 바뀐 경우 confirmations를 1부터 다시 세어 흔들리는 후보가 누적 확인만으로 확정되지 않도록 한다. 2026-06-15 12초/1초 중국어 모니터링에서는 `stt_step_load`가 대체로 0.4~0.7이고 `input_queue_drops=0`이라 처리량은 충분했지만, 복잡한 stage 보류/폐기 규칙이 누적되면서 `raw_without_final`이 증가했다. 2026-06-16 로그에서는 같은 STT chunk 안의 여러 중국어 completed 후보가 첫 관찰 후보를 `next_completed`로 즉시 final 확정시키는 문제가 관측되어, 중국어 multi-completed 후보는 하나의 관찰 단위로 병합하고 교체 직전 확정은 `sentenceFinalizeAge` 또는 재확인 횟수 기준을 통과한 후보에만 허용한다. 같은 모니터링에서 Qwen3-ASR가 빈 `ASRTranscription` 객체를 반환했을 때 객체 표현 문자열이 raw STT로 유입되는 경로도 확인되었으므로, STT 어댑터는 `.text` 속성이 존재하면 빈 값도 명시 결과로 처리하고 객체를 문자열화하지 않는다.
 
 전사 품질을 볼 때는 세 창/로그의 의미를 구분한다. STT 원문창은 raw STT window 결과이며, 전사 창은 revision lifecycle과 final 확정을 거친 사용자 출력이다. `stable_tail`, `delta_tail`, `pending_tail`, `staged_tail`은 stdout 진단 로그용 상태값이며 창에 표시되는 raw STT 또는 final transcript와 동일한 의미가 아니다.
 
