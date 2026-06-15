@@ -1,16 +1,15 @@
 import unittest
 
 from src.app.sentence_boundary import LegacyRegexSentenceBoundaryDetector
+from src.app.dictation_transcript_logic import _deferred_completed_text
 from src.app.dictation_window import (
     _collapse_adjacent_repeated_phrase_details,
     _collapse_adjacent_repeated_phrases,
     _coalesce_completed_sentences_for_staging,
-    _deferred_completed_text,
     _diagnostic_tail,
     _final_sentence_diagnostic_flags,
     _forced_sentence_reason,
     _format_transcript_metrics,
-    _is_quality_blocked_confirmed_replacement,
     _new_text_delta,
     _next_revision_confirmation_count,
     _pending_new_text_combined,
@@ -25,9 +24,7 @@ from src.app.dictation_window import (
     _should_age_staged_sentence,
     _should_drop_blocked_boundary_candidate,
     _should_drop_suppressed_stage,
-    _should_defer_completed_for_unconfirmed_stage,
     _should_finalize_replaced_sentence,
-    _should_release_quality_blocked_confirmed_replacement,
     _should_stage_replacement_candidate,
     _should_confirm_staged_sentence,
     _should_translate_staged_sentence,
@@ -275,51 +272,6 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         self.assertEqual(_replacement_decision_reason(staged, candidate, 3, False, 0), "confirmed")
         self.assertFalse(_should_confirm_staged_sentence(staged, 3, False))
         self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 3, False, 0))
-        self.assertTrue(_is_quality_blocked_confirmed_replacement(staged, candidate, 3, False, 0))
-
-    def test_quality_blocked_confirmed_cjk_replacement_is_preserved_from_monitoring(self) -> None:
-        # Regression from 2026-06-15 20:27 chunk 24. The staged CJK candidate
-        # had enough observations, but lacked a sentence end marker. Replacing
-        # it with another unstable candidate loses revision history.
-        staged = "盐面包呢它不能单买它就是一口气你就是一定要买四颗它四颗就是一个外包装的袋子自然到盐面包圣水洞的人气王他们呢曾经创下一天哦"
-        candidate = "盐面包呢它认单买它就是一口气你就是一定要买四颗它四颗就是一个外包装的袋子自然道盐面包圣水洞的人气王他们曾经创下一天哦"
-
-        self.assertEqual(_replacement_decision_reason(staged, candidate, 6, False, 0), "confirmed")
-        self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 6, False, 0))
-        self.assertTrue(_is_quality_blocked_confirmed_replacement(staged, candidate, 6, False, 0))
-        self.assertFalse(_should_release_quality_blocked_confirmed_replacement(staged, candidate, 6, False, 3, 3))
-
-    def test_quality_blocked_confirmed_cjk_replacement_releases_after_age_from_recent_log(self) -> None:
-        # Regression from 2026-06-15 12s Chinese monitoring. A quality-blocked
-        # staged sentence stayed visible after age overrun while raw STT moved
-        # to a new completed observation.
-        staged = (
-            "然后这个，像护唇膏的那些，嗯，这个很香哎，这个的味道画，就像摇椅。"
-            "对，把女生的化妆品都变成艺术品。然后这个，像护唇膏的那些。嗯，这个很香哎，这个的味道很香。"
-        )
-        candidate = "很舒服的裙子，这样。这件超可爱的。对啊，这件超可爱的。然后小包包，一套帮你配好了。"
-
-        self.assertEqual(_replacement_decision_reason(staged, candidate, 3, False, 3), "confirmed")
-        self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 3, False, 3))
-        self.assertTrue(_is_quality_blocked_confirmed_replacement(staged, candidate, 3, False, 3))
-        self.assertFalse(_should_release_quality_blocked_confirmed_replacement(staged, candidate, 3, False, 2, 3))
-        self.assertTrue(_should_release_quality_blocked_confirmed_replacement(staged, candidate, 3, False, 3, 3))
-
-    def test_quality_blocked_confirmed_cjk_replacement_releases_long_boundary_candidate_without_marker(self) -> None:
-        # Regression from live monitoring after chunk 521. The sentence boundary
-        # model emitted a long completed candidate, but the text itself did not
-        # end with a punctuation marker. It should become a staged observation,
-        # not a final sentence.
-        staged = (
-            "然后这个，像护唇膏的那些，嗯，这个很香哎，这个的味道画，就像摇椅。"
-            "对，把女生的化妆品都变成艺术品。然后这个，像护唇膏的那些。嗯，这个很香哎，这个的味道很香。"
-        )
-        candidate = "他的魔鬼衫打开之后是熊门门这样子诶，哦，很可爱，很可爱耶。我是没有"
-
-        self.assertEqual(_replacement_decision_reason(staged, candidate, 8, False, 22), "confirmed")
-        self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 8, False, 22))
-        self.assertEqual(_final_sentence_diagnostic_flags(candidate, "zh"), ())
-        self.assertTrue(_should_release_quality_blocked_confirmed_replacement(staged, candidate, 8, False, 22, 3))
 
     def test_spaced_cjk_without_end_marker_does_not_finalize_from_monitoring(self) -> None:
         staged = "见 什 么 都 想 吃 这 可 怎 么 办 呀 我 看 见 大 闸 丸 了 人 刚 才 来 的 啊 肉 丸"
@@ -691,9 +643,8 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
                 self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
 
 
-    def test_chinese_short_replacement_candidate_is_suppressed_from_recent_log(self) -> None:
+    def test_very_short_chinese_replacement_fragments_are_suppressed_from_recent_log(self) -> None:
         cases = [
-            ("这是我的台湾的车牌判。", "的个湾的吃排饭三。"),
             ("还宽零零。", "其有没？"),
             ("好像有没？", "对对。"),
             ("难。", "没？"),
@@ -708,6 +659,14 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
                 self.assertEqual(reason, "unconfirmed_cjk")
                 self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
                 self.assertFalse(_should_stage_replacement_candidate(staged, candidate, reason))
+
+    def test_complete_chinese_replacement_candidate_is_not_age_gated(self) -> None:
+        staged = "这是我的台湾的车牌判。"
+        candidate = "的个湾的吃排饭三。"
+        reason = _replacement_decision_reason(staged, candidate, 1, False, 0)
+
+        self.assertEqual(reason, "unconfirmed_cjk")
+        self.assertTrue(_should_stage_replacement_candidate(staged, candidate, reason, 0, 3))
 
     def test_chinese_long_replacement_candidate_can_be_staged_for_observation(self) -> None:
         cases = [
@@ -730,7 +689,7 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
                 self.assertEqual(reason, "unconfirmed_cjk")
                 self.assertTrue(_should_stage_replacement_candidate(staged, candidate, reason))
 
-    def test_chinese_short_candidate_suppression_releases_after_age_and_growth(self) -> None:
+    def test_chinese_replacement_stage_uses_minimum_units_not_age_growth_gate(self) -> None:
         staged = "我上次发现的都。"
         early_candidate = "继续。"
         grown_candidate = "继续吃，等下吃完再去下。"
@@ -738,7 +697,7 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
 
         self.assertEqual(reason, "unconfirmed_cjk")
         self.assertFalse(_should_stage_replacement_candidate(staged, early_candidate, reason, 3, 3))
-        self.assertFalse(_should_stage_replacement_candidate(staged, grown_candidate, reason, 2, 3))
+        self.assertTrue(_should_stage_replacement_candidate(staged, grown_candidate, reason, 2, 3))
         self.assertTrue(_should_stage_replacement_candidate(staged, grown_candidate, reason, 3, 3))
 
     def test_chinese_confirmed_stage_can_finalize_on_replacement(self) -> None:
@@ -798,14 +757,36 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
             "哎，好酷啊！对呀，我买的弓箭。",
         )
 
-    def test_unconfirmed_chinese_prefix_stage_defers_remaining_completed_candidates(self) -> None:
-        staged = "不重要，这种东西不用管它什么时候用得到。"
+    def test_complete_cjk_candidate_replaces_unconfirmed_stage_without_age_gate(self) -> None:
+        # Regression from 2026-06-15 Chinese monitoring. The previous age and
+        # growth gates kept complete CJK candidates from replacing an unrelated
+        # unconfirmed stage, causing completed queues to circulate back into
+        # pending.
+        staged = "不重要，这种东西不用管他什么感觉他应该会觉得蛮开心。"
+        candidate = "那你什么时候用得到啊？"
 
-        self.assertTrue(_should_defer_completed_for_unconfirmed_stage(staged, 1, False, 2))
-        self.assertTrue(_should_defer_completed_for_unconfirmed_stage(staged, 2, False, 1))
-        self.assertFalse(_should_defer_completed_for_unconfirmed_stage(staged, 3, False, 2))
-        self.assertFalse(_should_defer_completed_for_unconfirmed_stage(staged, 1, False, 0))
-        self.assertFalse(_should_defer_completed_for_unconfirmed_stage("", 1, False, 2))
+        self.assertTrue(
+            _should_stage_replacement_candidate(
+                staged,
+                candidate,
+                "unconfirmed_cjk",
+                staged_age=1,
+                max_age=3,
+            )
+        )
+
+    def test_incomplete_cjk_candidate_still_does_not_replace_unconfirmed_stage(self) -> None:
+        staged = "不重要，这种东西不用管他什么感觉他应该会觉得蛮开心。"
+
+        self.assertFalse(
+            _should_stage_replacement_candidate(
+                staged,
+                "他说不需要",
+                "unconfirmed_cjk",
+                staged_age=1,
+                max_age=3,
+            )
+        )
 
     def test_short_chinese_stage_does_not_block_long_prefix_candidates_from_log(self) -> None:
         # Regression from 2026-06-15 Chinese monitoring chunks 848-851.
@@ -814,7 +795,6 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         staged = "对啊。"
         candidate = "我们现在到的是宫岛的休息站。"
 
-        self.assertFalse(_should_defer_completed_for_unconfirmed_stage(staged, 1, False, 5))
         self.assertTrue(
             _should_stage_replacement_candidate(
                 staged,

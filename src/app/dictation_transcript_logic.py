@@ -24,6 +24,7 @@ FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS = 4
 MIN_PROVISIONAL_TRANSLATION_WORDS = 6
 PROVISIONAL_TRANSLATION_ENABLED = False
 SHORT_CJK_FINAL_UNITS = 10
+MIN_CJK_STAGE_REPLACEMENT_UNITS = 5
 
 
 def _coalesce_completed_sentences_for_staging(sentences: list[str], language: str) -> list[str]:
@@ -1011,66 +1012,6 @@ def _should_finalize_replaced_sentence(
     return reason in {"aged", "duplicate_or_suffix", "partial_preserve"}
 
 
-def _is_quality_blocked_confirmed_replacement(
-    staged_sentence: str,
-    candidate: str,
-    staged_confirmations: int,
-    staged_forced: bool,
-    staged_age: int,
-) -> bool:
-    reason = _replacement_decision_reason(
-        staged_sentence,
-        candidate,
-        staged_confirmations,
-        staged_forced,
-        staged_age,
-    )
-    if reason != "confirmed":
-        return False
-    return not _should_finalize_replaced_sentence(
-        staged_sentence,
-        candidate,
-        staged_confirmations,
-        staged_forced,
-        staged_age,
-    )
-
-
-def _should_release_quality_blocked_confirmed_replacement(
-    staged_sentence: str,
-    candidate: str,
-    staged_confirmations: int,
-    staged_forced: bool,
-    staged_age: int,
-    max_age: int | None = None,
-) -> bool:
-    if not _is_quality_blocked_confirmed_replacement(
-        staged_sentence,
-        candidate,
-        staged_confirmations,
-        staged_forced,
-        staged_age,
-    ):
-        return False
-    age_limit = _sentence_max_age_chunks(staged_forced) if max_age is None else max_age
-    if staged_age < age_limit:
-        return False
-    if _sentences_are_revisions(staged_sentence, candidate):
-        return False
-    similarity = SequenceMatcher(None, _normalized_text(staged_sentence), _normalized_text(candidate)).ratio()
-    if similarity >= 0.70:
-        return False
-    candidate_language = "zh" if _is_cjk_text(candidate) else "en"
-    flags = set(_final_sentence_diagnostic_flags(candidate, candidate_language))
-    if flags.intersection({"empty", "spaced_cjk", "cjk_repeated_ngram", "latin_only_for_zh"}):
-        return False
-    if candidate_language == "zh":
-        cjk_units = [word for word in _word_units(candidate) if _has_cjk_words([word])]
-        if len(cjk_units) <= SHORT_CJK_FINAL_UNITS:
-            return False
-    return True
-
-
 def _should_stage_replacement_candidate(
     staged_sentence: str,
     candidate: str,
@@ -1080,28 +1021,13 @@ def _should_stage_replacement_candidate(
 ) -> bool:
     if replacement_reason != "unconfirmed_cjk":
         return True
-    candidate_words = _word_units(candidate)
-    cjk_units = [word for word in candidate_words if _has_cjk_words([word])]
-    staged_words = _word_units(staged_sentence)
-    staged_cjk_units = [word for word in staged_words if _has_cjk_words([word])]
-    age_limit = SENTENCE_CONFIRM_MAX_AGE_CHUNKS if max_age is None else max_age
-    aged_enough = staged_age >= age_limit
-    enough_growth = len(cjk_units) >= len(staged_cjk_units) + 3
-    staged_flags = set(_final_sentence_diagnostic_flags(staged_sentence, "zh"))
     candidate_flags = set(_final_sentence_diagnostic_flags(candidate, "zh"))
-    if "short_cjk" in staged_flags:
-        if aged_enough and enough_growth:
-            return True
-        if not candidate_flags.intersection(
-            {"empty", "no_end_marker", "spaced_cjk", "cjk_internal_gap", "cjk_repeated_ngram", "latin_only_for_zh"}
-        ):
-            similarity = SequenceMatcher(None, _normalized_text(staged_sentence), _normalized_text(candidate)).ratio()
-            return len(cjk_units) > SHORT_CJK_FINAL_UNITS and similarity < 0.35
-    if 0 < len(cjk_units) <= SHORT_CJK_FINAL_UNITS:
-        return aged_enough and enough_growth
-    if 0 < len(staged_cjk_units) <= SHORT_CJK_FINAL_UNITS and len(cjk_units) <= SHORT_CJK_FINAL_UNITS + 4:
-        return aged_enough and enough_growth
-    return True
+    if candidate_flags.intersection(
+        {"empty", "no_end_marker", "spaced_cjk", "cjk_internal_gap", "cjk_repeated_ngram", "latin_only_for_zh"}
+    ):
+        return False
+    cjk_units = [word for word in _word_units(candidate) if _has_cjk_words([word])]
+    return len(cjk_units) >= MIN_CJK_STAGE_REPLACEMENT_UNITS
 
 
 def _format_transcript_metrics(metrics: dict[str, int]) -> str:
@@ -1160,21 +1086,6 @@ def _should_drop_suppressed_stage(
         staged_confirmations < _sentence_required_confirmations(staged_forced)
         and next_staged_age >= _sentence_max_age_chunks(staged_forced)
     )
-
-
-def _should_defer_completed_for_unconfirmed_stage(
-    staged_sentence: str,
-    staged_confirmations: int,
-    staged_forced: bool,
-    remaining_completed_count: int,
-) -> bool:
-    if not staged_sentence or remaining_completed_count <= 0:
-        return False
-    if _is_cjk_text(staged_sentence):
-        flags = set(_final_sentence_diagnostic_flags(staged_sentence, "zh"))
-        if "short_cjk" in flags:
-            return False
-    return not _should_confirm_staged_sentence(staged_sentence, staged_confirmations, staged_forced)
 
 
 def _is_short_staged_suffix_repeat(staged_sentence: str, pending_text: str) -> bool:

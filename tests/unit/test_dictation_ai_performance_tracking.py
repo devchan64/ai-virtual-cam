@@ -32,7 +32,7 @@ TRACKING_TARGETS = {
     "coalesce": {"target_cases": 10, "target_rate": 1.00},
     "stage_candidate": {"target_cases": 4, "target_rate": 1.00},
     "duplicate_suppression": {"target_cases": 4, "target_rate": 1.00},
-    "runtime_metrics": {"target_cases": 11, "target_rate": 1.00},
+    "runtime_metrics": {"target_cases": 10, "target_rate": 1.00},
 }
 
 REVISION_TRACKING_CASES = [
@@ -777,8 +777,8 @@ STAGE_CANDIDATE_TRACKING_CASES = [
         "candidate": "继续吃，等下吃完再去下。",
         "age": 2,
         "max_age": 3,
-        "expected": False,
-        "source": "2026-06-14 30m monitor chunk 104 before max age",
+        "expected": True,
+        "source": "2026-06-14 30m monitor chunk 104 complete candidate is no longer age-gated",
     },
     {
         "staged": "我上次发现的都。",
@@ -786,7 +786,7 @@ STAGE_CANDIDATE_TRACKING_CASES = [
         "age": 3,
         "max_age": 3,
         "expected": True,
-        "source": "2026-06-14 30m monitor chunk 104 aged growth release",
+        "source": "2026-06-14 30m monitor chunk 104 complete candidate remains accepted",
     },
     {
         "staged": "来看看吉普力哦，这是什么？",
@@ -801,8 +801,8 @@ STAGE_CANDIDATE_TRACKING_CASES = [
         "candidate": "厉害的宝宝应该会喜欢我，刚刚。",
         "age": 0,
         "max_age": 3,
-        "expected": False,
-        "source": "2026-06-14 30m monitor chunk 74 early short candidate suppressed",
+        "expected": True,
+        "source": "2026-06-14 30m monitor chunk 74 complete candidate is no longer age-gated",
     },
     {
         "staged": "对啊。",
@@ -985,11 +985,6 @@ RUNTIME_METRIC_TRACKING_CASES = [
         "source": "2026-06-15 30s/1s Chinese monitor Pulse queue saturation",
     },
     {
-        "metrics": {"stage_candidate_released_reason_confirmed_quality_blocked": 1},
-        "expected": {"quality_blocked_release": 1},
-        "source": "2026-06-15 12s Chinese monitor confirmed quality block age overrun",
-    },
-    {
         "metrics": {"stage_revision_candidate_quality_blocked": 1},
         "expected": {"revision_candidate_quality_blocked": 1},
         "source": "2026-06-15 Chinese monitor repeated ngram revision candidate",
@@ -1010,9 +1005,9 @@ RUNTIME_METRIC_TRACKING_CASES = [
         "source": "2026-06-15 Chinese monitor unconfirmed stage exceeded max age",
     },
     {
-        "metrics": {"completed_deferred_unconfirmed_stage": 3, "raw_without_final": 1},
-        "expected": {"completed_deferred": 3, "raw_without_final": 1},
-        "source": "2026-06-15 Chinese monitor raw STT present but finalization deferred",
+        "metrics": {"raw_without_final": 1},
+        "expected": {"raw_without_final": 1},
+        "source": "2026-06-15 Chinese monitor raw STT present but no final output",
     },
 ]
 
@@ -1088,12 +1083,10 @@ def _runtime_metric_summary(metrics: dict[str, int]) -> dict[str, int]:
         "revision_changed": int(metrics.get("stage_revision_changed", 0)),
         "revision_reset": int(metrics.get("stage_revision_confirmation_reset", 0)),
         "input_queue_drops": int(metrics.get("input_queue_drops", 0)),
-        "quality_blocked_release": int(metrics.get("stage_candidate_released_reason_confirmed_quality_blocked", 0)),
         "revision_candidate_quality_blocked": int(metrics.get("stage_revision_candidate_quality_blocked", 0)),
         "boundary_blocked": int(metrics.get("boundary_next_candidate_blocked", 0)),
         "boundary_dropped": int(metrics.get("boundary_next_candidate_dropped", 0)),
         "stage_candidate_dropped_age_overrun": int(metrics.get("stage_candidate_dropped_age_overrun", 0)),
-        "completed_deferred": int(metrics.get("completed_deferred_unconfirmed_stage", 0)),
         "raw_without_final": int(metrics.get("raw_without_final", 0)),
     }
 
