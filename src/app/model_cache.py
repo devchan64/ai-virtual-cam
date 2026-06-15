@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.domain.contracts.whisper import resolve_qwen_asr_model_name
+from src.domain.contracts.dictation_ai import resolve_qwen_asr_model_name
 
 
 def is_hf_repo_cached(repo_id: str) -> bool:

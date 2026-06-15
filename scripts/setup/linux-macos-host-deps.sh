@@ -376,7 +376,7 @@ PYVERIFY
 
   if [[ "$OS_KIND" == "linux" ]]; then
     if ! command -v parec >/dev/null 2>&1 && ! command -v parecord >/dev/null 2>&1; then
-      fail "parec/parecord is not available. Whisper input meter requires pulseaudio-utils."
+      fail "parec/parecord is not available. Dictation AI input meter requires pulseaudio-utils."
     fi
     if [[ "$INSTALL_WHISPER_CUDA" == "1" ]]; then
       if ! run_as_invoking_user "$venv_py" -c "import nvidia.cublas.lib, nvidia.cudnn.lib" >/dev/null 2>&1; then

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from pathlib import Path
 
 from src.domain.config import WhisperConfig
-from src.app.whisper_window import (
+from src.app.dictation_window import (
     DEFAULT_WINDOW_GEOMETRY_META,
     FINAL_TEXT_COLOR,
     FINAL_TEXT_TAG,
@@ -86,9 +86,9 @@ class WhisperWindowGeometryTest(unittest.TestCase):
             language = _load_ui_language(path)
 
         self.assertEqual(language, "ko")
-        self.assertEqual(_window_title("transcript", language), "ai-virtual-cam 오디오 AI 전사")
-        self.assertEqual(_window_title("translation", language), "ai-virtual-cam 오디오 AI 번역")
-        self.assertEqual(_window_title("sttStatus", language), "ai-virtual-cam 오디오 AI STT 원문창")
+        self.assertEqual(_window_title("transcript", language), "ai-virtual-cam 받아쓰기 AI 전사")
+        self.assertEqual(_window_title("translation", language), "ai-virtual-cam 받아쓰기 AI 번역")
+        self.assertEqual(_window_title("sttStatus", language), "ai-virtual-cam 받아쓰기 AI STT 원문창")
 
     def test_window_titles_fallback_to_english_for_unknown_language(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -98,9 +98,9 @@ class WhisperWindowGeometryTest(unittest.TestCase):
             language = _load_ui_language(path)
 
         self.assertEqual(language, "en")
-        self.assertEqual(_window_title("transcript", language), "ai-virtual-cam Audio AI Transcript")
-        self.assertEqual(_window_title("translation", language), "ai-virtual-cam Audio AI Translation")
-        self.assertEqual(_window_title("sttStatus", language), "ai-virtual-cam Audio AI STT Raw Transcript")
+        self.assertEqual(_window_title("transcript", language), "ai-virtual-cam Dictation AI Transcript")
+        self.assertEqual(_window_title("translation", language), "ai-virtual-cam Dictation AI Translation")
+        self.assertEqual(_window_title("sttStatus", language), "ai-virtual-cam Dictation AI STT Raw Transcript")
 
     def test_skips_invalid_geometry_cache_log(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -482,9 +482,9 @@ class WhisperWindowGeometryTest(unittest.TestCase):
         window._update_line_numbers = lambda _widget: None
 
         window._events.put(TranscriptEvent("status", "STT 모델 로딩 완료"))
-        window._events.put(TranscriptEvent("status", "Whisper 문장 진단: chunk=3 completed=1 final=1"))
-        window._events.put(TranscriptEvent("status", "Whisper 전사 요청: chunk=4 samples=16000"))
-        window._events.put(TranscriptEvent("status", "Whisper 성능: chunk=4 step=1.5"))
+        window._events.put(TranscriptEvent("status", "받아쓰기 AI 문장 진단: chunk=3 completed=1 final=1"))
+        window._events.put(TranscriptEvent("status", "받아쓰기 AI 전사 요청: chunk=4 samples=16000"))
+        window._events.put(TranscriptEvent("status", "받아쓰기 AI 성능: chunk=4 step=1.5"))
         window._poll_events()
 
         self.assertEqual(window._stt_status_text.lines, [])

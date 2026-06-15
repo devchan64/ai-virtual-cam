@@ -1,7 +1,7 @@
 import sys
 import unittest
 
-from src.app.whisper_window import (
+from src.app.dictation_window import (
     _collapse_adjacent_repeated_phrase_details,
     _coalesce_completed_sentences_for_staging,
     _final_sentence_diagnostic_flags,
@@ -9,6 +9,7 @@ from src.app.whisper_window import (
     _pending_overrun_reason,
     _pending_text_diagnostic_flags,
     _replacement_decision_reason,
+    _should_finalize_boundary_candidate,
     _should_stage_replacement_candidate,
     _sentence_output_delta,
     _sentences_are_revisions,
@@ -31,7 +32,7 @@ TRACKING_TARGETS = {
     "coalesce": {"target_cases": 10, "target_rate": 1.00},
     "stage_candidate": {"target_cases": 4, "target_rate": 1.00},
     "duplicate_suppression": {"target_cases": 4, "target_rate": 1.00},
-    "runtime_metrics": {"target_cases": 7, "target_rate": 1.00},
+    "runtime_metrics": {"target_cases": 11, "target_rate": 1.00},
 }
 
 REVISION_TRACKING_CASES = [
@@ -803,6 +804,14 @@ STAGE_CANDIDATE_TRACKING_CASES = [
         "expected": False,
         "source": "2026-06-14 30m monitor chunk 74 early short candidate suppressed",
     },
+    {
+        "staged": "对啊。",
+        "candidate": "我们现在到的是宫岛的休息站。",
+        "age": 0,
+        "max_age": 3,
+        "expected": True,
+        "source": "2026-06-15 avc-whisper.log chunks 848-851 short CJK stage blocked stable prefix",
+    },
 ]
 
 
@@ -985,6 +994,26 @@ RUNTIME_METRIC_TRACKING_CASES = [
         "expected": {"revision_candidate_quality_blocked": 1},
         "source": "2026-06-15 Chinese monitor repeated ngram revision candidate",
     },
+    {
+        "metrics": {"boundary_next_candidate_blocked": 1},
+        "expected": {"boundary_blocked": 1},
+        "source": "2026-06-15 Chinese monitor boundary-next short/spaced fragment",
+    },
+    {
+        "metrics": {"boundary_next_candidate_dropped": 1},
+        "expected": {"boundary_dropped": 1},
+        "source": "2026-06-15 Chinese monitor aged boundary-blocked fragment",
+    },
+    {
+        "metrics": {"stage_candidate_dropped_age_overrun": 1},
+        "expected": {"stage_candidate_dropped_age_overrun": 1},
+        "source": "2026-06-15 Chinese monitor unconfirmed stage exceeded max age",
+    },
+    {
+        "metrics": {"completed_deferred_unconfirmed_stage": 3, "raw_without_final": 1},
+        "expected": {"completed_deferred": 3, "raw_without_final": 1},
+        "source": "2026-06-15 Chinese monitor raw STT present but finalization deferred",
+    },
 ]
 
 
@@ -1061,6 +1090,11 @@ def _runtime_metric_summary(metrics: dict[str, int]) -> dict[str, int]:
         "input_queue_drops": int(metrics.get("input_queue_drops", 0)),
         "quality_blocked_release": int(metrics.get("stage_candidate_released_reason_confirmed_quality_blocked", 0)),
         "revision_candidate_quality_blocked": int(metrics.get("stage_revision_candidate_quality_blocked", 0)),
+        "boundary_blocked": int(metrics.get("boundary_next_candidate_blocked", 0)),
+        "boundary_dropped": int(metrics.get("boundary_next_candidate_dropped", 0)),
+        "stage_candidate_dropped_age_overrun": int(metrics.get("stage_candidate_dropped_age_overrun", 0)),
+        "completed_deferred": int(metrics.get("completed_deferred_unconfirmed_stage", 0)),
+        "raw_without_final": int(metrics.get("raw_without_final", 0)),
     }
 
 

@@ -22,7 +22,7 @@ from src.app.sentence_boundary import create_sentence_boundary_detector
 from src.app.stt_model import build_stt_model
 from src.app.translation_model import TranslationRequest, build_text_translator
 from src.app.transcript_revision import append_context as _append_committed_text, consume_committed_prefix as _consume_committed_prefix, revision_lifecycle_context as _revision_lifecycle_context
-from src.app.whisper_transcript_logic import (
+from src.app.dictation_transcript_logic import (
     _collapse_adjacent_repeated_phrase_details,
     _collapse_adjacent_repeated_phrases,
     _coalesce_completed_sentences_for_staging,
@@ -33,6 +33,7 @@ from src.app.whisper_transcript_logic import (
     _next_revision_confirmation_count,
     _normalized_text,
     _pending_new_text_combined,
+    _deferred_completed_text,
     _pending_overrun_reason,
     _pending_text_diagnostic_flags,
     _format_transcript_metrics,
@@ -50,6 +51,10 @@ from src.app.whisper_transcript_logic import (
     _should_stage_replacement_candidate,
     _should_confirm_staged_sentence,
     _should_age_staged_sentence,
+    _should_finalize_boundary_candidate,
+    _should_drop_blocked_boundary_candidate,
+    _should_drop_suppressed_stage,
+    _should_defer_completed_for_unconfirmed_stage,
     _should_translate_staged_sentence,
     _should_translate_final_sentence,
     _split_completed_sentences,
@@ -58,7 +63,7 @@ from src.app.whisper_transcript_logic import (
 )
 
 
-from src.domain.whisper_defaults import whisper_default
+from src.domain.dictation_ai_defaults import whisper_default
 from src.domain.config import AppConfig, WhisperConfig
 
 
@@ -86,14 +91,14 @@ RECENT_TRANSCRIPT_WINDOW = 8
 MAX_RECENT_SHORT_TEXT_REPEATS = 2
 _WINDOW_TITLES = {
     "en": {
-        "transcript": "ai-virtual-cam Audio AI Transcript",
-        "translation": "ai-virtual-cam Audio AI Translation",
-        "sttStatus": "ai-virtual-cam Audio AI STT Raw Transcript",
+        "transcript": "ai-virtual-cam Dictation AI Transcript",
+        "translation": "ai-virtual-cam Dictation AI Translation",
+        "sttStatus": "ai-virtual-cam Dictation AI STT Raw Transcript",
     },
     "ko": {
-        "transcript": "ai-virtual-cam 오디오 AI 전사",
-        "translation": "ai-virtual-cam 오디오 AI 번역",
-        "sttStatus": "ai-virtual-cam 오디오 AI STT 원문창",
+        "transcript": "ai-virtual-cam 받아쓰기 AI 전사",
+        "translation": "ai-virtual-cam 받아쓰기 AI 번역",
+        "sttStatus": "ai-virtual-cam 받아쓰기 AI STT 원문창",
     },
 }
 _WINDOW_GEOMETRY_RE = re.compile(
@@ -111,7 +116,7 @@ class TranscriptEvent:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Show local Whisper transcript window.")
+    parser = argparse.ArgumentParser(description="Show local Dictation AI transcript window.")
     parser.add_argument("--config", default="~/.avc/setting.json", help="Path to the JSON config file.")
     return parser.parse_args()
 
@@ -125,7 +130,7 @@ def _load_ui_language(config_path: Path) -> str:
     try:
         raw = json.loads(config_path.read_text(encoding="utf-8"))
     except Exception as exc:
-        _log_line(f"[avc] whisper status: UI language load failed: {exc}")
+        _log_line(f"[avc] Dictation AI status: UI language load failed: {exc}")
         return "en"
     if not isinstance(raw, dict):
         return "en"
@@ -223,14 +228,14 @@ def _load_window_geometry(config_path: Path, key: str, root) -> str | None:
         raw = json.loads(config_path.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
             _log_line(
-                f"[avc] whisper status: window geometry defaulted: key={key} "
+                f"[avc] Dictation AI status: window geometry defaulted: key={key} "
                 f"reason=invalid_config default={default_geometry}"
             )
             return default_geometry
         meta = raw.get("meta") or {}
         if not isinstance(meta, dict):
             _log_line(
-                f"[avc] whisper status: window geometry defaulted: key={key} "
+                f"[avc] Dictation AI status: window geometry defaulted: key={key} "
                 f"reason=invalid_meta default={default_geometry}"
             )
             return default_geometry
@@ -239,23 +244,23 @@ def _load_window_geometry(config_path: Path, key: str, root) -> str | None:
         restored = _sanitize_window_geometry(saved, screen_width, screen_height)
         if restored:
             _log_line(
-                f"[avc] whisper status: window geometry restored: key={key} geometry={restored} "
+                f"[avc] Dictation AI status: window geometry restored: key={key} geometry={restored} "
                 f"extent={screen_width}x{screen_height}"
             )
             return restored
         if default_geometry is not None:
             _log_line(
-                f"[avc] whisper status: window geometry defaulted: key={key} "
+                f"[avc] Dictation AI status: window geometry defaulted: key={key} "
                 f"saved={saved!r} default={default_geometry} extent={screen_width}x{screen_height}"
             )
             return default_geometry
         _log_line(
-            f"[avc] whisper status: window geometry restore skipped: key={key} "
+            f"[avc] Dictation AI status: window geometry restore skipped: key={key} "
             f"saved={saved!r} extent={screen_width}x{screen_height}"
         )
         return None
     except Exception as exc:
-        _log_line(f"[avc] whisper status: window geometry load failed: {exc}")
+        _log_line(f"[avc] Dictation AI status: window geometry load failed: {exc}")
         return default_geometry
 
 
@@ -270,11 +275,11 @@ def _save_window_geometry(
     try:
         sanitized = _sanitize_window_geometry(geometry, screen_width, screen_height)
         if sanitized is None:
-            _log_line(f"[avc] whisper status: window geometry cache skipped: key={key} invalid_geometry={geometry}")
+            _log_line(f"[avc] Dictation AI status: window geometry cache skipped: key={key} invalid_geometry={geometry}")
             return
-        _log_line(f"[avc] whisper status: window geometry cached: key={key} geometry={sanitized}")
+        _log_line(f"[avc] Dictation AI status: window geometry cached: key={key} geometry={sanitized}")
     except Exception as exc:
-        _log_line(f"[avc] whisper status: window geometry cache failed: key={key} error={exc}")
+        _log_line(f"[avc] Dictation AI status: window geometry cache failed: key={key} error={exc}")
 
 def _sounddevice_device_name(configured: str) -> str | None:
     value = str(configured).strip()
@@ -350,7 +355,7 @@ class WhisperTranscriptWorker:
         download_source = "Hugging Face"
         self._emit(
             "status",
-            "문장 경계 모델 로딩 중: "
+            "STT 결과 문장 경계 처리 모델 로딩 중: "
             f"profile={getattr(self._cfg, 'postProcessingProfile', 'manual')} backend={backend} model={model} "
             f"device={device} compute={compute_type} language={detected_language}. "
             f"캐시에 없으면 {download_source} 모델 다운로드가 진행될 수 있습니다.",
@@ -365,7 +370,7 @@ class WhisperTranscriptWorker:
         )
         self._emit(
             "status",
-            "문장 경계 모델 로딩 완료: "
+            "STT 결과 문장 경계 처리 모델 로딩 완료: "
             f"profile={getattr(self._cfg, 'postProcessingProfile', 'manual')} backend={backend} model={model} "
             f"device={device} compute={compute_type} language={detected_language}",
             display=False,
@@ -383,7 +388,7 @@ class WhisperTranscriptWorker:
         log_text: str | None = None,
         final: bool = True,
     ) -> None:
-        _log_line(f"[avc] whisper {kind}: {log_text if log_text is not None else text}")
+        _log_line(f"[avc] Dictation AI {kind}: {log_text if log_text is not None else text}")
         self._events.put(TranscriptEvent(kind, text, display, log_text, final))
 
     def _sync_sentence_boundary_detector(self, detected_language: str) -> None:
@@ -526,10 +531,10 @@ class WhisperTranscriptWorker:
                 ) from exc
             self._emit("status", "STT 모델 로딩 완료")
             text_translator = None
-            self._emit("status", "Whisper 전처리 모델 준비 시작: 전사/번역은 모든 모델 로딩이 끝난 뒤 시작됩니다.")
+            self._emit("status", "받아쓰기 AI 모델 준비 시작: 전사/번역은 모든 모델 로딩이 끝난 뒤 시작됩니다.")
             if self._cfg.translationEnabled:
                 translation_status = (
-                    "Whisper 내장 영어 번역 창 사용"
+                    "Whisper 백엔드 내장 영어 번역 창 사용"
                     if self._cfg.translationBackend == "whisper"
                     else "외부 텍스트 번역 창 사용"
                 )
@@ -550,7 +555,7 @@ class WhisperTranscriptWorker:
                     self._cfg.translationMaxNewTokens,
                 )
             self._preload_sentence_boundary_detector()
-            self._emit("status", "Whisper 전처리 모델 준비 완료: 입력 캡처와 전사를 시작합니다.")
+            self._emit("status", "받아쓰기 AI 모델 준비 완료: 입력 캡처와 전사를 시작합니다.")
             self._emit("status", f"입력 장치 열기: {self._cfg.inputDevice}")
 
             if _is_exact_pulse_source(self._cfg.inputDevice):
@@ -571,7 +576,7 @@ class WhisperTranscriptWorker:
                     self._audio_queue.put_nowait(mono.copy())
                 except queue.Full:
                     self._record_audio_queue_drop()
-                    self._emit("status", "오디오 AI 입력 버퍼가 가득 차 오디오 프레임을 건너뜁니다.")
+                    self._emit("status", "받아쓰기 AI 입력 버퍼가 가득 차 오디오 프레임을 건너뜁니다.")
 
             device = _sounddevice_device_name(self._cfg.inputDevice)
             self._emit("status", f"sounddevice 캡처 시작: runtime_device={device or 'default'}")
@@ -582,7 +587,7 @@ class WhisperTranscriptWorker:
                 device=device,
                 callback=callback,
             ):
-                self._emit("status", "Whisper 전사 시작")
+                self._emit("status", "받아쓰기 AI 전사 시작")
                 self._transcribe_loop(model, np, text_translator)
         except Exception as exc:
             self._emit("error", str(exc))
@@ -619,7 +624,7 @@ class WhisperTranscriptWorker:
                     self._audio_queue.put(samples, timeout=0.2)
                 except queue.Full:
                     self._record_audio_queue_drop()
-                    self._emit("status", "오디오 AI 입력 버퍼가 가득 차 Pulse 프레임을 건너뜁니다.")
+                    self._emit("status", "받아쓰기 AI 입력 버퍼가 가득 차 Pulse 프레임을 건너뜁니다.")
                 except Exception as exc:
                     self._emit("error", f"Pulse 캡처 처리 실패: {exc}")
                     break
@@ -667,7 +672,7 @@ class WhisperTranscriptWorker:
 
         self._emit(
             "status",
-            f"Whisper 전사 루프 시작: step_seconds={step_seconds} window_seconds={window_seconds} "
+            f"받아쓰기 AI 전사 루프 시작: step_seconds={step_seconds} window_seconds={window_seconds} "
             f"commit_lag_seconds={commit_lag_seconds} language={self._cfg.language} "
             f"stt_backend={self._stt_settings_for_language()[0]} stt_model={self._stt_settings_for_language()[1]} "
             f"translation_enabled={self._cfg.translationEnabled} "
@@ -709,7 +714,7 @@ class WhisperTranscriptWorker:
                 count_metric("finalize_duplicate_suppressed")
                 self._emit(
                     "status",
-                    f"Whisper 확정 후보 중복 무시: chunk={chunks} reason={reason} text={staged_before!r}",
+                    f"받아쓰기 AI 확정 후보 중복 무시: chunk={chunks} reason={reason} text={staged_before!r}",
                     display=False,
                 )
                 return []
@@ -721,7 +726,7 @@ class WhisperTranscriptWorker:
             self._remember_transcript(output_sentence)
             self._emit(
                 "status",
-                "Whisper 문장 확정: "
+                "받아쓰기 AI 문장 확정: "
                 f"chunk={chunks} reason={reason} committed_before_chars={committed_before_chars} "
                 f"output_chars={len(_normalized_text(output_sentence))} "
                 f"quality_flags={','.join(final_quality_flags) or 'none'} "
@@ -741,7 +746,7 @@ class WhisperTranscriptWorker:
                     count_metric("candidate_delta_trimmed_cjk")
             if not candidate:
                 count_metric("candidate_duplicate_suppressed")
-                self._emit("status", f"Whisper 중복 문장 무시: chunk={chunks} text={sentence!r}", display=False)
+                self._emit("status", f"받아쓰기 AI 중복 문장 무시: chunk={chunks} text={sentence!r}", display=False)
                 return []
             if not staged_sentence:
                 count_metric("stage_start")
@@ -752,7 +757,7 @@ class WhisperTranscriptWorker:
                 staged_forced = forced
                 self._emit(
                     "status",
-                    "Whisper stage 시작: "
+                    "받아쓰기 AI stage 시작: "
                     f"chunk={chunks} forced={forced} candidate_chars={len(_normalized_text(candidate))} "
                     f"candidate_tail={_diagnostic_tail(candidate)} committed_chars={len(_normalized_text(committed_text))}",
                     display=False,
@@ -785,7 +790,7 @@ class WhisperTranscriptWorker:
                 required_confirmations = _sentence_required_confirmations(staged_forced)
                 self._emit(
                     "status",
-                    "Whisper stage 리비전: "
+                    "받아쓰기 AI stage 리비전: "
                     f"chunk={chunks} confirmations={staged_confirmations}/{required_confirmations} "
                     f"forced={staged_forced} preferred_changed={preferred_changed} "
                     f"staged_before={_diagnostic_tail(staged_before)} candidate={_diagnostic_tail(candidate)} "
@@ -808,7 +813,7 @@ class WhisperTranscriptWorker:
             count_metric(f"stage_replace_decision_{replacement_reason}")
             self._emit(
                 "status",
-                "Whisper stage 교체: "
+                "받아쓰기 AI stage 교체: "
                 f"chunk={chunks} reason=revision_false decision={replacement_reason} forced={forced} "
                 f"staged_confirmations={staged_confirmations} staged_age={staged_age} "
                 f"staged_tail={_diagnostic_tail(staged_sentence)} candidate_tail={_diagnostic_tail(candidate)}",
@@ -851,7 +856,7 @@ class WhisperTranscriptWorker:
                 )
                 self._emit(
                     "status",
-                    "Whisper stage 폐기: "
+                    "받아쓰기 AI stage 폐기: "
                     f"chunk={chunks} reason=replaced_{replacement_reason} "
                     f"staged_confirmations={staged_confirmations} required={_sentence_required_confirmations(staged_forced)} "
                     f"staged_age={staged_age} max_age={max_age} "
@@ -865,17 +870,42 @@ class WhisperTranscriptWorker:
                 if not should_stage_candidate:
                     count_metric("stage_candidate_suppressed")
                     count_metric(f"stage_candidate_suppressed_reason_{replacement_reason}")
+                    next_staged_age = staged_age + 1
+                    drop_suppressed_stage = _should_drop_suppressed_stage(
+                        staged_confirmations,
+                        staged_forced,
+                        next_staged_age,
+                    )
                     if staged_age >= max_age:
                         count_metric("stage_candidate_suppressed_age_overrun")
-                    staged_age += 1
+                    if drop_suppressed_stage:
+                        count_metric("stage_candidate_dropped_age_overrun")
+                    staged_age = next_staged_age
                     staged_translation_pending = True
                     self._emit(
                         "status",
-                        "Whisper stage 후보 보류: "
+                        "받아쓰기 AI stage 후보 보류: "
                         f"chunk={chunks} reason={replacement_reason} staged_age={staged_age} "
+                        f"drop_suppressed_stage={drop_suppressed_stage} "
                         f"staged_tail={_diagnostic_tail(staged_sentence)} candidate_tail={_diagnostic_tail(candidate)}",
                         display=False,
                     )
+                    if drop_suppressed_stage:
+                        self._emit(
+                            "status",
+                            "받아쓰기 AI stage 폐기 완료: "
+                            f"chunk={chunks} reason=age_overrun_unconfirmed "
+                            f"confirmations={staged_confirmations}/{_sentence_required_confirmations(staged_forced)} "
+                            f"staged_age={staged_age} max_age={max_age} "
+                            f"staged_tail={_diagnostic_tail(staged_sentence)}",
+                            display=False,
+                        )
+                        staged_sentence = ""
+                        staged_confirmations = 0
+                        staged_age = 0
+                        staged_translation_pending = False
+                        staged_forced = False
+                        return finalized
                     self._emit("transcript", staged_sentence, log_text=f"[{detected}] {staged_sentence}", final=False)
                     return finalized
                 staged_sentence = ""
@@ -890,7 +920,7 @@ class WhisperTranscriptWorker:
             staged_forced = forced
             self._emit(
                 "status",
-                "Whisper stage 시작: "
+                "받아쓰기 AI stage 시작: "
                 f"chunk={chunks} forced={forced} candidate_chars={len(_normalized_text(candidate))} "
                 f"candidate_tail={_diagnostic_tail(candidate)} committed_chars={len(_normalized_text(committed_text))}",
                 display=False,
@@ -903,12 +933,59 @@ class WhisperTranscriptWorker:
                 return
             self._emit(
                 "status",
-                "Whisper collapse 진단: "
+                "받아쓰기 AI collapse 진단: "
                 f"chunk={chunks} scope={scope} rules={','.join(rules)} "
                 f"before_chars={len(_normalized_text(before))} after_chars={len(_normalized_text(after))} "
                 f"before_tail={_diagnostic_tail(before)} after_tail={_diagnostic_tail(after)}",
                 display=False,
             )
+
+        def finalize_staged_for_boundary_next(detected: str) -> list[str]:
+            nonlocal staged_sentence, staged_confirmations, staged_age, staged_translation_pending, staged_forced
+            if not staged_sentence:
+                return []
+            required_confirmations = _sentence_required_confirmations(staged_forced)
+            if _should_finalize_boundary_candidate(
+                staged_sentence,
+                detected,
+                staged_confirmations,
+                staged_forced,
+            ):
+                return finalize_staged_sentence(detected, "boundary_next_candidate")
+            flags = _final_sentence_diagnostic_flags(staged_sentence, detected)
+            count_metric("boundary_next_candidate_blocked")
+            if staged_confirmations < required_confirmations:
+                count_metric("boundary_next_candidate_blocked_unconfirmed")
+            for flag in flags:
+                count_metric(f"boundary_next_candidate_blocked_{flag}")
+            drop_blocked = _should_drop_blocked_boundary_candidate(
+                staged_sentence,
+                detected,
+                staged_age,
+                staged_forced,
+                staged_confirmations,
+            )
+            if drop_blocked:
+                count_metric("boundary_next_candidate_dropped")
+                for flag in flags:
+                    count_metric(f"boundary_next_candidate_dropped_{flag}")
+            self._emit(
+                "status",
+                "받아쓰기 AI boundary 확정 보류: "
+                f"chunk={chunks} reason=final_quality flags={','.join(flags)} "
+                f"confirmations={staged_confirmations}/{required_confirmations} "
+                f"drop_blocked={drop_blocked} staged_age={staged_age} "
+                f"max_age={_sentence_max_age_chunks(staged_forced)} "
+                f"staged_tail={_diagnostic_tail(staged_sentence)}",
+                display=False,
+            )
+            if drop_blocked:
+                staged_sentence = ""
+                staged_confirmations = 0
+                staged_age = 0
+                staged_translation_pending = False
+                staged_forced = False
+            return []
 
         def age_staged_sentence(detected: str, pending_text: str = "") -> list[str]:
             nonlocal staged_age
@@ -919,7 +996,7 @@ class WhisperTranscriptWorker:
                 staged_age = 0
                 self._emit(
                     "status",
-                    f"Whisper staged aging 보류: chunk={chunks} staged={staged_sentence!r} pending={pending_text!r}",
+                    f"받아쓰기 AI staged aging 보류: chunk={chunks} staged={staged_sentence!r} pending={pending_text!r}",
                     display=False,
                 )
                 return []
@@ -930,6 +1007,39 @@ class WhisperTranscriptWorker:
                 count_metric("stage_age_finalize")
                 return finalize_staged_sentence(detected, "aged_forced" if staged_forced else "aged")
             return []
+
+        def defer_remaining_completed_sentences(
+            completed: list[str],
+            next_index: int,
+            detected: str,
+        ) -> bool:
+            nonlocal pending_transcript_text, pending_chunks
+            remaining_count = len(completed) - next_index
+            if not _should_defer_completed_for_unconfirmed_stage(
+                staged_sentence,
+                staged_confirmations,
+                staged_forced,
+                remaining_count,
+            ):
+                return False
+            remaining = completed[next_index:]
+            deferred_text = _deferred_completed_text(remaining, pending_transcript_text)
+            if not deferred_text:
+                return False
+            for _sentence in remaining:
+                count_metric("completed_deferred_unconfirmed_stage")
+            pending_transcript_text = deferred_text
+            pending_chunks = max(pending_chunks, 1)
+            self._emit(
+                "status",
+                "받아쓰기 AI completed 후보 보류: "
+                f"chunk={chunks} language={detected} reason=unconfirmed_stage deferred={len(remaining)} "
+                f"pending_chars={len(_normalized_text(pending_transcript_text))} "
+                f"staged_confirmations={staged_confirmations}/{_sentence_required_confirmations(staged_forced)} "
+                f"staged_tail={_diagnostic_tail(staged_sentence)} pending_tail={_diagnostic_tail(pending_transcript_text)}",
+                display=False,
+            )
+            return True
 
         while not self._stop.is_set():
             try:
@@ -947,7 +1057,7 @@ class WhisperTranscriptWorker:
 
             chunks += 1
             chunk_lifecycle_metrics.clear()
-            self._emit("status", f"Whisper 전사 요청: chunk={chunks} samples={buffered}", display=False)
+            self._emit("status", f"받아쓰기 AI 전사 요청: chunk={chunks} samples={buffered}", display=False)
             audio = np.concatenate(list(audio_blocks)).astype(np.float32, copy=False)
             chunk_audio_seconds = float(audio.shape[0]) / float(SAMPLE_RATE)
             chunk_started_at = time.perf_counter()
@@ -994,7 +1104,7 @@ class WhisperTranscriptWorker:
                 if rejected_reasons:
                     self._emit(
                         "status",
-                        f"Whisper 전사 후보 무시: chunk={chunks} reasons={'; '.join(rejected_reasons)}",
+                        f"받아쓰기 AI 전사 후보 무시: chunk={chunks} reasons={'; '.join(rejected_reasons)}",
                         display=False,
                     )
                 completed_sentences: list[str] = []
@@ -1005,7 +1115,7 @@ class WhisperTranscriptWorker:
                 boundary_soft = 0
                 boundary_confidence_display = f"{boundary_confidence:.2f}" if boundary_confidence is not None else "n/a"
                 if text and self._is_repeated_hallucination(text):
-                    self._emit("status", f"Whisper 반복 전사 무시: chunk={chunks} text={text!r}", display=False)
+                    self._emit("status", f"받아쓰기 AI 반복 전사 무시: chunk={chunks} text={text!r}", display=False)
                     text = ""
                 if text:
                     boundary_result = self._sentence_boundary_detector.split(
@@ -1035,7 +1145,7 @@ class WhisperTranscriptWorker:
                             count_metric(f"completed_coalesced_lang_{str(detected).strip().lower() or 'unknown'}")
                             self._emit(
                                 "status",
-                                "오디오 AI completed 후보 병합: "
+                                "받아쓰기 AI completed 후보 병합: "
                                 f"chunk={chunks} language={detected} before={len(completed_sentences)} "
                                 f"after={len(coalesced_completed_sentences)} "
                                 f"tail={_diagnostic_tail(coalesced_completed_sentences[0])}",
@@ -1063,11 +1173,13 @@ class WhisperTranscriptWorker:
                             if not pending_transcript_text:
                                 pending_chunks = 0
                         if sentence_index < len(completed_sentences) - 1 and staged_sentence:
-                            final_sentences.extend(finalize_staged_sentence(detected, "boundary_next_candidate"))
+                            final_sentences.extend(finalize_staged_for_boundary_next(detected))
+                            if defer_remaining_completed_sentences(completed_sentences, sentence_index + 1, detected):
+                                break
                     if pending_transcript_text and not forced_candidate_pending:
                         self._emit(
                             "status",
-                            "Whisper pending tail: "
+                            "받아쓰기 AI pending tail: "
                             f"chunk={chunks} language={detected} text={pending_transcript_text!r}",
                             display=False,
                         )
@@ -1077,7 +1189,7 @@ class WhisperTranscriptWorker:
                     preview_chars = max(0, len(_normalized_text(window_text)) - len(_normalized_text(stable_text)))
                     self._emit(
                         "status",
-                        f"Whisper 전사 결과 없음: chunk={chunks} preview_chars={preview_chars}",
+                        f"받아쓰기 AI 전사 결과 없음: chunk={chunks} preview_chars={preview_chars}",
                         display=False,
                     )
                     if pending_transcript_text:
@@ -1100,7 +1212,9 @@ class WhisperTranscriptWorker:
                                     if not pending_transcript_text:
                                         pending_chunks = 0
                                 if sentence_index < len(completed_sentences) - 1 and staged_sentence:
-                                    final_sentences.extend(finalize_staged_sentence(detected, "boundary_next_candidate"))
+                                    final_sentences.extend(finalize_staged_for_boundary_next(detected))
+                                    if defer_remaining_completed_sentences(completed_sentences, sentence_index + 1, detected):
+                                        break
                         else:
                             final_sentences.extend(age_staged_sentence(detected, pending_transcript_text))
                     else:
@@ -1114,7 +1228,7 @@ class WhisperTranscriptWorker:
                     count_metric(f"pending_quality_{flag}")
                 self._emit(
                     "status",
-                    "Whisper 문장 진단: "
+                    "받아쓰기 AI 문장 진단: "
                     f"chunk={chunks} completed={len(completed_sentences)} final={len(final_sentences)} forced_by={forced_by or 'none'} "
                     f"pending_overrun={pending_overrun_reason or 'none'} "
                     f"pending_quality={','.join(pending_quality_flags) or 'none'} "
@@ -1152,7 +1266,7 @@ class WhisperTranscriptWorker:
                         count_metric("translation_skip_final_quality")
                         self._emit(
                             "status",
-                            "Whisper 번역 생략: "
+                            "받아쓰기 AI 번역 생략: "
                             f"chunk={chunks} reason=final_quality flags={','.join(_final_sentence_diagnostic_flags(sentence, detected))} "
                             f"text={sentence!r}",
                             display=False,
@@ -1160,7 +1274,7 @@ class WhisperTranscriptWorker:
                 if self._cfg.translationEnabled and not translation_failed and translation_jobs:
                     try:
                         translation_attempted = True
-                        request_label = "Whisper 내장 번역 요청" if text_translator is None else "외부 텍스트 번역 요청"
+                        request_label = "Whisper 백엔드 내장 번역 요청" if text_translator is None else "외부 텍스트 번역 요청"
                         target_language = self._cfg.translationTargetLanguage
                         source_language = detected if detected in {"ko", "en", "zh"} else self._cfg.language
                         for sentence, is_final_translation in translation_jobs:
@@ -1202,7 +1316,7 @@ class WhisperTranscriptWorker:
                             if translated_text:
                                 self._emit(
                                     "status",
-                                    "Whisper 번역 진단: "
+                                    "받아쓰기 AI 번역 진단: "
                                     f"chunk={chunks} final={is_final_translation} "
                                     f"source_lang={source_language} target_lang={target_language} "
                                     f"source_chars={len(_normalized_text(sentence))} "
@@ -1219,13 +1333,13 @@ class WhisperTranscriptWorker:
                                     final=is_final_translation,
                                 )
                             else:
-                                self._emit("status", f"Whisper 번역 결과 없음: chunk={chunks}", display=False)
+                                self._emit("status", f"받아쓰기 AI 번역 결과 없음: chunk={chunks}", display=False)
                     except Exception as exc:
                         translation_elapsed = time.perf_counter() - translation_started_at if translation_attempted else 0.0
                         translation_failed = True
                         self._emit(
                             "error",
-                            "Whisper 번역 실패: "
+                            "받아쓰기 AI 번역 실패: "
                             f"{exc}. 번역을 이번 세션에서 중지합니다. STT 전사는 계속됩니다.",
                         )
                 total_elapsed = time.perf_counter() - chunk_started_at
@@ -1249,15 +1363,23 @@ class WhisperTranscriptWorker:
                 final_quality_count = sum(
                     value for key, value in chunk_lifecycle_metrics.items() if key.startswith("final_quality_")
                 )
+                boundary_blocked_count = chunk_lifecycle_metrics.get("boundary_next_candidate_blocked", 0)
+                boundary_dropped_count = chunk_lifecycle_metrics.get("boundary_next_candidate_dropped", 0)
+                completed_deferred_count = chunk_lifecycle_metrics.get("completed_deferred_unconfirmed_stage", 0)
+                raw_without_final_count = 1 if raw_window_text and not final_sentences else 0
+                if raw_without_final_count:
+                    count_metric("raw_without_final")
                 translation_skip_count = chunk_lifecycle_metrics.get("translation_skip_final_quality", 0)
                 self._emit(
                     "status",
-                    "Whisper 안정성 지표: "
+                    "받아쓰기 AI 안정성 지표: "
                     f"chunk={chunks} replace={stage_replace_count} discard={stage_discard_count} "
                     f"revision={stage_revision_count} revision_changed={stage_revision_changed_count} "
                     f"revision_reset={stage_revision_reset_count} finalized={finalize_count} "
                     f"duplicate_suppressed={duplicate_suppressed_count} delta_trimmed={delta_trimmed_count} "
                     f"final_quality={final_quality_count} translation_skip={translation_skip_count} "
+                    f"boundary_blocked={boundary_blocked_count} boundary_dropped={boundary_dropped_count} "
+                    f"completed_deferred={completed_deferred_count} raw_without_final={raw_without_final_count} "
                     f"replace_discard_rate={stage_discard_count / max(stage_replace_count, 1):.2f} "
                     f"decision_count={stage_decision_count} "
                     f"completed_coalesced={chunk_lifecycle_metrics.get('completed_coalesced', 0)}",
@@ -1265,7 +1387,7 @@ class WhisperTranscriptWorker:
                 )
                 self._emit(
                     "status",
-                    "Whisper 성능: "
+                    "받아쓰기 AI 성능: "
                     f"chunk={chunks} step={step_seconds:.2f}s window={window_seconds:.2f}s "
                     f"commit_lag={commit_lag_seconds:.2f}s audio={chunk_audio_seconds:.2f}s "
                     f"stt={stt_elapsed:.2f}s stt_rtf={stt_elapsed / max(chunk_audio_seconds, 0.001):.2f} "
@@ -1280,12 +1402,12 @@ class WhisperTranscriptWorker:
                     display=False,
                 )
             except Exception as exc:
-                self._emit("error", f"Whisper 전사 실패: {exc}")
+                self._emit("error", f"받아쓰기 AI 전사 실패: {exc}")
                 self._stop.set()
                 raise
 
     def _run_mock(self) -> None:
-        self._emit("status", "Whisper mock 출력 시작")
+        self._emit("status", "받아쓰기 AI mock 출력 시작")
         index = 1
         while not self._stop.is_set():
             self._emit("transcript", f"[mock] sample transcript {index}")
@@ -1298,12 +1420,12 @@ class WhisperTranscriptWorker:
 class WhisperTranscriptWindow:
     def __init__(self, app_config: AppConfig, config_path: Path) -> None:
         if not app_config.whisper.enabled:
-            raise RuntimeError("whisper.enabled=false 입니다. config에서 오디오 AI 전사를 켠 뒤 serve를 실행하세요.")
+            raise RuntimeError("whisper.enabled=false 입니다. config에서 받아쓰기 AI 전사를 켠 뒤 serve를 실행하세요.")
         try:
             import tkinter as tk
             from tkinter import ttk
         except ModuleNotFoundError as exc:
-            raise RuntimeError("Tkinter가 없습니다. Whisper 출력 창을 열 수 없습니다.") from exc
+            raise RuntimeError("Tkinter가 없습니다. 받아쓰기 AI 출력 창을 열 수 없습니다.") from exc
 
         self._tk = tk
         self._ttk = ttk
@@ -1719,7 +1841,7 @@ class WhisperTranscriptWindow:
 
 def main() -> int:
     log_path = install_rotating_stdout_log("avc-whisper")
-    _log_line(f"[avc] whisper rotating log file: {log_path}")
+    _log_line(f"[avc] Dictation AI rotating log file: {log_path}")
     args = parse_args()
     config_path = Path(args.config).expanduser()
     app_config = AppConfig.load(config_path)
@@ -1731,5 +1853,5 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except Exception as exc:
-        _log_line(f"[avc] whisper window failed: {exc}", file=sys.stderr)
+        _log_line(f"[avc] Dictation AI window failed: {exc}", file=sys.stderr)
         raise SystemExit(2)

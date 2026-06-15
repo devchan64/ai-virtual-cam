@@ -1,10 +1,11 @@
 import unittest
 
 from src.app.sentence_boundary import LegacyRegexSentenceBoundaryDetector
-from src.app.whisper_window import (
+from src.app.dictation_window import (
     _collapse_adjacent_repeated_phrase_details,
     _collapse_adjacent_repeated_phrases,
     _coalesce_completed_sentences_for_staging,
+    _deferred_completed_text,
     _diagnostic_tail,
     _final_sentence_diagnostic_flags,
     _forced_sentence_reason,
@@ -22,12 +23,16 @@ from src.app.whisper_window import (
     _sentence_required_confirmations,
     _sentences_are_revisions,
     _should_age_staged_sentence,
+    _should_drop_blocked_boundary_candidate,
+    _should_drop_suppressed_stage,
+    _should_defer_completed_for_unconfirmed_stage,
     _should_finalize_replaced_sentence,
     _should_release_quality_blocked_confirmed_replacement,
     _should_stage_replacement_candidate,
     _should_confirm_staged_sentence,
     _should_translate_staged_sentence,
     _should_translate_final_sentence,
+    _should_finalize_boundary_candidate,
     _split_completed_sentences,
     _stable_window_text,
 )
@@ -199,9 +204,10 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         self.assertTrue(_sentences_are_revisions(staged, revised))
         self.assertEqual(_prefer_sentence_revision(staged, revised), revised)
 
-    def test_unconfirmed_replaced_stage_finalizes_completed_short_sentences_from_monitoring(self) -> None:
-        # Regressions from 2026-06-13 monitoring. These are complete short utterances,
-        # not disposable noise just because they were observed once before a replacement.
+    def test_unconfirmed_replaced_stage_waits_on_completed_short_sentences_from_monitoring(self) -> None:
+        # Regressions from 2026-06-13 monitoring, reclassified after duplicated
+        # final observations appeared in live logs. A single observation before a
+        # distinct replacement is not enough to commit a final sentence.
         cases = [
             ("그렇죠", "스테이블 코인인가요"),
             ("스테이블 코인인가요", "그렇죠"),
@@ -213,7 +219,8 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         ]
         for staged, candidate in cases:
             with self.subTest(staged=staged, candidate=candidate):
-                self.assertTrue(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
+                self.assertEqual(_replacement_decision_reason(staged, candidate, 1, False, 0), "unconfirmed")
+                self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
 
     def test_unconfirmed_replaced_stage_waits_on_open_latin_clause_from_monitoring(self) -> None:
         cases = [
@@ -239,8 +246,10 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         self.assertTrue(_should_finalize_replaced_sentence("강제 확정 후보입니다", "다른 후보입니다", 4, True, 0))
 
     def test_unconfirmed_replaced_stage_waits_for_observation_age(self) -> None:
-        self.assertTrue(_should_finalize_replaced_sentence("Aged candidate", "Different candidate", 1, False, 1))
-        self.assertTrue(_should_finalize_replaced_sentence("Forced aged candidate", "Different candidate", 1, True, 1))
+        self.assertFalse(_should_finalize_replaced_sentence("Aged candidate", "Different candidate", 1, False, 1))
+        self.assertTrue(_should_finalize_replaced_sentence("Aged candidate", "Different candidate", 1, False, 3))
+        self.assertFalse(_should_finalize_replaced_sentence("Forced aged candidate", "Different candidate", 1, True, 3))
+        self.assertTrue(_should_finalize_replaced_sentence("Forced aged candidate", "Different candidate", 1, True, 4))
 
     def test_open_korean_clause_does_not_confirm_from_repeated_candidate(self) -> None:
         # Regression from 2026-06-13 monitoring chunks 54-55. The same open
@@ -388,6 +397,10 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         )
         self.assertEqual(
             _replacement_decision_reason("Aged candidate", "Different candidate", 1, False, 1),
+            "unconfirmed",
+        )
+        self.assertEqual(
+            _replacement_decision_reason("Aged candidate", "Different candidate", 1, False, 3),
             "aged",
         )
         self.assertEqual(
@@ -435,15 +448,16 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         self.assertEqual(_sentence_required_confirmations(True), 4)
         self.assertEqual(_sentence_max_age_chunks(True), 4)
 
-    def test_unconfirmed_replaced_stage_preserves_completed_dollar_sentence_from_log(self) -> None:
+    def test_unconfirmed_replaced_stage_blocks_single_observation_misrecognition_from_log(self) -> None:
         # Regression from avc-whisper.log chunk 48 and 2026-06-13 monitoring chunks 991-992.
-        # Without a semantic verifier, fail closed on dropping completed text; later candidates
-        # are still staged and must earn their own confirmations.
+        # The staged text was a one-window misrecognition. Committing it before
+        # the next revision opportunity produces duplicated final sentences.
         staged = "의장들이 나와서 달러를 홍보를 합니다"
         candidate = "빨라를 홍보를 합니다"
 
         self.assertFalse(_sentences_are_revisions(staged, candidate))
-        self.assertTrue(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
+        self.assertEqual(_replacement_decision_reason(staged, candidate, 1, False, 0), "unconfirmed")
+        self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
 
     def test_partial_replacement_preserves_completed_staged_sentence_from_monitoring(self) -> None:
         cases = [
@@ -473,13 +487,15 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         self.assertFalse(_sentences_are_revisions(staged, candidate))
         self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
 
-    def test_replaced_stage_finalizes_long_sentence_from_log(self) -> None:
-        # Regression from avc-whisper.log chunk 59. A single-observation but long completed sentence should not be dropped.
+    def test_replaced_stage_waits_on_single_observation_long_sentence_from_log(self) -> None:
+        # Regression from avc-whisper.log chunk 59. A single-observation long sentence
+        # can still be an STT rewrite. Keep it provisional until confirmation/age.
         staged = "이게 초래할 미래의 형국도 저는 지금의 경제 시스템으로는 감당 불가능하다"
         candidate = "여기서 이제 일론 머스크의 비판을 또 하나 좀 말씀드리는데 XG가 X지갑 만들었잖아요"
 
         self.assertFalse(_sentences_are_revisions(staged, candidate))
-        self.assertTrue(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
+        self.assertEqual(_replacement_decision_reason(staged, candidate, 1, False, 0), "unconfirmed")
+        self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
 
     def test_replaced_stage_finalizes_suffix_candidate_from_log(self) -> None:
         # Regression from avc-whisper.log chunk 25. Suffix-only candidate means the staged sentence is already complete.
@@ -747,6 +763,116 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
             completed,
         )
         self.assertEqual(_coalesce_completed_sentences_for_staging(completed, "ko"), completed)
+
+    def test_boundary_next_candidate_blocks_incomplete_cjk_fragments_from_monitoring(self) -> None:
+        self.assertFalse(_should_finalize_boundary_candidate("西 门 泾 的", "zh"))
+        self.assertFalse(_should_finalize_boundary_candidate("我现在顶", "zh"))
+        self.assertFalse(_should_finalize_boundary_candidate("好 玩", "zh"))
+        self.assertTrue(_should_finalize_boundary_candidate("你觉得什么西门町的？", "zh"))
+        self.assertFalse(_should_finalize_boundary_candidate("你觉得什么西门町的？", "zh", 1, False))
+        self.assertTrue(_should_finalize_boundary_candidate("你觉得什么西门町的？", "zh", 3, False))
+
+    def test_deferred_completed_sentences_preserve_raw_prefix_for_next_revision(self) -> None:
+        # Regression from 2026-06-15 Chinese monitoring. The first sentence was
+        # repeatedly observed, while tail sentences changed in the same STT
+        # window. Remaining completed candidates must return to pending instead
+        # of forcing multiple unconfirmed stage replacements in one chunk.
+        completed = [
+            "哎，好酷啊！",
+            "等一下，有那种东西啊，什么时候？",
+            "教育对，他说不需要知道。",
+        ]
+        pending = "这个怎么收"
+
+        self.assertEqual(
+            _deferred_completed_text(completed, pending),
+            "哎，好酷啊！等一下，有那种东西啊，什么时候？教育对，他说不需要知道。这个怎么收",
+        )
+
+    def test_committed_chinese_prefix_is_removed_from_next_output_delta(self) -> None:
+        committed = "不重要，这种东西不用管它什么时候用得到。"
+        candidate = "不重要，这种东西不用管它什么时候用得到。哎，好酷啊！对呀，我买的弓箭。"
+
+        self.assertEqual(
+            _sentence_output_delta(committed, candidate),
+            "哎，好酷啊！对呀，我买的弓箭。",
+        )
+
+    def test_unconfirmed_chinese_prefix_stage_defers_remaining_completed_candidates(self) -> None:
+        staged = "不重要，这种东西不用管它什么时候用得到。"
+
+        self.assertTrue(_should_defer_completed_for_unconfirmed_stage(staged, 1, False, 2))
+        self.assertTrue(_should_defer_completed_for_unconfirmed_stage(staged, 2, False, 1))
+        self.assertFalse(_should_defer_completed_for_unconfirmed_stage(staged, 3, False, 2))
+        self.assertFalse(_should_defer_completed_for_unconfirmed_stage(staged, 1, False, 0))
+        self.assertFalse(_should_defer_completed_for_unconfirmed_stage("", 1, False, 2))
+
+    def test_short_chinese_stage_does_not_block_long_prefix_candidates_from_log(self) -> None:
+        # Regression from 2026-06-15 Chinese monitoring chunks 848-851.
+        # A short interjection occupied the staged slot and caused the stable
+        # completed prefix candidates to be repeatedly deferred into pending.
+        staged = "对啊。"
+        candidate = "我们现在到的是宫岛的休息站。"
+
+        self.assertFalse(_should_defer_completed_for_unconfirmed_stage(staged, 1, False, 5))
+        self.assertTrue(
+            _should_stage_replacement_candidate(
+                staged,
+                candidate,
+                "unconfirmed_cjk",
+                staged_age=0,
+                max_age=3,
+            )
+        )
+
+    def test_short_chinese_stage_still_rejects_short_or_unfinished_replacement(self) -> None:
+        staged = "对啊。"
+
+        self.assertFalse(
+            _should_stage_replacement_candidate(
+                staged,
+                "等等。",
+                "unconfirmed_cjk",
+                staged_age=0,
+                max_age=3,
+            )
+        )
+        self.assertFalse(
+            _should_stage_replacement_candidate(
+                staged,
+                "这里，好可爱哦，好可惜",
+                "unconfirmed_cjk",
+                staged_age=0,
+                max_age=3,
+            )
+        )
+
+    def test_chinese_prefix_revision_prefers_extended_candidate_before_final(self) -> None:
+        staged = "不重要，这种东西不用管它什么时候用得到。"
+        candidate = "不重要，这种东西不用管它什么时候用得到。哎，好酷啊！等一下，有那种东西啊，什么时候？"
+
+        self.assertTrue(_sentences_are_revisions(staged, candidate))
+        self.assertEqual(_prefer_sentence_revision(staged, candidate), candidate)
+        self.assertEqual(_next_revision_confirmation_count(staged, candidate, 2), 1)
+
+    def test_boundary_blocked_cjk_fragment_drops_after_max_age_from_monitoring(self) -> None:
+        self.assertFalse(_should_drop_blocked_boundary_candidate("什 么 的", "zh", 2, False))
+        self.assertTrue(_should_drop_blocked_boundary_candidate("什 么 的", "zh", 3, False))
+        self.assertTrue(_should_drop_blocked_boundary_candidate("你 应 该 有 那", "zh", 4, False))
+        self.assertFalse(_should_drop_blocked_boundary_candidate("对，他穿起来没有那么胖哎。", "zh", 3, False))
+        self.assertFalse(_should_drop_blocked_boundary_candidate("最后一点了。", "zh", 2, False, 1))
+        self.assertTrue(_should_drop_blocked_boundary_candidate("最后一点了。", "zh", 3, False, 1))
+        self.assertFalse(_should_drop_blocked_boundary_candidate("最后一点了。", "zh", 3, False, 3))
+
+    def test_suppressed_stage_drops_after_max_age_from_monitoring(self) -> None:
+        # Regression from 2026-06-15 Chinese monitoring chunks 798-799.
+        # The stage stayed visible with staged_age far beyond max_age because
+        # age-overrun was counted but did not clear the unconfirmed stage.
+        self.assertFalse(_should_drop_suppressed_stage(1, False, 2))
+        self.assertTrue(_should_drop_suppressed_stage(1, False, 3))
+        self.assertFalse(_should_drop_suppressed_stage(3, False, 3))
+        self.assertTrue(_should_drop_suppressed_stage(2, True, 4))
+        self.assertFalse(_should_drop_suppressed_stage(4, True, 4))
 
 
 

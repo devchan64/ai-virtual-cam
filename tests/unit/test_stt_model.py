@@ -17,6 +17,16 @@ class SttModelTest(unittest.TestCase):
             ("hello", "en"),
         )
 
+    def test_qwen_asr_generated_text_does_not_stringify_empty_object_text(self) -> None:
+        class Result:
+            text = ""
+            language = ""
+
+            def __str__(self) -> str:
+                return "ASRTranscription(language='', text='', time_stamps=None)"
+
+        self.assertEqual(qwen_asr_generated_text([Result()], fallback_language="zh"), ("", "zh"))
+
     def test_stt_segment_defaults_are_accepted_by_whisper_filters(self) -> None:
         segment = SttSegment("你好世界")
 

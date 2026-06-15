@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Iterable
 
 from src.app.model_cache import require_qwen_asr_model_cached
-from src.domain.contracts.whisper import resolve_qwen_asr_model_name
+from src.domain.contracts.dictation_ai import resolve_qwen_asr_model_name
 
 
 QWEN_ASR_BACKENDS = {"qwen3-asr-transformers", "qwen3-asr-vllm-streaming"}
@@ -150,7 +150,11 @@ def _qwen_detected_language(language: object, fallback_language: str) -> str:
 
 def qwen_asr_generated_text(result: object, *, fallback_language: str) -> tuple[str, str]:
     first = result[0] if isinstance(result, list) and result else result
-    text = getattr(first, "text", None) or (first.get("text") if isinstance(first, dict) else None) or str(first or "")
-    language = getattr(first, "language", None) or (first.get("language") if isinstance(first, dict) else None) or fallback_language
+    if isinstance(first, dict):
+        text = first["text"] if "text" in first else str(first or "")
+        language = first.get("language") or fallback_language
+    else:
+        text = getattr(first, "text") if hasattr(first, "text") else str(first or "")
+        language = getattr(first, "language", None) or fallback_language
     normalized_language = _qwen_detected_language(language, fallback_language)
     return str(text).strip(), normalized_language

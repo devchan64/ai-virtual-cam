@@ -659,6 +659,13 @@ def _sentence_output_delta(committed_text: str, sentence: str) -> str:
     normalized = _collapse_adjacent_repeated_phrases(_normalized_text(sentence))
     if not normalized:
         return ""
+    committed_normalized = _normalized_text(committed_text)
+    if (
+        committed_normalized
+        and normalized.startswith(committed_normalized)
+        and (_is_cjk_text(committed_normalized) or _is_cjk_text(normalized))
+    ):
+        return _trim_leading_boundary_noise(normalized[len(committed_normalized) :].lstrip(" ，,"))
     committed_words = _word_units(committed_text)
     sentence_words = _word_units(normalized)
     if not committed_words or not sentence_words:
@@ -972,7 +979,7 @@ def _replacement_decision_reason(
         return "confirmed"
     if _has_cjk_words(staged_words):
         return "unconfirmed_cjk"
-    if staged_age > 0:
+    if staged_age >= _sentence_max_age_chunks(staged_forced):
         return "aged"
 
     candidate_delta = _sentence_output_delta(staged_sentence, candidate)
@@ -982,7 +989,7 @@ def _replacement_decision_reason(
         if _should_preserve_partial_replacement(staged_sentence, candidate):
             return "partial_preserve"
         return "partial_revision"
-    return "finalize"
+    return "unconfirmed"
 
 
 def _should_finalize_replaced_sentence(
@@ -1001,7 +1008,7 @@ def _should_finalize_replaced_sentence(
     )
     if reason == "confirmed":
         return _should_confirm_staged_sentence(staged_sentence, staged_confirmations, staged_forced)
-    return reason in {"aged", "duplicate_or_suffix", "partial_preserve", "finalize"}
+    return reason in {"aged", "duplicate_or_suffix", "partial_preserve"}
 
 
 def _is_quality_blocked_confirmed_replacement(
@@ -1080,6 +1087,16 @@ def _should_stage_replacement_candidate(
     age_limit = SENTENCE_CONFIRM_MAX_AGE_CHUNKS if max_age is None else max_age
     aged_enough = staged_age >= age_limit
     enough_growth = len(cjk_units) >= len(staged_cjk_units) + 3
+    staged_flags = set(_final_sentence_diagnostic_flags(staged_sentence, "zh"))
+    candidate_flags = set(_final_sentence_diagnostic_flags(candidate, "zh"))
+    if "short_cjk" in staged_flags:
+        if aged_enough and enough_growth:
+            return True
+        if not candidate_flags.intersection(
+            {"empty", "no_end_marker", "spaced_cjk", "cjk_internal_gap", "cjk_repeated_ngram", "latin_only_for_zh"}
+        ):
+            similarity = SequenceMatcher(None, _normalized_text(staged_sentence), _normalized_text(candidate)).ratio()
+            return len(cjk_units) > SHORT_CJK_FINAL_UNITS and similarity < 0.35
     if 0 < len(cjk_units) <= SHORT_CJK_FINAL_UNITS:
         return aged_enough and enough_growth
     if 0 < len(staged_cjk_units) <= SHORT_CJK_FINAL_UNITS and len(cjk_units) <= SHORT_CJK_FINAL_UNITS + 4:
@@ -1105,6 +1122,59 @@ def _should_translate_final_sentence(sentence: str, language: str) -> bool:
     return not flags.intersection(
         {"latin_only_for_zh", "short_cjk", "no_end_marker", "empty", "spaced_cjk", "cjk_repeated_ngram"}
     )
+
+
+def _should_finalize_boundary_candidate(
+    sentence: str,
+    language: str,
+    staged_confirmations: int | None = None,
+    staged_forced: bool = False,
+) -> bool:
+    if staged_confirmations is not None and staged_confirmations < _sentence_required_confirmations(staged_forced):
+        return False
+    flags = set(_final_sentence_diagnostic_flags(sentence, language))
+    return not flags.intersection({"empty", "no_end_marker", "spaced_cjk", "cjk_internal_gap", "cjk_repeated_ngram"})
+
+
+def _should_drop_blocked_boundary_candidate(
+    sentence: str,
+    language: str,
+    staged_age: int,
+    staged_forced: bool,
+    staged_confirmations: int | None = None,
+) -> bool:
+    if staged_confirmations is not None and staged_confirmations < _sentence_required_confirmations(staged_forced):
+        return staged_age >= _sentence_max_age_chunks(staged_forced)
+    return (
+        not _should_finalize_boundary_candidate(sentence, language)
+        and staged_age >= _sentence_max_age_chunks(staged_forced)
+    )
+
+
+def _should_drop_suppressed_stage(
+    staged_confirmations: int,
+    staged_forced: bool,
+    next_staged_age: int,
+) -> bool:
+    return (
+        staged_confirmations < _sentence_required_confirmations(staged_forced)
+        and next_staged_age >= _sentence_max_age_chunks(staged_forced)
+    )
+
+
+def _should_defer_completed_for_unconfirmed_stage(
+    staged_sentence: str,
+    staged_confirmations: int,
+    staged_forced: bool,
+    remaining_completed_count: int,
+) -> bool:
+    if not staged_sentence or remaining_completed_count <= 0:
+        return False
+    if _is_cjk_text(staged_sentence):
+        flags = set(_final_sentence_diagnostic_flags(staged_sentence, "zh"))
+        if "short_cjk" in flags:
+            return False
+    return not _should_confirm_staged_sentence(staged_sentence, staged_confirmations, staged_forced)
 
 
 def _is_short_staged_suffix_repeat(staged_sentence: str, pending_text: str) -> bool:
@@ -1225,6 +1295,15 @@ def _pending_new_text_combined(pending_text: str, new_text: str) -> str:
     from src.app.sentence_boundary import pending_new_text_combined
 
     return pending_new_text_combined(pending_text, new_text)
+
+
+def _deferred_completed_text(completed_sentences: list[str], pending_text: str) -> str:
+    combined = ""
+    for sentence in completed_sentences:
+        combined = _pending_new_text_combined(combined, sentence)
+    if pending_text:
+        combined = _pending_new_text_combined(combined, pending_text)
+    return combined
 
 
 def _split_completed_sentences(pending_text: str, new_text: str) -> tuple[list[str], str]:

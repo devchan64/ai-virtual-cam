@@ -59,7 +59,7 @@ class TranslationModelTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "en/ko/zh"):
             _m2m100_language_code("ja")
 
-    def test_whisper_backend_uses_whisper_translate_path(self) -> None:
+    def test_dictation_ai_backend_uses_whisper_translate_path(self) -> None:
         self.assertIsNone(build_text_translator("whisper", "unused", "cpu", "float32"))
 
     def test_explicit_cuda_rejects_unsupported_gpu_architecture(self) -> None:
