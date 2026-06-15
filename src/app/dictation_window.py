@@ -45,12 +45,8 @@ from src.app.dictation_transcript_logic import (
     _sentences_are_revisions,
     _replacement_decision_reason,
     _should_finalize_replaced_sentence,
-    _should_stage_replacement_candidate,
     _should_confirm_staged_sentence,
     _should_age_staged_sentence,
-    _should_finalize_boundary_candidate,
-    _should_drop_blocked_boundary_candidate,
-    _should_drop_suppressed_stage,
     _should_translate_staged_sentence,
     _should_translate_final_sentence,
     _split_completed_sentences,
@@ -818,68 +814,17 @@ class WhisperTranscriptWorker:
             if _should_finalize_replaced_sentence(staged_sentence, candidate, staged_confirmations, staged_forced, staged_age):
                 finalized = finalize_staged_sentence(detected, f"replaced_{replacement_reason}")
             else:
-                count_metric("stage_discard")
-                count_metric(f"stage_discard_reason_{replacement_reason}")
-                max_age = _sentence_max_age_chunks(staged_forced)
-                should_stage_candidate = _should_stage_replacement_candidate(
-                    staged_sentence,
-                    candidate,
-                    replacement_reason,
-                    staged_age,
-                    max_age,
-                )
+                count_metric("stage_replaced_unconfirmed")
                 self._emit(
                     "status",
-                    "받아쓰기 AI stage 폐기: "
-                    f"chunk={chunks} reason=replaced_{replacement_reason} "
+                    "받아쓰기 AI stage 미확정 교체: "
+                    f"chunk={chunks} decision={replacement_reason} "
                     f"staged_confirmations={staged_confirmations} required={_sentence_required_confirmations(staged_forced)} "
-                    f"staged_age={staged_age} max_age={max_age} "
                     f"staged_forced={staged_forced} staged_tail={_diagnostic_tail(staged_sentence)} "
-                    f"candidate_tail={_diagnostic_tail(candidate)} candidate_stage={should_stage_candidate}",
+                    f"candidate_tail={_diagnostic_tail(candidate)}",
                     display=False,
                 )
                 finalized = []
-                if not should_stage_candidate:
-                    count_metric("stage_candidate_suppressed")
-                    count_metric(f"stage_candidate_suppressed_reason_{replacement_reason}")
-                    next_staged_age = staged_age + 1
-                    drop_suppressed_stage = _should_drop_suppressed_stage(
-                        staged_confirmations,
-                        staged_forced,
-                        next_staged_age,
-                    )
-                    if staged_age >= max_age:
-                        count_metric("stage_candidate_suppressed_age_overrun")
-                    if drop_suppressed_stage:
-                        count_metric("stage_candidate_dropped_age_overrun")
-                    staged_age = next_staged_age
-                    staged_translation_pending = True
-                    self._emit(
-                        "status",
-                        "받아쓰기 AI stage 후보 보류: "
-                        f"chunk={chunks} reason={replacement_reason} staged_age={staged_age} "
-                        f"drop_suppressed_stage={drop_suppressed_stage} "
-                        f"staged_tail={_diagnostic_tail(staged_sentence)} candidate_tail={_diagnostic_tail(candidate)}",
-                        display=False,
-                    )
-                    if drop_suppressed_stage:
-                        self._emit(
-                            "status",
-                            "받아쓰기 AI stage 폐기 완료: "
-                            f"chunk={chunks} reason=age_overrun_unconfirmed "
-                            f"confirmations={staged_confirmations}/{_sentence_required_confirmations(staged_forced)} "
-                            f"staged_age={staged_age} max_age={max_age} "
-                            f"staged_tail={_diagnostic_tail(staged_sentence)}",
-                            display=False,
-                        )
-                        staged_sentence = ""
-                        staged_confirmations = 0
-                        staged_age = 0
-                        staged_translation_pending = False
-                        staged_forced = False
-                        return finalized
-                    self._emit("transcript", staged_sentence, log_text=f"[{detected}] {staged_sentence}", final=False)
-                    return finalized
                 staged_sentence = ""
                 staged_confirmations = 0
                 staged_age = 0
@@ -911,53 +856,6 @@ class WhisperTranscriptWorker:
                 f"before_tail={_diagnostic_tail(before)} after_tail={_diagnostic_tail(after)}",
                 display=False,
             )
-
-        def finalize_staged_for_boundary_next(detected: str) -> list[str]:
-            nonlocal staged_sentence, staged_confirmations, staged_age, staged_translation_pending, staged_forced
-            if not staged_sentence:
-                return []
-            required_confirmations = _sentence_required_confirmations(staged_forced)
-            if _should_finalize_boundary_candidate(
-                staged_sentence,
-                detected,
-                staged_confirmations,
-                staged_forced,
-            ):
-                return finalize_staged_sentence(detected, "boundary_next_candidate")
-            flags = _final_sentence_diagnostic_flags(staged_sentence, detected)
-            count_metric("boundary_next_candidate_blocked")
-            if staged_confirmations < required_confirmations:
-                count_metric("boundary_next_candidate_blocked_unconfirmed")
-            for flag in flags:
-                count_metric(f"boundary_next_candidate_blocked_{flag}")
-            drop_blocked = _should_drop_blocked_boundary_candidate(
-                staged_sentence,
-                detected,
-                staged_age,
-                staged_forced,
-                staged_confirmations,
-            )
-            if drop_blocked:
-                count_metric("boundary_next_candidate_dropped")
-                for flag in flags:
-                    count_metric(f"boundary_next_candidate_dropped_{flag}")
-            self._emit(
-                "status",
-                "받아쓰기 AI boundary 확정 보류: "
-                f"chunk={chunks} reason=final_quality flags={','.join(flags)} "
-                f"confirmations={staged_confirmations}/{required_confirmations} "
-                f"drop_blocked={drop_blocked} staged_age={staged_age} "
-                f"max_age={_sentence_max_age_chunks(staged_forced)} "
-                f"staged_tail={_diagnostic_tail(staged_sentence)}",
-                display=False,
-            )
-            if drop_blocked:
-                staged_sentence = ""
-                staged_confirmations = 0
-                staged_age = 0
-                staged_translation_pending = False
-                staged_forced = False
-            return []
 
         def age_staged_sentence(detected: str, pending_text: str = "") -> list[str]:
             nonlocal staged_age
@@ -1104,15 +1002,13 @@ class WhisperTranscriptWorker:
                                 repeat_collapse_rules.extend(f"forced_{rule}" for rule in forced_collapse_rules)
                             completed_sentences = [forced_sentence]
                             forced_candidate_pending = True
-                    for sentence_index, sentence in enumerate(completed_sentences):
+                    for sentence in completed_sentences:
                         produced_sentences = stage_completed_sentence(sentence, detected, forced=bool(forced_by))
                         final_sentences.extend(produced_sentences)
                         for produced_sentence in produced_sentences:
                             pending_transcript_text = _consume_committed_prefix(pending_transcript_text, produced_sentence)
                             if not pending_transcript_text:
                                 pending_chunks = 0
-                        if sentence_index < len(completed_sentences) - 1 and staged_sentence:
-                            final_sentences.extend(finalize_staged_for_boundary_next(detected))
                     if pending_transcript_text and not forced_candidate_pending:
                         self._emit(
                             "status",
@@ -1141,15 +1037,13 @@ class WhisperTranscriptWorker:
                                 repeat_collapse_rules.extend(f"forced_{rule}" for rule in forced_collapse_rules)
                             completed_sentences = [forced_sentence]
                             forced_candidate_pending = True
-                            for sentence_index, sentence in enumerate(completed_sentences):
+                            for sentence in completed_sentences:
                                 produced_sentences = stage_completed_sentence(sentence, detected, forced=bool(forced_by))
                                 final_sentences.extend(produced_sentences)
                                 for produced_sentence in produced_sentences:
                                     pending_transcript_text = _consume_committed_prefix(pending_transcript_text, produced_sentence)
                                     if not pending_transcript_text:
                                         pending_chunks = 0
-                                if sentence_index < len(completed_sentences) - 1 and staged_sentence:
-                                    final_sentences.extend(finalize_staged_for_boundary_next(detected))
                         else:
                             final_sentences.extend(age_staged_sentence(detected, pending_transcript_text))
                     else:
@@ -1288,7 +1182,7 @@ class WhisperTranscriptWorker:
                     value for key, value in chunk_lifecycle_metrics.items() if key.startswith("stage_replace_decision_")
                 )
                 stage_replace_count = chunk_lifecycle_metrics.get("stage_replace", 0)
-                stage_discard_count = chunk_lifecycle_metrics.get("stage_discard", 0)
+                stage_replaced_unconfirmed_count = chunk_lifecycle_metrics.get("stage_replaced_unconfirmed", 0)
                 stage_revision_count = chunk_lifecycle_metrics.get("stage_revision", 0)
                 stage_revision_changed_count = chunk_lifecycle_metrics.get("stage_revision_changed", 0)
                 stage_revision_reset_count = chunk_lifecycle_metrics.get("stage_revision_confirmation_reset", 0)
@@ -1298,8 +1192,6 @@ class WhisperTranscriptWorker:
                 final_quality_count = sum(
                     value for key, value in chunk_lifecycle_metrics.items() if key.startswith("final_quality_")
                 )
-                boundary_blocked_count = chunk_lifecycle_metrics.get("boundary_next_candidate_blocked", 0)
-                boundary_dropped_count = chunk_lifecycle_metrics.get("boundary_next_candidate_dropped", 0)
                 raw_without_final_count = 1 if raw_window_text and not final_sentences else 0
                 if raw_without_final_count:
                     count_metric("raw_without_final")
@@ -1307,14 +1199,13 @@ class WhisperTranscriptWorker:
                 self._emit(
                     "status",
                     "받아쓰기 AI 안정성 지표: "
-                    f"chunk={chunks} replace={stage_replace_count} discard={stage_discard_count} "
+                    f"chunk={chunks} replace={stage_replace_count} replaced_unconfirmed={stage_replaced_unconfirmed_count} "
                     f"revision={stage_revision_count} revision_changed={stage_revision_changed_count} "
                     f"revision_reset={stage_revision_reset_count} finalized={finalize_count} "
                     f"duplicate_suppressed={duplicate_suppressed_count} delta_trimmed={delta_trimmed_count} "
                     f"final_quality={final_quality_count} translation_skip={translation_skip_count} "
-                    f"boundary_blocked={boundary_blocked_count} boundary_dropped={boundary_dropped_count} "
                     f"raw_without_final={raw_without_final_count} "
-                    f"replace_discard_rate={stage_discard_count / max(stage_replace_count, 1):.2f} "
+                    f"replace_unconfirmed_rate={stage_replaced_unconfirmed_count / max(stage_replace_count, 1):.2f} "
                     f"decision_count={stage_decision_count} "
                     f"completed_coalesced={chunk_lifecycle_metrics.get('completed_coalesced', 0)}",
                     display=False,

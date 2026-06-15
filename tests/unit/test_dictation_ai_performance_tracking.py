@@ -9,11 +9,10 @@ from src.app.dictation_window import (
     _pending_overrun_reason,
     _pending_text_diagnostic_flags,
     _replacement_decision_reason,
-    _should_finalize_boundary_candidate,
-    _should_stage_replacement_candidate,
     _sentence_output_delta,
     _sentences_are_revisions,
 )
+from src.app.dictation_transcript_logic import _should_finalize_boundary_candidate
 
 
 # These tracking cases are mined from accumulated .tmp/logs/avc-whisper.log* files.
@@ -30,9 +29,8 @@ TRACKING_TARGETS = {
     "final_quality": {"target_cases": 8, "target_rate": 0.90},
     "translation_quality": {"target_cases": 8, "target_rate": 0.80},
     "coalesce": {"target_cases": 10, "target_rate": 1.00},
-    "stage_candidate": {"target_cases": 4, "target_rate": 1.00},
     "duplicate_suppression": {"target_cases": 4, "target_rate": 1.00},
-    "runtime_metrics": {"target_cases": 10, "target_rate": 1.00},
+    "runtime_metrics": {"target_cases": 7, "target_rate": 1.00},
 }
 
 REVISION_TRACKING_CASES = [
@@ -763,58 +761,6 @@ REPLACEMENT_TRACKING_CASES.extend([
 ])
 
 
-STAGE_CANDIDATE_TRACKING_CASES = [
-    {
-        "staged": "我上次发现的都。",
-        "candidate": "爸爸妈。爸。",
-        "age": 2,
-        "max_age": 3,
-        "expected": False,
-        "source": "2026-06-14 30m monitor chunk 101 short candidate remains suppressed",
-    },
-    {
-        "staged": "我上次发现的都。",
-        "candidate": "继续吃，等下吃完再去下。",
-        "age": 2,
-        "max_age": 3,
-        "expected": True,
-        "source": "2026-06-14 30m monitor chunk 104 complete candidate is no longer age-gated",
-    },
-    {
-        "staged": "我上次发现的都。",
-        "candidate": "继续吃，等下吃完再去下。",
-        "age": 3,
-        "max_age": 3,
-        "expected": True,
-        "source": "2026-06-14 30m monitor chunk 104 complete candidate remains accepted",
-    },
-    {
-        "staged": "来看看吉普力哦，这是什么？",
-        "candidate": "可爱哦，好。",
-        "age": 3,
-        "max_age": 3,
-        "expected": False,
-        "source": "2026-06-14 30m monitor chunk 121 short candidate remains suppressed",
-    },
-    {
-        "staged": "厉害的吧，应应该。",
-        "candidate": "厉害的宝宝应该会喜欢我，刚刚。",
-        "age": 0,
-        "max_age": 3,
-        "expected": True,
-        "source": "2026-06-14 30m monitor chunk 74 complete candidate is no longer age-gated",
-    },
-    {
-        "staged": "对啊。",
-        "candidate": "我们现在到的是宫岛的休息站。",
-        "age": 0,
-        "max_age": 3,
-        "expected": True,
-        "source": "2026-06-15 avc-whisper.log chunks 848-851 short CJK stage blocked stable prefix",
-    },
-]
-
-
 TRANSLATION_OBSERVED_QUALITY_CASES = [
     # These are observed output samples, not live model assertions. They are a
     # small regression corpus for comparing translation backends on the same input.
@@ -990,21 +936,6 @@ RUNTIME_METRIC_TRACKING_CASES = [
         "source": "2026-06-15 Chinese monitor repeated ngram revision candidate",
     },
     {
-        "metrics": {"boundary_next_candidate_blocked": 1},
-        "expected": {"boundary_blocked": 1},
-        "source": "2026-06-15 Chinese monitor boundary-next short/spaced fragment",
-    },
-    {
-        "metrics": {"boundary_next_candidate_dropped": 1},
-        "expected": {"boundary_dropped": 1},
-        "source": "2026-06-15 Chinese monitor aged boundary-blocked fragment",
-    },
-    {
-        "metrics": {"stage_candidate_dropped_age_overrun": 1},
-        "expected": {"stage_candidate_dropped_age_overrun": 1},
-        "source": "2026-06-15 Chinese monitor unconfirmed stage exceeded max age",
-    },
-    {
         "metrics": {"raw_without_final": 1},
         "expected": {"raw_without_final": 1},
         "source": "2026-06-15 Chinese monitor raw STT present but no final output",
@@ -1084,9 +1015,6 @@ def _runtime_metric_summary(metrics: dict[str, int]) -> dict[str, int]:
         "revision_reset": int(metrics.get("stage_revision_confirmation_reset", 0)),
         "input_queue_drops": int(metrics.get("input_queue_drops", 0)),
         "revision_candidate_quality_blocked": int(metrics.get("stage_revision_candidate_quality_blocked", 0)),
-        "boundary_blocked": int(metrics.get("boundary_next_candidate_blocked", 0)),
-        "boundary_dropped": int(metrics.get("boundary_next_candidate_dropped", 0)),
-        "stage_candidate_dropped_age_overrun": int(metrics.get("stage_candidate_dropped_age_overrun", 0)),
         "raw_without_final": int(metrics.get("raw_without_final", 0)),
     }
 
@@ -1283,26 +1211,6 @@ def _make_replacement_tracking_test(index: int, case: dict[str, object]):
     return test
 
 
-def _make_stage_candidate_tracking_test(index: int, case: dict[str, object]):
-    def test(self: WhisperPerformanceTrackingTest) -> None:
-        reason = _replacement_decision_reason(
-            str(case["staged"]),
-            str(case["candidate"]),
-            int(case.get("confirmations", 1)),
-            bool(case.get("forced", False)),
-            int(case.get("age", 0)),
-        )
-        actual = _should_stage_replacement_candidate(
-            str(case["staged"]),
-            str(case["candidate"]),
-            reason,
-            int(case.get("age", 0)),
-            int(case.get("max_age", 3)),
-        )
-        self._record("stage_candidate", f"stage_candidate_{index:03d}", actual == bool(case["expected"]))
-    return test
-
-
 def _make_stability_tracking_test(index: int, sequence: list[str]):
     def test(self: WhisperPerformanceTrackingTest) -> None:
         transition_results = []
@@ -1393,13 +1301,6 @@ for _index, _case in enumerate(REPLACEMENT_TRACKING_CASES, 1):
         WhisperPerformanceTrackingTest,
         f"test_tracking_replacement_{_index:03d}",
         _make_replacement_tracking_test(_index, _case),
-    )
-
-for _index, _case in enumerate(STAGE_CANDIDATE_TRACKING_CASES, 1):
-    setattr(
-        WhisperPerformanceTrackingTest,
-        f"test_tracking_stage_candidate_{_index:03d}",
-        _make_stage_candidate_tracking_test(_index, _case),
     )
 
 for _index, _sequence in enumerate(STABILITY_TRACKING_SEQUENCES, 1):

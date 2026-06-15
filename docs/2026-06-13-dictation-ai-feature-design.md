@@ -151,7 +151,7 @@ new:      "in the United States to take delivery"
 - 겹치지 않는 신규 부분만 `candidate_text`로 계산한다.
 - `commitLagSeconds` 구간은 즉시 확정하지 않는다. 이 값은 STT 윈도우 끝단의 불안정한 tail을 보류하는 입력 안정화 장치이며, STT 결과 문장 경계 처리 모델의 신뢰도와는 별개의 시간 보류값이다. 2026-06-15 운영 로그에서는 1초 설정에서도 큐 드롭 없이 동작했으므로 기본값은 1초로 낮춘다.
 - 동일 후보 재확인 횟수(`staged_confirmations`)를 만족할 때만 `confirmed`를 확장한다. STT 결과 문장 경계 처리 모델이 `completed` 후보를 반환해도 STT 가설 텍스트는 다음 윈도우에서 고쳐질 수 있으므로, 후보 재확인은 ASR revision 안정성을 확인하는 생명주기다.
-- 현재 기본 확정 기준은 일반 후보 3회, 강제 후보 4회 재확인이다. 같은 STT 윈도우에서 STT 결과 문장 경계 처리 모델이 여러 completed 후보를 반환하면 `boundary_next_candidate`는 이전 staged 후보의 확정 기회로만 사용한다. staged 후보가 요구 재확인 횟수를 채우지 못했거나 final 품질 플래그가 있으면 final로 올리지 않는다. 또한 단일 관측 staged 후보가 다른 distinct 후보로 교체될 때는 즉시 확정하지 않고 새 후보가 별도 확인을 받게 한다. 이는 오인식 문장이 먼저 확정된 뒤 수정 후보가 다른 문장처럼 중복 확정되는 문제를 줄이기 위한 보수 정책이다.
+- 현재 기본 확정 기준은 일반 후보 3회, 강제 후보 4회 재확인이다. STT 결과 문장 경계 처리 모델이 여러 completed 후보를 반환하면 각 후보를 순서대로 staged 관찰 대상으로 처리한다. 이전 staged 후보가 재확인 기준을 만족하면 먼저 확정하고, 만족하지 못하면 새 후보로 교체해 다음 윈도우에서 다시 관찰한다. 이는 후보 보류/폐기 규칙이 누적되면서 대부분 문장이 final까지 가지 못한 문제를 줄이기 위한 단순 정책이다.
 - 구두점 없는 한글 열린 절(`이 두 직업은`, `저녁에 퇴근하고` 등)은 반복 관측만으로 확정하지 않고 다음 revision 기회를 유지한다.
 - 정교화 단계에서는 `word_timestamps=true` 기반 시간 정합 후보를 도입한다.
 
@@ -327,7 +327,7 @@ STT 결과 문장 경계 처리:
 - 최근 중국어 구간: `perf=125`, `diag=125`, `zh_transcripts=163`, `errors=0`.
 - 속도: `stt_rtf avg=0.075`, `p95=0.100`; 계산 성능은 병목이 아님.
 - STT 신뢰도: `low_logprob` 후보 무시 12회. STT 자체 품질 문제도 일부 존재한다.
-- 경계 품질: `boundary_complete=0`이 82/125, `slow_pending=19`, `stage_discard_reason_empty`가 53회. 이는 문장 경계/리비전 생명주기가 중국어 스트림을 충분히 다루지 못한다는 신호다.
+- 경계 품질: 초기 로그에서는 `boundary_complete=0`이 82/125, `slow_pending=19`처럼 문장 경계/리비전 생명주기가 중국어 스트림을 충분히 다루지 못하는 신호가 확인되었다.
 - 2026-06-13 추가 관측: `language=zh` 고정 상태에서도 `Hey guys`, `read ok ready`, `OK,Ready` 같은 영어/중국어 혼합 출력이 발생했다. 이는 후처리 이전의 raw STT 품질 저하 신호다.
 - 결론: 중국어 품질 문제는 STT와 경계 처리 양쪽에서 발생한다. raw STT, boundary output, committed output을 분리 평가하되, 중국어는 Whisper large-v3 고정이 아니라 언어별 STT backend 교체 실험을 포함한다. 최근 로그 기준 Whisper/faster-whisper는 중국어에서 문맥과 의미 보존이 충분하지 않아 정확도 기준 후보에서 제외하고, baseline 비교군으로만 취급한다.
 
@@ -339,7 +339,7 @@ STT 결과 문장 경계 처리:
 - 확정 전/후 텍스트가 과도하게 교차할 경우 단순 delta 계산만으로는 충분치 않으므로 경계 모듈 경향을 추가 점검.
 - `lifecycle_metrics`는 세션 누적 추세를, `chunk_metrics`는 해당 chunk의 이벤트를 추적한다.
 - `stage_replace_decision_finalize`가 많으면 staged 후보가 너무 쉽게 교체 확정되는지 확인한다.
-- `stage_discard_reason_open_korean_clause`가 많으면 열린 한글 절을 과도하게 폐기하고 있는지 확인한다.
+- `stage_replaced_unconfirmed`가 많으면 미확정 후보가 너무 자주 교체되어 재확인 횟수를 쌓지 못하는지 확인한다.
 - `pending_overrun`은 pending이 길이/관측 횟수 임계치를 넘었지만 확정되지 않은 상태를 나타낸다. `long_no_boundary`는 경계 모델이 문장 경계를 찾지 못해 번역 지연이 커질 수 있는 신호다. 일반 overrun은 180자/8 chunks 이상, 빠른 overrun은 240자/4 chunks 이상을 기준으로 추적한다.
 - `finalize_duplicate_suppressed`가 증가하면 중복 출력은 막고 있지만 앞단 경계/리비전이 불안정하다는 신호로 본다.
 - `pending_chars_per_chunk`가 80~100 이상으로 튀면서 `repeat_collapse_chars=0`이면 STT 결과 문장 경계 처리 모델 실패만이 아니라 pending 결합에서 내부 재시작을 그대로 이어붙인 케이스를 의심한다.
@@ -352,10 +352,10 @@ STT 결과 문장 경계 처리:
 1. 이전 committed 출력과 겹치는 prefix/suffix는 제거하고 신규 후보만 staged 후보로 관찰한다.
 2. `commitLagSeconds` 구간(윈도우 끝단)은 즉시 확정하지 않는다.
 3. 동일 후보 또는 더 나은 revision 후보가 요구 재확인 횟수(`staged_confirmations`)를 채우면 확정한다.
-4. final 품질 플래그(`empty`, `no_end_marker`, `spaced_cjk`, `cjk_internal_gap`, `cjk_repeated_ngram` 등)가 있는 후보는 확정하지 않는다.
-5. STT 결과 문장 경계 처리 모델이 여러 completed 후보를 반환하면, 다음 completed 후보는 현재 staged 후보의 `boundary_next_candidate` 확정 기회로만 사용한다.
-6. 확정되지 못한 staged 후보가 age 한계에 도달하면 슬롯을 비워 다음 후보를 관찰한다.
-7. pending이 길이/관측 횟수 임계치를 넘으면 `forced_by` 후보로 stage에 올리되, forced 후보도 별도 재확인 기준과 final 품질 게이트를 통과해야 확정한다.
+4. 명백한 final 품질 오류(`empty`, `spaced_cjk`, `cjk_repeated_ngram`, `latin_only_for_zh`)가 있는 후보만 확정하지 않는다.
+5. STT 결과 문장 경계 처리 모델이 여러 completed 후보를 반환하면, 각 completed 후보를 순서대로 stage 처리한다.
+6. 이전 staged 후보가 확정 기준을 통과하지 못하면 폐기/보류하지 않고 새 후보로 교체해 관찰을 계속한다.
+7. pending이 길이/관측 횟수 임계치를 넘으면 `forced_by` 후보로 stage에 올리되, forced 후보도 별도 재확인 기준과 명백한 final 품질 게이트를 통과해야 확정한다.
 
 제거한 규칙:
 
@@ -364,11 +364,13 @@ STT 결과 문장 경계 처리:
 - prefix evidence를 근거로 보류를 우회하던 규칙
 - final 품질 플래그로 막힌 confirmed staged 후보를 age 이후 candidate로 release하던 우회 규칙
 - completed 후보를 언어별로 병합해 하나의 관측 단위로 만들던 규칙
+- same chunk 안의 후속 completed 후보를 스킵하는 규칙
+- age 한계 초과만으로 staged 후보를 폐기하는 규칙
 
 ### 9.1 배포 판단 규칙
 
 - STT 결과 문장 경계 처리 모델이 제안한 completed 단위를 보존한다.
-- `boundary_next_candidate`는 확정 사유가 아니라 확정 기회다.
+- 미확정 staged 후보가 있더라도 후속 completed 후보를 버리지 않고 새 관찰 후보로 전환한다.
 - 확정 여부는 재확인 횟수와 final 품질 게이트로 결정한다.
 - 언어별 ad-hoc 규칙을 늘리지 않고, 영향이 약한 규칙은 지표 확인 후 제거한다.
 
@@ -674,18 +676,17 @@ unittest 성공은 테스트 코드가 실행되어 지표가 수집되었다는
 | `final_quality` | final 확정 후보의 짧은 CJK, 언어 불일치, 반복 n-gram 등 품질 플래그를 추적하는지 | 8 | 90% 이상 |
 | `coalesce` | STT 결과 문장 경계 처리 모델이 반환한 completed 후보 단위를 보존해 여러 문장이 한 final로 과도하게 병합되지 않는지 | 10 | 100% |
 | `duplicate_suppression` | 이미 확정/관측된 후보가 중복 출력되지 않도록 억제되는지 | 4 | 100% |
-| `runtime_metrics` | 런타임 누적 지표가 안정성 요약으로 올바르게 집계되는지 | 11 | 100% |
+| `runtime_metrics` | 런타임 누적 지표가 안정성 요약으로 올바르게 집계되는지 | 8 | 100% |
 | `translation_quality` | 관측된 번역 출력 샘플에서 고유명사/도메인 용어/명백한 환각 회귀를 추적하는지 | 8 | 80% 이상 |
-| `stage_candidate` | 중국어 staged 후보를 보류/전환하는 결정이 장기 보류 없이 동작하는지 | 4 | 100% |
 
-`distinct` 목표율을 더 높게 둔 이유는 서로 다른 문장을 병합하면 원문 손실이 발생하고, 이후 번역도 복구할 수 없기 때문이다. `revision`과 `collapse`는 중복을 줄이는 방향의 품질 지표지만, 과도한 병합보다 손실 위험이 낮으므로 초기 목표율을 90%로 둔다. `stability`는 incremental ASR의 partial hypothesis instability와 revokes 문제를 현재 코드의 revision lifecycle에 맞춘 프록시 지표다. `replacement`는 2026-06-13 30분 운영 로그에서 관측된 staged 교체 손실을 직접 추적하기 위해 추가한 지표이며, `open_korean_clause`와 `partial_preserve` 결정의 회귀를 막는다. `pending`은 영어 장문처럼 경계가 늦게 나오는 구간에서 번역 지연 위험을 추적하고, `pending_quality`는 중국어 no-space STT 윈도우의 내부 재시작이 pending에 반복 접합되는 오염 신호를 분리해서 본다. `final_quality`는 final 후보 자체가 번역/복사 대상으로 적합한지 확인하는 품질 축이고, `coalesce`는 과거 중국어 completed 후보를 단일 관측 단위로 병합하던 정책의 회귀를 추적하던 이름이지만 현재는 경계 모델 출력 단위 보존을 확인하는 지표로 사용한다. `translation_quality`는 STT/문장 확정과 분리된 번역 모델 품질 축이다. 이 값은 실제 모델을 실행하는 패스 기준이 아니라, 운영 로그에서 관측한 source/observed 쌍을 기준으로 고유명사 보존, 도메인 용어 보존, 금지 오역을 확인하는 회귀 샘플 지표다. `stage_candidate`는 중국어의 미확정 staged 후보를 새 completed 후보로 교체할 때 품질 플래그와 최소 길이만 확인하는 단순 기준을 추적한다. age/growth 기반 보류, completed 후보를 미확정 stage 뒤에 되돌리는 정책, prefix evidence 우회 정책은 2026-06-15 로그에서 `completed_deferred_unconfirmed_stage`가 대량 증가하는 동안 `finalized`가 낮고 prefix 우회 카운터의 영향이 작아 약한 규칙으로 판단해 제거한다. `runtime_metrics`는 로그 집계 경로가 새 지표를 누락하지 않는지 확인하는 계약 지표다. 2026-06-15 `windowSeconds=30`, `stepSeconds=1` 중국어 모니터링에서는 `stt_step_load > 1`과 Pulse 입력 큐 드롭이 함께 관측되어 `input_queue_drops`를 runtime metric에 추가했다. 2026-06-15 `boundary_next_candidate` 실험에서는 짧거나 공백 삽입된 CJK fragment가 final로 확정되는 회귀가 관측되어 `boundary_blocked`를 runtime metric에 추가했다. 이어진 5분 모니터링에서는 `boundary_blocked`된 staged fragment가 `staged_age` 한계를 넘어서도 슬롯을 잡고 다음 후보들을 막는 현상이 반복되어, age 한계 초과 시 해당 staged 후보를 폐기하는 `boundary_dropped` 지표를 추가했다. 추가 5분 모니터링에서는 `boundary_next_candidate`가 직접 실행되지 않는 replacement 보류 경로에서도 미확정 staged 후보가 age 한계를 넘긴 채 남아 `stage_candidate_suppressed_age_overrun`만 증가하는 현상이 확인되었다. 이 경로는 `stage_candidate_dropped_age_overrun`으로 별도 집계하고, 요구 재확인 횟수를 채우지 못한 staged 후보가 max age에 도달하면 슬롯을 비워 다음 STT revision을 관찰한다. 2026-06-15 중국어 12초/1초 로그에서는 raw STT가 정상적으로 출력되는데 final이 나오지 않는 구간이 반복되었다. 이는 입력 큐 드롭이 아니라 같은 chunk의 여러 completed 후보가 하나의 staged 슬롯을 순차 교체하거나 completed 후보가 pending으로 되돌아가는 생명주기 문제였다. 해당 관측을 근거로 completed 후보 보류 정책은 제거하고, 현재 운영 지표는 `raw_without_final`로 final 미생성 상태만 추적한다.
+`distinct` 목표율을 더 높게 둔 이유는 서로 다른 문장을 병합하면 원문 손실이 발생하고, 이후 번역도 복구할 수 없기 때문이다. `revision`과 `collapse`는 중복을 줄이는 방향의 품질 지표지만, 과도한 병합보다 손실 위험이 낮으므로 초기 목표율을 90%로 둔다. `stability`는 incremental ASR의 partial hypothesis instability와 revokes 문제를 현재 코드의 revision lifecycle에 맞춘 프록시 지표다. `replacement`는 2026-06-13 30분 운영 로그에서 관측된 staged 교체 손실을 직접 추적하기 위해 추가한 지표이며, `open_korean_clause`와 `partial_preserve` 결정의 회귀를 막는다. `pending`은 영어 장문처럼 경계가 늦게 나오는 구간에서 번역 지연 위험을 추적하고, `pending_quality`는 중국어 no-space STT 윈도우의 내부 재시작이 pending에 반복 접합되는 오염 신호를 분리해서 본다. `final_quality`는 final 후보 자체가 번역/복사 대상으로 적합한지 확인하는 품질 축이고, `coalesce`는 과거 중국어 completed 후보를 단일 관측 단위로 병합하던 정책의 회귀를 추적하던 이름이지만 현재는 경계 모델 출력 단위 보존을 확인하는 지표로 사용한다. `translation_quality`는 STT/문장 확정과 분리된 번역 모델 품질 축이다. 이 값은 실제 모델을 실행하는 패스 기준이 아니라, 운영 로그에서 관측한 source/observed 쌍을 기준으로 고유명사 보존, 도메인 용어 보존, 금지 오역을 확인하는 회귀 샘플 지표다. age/growth 기반 보류, completed 후보를 미확정 stage 뒤에 되돌리는 정책, prefix evidence 우회 정책은 2026-06-15 로그에서 `completed_deferred_unconfirmed_stage`가 대량 증가하는 동안 `finalized`가 낮고 prefix 우회 카운터의 영향이 작아 약한 규칙으로 판단해 제거한다. `runtime_metrics`는 로그 집계 경로가 새 지표를 누락하지 않는지 확인하는 계약 지표다. 2026-06-15 `windowSeconds=30`, `stepSeconds=1` 중국어 모니터링에서는 `stt_step_load > 1`과 Pulse 입력 큐 드롭이 함께 관측되어 `input_queue_drops`를 runtime metric에 추가했다. 2026-06-15 중국어 12초/1초 로그에서는 raw STT가 정상적으로 출력되는데 final이 나오지 않는 구간이 반복되었다. 원인은 입력 큐 드롭보다 stage 교체/보류 규칙이 누적되어 후보가 final까지 가지 못하는 생명주기 복잡도였다. 현재 운영 경로는 `raw_without_final`, `stage_replaced_unconfirmed`, `finalized`를 중심으로 보며, 후보를 버리는 규칙보다 final 생성률 회복을 우선한다.
 
 ### 12.1 운영 규칙
 
 - 성능 추적 테스트의 성공/실패 자체에 품질 통과 의미를 부여하지 않는다.
 - 새 로그에서 중복/누락/잘못된 revision이 관측되면 케이스를 추가한다.
-- 경계 모델이 여러 completed 후보를 반환해도 final 품질 플래그가 있는 후보는 확정하지 않는다. `boundary_next_candidate`는 경계 기반 빠른 확정 기회이며, `boundary_blocked`가 증가하면 짧은 CJK fragment 또는 공백 삽입 fragment가 final로 올라가려는 신호로 본다. 단, 차단된 후보가 staged age 한계를 넘어서면 슬롯을 비워 다음 후보가 관측될 수 있게 한다. 이때 `boundary_dropped`를 증가시켜 품질 차단 후보가 흐름을 막는 빈도를 추적한다. replacement 보류 경로에서 재확인 횟수를 채우지 못한 staged 후보가 age 한계에 도달하면 `stage_candidate_dropped_age_overrun`을 증가시키고 staged 슬롯을 비운다.
-- 같은 STT chunk 안에서 여러 completed 후보가 반환됐을 때, 현재 staged 후보가 아직 재확인 기준을 채우지 못했다는 이유만으로 나머지 completed 후보를 pending으로 되돌리지 않는다. 2026-06-15 누적 지표에서 이 보류 정책은 `completed_deferred_unconfirmed_stage`를 크게 늘리고 `raw_without_final` 구간을 만들었으나 final 확정 개선 효과는 작았다. 따라서 completed 후보는 품질 플래그와 최소 CJK 단위 수를 통과하면 다음 stage 관찰 대상으로 전환할 수 있다. 아주 짧은 CJK 조각, 끝표식 없는 조각, 공백 삽입 CJK, 반복 n-gram 후보만 차단한다.
+- 경계 모델이 여러 completed 후보를 반환하면 각 후보를 순서대로 처리한다. 이전 staged 후보가 확정되지 않았다는 이유만으로 다음 후보를 버리지 않는다.
+- 같은 STT chunk 안에서 여러 completed 후보가 반환됐을 때, 현재 staged 후보가 아직 재확인 기준을 채우지 못했다는 이유만으로 나머지 completed 후보를 pending으로 되돌리거나 스킵하지 않는다. 이전 staged 후보가 확정 기준을 통과하지 못하면 새 후보로 교체하고 다음 윈도우에서 다시 안정성을 본다. 차단 대상은 빈 문자열, 공백 삽입 CJK, 반복 n-gram, 중국어 설정에서 라틴 문자만 나온 후보처럼 명백한 오류로 제한한다.
 - 케이스 추가로 tracking rate가 내려가는 것은 정상적인 관측 신호다.
 - 알고리즘, 버퍼 라이프사이클, revision 판단 개선으로 rate를 올리고 gap을 줄인다.
 - 목표율 변경은 서비스 요구가 바뀌거나 정답 코퍼스 기반 WER/CER 평가가 도입될 때 문서와 함께 수행한다.
@@ -724,7 +725,7 @@ unittest 성공은 테스트 코드가 실행되어 지표가 수집되었다는
 - forced 후보 확정 기준은 4회 재확인을 유지한다.
 - `commitLagSeconds` 기본/운영값은 1.0초로 정렬한다. 1초 설정은 최근 중국어 로그에서 `input_queue_drops=0`, `stt_step_load < 1` 범위로 관측되어 처리량 문제를 만들지 않았다.
 - VAD 기반 필터링은 현재 슬라이딩 윈도우 확정 정책과 충돌해 운영 경로에서 제거한다.
-- `chunk_metrics`를 추가해 해당 chunk에서 발생한 `stage_start`, `stage_revision`, `stage_replace`, `stage_discard`, `finalized` 등을 즉시 확인한다.
+- `chunk_metrics`를 추가해 해당 chunk에서 발생한 `stage_start`, `stage_revision`, `stage_replace`, `stage_replaced_unconfirmed`, `finalized` 등을 즉시 확인한다.
 - `pending_overrun`을 추가해 긴 pending이 `long_no_boundary`, `with_end_mark`, `unstable_numeric_tail` 중 어떤 상태인지 추적한다.
 - `replacement` 추적 테스트를 추가해 staged 교체 결정의 보존/폐기/확정 품질을 별도 관리한다.
 - 열린 한글 절은 반복 관측만으로 확정하지 않는다.
@@ -764,10 +765,10 @@ stability=10/10 rate=1.000 target>=0.80
 반영 정책:
 
 - STT 결과 문장 경계 처리 모델이 반환한 completed 후보 단위는 병합하지 않고 보존한다.
-- 같은 STT chunk의 다음 completed 후보는 현재 staged 후보의 `boundary_next_candidate` 확정 기회로만 사용한다.
+- 같은 STT chunk의 completed 후보는 순서대로 stage 처리한다.
 - staged 후보가 재확인 횟수 또는 final 품질 게이트를 통과하지 못하면 확정하지 않는다.
 - completed 후보를 미확정 stage 뒤로 되돌려 pending에 붙이는 보류 정책은 제거한다.
-- `받아쓰기 AI 안정성 지표` 로그는 누적 `stage_replace`, `stage_discard`, `stage_revision`, `finalized`, `boundary_blocked`, `boundary_dropped`, `raw_without_final`을 함께 출력해 생명주기 안정성을 관측한다.
+- `받아쓰기 AI 안정성 지표` 로그는 누적 `stage_replace`, `stage_replaced_unconfirmed`, `stage_revision`, `finalized`, `raw_without_final`을 함께 출력해 생명주기 안정성을 관측한다.
 
 2026-06-14 검증 결과:
 
@@ -797,7 +798,7 @@ perf_samples=1064 max_stt=0.350s max_total=0.370s avg_total_rtf=0.010 translatio
 
 운영 판단은 Qwen3-ASR를 중국어 품질 우선 후보로 올리고, FunASR STT는 후보군에서 제외해 폐기한다는 것이다. 2026-06-15 기준 기본 계약은 `sttBackendZh=qwen3-asr-transformers`, `sttModelZh=qwen3-asr-0.6b`로 전환한다. 단, 현재 비교는 같은 입력 replay가 아니라 시간대가 다른 운영 로그 기반이므로, 향후 동일 입력 replay에서는 `faster-whisper`, `qwen3-asr-0.6b`, 과거 FunASR 기준선을 비교해 회귀 여부를 확인한다. FunASR 관련 과거 로그는 기준선 기록으로만 문서에 남긴다.
 
-결론은 STT/staging 생명주기 병목과 번역 모델 품질 병목을 분리해서 본다는 것이다. 중국어 completed 후보는 병합하지 않고 경계 모델의 출력 단위를 보존하며, `boundary_next_candidate`를 통해 staged 후보에 확정 기회를 부여한다. 낮은 `translation_quality`는 중한 번역 백엔드/모델 비교 과제로 남긴다.
+결론은 STT/staging 생명주기 병목과 번역 모델 품질 병목을 분리해서 본다는 것이다. 중국어 completed 후보는 병합하지 않고 경계 모델의 출력 단위를 보존하며, 각 후보를 순서대로 stage 처리한다. 낮은 `translation_quality`는 중한 번역 백엔드/모델 비교 과제로 남긴다.
 
 ## 12.5 2026-06-15 중국어 pending 내부 재시작 관측
 
@@ -832,7 +833,7 @@ unit test discover: 567 passed
 ./bin/avc test: passed, integration skipped=1
 ```
 
-운영 파라미터 비교에서 영어/한국어는 `windowSeconds=7`이 실시간성과 품질의 균형점으로 관측되었다. 중국어/Qwen3-ASR는 원문창이 staged 후보를 표시하던 시기의 로그 해석 오류 때문에 작은 윈도우의 raw STT 품질을 과소평가했다. 원문창을 `stt_raw` 기반 raw STT window 출력으로 분리한 뒤에는 `windowSeconds=12`도 유효한 시작점으로 본다. `windowSeconds=30`은 문맥 안정성은 상대적으로 좋지만 final script 갱신이 늦고 긴 문장 확정 비용이 커졌다. 또한 `stepSeconds=1`과 결합하면 `stt_step_load`가 1을 초과하고 Pulse 입력 큐 드롭이 발생할 수 있으므로 성능 로그를 함께 확인해야 한다. 2026-06-15 현재 기본 계약값은 언어별로 분리한다. 영어/한국어는 `windowSecondsEn=7`, `windowSecondsKo=7`, `stepSecondsEn=1`, `stepSecondsKo=1`, `commitLagSecondsEn=1`, `commitLagSecondsKo=1`, 중국어는 `windowSecondsZh=12`, `stepSecondsZh=1`, `commitLagSecondsZh=1`을 시작점으로 둔다. 우선순위는 STT 모델 품질과 pending/revision 생명주기 지표 개선이며, `final_quality_cjk_internal_gap`는 공백 없는 CJK 출력에서 false positive가 있을 수 있으므로 hard fail이 아니라 추세 지표로만 사용한다. 안정성 로그에는 `duplicate_suppressed`, `delta_trimmed`, `final_quality`, `translation_skip`, `revision_changed`, `revision_reset`, `pending_quality`, `input_queue_drops`, `revision_candidate_quality_blocked`, `boundary_blocked`, `boundary_dropped`, `stage_candidate_dropped_age_overrun`을 남겨 중복 억제, 후보 흔들림, pending 버퍼 오염, 처리량 초과, 반복 n-gram revision 후보 차단, 경계 기반 확정 차단/폐기, age 한계 초과 staged 폐기를 분리해서 본다. CJK revision 내용이 실제로 바뀐 경우 confirmations를 1부터 다시 세어 흔들리는 후보가 누적 확인만으로 확정되지 않도록 한다. 재확인 횟수를 채우지 못한 staged 후보는 age 한계에 도달하면 폐기하여 원문창과 전사창의 장기 고착을 막는다. 이때 구두점 없는 긴 CJK 후보는 즉시 final로 확정하지 않고 staged 관찰 대상으로만 전환한다. 2026-06-15 12초/1초 중국어 모니터링에서는 `stt_step_load`가 대체로 0.4~0.7이고 `input_queue_drops=0`이라 처리량은 충분했지만, pending tail과 새 윈도우 재시작이 접합된 긴 revision 후보가 `cjk_repeated_ngram`을 포함해도 길이 때문에 선호되는 문제가 관측되었다. 이후 revision 선호 로직은 반복 n-gram이 있는 CJK 후보보다 clean staged 후보를 우선한다. 또한 중국어 completed 후보를 무조건 하나로 병합하던 정책은 여러 문장이 한 final로 묶이는 원인이므로 폐기하고, 같은 chunk 안의 다음 completed 후보는 현재 staged 후보를 `boundary_next_candidate` 사유로 확정시키는 경계 기반 확정 기회로 사용한다. 단, `boundary_next_candidate`는 확정 사유가 아니라 확정 기회다. `no_end_marker`, `spaced_cjk`, `cjk_internal_gap`, `cjk_repeated_ngram` 등 final 품질 플래그가 있으면 final로 올리지 않고 `boundary_blocked`로 기록한다. 2026-06-15 모니터링에서 `西 门 泾 的`, `我现在顶`, `好 玩` 같은 짧거나 공백 삽입된 CJK fragment가 final로 올라온 것이 이 정책의 근거다. 같은 모니터링에서 Qwen3-ASR가 빈 `ASRTranscription` 객체를 반환했을 때 객체 표현 문자열이 raw STT로 유입되는 경로도 확인되었으므로, STT 어댑터는 `.text` 속성이 존재하면 빈 값도 명시 결과로 처리하고 객체를 문자열화하지 않는다.
+운영 파라미터 비교에서 영어/한국어는 `windowSeconds=7`이 실시간성과 품질의 균형점으로 관측되었다. 중국어/Qwen3-ASR는 원문창이 staged 후보를 표시하던 시기의 로그 해석 오류 때문에 작은 윈도우의 raw STT 품질을 과소평가했다. 원문창을 `stt_raw` 기반 raw STT window 출력으로 분리한 뒤에는 `windowSeconds=12`도 유효한 시작점으로 본다. `windowSeconds=30`은 문맥 안정성은 상대적으로 좋지만 final script 갱신이 늦고 긴 문장 확정 비용이 커졌다. 또한 `stepSeconds=1`과 결합하면 `stt_step_load`가 1을 초과하고 Pulse 입력 큐 드롭이 발생할 수 있으므로 성능 로그를 함께 확인해야 한다. 2026-06-15 현재 기본 계약값은 언어별로 분리한다. 영어/한국어는 `windowSecondsEn=7`, `windowSecondsKo=7`, `stepSecondsEn=1`, `stepSecondsKo=1`, `commitLagSecondsEn=1`, `commitLagSecondsKo=1`, 중국어는 `windowSecondsZh=12`, `stepSecondsZh=1`, `commitLagSecondsZh=1`을 시작점으로 둔다. 우선순위는 STT 모델 품질과 pending/revision 생명주기 지표 개선이며, 운영 지표는 `finalized`, `raw_without_final`, `stage_replaced_unconfirmed`, `revision_changed`, `input_queue_drops`를 먼저 본다. 후보 차단/폐기 규칙이 늘어나면 final 생성률이 급격히 낮아질 수 있으므로, 명백한 오류 후보만 막고 나머지는 staged 교체와 재확인으로 처리한다. CJK revision 내용이 실제로 바뀐 경우 confirmations를 1부터 다시 세어 흔들리는 후보가 누적 확인만으로 확정되지 않도록 한다. 2026-06-15 12초/1초 중국어 모니터링에서는 `stt_step_load`가 대체로 0.4~0.7이고 `input_queue_drops=0`이라 처리량은 충분했지만, 복잡한 stage 보류/폐기 규칙이 누적되면서 `raw_without_final`이 증가했다. 따라서 현재 절차는 completed 후보를 병합하지 않고 순서대로 처리하며, 확정 가능한 staged 후보는 확정하고 그렇지 않으면 새 후보로 관찰을 전환한다. 같은 모니터링에서 Qwen3-ASR가 빈 `ASRTranscription` 객체를 반환했을 때 객체 표현 문자열이 raw STT로 유입되는 경로도 확인되었으므로, STT 어댑터는 `.text` 속성이 존재하면 빈 값도 명시 결과로 처리하고 객체를 문자열화하지 않는다.
 
 전사 품질을 볼 때는 세 창/로그의 의미를 구분한다. STT 원문창은 raw STT window 결과이며, 전사 창은 revision lifecycle과 final 확정을 거친 사용자 출력이다. `stable_tail`, `delta_tail`, `pending_tail`, `staged_tail`은 stdout 진단 로그용 상태값이며 창에 표시되는 raw STT 또는 final transcript와 동일한 의미가 아니다.
 

@@ -24,7 +24,6 @@ FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS = 4
 MIN_PROVISIONAL_TRANSLATION_WORDS = 6
 PROVISIONAL_TRANSLATION_ENABLED = False
 SHORT_CJK_FINAL_UNITS = 10
-MIN_CJK_STAGE_REPLACEMENT_UNITS = 5
 
 
 def _coalesce_completed_sentences_for_staging(sentences: list[str], language: str) -> list[str]:
@@ -934,13 +933,7 @@ def _should_confirm_staged_sentence(staged_sentence: str, staged_confirmations: 
         return False
     if _is_cjk_text(staged_sentence):
         flags = set(_final_sentence_diagnostic_flags(staged_sentence, "zh"))
-        if "spaced_cjk" in flags:
-            return False
-        if "cjk_repeated_ngram" in flags:
-            return False
-        if {"short_cjk", "no_end_marker"}.issubset(flags):
-            return False
-        if not staged_forced and "no_end_marker" in flags:
+        if flags.intersection({"empty", "spaced_cjk", "cjk_repeated_ngram", "latin_only_for_zh"}):
             return False
     return staged_confirmations >= _sentence_required_confirmations(staged_forced)
 
@@ -1012,24 +1005,6 @@ def _should_finalize_replaced_sentence(
     return reason in {"aged", "duplicate_or_suffix", "partial_preserve"}
 
 
-def _should_stage_replacement_candidate(
-    staged_sentence: str,
-    candidate: str,
-    replacement_reason: str,
-    staged_age: int = 0,
-    max_age: int | None = None,
-) -> bool:
-    if replacement_reason != "unconfirmed_cjk":
-        return True
-    candidate_flags = set(_final_sentence_diagnostic_flags(candidate, "zh"))
-    if candidate_flags.intersection(
-        {"empty", "no_end_marker", "spaced_cjk", "cjk_internal_gap", "cjk_repeated_ngram", "latin_only_for_zh"}
-    ):
-        return False
-    cjk_units = [word for word in _word_units(candidate) if _has_cjk_words([word])]
-    return len(cjk_units) >= MIN_CJK_STAGE_REPLACEMENT_UNITS
-
-
 def _format_transcript_metrics(metrics: dict[str, int]) -> str:
     parts = [f"{key}={metrics[key]}" for key in sorted(metrics) if metrics[key]]
     return ",".join(parts) if parts else "none"
@@ -1059,33 +1034,7 @@ def _should_finalize_boundary_candidate(
     if staged_confirmations is not None and staged_confirmations < _sentence_required_confirmations(staged_forced):
         return False
     flags = set(_final_sentence_diagnostic_flags(sentence, language))
-    return not flags.intersection({"empty", "no_end_marker", "spaced_cjk", "cjk_internal_gap", "cjk_repeated_ngram"})
-
-
-def _should_drop_blocked_boundary_candidate(
-    sentence: str,
-    language: str,
-    staged_age: int,
-    staged_forced: bool,
-    staged_confirmations: int | None = None,
-) -> bool:
-    if staged_confirmations is not None and staged_confirmations < _sentence_required_confirmations(staged_forced):
-        return staged_age >= _sentence_max_age_chunks(staged_forced)
-    return (
-        not _should_finalize_boundary_candidate(sentence, language)
-        and staged_age >= _sentence_max_age_chunks(staged_forced)
-    )
-
-
-def _should_drop_suppressed_stage(
-    staged_confirmations: int,
-    staged_forced: bool,
-    next_staged_age: int,
-) -> bool:
-    return (
-        staged_confirmations < _sentence_required_confirmations(staged_forced)
-        and next_staged_age >= _sentence_max_age_chunks(staged_forced)
-    )
+    return not flags.intersection({"empty", "spaced_cjk", "cjk_repeated_ngram", "latin_only_for_zh"})
 
 
 def _is_short_staged_suffix_repeat(staged_sentence: str, pending_text: str) -> bool:
@@ -1206,15 +1155,6 @@ def _pending_new_text_combined(pending_text: str, new_text: str) -> str:
     from src.app.sentence_boundary import pending_new_text_combined
 
     return pending_new_text_combined(pending_text, new_text)
-
-
-def _deferred_completed_text(completed_sentences: list[str], pending_text: str) -> str:
-    combined = ""
-    for sentence in completed_sentences:
-        combined = _pending_new_text_combined(combined, sentence)
-    if pending_text:
-        combined = _pending_new_text_combined(combined, pending_text)
-    return combined
 
 
 def _split_completed_sentences(pending_text: str, new_text: str) -> tuple[list[str], str]:
