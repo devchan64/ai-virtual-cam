@@ -152,14 +152,14 @@ class WhisperConfigTest(unittest.TestCase):
                 "beamSizeEn": 1,
                 "maxNewTokensEn": 128,
                 "temperatureEn": 0.2,
-                "stepSecondsKo": 2.0,
+                "stepSecondsKo": 1.0,
                 "windowSecondsKo": 7.0,
                 "commitLagSecondsKo": 2.0,
                 "beamSizeKo": 3,
                 "maxNewTokensKo": 192,
                 "temperatureKo": 0.0,
-                "stepSecondsZh": 2.0,
-                "windowSecondsZh": 20.0,
+                "stepSecondsZh": 1.0,
+                "windowSecondsZh": 12.0,
                 "commitLagSecondsZh": 2.0,
                 "beamSizeZh": 3,
                 "maxNewTokensZh": 192,
@@ -224,17 +224,19 @@ class WhisperConfigTest(unittest.TestCase):
             audio_output_device="default",
             whisper_backend="mock",
             whisper_language="zh",
-            whisper_window_seconds=20.0,
+            whisper_window_seconds=12.0,
             whisper_window_seconds_en=7.0,
             whisper_window_seconds_ko=7.0,
-            whisper_window_seconds_zh=20.0,
+            whisper_window_seconds_zh=12.0,
             whisper_step_seconds_zh=1.0,
         )
 
-        self.assertEqual(config["whisper"]["windowSeconds"], 20.0)
+        self.assertEqual(config["whisper"]["windowSeconds"], 12.0)
         self.assertEqual(config["whisper"]["windowSecondsEn"], 7.0)
         self.assertEqual(config["whisper"]["windowSecondsKo"], 7.0)
-        self.assertEqual(config["whisper"]["windowSecondsZh"], 20.0)
+        self.assertEqual(config["whisper"]["windowSecondsZh"], 12.0)
+        self.assertEqual(config["whisper"]["stepSecondsEn"], 1.0)
+        self.assertEqual(config["whisper"]["stepSecondsKo"], 1.0)
         self.assertEqual(config["whisper"]["stepSecondsZh"], 1.0)
 
     def test_app_config_loads_whisper_settings(self) -> None:
@@ -433,8 +435,9 @@ class WhisperConfigTest(unittest.TestCase):
         en = WhisperConfig.from_dict({"language": "en"})
         ko = WhisperConfig.from_dict({"language": "ko"})
 
-        self.assertEqual(zh.windowSeconds, 20.0)
-        self.assertEqual(zh.chunkSeconds, 20.0)
+        self.assertEqual(zh.stepSeconds, 1.0)
+        self.assertEqual(zh.windowSeconds, 12.0)
+        self.assertEqual(zh.chunkSeconds, 12.0)
         self.assertEqual(en.windowSeconds, 7.0)
         self.assertEqual(ko.windowSeconds, 7.0)
 

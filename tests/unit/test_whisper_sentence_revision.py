@@ -23,6 +23,7 @@ from src.app.whisper_window import (
     _sentences_are_revisions,
     _should_age_staged_sentence,
     _should_finalize_replaced_sentence,
+    _should_release_quality_blocked_confirmed_replacement,
     _should_stage_replacement_candidate,
     _should_confirm_staged_sentence,
     _should_translate_staged_sentence,
@@ -277,6 +278,39 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         self.assertEqual(_replacement_decision_reason(staged, candidate, 6, False, 0), "confirmed")
         self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 6, False, 0))
         self.assertTrue(_is_quality_blocked_confirmed_replacement(staged, candidate, 6, False, 0))
+        self.assertFalse(_should_release_quality_blocked_confirmed_replacement(staged, candidate, 6, False, 3, 3))
+
+    def test_quality_blocked_confirmed_cjk_replacement_releases_after_age_from_recent_log(self) -> None:
+        # Regression from 2026-06-15 12s Chinese monitoring. A quality-blocked
+        # staged sentence stayed visible after age overrun while raw STT moved
+        # to a new completed observation.
+        staged = (
+            "然后这个，像护唇膏的那些，嗯，这个很香哎，这个的味道画，就像摇椅。"
+            "对，把女生的化妆品都变成艺术品。然后这个，像护唇膏的那些。嗯，这个很香哎，这个的味道很香。"
+        )
+        candidate = "很舒服的裙子，这样。这件超可爱的。对啊，这件超可爱的。然后小包包，一套帮你配好了。"
+
+        self.assertEqual(_replacement_decision_reason(staged, candidate, 3, False, 3), "confirmed")
+        self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 3, False, 3))
+        self.assertTrue(_is_quality_blocked_confirmed_replacement(staged, candidate, 3, False, 3))
+        self.assertFalse(_should_release_quality_blocked_confirmed_replacement(staged, candidate, 3, False, 2, 3))
+        self.assertTrue(_should_release_quality_blocked_confirmed_replacement(staged, candidate, 3, False, 3, 3))
+
+    def test_quality_blocked_confirmed_cjk_replacement_releases_long_boundary_candidate_without_marker(self) -> None:
+        # Regression from live monitoring after chunk 521. The sentence boundary
+        # model emitted a long completed candidate, but the text itself did not
+        # end with a punctuation marker. It should become a staged observation,
+        # not a final sentence.
+        staged = (
+            "然后这个，像护唇膏的那些，嗯，这个很香哎，这个的味道画，就像摇椅。"
+            "对，把女生的化妆品都变成艺术品。然后这个，像护唇膏的那些。嗯，这个很香哎，这个的味道很香。"
+        )
+        candidate = "他的魔鬼衫打开之后是熊门门这样子诶，哦，很可爱，很可爱耶。我是没有"
+
+        self.assertEqual(_replacement_decision_reason(staged, candidate, 8, False, 22), "confirmed")
+        self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 8, False, 22))
+        self.assertEqual(_final_sentence_diagnostic_flags(candidate, "zh"), ())
+        self.assertTrue(_should_release_quality_blocked_confirmed_replacement(staged, candidate, 8, False, 22, 3))
 
     def test_spaced_cjk_without_end_marker_does_not_finalize_from_monitoring(self) -> None:
         staged = "见 什 么 都 想 吃 这 可 怎 么 办 呀 我 看 见 大 闸 丸 了 人 刚 才 来 的 啊 肉 丸"

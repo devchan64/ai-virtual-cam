@@ -331,6 +331,7 @@ Linux Docker 정책:
 - config GUI의 `Serve 시작`으로 실행하면 별도 오디오 AI 전사 창이 열립니다.
 - CLI `./bin/avc serve`는 기본적으로 오디오 AI 창을 열지 않습니다.
 - 전사 창은 텍스트 선택, `Ctrl+C`, `Ctrl+A`, 우클릭 `Copy`/`Copy All`을 지원합니다.
+- STT 원문창을 켜면 문장 경계, pending, staged revision 처리 전의 raw STT 청크가 별도 창에 출력됩니다. 이 창은 모델이 현재 오디오 윈도우를 어떻게 전사했는지 확인하는 진단용이며, 최종 복사용 문장은 전사 창에만 출력됩니다.
 - `번역 창`을 켜면 원문 전사 창과 별도로 번역 창이 열립니다. 창 제목은 `meta.language` 설정에 따라 한글/영문으로 표시됩니다.
 - 전사/번역 창에는 복사용 텍스트만 표시합니다. 시간, `[ko]` 같은 언어 태그, `전사 결과 없음` 같은 추적 로그는 표시하지 않습니다.
 - stdout/stderr 로그에는 시간 prefix와 함께 모델 로딩, 입력 장치, chunk 처리, 오류 상태가 출력됩니다.
@@ -361,14 +362,14 @@ Linux Docker 정책:
 
 응답속도 조정:
 
-- `청크/윈도우 길이(초)`(`chunkSeconds`, `windowSeconds`): 최근 몇 초의 오디오 문맥을 STT 모델에 전달할지 결정합니다. 길게 잡으면 빠른 발화의 문장 완성도와 앞뒤 문맥 안정성에 유리하지만, tail echo와 후보 리비전 관리 부담이 늘 수 있습니다. 영어/한국어는 7초가 실시간성과 품질의 균형점으로 관측되어 기본 추천값은 `7.0`초입니다. 중국어/Qwen3-ASR는 16초에서 STT 후보 흔들림이 컸고 20초부터 준수한 품질이 관측되어 `20.0`초를 시작점으로 사용합니다.
-- `갱신 주기(초)`(`stepSeconds`): 몇 초마다 새 STT 요청을 만들지 결정합니다. 기본 추천값은 `2.0`초이며, 낮추면 화면 갱신은 빨라지지만 같은 문맥을 반복 처리하는 비율이 커집니다. `1.0`초는 20초 윈도우에서도 계산 부하가 `stt_step_load=0.7~0.9` 수준까지 올라갈 수 있으므로 실험값으로 둡니다.
+- `청크/윈도우 길이(초)`(`chunkSeconds`, `windowSeconds`): 최근 몇 초의 오디오 문맥을 STT 모델에 전달할지 결정합니다. 길게 잡으면 빠른 발화의 문장 완성도와 앞뒤 문맥 안정성에 유리하지만, tail echo와 후보 리비전 관리 부담이 늘 수 있습니다. 영어/한국어는 7초가 실시간성과 품질의 균형점으로 관측되어 기본 추천값은 `7.0`초입니다. 중국어/Qwen3-ASR는 원문창 기준 재검토에서 12초도 유효한 것으로 확인되어 `12.0`초를 시작점으로 사용합니다.
+- `갱신 주기(초)`(`stepSeconds`): 몇 초마다 새 STT 요청을 만들지 결정합니다. 영어/한국어/중국어 기본 추천값은 `1.0`초입니다. 중국어/Qwen3-ASR는 `windowSeconds=12.0`, `stepSeconds=1.0`을 시작점으로 사용합니다. 낮추면 화면 갱신은 빨라지지만 같은 문맥을 반복 처리하는 비율이 커집니다.
 - 성능 로그의 `stt_step_load` 또는 `total_step_load`가 `1.0`을 넘거나 `input_queue_drops`가 1 이상이면 실시간 처리량을 초과한 상태입니다. 특히 중국어 `windowSeconds=30.0`, `stepSeconds=1.0` 조합은 입력 큐 드롭이 관측되었으므로 품질 평가용 기본값으로 쓰지 않습니다.
 - `Tail 확정 지연(초)`(`commitLagSeconds`): 윈도우 끝단의 불안정한 tail을 즉시 확정하지 않기 위한 보류 구간입니다. 기본 추천값은 `2.0`초입니다. 이 값은 문장 경계 모델의 성능을 보완하는 전부가 아니라, 아직 STT가 다시 고쳐 쓸 수 있는 마지막 구간을 입력에서 잠시 제외하는 장치입니다.
 - 문장 후보 재확인: 문장 경계 모델이 완료 문장을 제안해도 즉시 final로 출력하지 않고, 다음 STT 윈도우에서 같은 후보가 다시 관측되는지 확인합니다. 이 단계는 `commitLagSeconds`와 별개이며, 문장 경계가 맞더라도 STT 후보 텍스트 자체가 뒤 청크에서 바뀌는 문제를 줄이기 위한 생명주기입니다.
 - `Beam 크기`(`beamSize`): 디코딩 후보를 몇 갈래로 탐색할지 결정합니다. `1`은 가장 빠른 greedy 디코딩에 가깝고 지연을 줄이는 데 유리합니다. 값을 키우면 후보 탐색이 늘어 일부 발화의 정확도와 안정성이 좋아질 수 있지만, large-v3에서는 GPU 사용량과 디코딩 시간이 늘어 응답이 늦어질 수 있습니다.
-- 영어/한국어 빠른 발화와 문장 누락이 문제라면 우선 `windowSeconds=7.0`, `stepSeconds=2.0`, `commitLagSeconds=2.0`, `beamSize=3`, `temperature=0.0`, `maxNewTokens=192` 조합을 시작점으로 사용하세요.
-- 중국어는 `windowSeconds=20.0`, `stepSeconds=2.0`, `commitLagSeconds=2.0`, `beamSize=3`, `temperature=0.0`, `maxNewTokens=192`를 시작점으로 사용합니다. 문장이 여전히 흔들리면 `windowSeconds`를 `24.0`, 최대 `30.0`까지 단계적으로 늘려 비교합니다. 30초는 장문 문맥 안정성에는 유리하지만 final script 갱신이 늦고 긴 문장 확정 비용이 커질 수 있습니다.
+- 영어/한국어 빠른 발화와 문장 누락이 문제라면 우선 `windowSeconds=7.0`, `stepSeconds=1.0`, `commitLagSeconds=2.0`, `beamSize=3`, `temperature=0.0`, `maxNewTokens=192` 조합을 시작점으로 사용하세요.
+- 중국어는 `windowSeconds=12.0`, `stepSeconds=1.0`, `commitLagSeconds=2.0`, `beamSize=3`, `temperature=0.0`, `maxNewTokens=192`를 시작점으로 사용합니다. 문장이 여전히 흔들리면 `windowSeconds`를 `16.0`, `20.0`, `24.0`, 최대 `30.0`까지 단계적으로 늘려 비교합니다. 30초는 장문 문맥 안정성에는 유리하지만 final script 갱신이 늦고 긴 문장 확정 비용이 커질 수 있습니다.
 - GUI에서는 현재 선택한 STT 언어의 파라미터만 표시합니다. 언어를 바꾸면 이전 언어의 값은 메모리에 보존되고, `JSON 저장` 시 `setting.json`의 언어별 키로 함께 저장됩니다.
 - 속도는 충분하지만 고유명사나 짧은 발화 인식이 흔들리면 `beamSize`를 `3` 또는 `5`로 올려 비교합니다. 문장이 실제로 잘릴 때만 `maxNewTokens`를 `128` 또는 `192`로 올립니다. 짧은 청크에서는 이 값이 응답속도에 거의 영향을 주지 않을 수 있습니다.
 - 번역까지 포함한 지연은 NLLB `translationBeamSize`와 `translationMaxNewTokens`의 영향을 받습니다. 실시간 응답성은 `translationBeamSize=1`, `translationMaxNewTokens=128`에서 시작하고, 번역 품질이나 긴 문장 완성도가 부족하면 각각 `3` 또는 `256`으로 올려 비교합니다.
@@ -599,10 +600,10 @@ python3 -m unittest tests.unit.test_whisper_performance_tracking
     "temperature": 0.0,
     "windowSecondsEn": 7.0,
     "windowSecondsKo": 7.0,
-    "windowSecondsZh": 20.0,
-    "stepSecondsEn": 2.0,
-    "stepSecondsKo": 2.0,
-    "stepSecondsZh": 2.0,
+    "windowSecondsZh": 12.0,
+    "stepSecondsEn": 1.0,
+    "stepSecondsKo": 1.0,
+    "stepSecondsZh": 1.0,
     "commitLagSecondsEn": 2.0,
     "commitLagSecondsKo": 2.0,
     "commitLagSecondsZh": 2.0,

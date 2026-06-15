@@ -46,6 +46,7 @@ from src.app.whisper_transcript_logic import (
     _sentences_are_revisions,
     _replacement_decision_reason,
     _should_finalize_replaced_sentence,
+    _should_release_quality_blocked_confirmed_replacement,
     _should_stage_replacement_candidate,
     _should_confirm_staged_sentence,
     _should_age_staged_sentence,
@@ -822,8 +823,21 @@ class WhisperTranscriptWorker:
                     staged_age,
                 )
                 if quality_blocked_confirmed:
-                    count_metric("stage_candidate_suppressed_reason_confirmed_quality_blocked")
-                should_stage_candidate = False if quality_blocked_confirmed else _should_stage_replacement_candidate(
+                    quality_blocked_release = _should_release_quality_blocked_confirmed_replacement(
+                        staged_sentence,
+                        candidate,
+                        staged_confirmations,
+                        staged_forced,
+                        staged_age,
+                        max_age,
+                    )
+                    if quality_blocked_release:
+                        count_metric("stage_candidate_released_reason_confirmed_quality_blocked")
+                    else:
+                        count_metric("stage_candidate_suppressed_reason_confirmed_quality_blocked")
+                else:
+                    quality_blocked_release = False
+                should_stage_candidate = quality_blocked_release or _should_stage_replacement_candidate(
                     staged_sentence,
                     candidate,
                     replacement_reason,
@@ -837,6 +851,7 @@ class WhisperTranscriptWorker:
                     f"staged_confirmations={staged_confirmations} required={_sentence_required_confirmations(staged_forced)} "
                     f"staged_age={staged_age} max_age={max_age} "
                     f"quality_blocked_confirmed={quality_blocked_confirmed} "
+                    f"quality_blocked_release={quality_blocked_release} "
                     f"staged_forced={staged_forced} staged_tail={_diagnostic_tail(staged_sentence)} "
                     f"candidate_tail={_diagnostic_tail(candidate)} candidate_stage={should_stage_candidate}",
                     display=False,

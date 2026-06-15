@@ -31,7 +31,7 @@ TRACKING_TARGETS = {
     "coalesce": {"target_cases": 10, "target_rate": 1.00},
     "stage_candidate": {"target_cases": 4, "target_rate": 1.00},
     "duplicate_suppression": {"target_cases": 4, "target_rate": 1.00},
-    "runtime_metrics": {"target_cases": 5, "target_rate": 1.00},
+    "runtime_metrics": {"target_cases": 6, "target_rate": 1.00},
 }
 
 REVISION_TRACKING_CASES = [
@@ -975,6 +975,11 @@ RUNTIME_METRIC_TRACKING_CASES = [
         "expected": {"input_queue_drops": 5},
         "source": "2026-06-15 30s/1s Chinese monitor Pulse queue saturation",
     },
+    {
+        "metrics": {"stage_candidate_released_reason_confirmed_quality_blocked": 1},
+        "expected": {"quality_blocked_release": 1},
+        "source": "2026-06-15 12s Chinese monitor confirmed quality block age overrun",
+    },
 ]
 
 
@@ -1049,6 +1054,7 @@ def _runtime_metric_summary(metrics: dict[str, int]) -> dict[str, int]:
         "revision_changed": int(metrics.get("stage_revision_changed", 0)),
         "revision_reset": int(metrics.get("stage_revision_confirmation_reset", 0)),
         "input_queue_drops": int(metrics.get("input_queue_drops", 0)),
+        "quality_blocked_release": int(metrics.get("stage_candidate_released_reason_confirmed_quality_blocked", 0)),
     }
 
 

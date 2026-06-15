@@ -1038,6 +1038,41 @@ def _is_quality_blocked_confirmed_replacement(
     )
 
 
+def _should_release_quality_blocked_confirmed_replacement(
+    staged_sentence: str,
+    candidate: str,
+    staged_confirmations: int,
+    staged_forced: bool,
+    staged_age: int,
+    max_age: int | None = None,
+) -> bool:
+    if not _is_quality_blocked_confirmed_replacement(
+        staged_sentence,
+        candidate,
+        staged_confirmations,
+        staged_forced,
+        staged_age,
+    ):
+        return False
+    age_limit = _sentence_max_age_chunks(staged_forced) if max_age is None else max_age
+    if staged_age < age_limit:
+        return False
+    if _sentences_are_revisions(staged_sentence, candidate):
+        return False
+    similarity = SequenceMatcher(None, _normalized_text(staged_sentence), _normalized_text(candidate)).ratio()
+    if similarity >= 0.70:
+        return False
+    candidate_language = "zh" if _is_cjk_text(candidate) else "en"
+    flags = set(_final_sentence_diagnostic_flags(candidate, candidate_language))
+    if flags.intersection({"empty", "spaced_cjk", "cjk_repeated_ngram", "latin_only_for_zh"}):
+        return False
+    if candidate_language == "zh":
+        cjk_units = [word for word in _word_units(candidate) if _has_cjk_words([word])]
+        if len(cjk_units) <= SHORT_CJK_FINAL_UNITS:
+            return False
+    return True
+
+
 def _should_stage_replacement_candidate(
     staged_sentence: str,
     candidate: str,

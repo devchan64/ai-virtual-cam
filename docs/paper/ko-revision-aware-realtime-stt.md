@@ -75,7 +75,7 @@ Whisper 계열 모델은 강력한 오프라인 전사 성능을 보이지만, �
 
 문맥 윈도우는 STT 모델에 전달되는 오디오 범위를 의미한다. 긴 문맥 윈도우는 모델이 더 많은 문맥을 보고 동음어와 문장 구조를 판단하게 해 전사 안정성을 높일 수 있다. 그러나 final transcript는 사용자가 보는 텍스트이므로 낮은 지연과 적절한 문장 길이가 필요하다.
 
-운영 관측에서는 중국어 `windowSeconds=30`이 raw STT 안정성을 높이는 경향을 보였지만, final transcript가 긴 문장으로 묶이고 갱신이 늦어지는 문제가 관측되었다. `windowSeconds=16`에서는 중국어 후보 흔들림이 컸고, `windowSeconds=20`부터 실사용 가능한 안정성이 관측되었다. 따라서 본 연구는 문맥 윈도우와 확정 단위를 분리해야 한다고 본다. 현재 기본 계약은 STT 언어별로 분리하며, 영어/한국어는 `windowSeconds=7`, `stepSeconds=2`, `commitLagSeconds=2`, `maxNewTokens=192`를 기준으로 하고, 중국어는 `windowSeconds=20`, `stepSeconds=2`, `commitLagSeconds=2`, `maxNewTokens=192`를 기준으로 한다. 24초와 30초 윈도우는 중국어 장문 안정성 비교 실험값으로 유지한다.
+운영 관측에서는 중국어 `windowSeconds=30`이 raw STT 안정성을 높이는 경향을 보였지만, final transcript가 긴 문장으로 묶이고 갱신이 늦어지는 문제가 관측되었다. 이후 원문창이 raw STT가 아니라 staged 후보를 표시하던 문제를 수정하면서 작은 윈도우 품질에 대한 해석을 재검토했다. 현재 기본 계약은 STT 언어별로 분리하며, 영어/한국어는 `windowSeconds=7`, `stepSeconds=1`, `commitLagSeconds=2`, `maxNewTokens=192`를 기준으로 하고, 중국어는 `windowSeconds=12`, `stepSeconds=1`, `commitLagSeconds=2`, `maxNewTokens=192`를 기준으로 한다. 16초, 20초, 24초, 30초 윈도우는 중국어 장문 안정성 비교 실험값으로 유지한다.
 
 ## 7. 평가 지표
 
@@ -97,7 +97,7 @@ Whisper 계열 모델은 강력한 오프라인 전사 성능을 보이지만, �
 | `runtime_metrics` | 중복 억제, delta trim, final quality, translation skip을 분리 계측하는지 |
 | `translation_quality` | 번역 출력의 고유명사/도메인 용어/환각 회귀를 추적하는지 |
 
-향후 정답 전사 코퍼스가 준비되면 `CER`, `WER`, deletion rate, duplicate insertion rate, finalization latency, revokes per second를 추가한다. 중국어는 WER보다 CER을 우선한다.
+향후 정답 전사 코퍼스가 준비되면 `CER`, `WER`, deletion rate, duplicate insertion rate, finalization latency, revokes per second를 추가한다. 중국어는 WER보다 CER을 우선한다. 평가 시 raw STT window 결과와 revision lifecycle을 거친 final transcript를 분리한다. raw STT는 모델 전사 품질을, final transcript는 사용자에게 표시되는 실시간 자막 품질을 나타낸다.
 
 ## 8. 운영 관측
 
@@ -117,7 +117,7 @@ Whisper 계열 모델은 강력한 오프라인 전사 성능을 보이지만, �
 
 현재 연구는 운영 로그 기반 관측이 중심이며, 동일 오디오 replay 기반 통제 실험이 충분하지 않다. 정답 전사 코퍼스가 없어 CER/WER 기반 정량 평가는 아직 제한적이다. 또한 사용자 체감 지연, 가독성, 번역 만족도에 대한 사용자 연구가 포함되어 있지 않다.
 
-향후 연구에서는 동일 오디오셋에 대해 언어별 기준값과 비교값을 분리해 평가한다. 영어/한국어는 7초 기준선을 중심으로 비교하고, 중국어는 16초, 20초, 24초, 30초를 비교한다. Whisper, Qwen3-ASR, streaming ASR 후보를 같은 조건에서 replay 평가하고, 번역 품질은 STT/확정 품질과 분리해 별도 평가셋으로 측정한다.
+향후 연구에서는 동일 오디오셋에 대해 언어별 기준값과 비교값을 분리해 평가한다. 영어/한국어는 7초 기준선을 중심으로 비교하고, 중국어는 12초 기준선과 16초, 20초, 24초, 30초 비교군을 둔다. Whisper, Qwen3-ASR, streaming ASR 후보를 같은 조건에서 replay 평가하고, 번역 품질은 STT/확정 품질과 분리해 별도 평가셋으로 측정한다.
 
 ## 11. 결론
 
