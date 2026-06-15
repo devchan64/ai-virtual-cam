@@ -108,7 +108,6 @@ class DictationAiConfigTest(unittest.TestCase):
             dictation_ai_compute_type="int8",
             dictation_ai_step_seconds=1.0,
             dictation_ai_window_seconds=4.0,
-            dictation_ai_commit_lag_seconds=1.0,
             dictation_ai_sentence_finalize_age=2,
             dictation_ai_beam_size=1,
             dictation_ai_max_new_tokens=128,
@@ -162,28 +161,24 @@ class DictationAiConfigTest(unittest.TestCase):
                 "chunkSeconds": 4.0,
                 "stepSeconds": 1.0,
                 "windowSeconds": 4.0,
-                "commitLagSeconds": 1.0,
                 "sentenceFinalizeAge": 2,
                 "beamSize": 1,
                 "maxNewTokens": 128,
                 "temperature": 0.2,
                 "stepSecondsEn": 1.0,
                 "windowSecondsEn": 4.0,
-                "commitLagSecondsEn": 1.0,
                 "sentenceFinalizeAgeEn": 2,
                 "beamSizeEn": 1,
                 "maxNewTokensEn": 128,
                 "temperatureEn": 0.2,
                 "stepSecondsKo": 1.0,
                 "windowSecondsKo": 7.0,
-                "commitLagSecondsKo": 1.0,
                 "sentenceFinalizeAgeKo": 3,
                 "beamSizeKo": 3,
                 "maxNewTokensKo": 192,
                 "temperatureKo": 0.0,
                 "stepSecondsZh": 1.0,
                 "windowSecondsZh": 12.0,
-                "commitLagSecondsZh": 1.0,
                 "sentenceFinalizeAgeZh": 3,
                 "beamSizeZh": 3,
                 "maxNewTokensZh": 192,
@@ -316,7 +311,6 @@ class DictationAiConfigTest(unittest.TestCase):
         self.assertEqual(loaded.dictationAi.chunkSeconds, dictation_ai_default("chunkSeconds"))
         self.assertEqual(loaded.dictationAi.stepSeconds, dictation_ai_default("stepSeconds"))
         self.assertEqual(loaded.dictationAi.windowSeconds, dictation_ai_default("windowSeconds"))
-        self.assertEqual(loaded.dictationAi.commitLagSeconds, dictation_ai_default("commitLagSeconds"))
         self.assertEqual(loaded.dictationAi.beamSize, dictation_ai_default("beamSize"))
         self.assertEqual(loaded.dictationAi.maxNewTokens, dictation_ai_default("maxNewTokens"))
         self.assertEqual(loaded.dictationAi.temperature, dictation_ai_default("temperature"))
@@ -526,12 +520,8 @@ class DictationAiConfigTest(unittest.TestCase):
             DictationAiConfig.from_dict({"windowSeconds": 0.5})
         with self.assertRaisesRegex(ValueError, "dictationAi.stepSeconds"):
             DictationAiConfig.from_dict({"stepSeconds": 5.0, "windowSeconds": 4.0})
-        with self.assertRaisesRegex(ValueError, "dictationAi.commitLagSeconds"):
-            DictationAiConfig.from_dict({"commitLagSeconds": 4.0, "windowSeconds": 4.0})
         with self.assertRaisesRegex(ValueError, "dictationAi.stepSecondsZh"):
             DictationAiConfig.from_dict({"language": "zh", "stepSecondsZh": 5.0, "windowSecondsZh": 4.0})
-        with self.assertRaisesRegex(ValueError, "dictationAi.commitLagSecondsZh"):
-            DictationAiConfig.from_dict({"language": "zh", "commitLagSecondsZh": 20.0, "windowSecondsZh": 20.0})
         with self.assertRaisesRegex(ValueError, "dictationAi.beamSize"):
             DictationAiConfig.from_dict({"beamSize": 0})
         with self.assertRaisesRegex(ValueError, "dictationAi.maxNewTokens"):

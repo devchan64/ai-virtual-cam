@@ -5,10 +5,10 @@ from src.app.dictation_window import _collapse_adjacent_repeated_phrase_details,
 
 
 class WhisperTranscriptDeltaTest(unittest.TestCase):
-    def test_stable_window_holds_tail_by_commit_lag_ratio(self) -> None:
+    def test_stable_window_keeps_full_text_without_tail_lag(self) -> None:
         self.assertEqual(
             _stable_window_text("Folks I was one of the first people", 1.0, 4.0),
-            "Folks I was one of the",
+            "Folks I was one of the first people",
         )
 
     def test_sentence_output_delta_ignores_committed_sentence_with_punctuation_changes(self) -> None:
