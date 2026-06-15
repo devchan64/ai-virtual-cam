@@ -412,7 +412,7 @@ STT 모델과 문장 경계 모델의 책임을 분리해 검증한다.
 실험 설계:
 
 1. 중국어 기준선은 `windowSeconds=9.0`, `stepSeconds=1.5`, `commitLagSeconds=2.0`으로 둔다.
-2. 비교군은 `windowSeconds=12.0`, `15.0`, `30.0`을 사용하고 `stepSeconds`는 먼저 고정한다. 30초는 중국어 장문 문맥 실험용 상한이며, 실시간 UX 기본값으로 보지 않는다.
+2. 비교군은 `windowSeconds=12.0`, `15.0`, `30.0`을 사용하고 `stepSeconds`는 먼저 고정한다. 2026-06-15 로그 기준으로 30초 윈도우는 중국어 장문 문맥 안정성에 유리했고, `stepSeconds=2.0`, `commitLagSeconds=3.0`, `maxNewTokens=192`와 함께 안정성 우선 기본값으로 전환한다.
 3. 각 비교군에서 `raw_stt_window` CER, mixed-script ratio, repeated final count, pending overrun, final latency를 기록한다.
 4. `total_rtf`가 1.0 미만이어도 final latency가 커지면 실시간 자막 UX 실패로 판단한다.
 5. 계산 지연과 정책 지연을 분리하기 위해 성능 로그에는 `stt`, `translation`, `total` 외에 `effective_latency_estimate=windowSeconds+commitLagSeconds+total`을 추가하는 것을 검토한다.
@@ -490,7 +490,7 @@ STT 모델과 문장 경계 모델의 책임을 분리해 검증한다.
 2026-06-13 구현 상태:
 
 - `WhisperConfig`/`setting.json`에 `sttBackendEn`, `sttModelEn`, `sttBackendKo`, `sttModelKo`, `sttBackendZh`, `sttModelZh`를 추가했다. 후처리는 manual만 지원한다.
-- 명시 인식 언어가 `zh`이면 현재 호환 기본값은 `sttBackendZh=faster-whisper`, `sttModelZh=large-v3` 기준선이지만, 품질 검토 방향은 Qwen3-ASR 우선이다. 기본값 전환은 동일 입력 replay와 장시간 로그 검증 뒤 수행한다.
+- 명시 인식 언어가 `zh`이면 현재 기본값은 `sttBackendZh=qwen3-asr-transformers`, `sttModelZh=qwen3-asr-0.6b`다. `faster-whisper`/`large-v3`는 중국어 품질 기준선 비교군으로만 유지한다.
 - 영어/한국어 기본 STT는 `faster-whisper` + `large-v3`를 유지한다.
 - `src/app/stt_model.py`가 faster-whisper와 Qwen3-ASR를 동일한 `transcribe()` 인터페이스로 감싼다. FunASR STT 경로는 제거했다.
 - 중국어 STT가 Whisper 내장 번역을 지원하지 않는 backend일 때 `translationBackend=whisper` 조합은 Fail-Fast로 중지한다. 중국어 번역은 NLLB/M2M100 등 외부 번역 경로를 사용한다.
@@ -774,7 +774,7 @@ perf_samples=1064 max_stt=0.350s max_total=0.370s avg_total_rtf=0.010 translatio
 - `funasr-paraformer`, `window=30`: `replace/chunk=0.74`, `discard/chunk=0.74`, `finalized/chunk=0.04`, STT 평균 `0.290s`.
 - `funasr-paraformer`, `window=15`: `replace/chunk=0.25`, `discard/chunk=0.25`, `finalized/chunk=0.22`, STT 평균 `0.129s`.
 
-운영 판단은 Qwen3-ASR를 중국어 품질 우선 후보로 올리고, FunASR STT는 후보군에서 제외해 폐기한다는 것이다. 단, 현재 비교는 같은 입력 replay가 아니라 시간대가 다른 운영 로그 기반이므로 기본값 변경 전에는 동일 입력에서 `faster-whisper`, `qwen3-asr-0.6b`, `funasr-paraformer`를 replay 비교해야 한다. FunASR 관련 과거 로그는 기준선 기록으로만 문서에 남긴다.
+운영 판단은 Qwen3-ASR를 중국어 품질 우선 후보로 올리고, FunASR STT는 후보군에서 제외해 폐기한다는 것이다. 2026-06-15 기준 기본 계약은 `sttBackendZh=qwen3-asr-transformers`, `sttModelZh=qwen3-asr-0.6b`로 전환한다. 단, 현재 비교는 같은 입력 replay가 아니라 시간대가 다른 운영 로그 기반이므로, 향후 동일 입력 replay에서는 `faster-whisper`, `qwen3-asr-0.6b`, 과거 FunASR 기준선을 비교해 회귀 여부를 확인한다. FunASR 관련 과거 로그는 기준선 기록으로만 문서에 남긴다.
 
 결론은 STT/staging 생명주기 병목과 번역 모델 품질 병목을 분리해서 본다는 것이다. 중국어 completed 병합은 문장 손실과 stage churn을 줄이기 위한 조치이며, 낮은 `translation_quality`는 중한 번역 백엔드/모델 비교 과제로 남긴다.
 
@@ -811,7 +811,7 @@ unit test discover: 567 passed
 ./bin/avc test: passed, integration skipped=1
 ```
 
-운영 파라미터(`windowSeconds=30`, `stepSeconds=2`, `commitLagSeconds=3`, `maxNewTokens=192`)는 이번 관측에서 병목으로 보이지 않았다. 우선순위는 STT 모델 품질과 pending/revision 생명주기 지표 개선이며, `final_quality_cjk_internal_gap`는 공백 없는 CJK 출력에서 false positive가 있을 수 있으므로 hard fail이 아니라 추세 지표로만 사용한다.
+운영 파라미터(`windowSeconds=30`, `stepSeconds=2`, `commitLagSeconds=3`, `maxNewTokens=192`)는 이번 관측에서 병목으로 보이지 않았다. 따라서 기본 계약값을 이 운영값으로 정렬한다. 우선순위는 STT 모델 품질과 pending/revision 생명주기 지표 개선이며, `final_quality_cjk_internal_gap`는 공백 없는 CJK 출력에서 false positive가 있을 수 있으므로 hard fail이 아니라 추세 지표로만 사용한다. 안정성 로그에는 `duplicate_suppressed`, `delta_trimmed`, `final_quality`, `translation_skip`을 추가해 중복 억제와 후보 흔들림을 분리해서 본다.
 
 ## 13) 점진적 적용 순서
 

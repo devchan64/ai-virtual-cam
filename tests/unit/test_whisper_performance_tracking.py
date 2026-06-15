@@ -29,6 +29,7 @@ TRACKING_TARGETS = {
     "coalesce": {"target_cases": 10, "target_rate": 1.00},
     "stage_candidate": {"target_cases": 4, "target_rate": 1.00},
     "duplicate_suppression": {"target_cases": 4, "target_rate": 1.00},
+    "runtime_metrics": {"target_cases": 3, "target_rate": 1.00},
 }
 
 REVISION_TRACKING_CASES = [
@@ -911,7 +912,29 @@ FINAL_QUALITY_TRACKING_CASES = [
     {"text": "见 什 么 都 想 吃 这 可 怎 么 办 呀 我 看 见 大 闸 丸 了 人 刚 才 来 的 啊 肉 丸", "language": "zh", "expected_flags": {"no_end_marker", "spaced_cjk"}, "source": "2026-06-14 monitor chunk 723 spaced CJK output"},
     {"text": "我跟你说，就这一 得脱鞋！哇，它是楼梯好高啊。Hello，活动们，大家下午好。", "language": "zh", "expected_flags": {"mixed_latin_zh", "cjk_internal_gap"}, "source": "2026-06-14 monitor chunk 890 internal CJK gap"},
     {"text": "对，他的 了，中国人主打一来了，所以叫我进去走。", "language": "zh", "expected_flags": {"cjk_internal_gap"}, "source": "2026-06-14 monitor chunk 801 internal CJK gap"},
+    {"text": "真的，吃这个干热午茶必须得是这半肥瘦，就是宽肉带皮的还 汤的，有油饭吗？", "language": "zh", "expected_flags": {"cjk_internal_gap"}, "source": "2026-06-14 avc-whisper.log.1 chunk 1817 internal gap"},
+    {"text": "它是先做成一个寿司条，然后把这米再切断了，摆成四个墩墩，然后就是火山的底座，然后上面这个撒的就更像熔岩 他们这儿还有这个特殊菜单。", "language": "zh", "expected_flags": {"cjk_internal_gap"}, "source": "2026-06-15 avc-whisper.log chunk 3039 suppressed duplicate gap"},
+    {"text": "妈呀，隐形眼镜掉这午茶里了。又是没吃过的味道。嗯。", "language": "zh", "expected_flags": set(), "source": "2026-06-14 avc-whisper.log.1 chunk 1820 stable final"},
     {"text": "看起来好好吃啊，你真的有很多小吃呢，我看到。", "language": "zh", "expected_flags": set(), "source": "2026-06-14 monitor chunk 50 stable comparison"},
+]
+
+
+RUNTIME_METRIC_TRACKING_CASES = [
+    {
+        "metrics": {"candidate_duplicate_suppressed": 1, "completed_coalesced": 1},
+        "expected": {"duplicate_suppressed": 1, "completed_coalesced": 1},
+        "source": "2026-06-15 avc-whisper.log chunk 3039",
+    },
+    {
+        "metrics": {"candidate_delta_trimmed": 1, "candidate_delta_trimmed_cjk": 1, "stage_start": 1},
+        "expected": {"delta_trimmed": 1, "completed_coalesced": 0},
+        "source": "2026-06-14 avc-whisper.log.1 chunk 1820",
+    },
+    {
+        "metrics": {"final_quality_cjk_internal_gap": 1, "translation_skip_final_quality": 1},
+        "expected": {"final_quality": 1, "translation_skip": 1},
+        "source": "2026-06-14 translation skip quality diagnostic",
+    },
 ]
 
 
@@ -975,6 +998,25 @@ def _make_final_quality_tracking_test(index: int, case: dict[str, object]):
         matched = expected.issubset(actual) if expected else not actual
         self._record("final_quality", f"final_quality_{index:03d}", matched)
     return test
+
+def _runtime_metric_summary(metrics: dict[str, int]) -> dict[str, int]:
+    return {
+        "duplicate_suppressed": int(metrics.get("candidate_duplicate_suppressed", 0)),
+        "delta_trimmed": int(metrics.get("candidate_delta_trimmed", 0)),
+        "final_quality": sum(value for key, value in metrics.items() if key.startswith("final_quality_")),
+        "translation_skip": int(metrics.get("translation_skip_final_quality", 0)),
+        "completed_coalesced": int(metrics.get("completed_coalesced", 0)),
+    }
+
+
+def _make_runtime_metric_tracking_test(index: int, case: dict[str, object]):
+    def test(self: WhisperPerformanceTrackingTest) -> None:
+        actual = _runtime_metric_summary({str(key): int(value) for key, value in dict(case["metrics"]).items()})
+        expected = {str(key): int(value) for key, value in dict(case["expected"]).items()}
+        matched = all(actual.get(key) == value for key, value in expected.items())
+        self._record("runtime_metrics", f"runtime_metrics_{index:03d}", matched)
+    return test
+
 
 def _make_revision_tracking_test(index: int, case: dict[str, object]):
     def test(self: WhisperPerformanceTrackingTest) -> None:
@@ -1203,6 +1245,13 @@ for _index, _case in enumerate(FINAL_QUALITY_TRACKING_CASES, 1):
         WhisperPerformanceTrackingTest,
         f"test_tracking_final_quality_{_index:03d}",
         _make_final_quality_tracking_test(_index, _case),
+    )
+
+for _index, _case in enumerate(RUNTIME_METRIC_TRACKING_CASES, 1):
+    setattr(
+        WhisperPerformanceTrackingTest,
+        f"test_tracking_runtime_metrics_{_index:03d}",
+        _make_runtime_metric_tracking_test(_index, _case),
     )
 
 for _index, _case in enumerate(REVISION_TRACKING_CASES, 1):

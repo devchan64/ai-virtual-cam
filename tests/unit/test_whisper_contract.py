@@ -17,7 +17,12 @@ class WhisperContractTest(unittest.TestCase):
 
         self.assertEqual(set(defaults), set(WHISPER_CONTRACT))
         self.assertEqual(defaults["language"], "en")
-        self.assertEqual(defaults["sttBackendZh"], "faster-whisper")
+        self.assertEqual(defaults["sttBackendZh"], "qwen3-asr-transformers")
+        self.assertEqual(defaults["sttModelZh"], "qwen3-asr-0.6b")
+        self.assertEqual(defaults["stepSeconds"], 2.0)
+        self.assertEqual(defaults["windowSeconds"], 30.0)
+        self.assertEqual(defaults["commitLagSeconds"], 3.0)
+        self.assertEqual(defaults["maxNewTokens"], 192)
         self.assertEqual(defaults["postProcessingProfile"], "manual")
         self.assertEqual(whisper_default("sentenceBoundaryBackendZh"), "sat")
 

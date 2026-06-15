@@ -1167,11 +1167,19 @@ class WhisperTranscriptWorker:
                 stage_discard_count = chunk_lifecycle_metrics.get("stage_discard", 0)
                 stage_revision_count = chunk_lifecycle_metrics.get("stage_revision", 0)
                 finalize_count = chunk_lifecycle_metrics.get("finalized", 0)
+                duplicate_suppressed_count = chunk_lifecycle_metrics.get("candidate_duplicate_suppressed", 0)
+                delta_trimmed_count = chunk_lifecycle_metrics.get("candidate_delta_trimmed", 0)
+                final_quality_count = sum(
+                    value for key, value in chunk_lifecycle_metrics.items() if key.startswith("final_quality_")
+                )
+                translation_skip_count = chunk_lifecycle_metrics.get("translation_skip_final_quality", 0)
                 self._emit(
                     "status",
                     "Whisper 안정성 지표: "
                     f"chunk={chunks} replace={stage_replace_count} discard={stage_discard_count} "
                     f"revision={stage_revision_count} finalized={finalize_count} "
+                    f"duplicate_suppressed={duplicate_suppressed_count} delta_trimmed={delta_trimmed_count} "
+                    f"final_quality={final_quality_count} translation_skip={translation_skip_count} "
                     f"replace_discard_rate={stage_discard_count / max(stage_replace_count, 1):.2f} "
                     f"decision_count={stage_decision_count} "
                     f"completed_coalesced={chunk_lifecycle_metrics.get('completed_coalesced', 0)}",
