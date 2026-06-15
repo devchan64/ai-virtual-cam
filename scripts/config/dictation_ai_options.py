@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from src.domain.contracts.whisper import (
+from src.domain.contracts.dictation_ai import (
     whisper_translation_backends_for_language,
+    whisper_translation_backends_for_target_language,
     whisper_translation_models_for_backend,
     whisper_translation_targets_for_backend,
 )
@@ -103,6 +104,10 @@ def whisper_translation_target_display_from_raw(value: object) -> str:
 
 def whisper_translation_backend_options(language: str | None = None) -> list[str]:
     return list(whisper_translation_backends_for_language(language or "en"))
+
+
+def whisper_translation_backend_options_for_target(target_language: str | None = None) -> list[str]:
+    return list(whisper_translation_backends_for_target_language(target_language or "ko"))
 
 
 def whisper_translation_target_options_for_backend(language: str | None, backend: str | None) -> list[str]:

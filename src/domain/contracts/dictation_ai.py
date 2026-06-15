@@ -67,6 +67,15 @@ def whisper_translation_backends_for_language(language: str) -> tuple[str, ...]:
     )
 
 
+def whisper_translation_backends_for_target_language(target_language: str) -> tuple[str, ...]:
+    normalized = str(target_language or "").strip().lower()
+    return tuple(
+        backend
+        for backend, group in WHISPER_TRANSLATION_GROUPS.items()
+        if normalized in group["target_languages"]
+    )
+
+
 def whisper_translation_targets_for_backend(language: str, backend: str) -> tuple[str, ...]:
     normalized_language = str(language or "").strip().lower()
     normalized_backend = str(backend or "").strip().lower()
@@ -115,6 +124,42 @@ WHISPER_CONTRACT: dict[str, ConfigFieldSpec] = {
     "translationComputeType": ConfigFieldSpec("translationComputeType", "float16", str, allowed=WHISPER_COMPUTE_TYPES),
     "translationBeamSize": ConfigFieldSpec("translationBeamSize", 1, int, min_value=1, max_value=8),
     "translationMaxNewTokens": ConfigFieldSpec("translationMaxNewTokens", 128, int, min_value=16, max_value=512),
+    "translationBackendEn": ConfigFieldSpec(
+        "translationBackendEn", "whisper", str, allowed=WHISPER_TRANSLATION_BACKENDS, ui_group="translation.en"
+    ),
+    "translationModelEn": ConfigFieldSpec("translationModelEn", "", str, ui_group="translation.en"),
+    "translationDeviceEn": ConfigFieldSpec("translationDeviceEn", "cuda", str, allowed=WHISPER_RUNTIME_DEVICES, ui_group="translation.en"),
+    "translationComputeTypeEn": ConfigFieldSpec(
+        "translationComputeTypeEn", "float16", str, allowed=WHISPER_COMPUTE_TYPES, ui_group="translation.en"
+    ),
+    "translationBeamSizeEn": ConfigFieldSpec("translationBeamSizeEn", 1, int, min_value=1, max_value=8, ui_group="translation.en"),
+    "translationMaxNewTokensEn": ConfigFieldSpec(
+        "translationMaxNewTokensEn", 128, int, min_value=16, max_value=512, ui_group="translation.en"
+    ),
+    "translationBackendKo": ConfigFieldSpec(
+        "translationBackendKo", "nllb-transformers", str, allowed=WHISPER_TRANSLATION_BACKENDS, ui_group="translation.ko"
+    ),
+    "translationModelKo": ConfigFieldSpec("translationModelKo", "facebook/nllb-200-distilled-600M", str, ui_group="translation.ko"),
+    "translationDeviceKo": ConfigFieldSpec("translationDeviceKo", "cuda", str, allowed=WHISPER_RUNTIME_DEVICES, ui_group="translation.ko"),
+    "translationComputeTypeKo": ConfigFieldSpec(
+        "translationComputeTypeKo", "float16", str, allowed=WHISPER_COMPUTE_TYPES, ui_group="translation.ko"
+    ),
+    "translationBeamSizeKo": ConfigFieldSpec("translationBeamSizeKo", 1, int, min_value=1, max_value=8, ui_group="translation.ko"),
+    "translationMaxNewTokensKo": ConfigFieldSpec(
+        "translationMaxNewTokensKo", 128, int, min_value=16, max_value=512, ui_group="translation.ko"
+    ),
+    "translationBackendZh": ConfigFieldSpec(
+        "translationBackendZh", "m2m100-transformers", str, allowed=WHISPER_TRANSLATION_BACKENDS, ui_group="translation.zh"
+    ),
+    "translationModelZh": ConfigFieldSpec("translationModelZh", "facebook/m2m100_1.2B", str, ui_group="translation.zh"),
+    "translationDeviceZh": ConfigFieldSpec("translationDeviceZh", "cuda", str, allowed=WHISPER_RUNTIME_DEVICES, ui_group="translation.zh"),
+    "translationComputeTypeZh": ConfigFieldSpec(
+        "translationComputeTypeZh", "float16", str, allowed=WHISPER_COMPUTE_TYPES, ui_group="translation.zh"
+    ),
+    "translationBeamSizeZh": ConfigFieldSpec("translationBeamSizeZh", 1, int, min_value=1, max_value=8, ui_group="translation.zh"),
+    "translationMaxNewTokensZh": ConfigFieldSpec(
+        "translationMaxNewTokensZh", 128, int, min_value=16, max_value=512, ui_group="translation.zh"
+    ),
     "device": ConfigFieldSpec("device", "cuda", str),
     "computeType": ConfigFieldSpec("computeType", "float16", str),
     "chunkSeconds": ConfigFieldSpec("chunkSeconds", 7.0, float, min_value=1.0, max_value=30.0),
@@ -152,9 +197,9 @@ WHISPER_CONTRACT: dict[str, ConfigFieldSpec] = {
         "postProcessingProfile", "manual", str, allowed=WHISPER_POST_PROCESSING_PROFILES
     ),
     "sentenceBoundaryBackend": ConfigFieldSpec(
-        "sentenceBoundaryBackend", "sat", str, allowed=WHISPER_SENTENCE_BOUNDARY_BACKENDS, ui_group="boundary.manual"
+        "sentenceBoundaryBackend", "sat", str, allowed=WHISPER_SENTENCE_BOUNDARY_BACKENDS, ui_group="boundary.stt_result"
     ),
-    "sentenceBoundaryModel": ConfigFieldSpec("sentenceBoundaryModel", "sat-3l-sm", str, ui_group="boundary.manual"),
+    "sentenceBoundaryModel": ConfigFieldSpec("sentenceBoundaryModel", "sat-3l-sm", str, ui_group="boundary.stt_result"),
     "sentenceBoundaryBackendEn": ConfigFieldSpec(
         "sentenceBoundaryBackendEn", "sat", str, allowed=WHISPER_SENTENCE_BOUNDARY_BACKENDS, ui_group="boundary.en"
     ),

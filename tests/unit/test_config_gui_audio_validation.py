@@ -45,8 +45,14 @@ class _DummyWidget:
 
 
 class _DummyFrame:
+    def __init__(self):
+        self.visible = True
+
     def grid(self):
-        pass
+        self.visible = True
+
+    def grid_remove(self):
+        self.visible = False
 
 
 
@@ -83,16 +89,16 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         cls.audio_devices = importlib.import_module("scripts.config.audio_devices")
 
 
-    def test_whisper_tab_i18n_keys_exist_for_korean_and_english(self) -> None:
-        source = (REPO_ROOT / "scripts" / "config" / "whisper_tab.py").read_text(encoding="utf-8")
+    def test_dictation_ai_tab_i18n_keys_exist_for_korean_and_english(self) -> None:
+        source = (REPO_ROOT / "scripts" / "config" / "dictation_ai_tab.py").read_text(encoding="utf-8")
         import re
-        keys = set(re.findall(r'"((?:label|hint|button)\.whisper[^"]+)"', source))
+        keys = set(re.findall(r'"((?:label|hint|button)\.dictation_ai[^"]+)"', source))
         self.assertGreater(len(keys), 20)
 
         for lang in ("ko", "en"):
             pack = self.module._read_flat_yaml(self.module.LANG_PACK_DIR / f"config-gui.{lang}.yaml")
             missing = sorted(key for key in keys if key not in pack)
-            self.assertEqual(missing, [], f"missing Whisper i18n keys for {lang}")
+            self.assertEqual(missing, [], f"missing dictation AI i18n keys for {lang}")
 
 
 
@@ -110,7 +116,7 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         self.module.ConfigGui._grid_rows(gui, parent, [2], True)
         self.assertTrue(second.visible)
 
-    def test_whisper_stt_gui_shows_only_selected_language_options(self) -> None:
+    def test_dictation_ai_stt_gui_shows_only_selected_language_options(self) -> None:
         gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
         gui.vars = {
             "whisper_language": _DummyVar("한국어 (ko)"),
@@ -128,7 +134,10 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         gui._whisper_stt_frame = _DummyFrame()
         gui._whisper_global_stt_rows = [10, 11]
         gui._whisper_stt_language_rows = {"en": [1, 2], "ko": [3, 4], "zh": [5, 6]}
-        gui._whisper_manual_boundary_rows = [20, 21, 22]
+        gui._whisper_stt_boundary_rows = [20, 21, 22]
+        gui._whisper_selected_stt_language = None
+        gui._whisper_stt_language_runtime_state = {}
+        gui._whisper_runtime_by_language = {}
         gui._whisper_backend_option_rows = {
             "compute_type": 30,
             "beam_size": 31,
@@ -186,6 +195,72 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         self.assertTrue(backend_option_visibility[(33,)])
         self.assertEqual(gui.vars["whisper_stt_backend_zh"].get(), "faster-whisper")
         self.assertEqual(gui._widgets["whisper_stt_model_zh"].values, ("large-v3", "medium", "small", "base", "tiny"))
+
+    def test_dictation_ai_translation_gui_groups_settings_by_target_language(self) -> None:
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        gui.vars = {
+            "whisper_language": _DummyVar("中文 (zh)"),
+            "whisper_translation_target_language": _DummyVar("한국어 (ko)"),
+            "whisper_translation_backend": _DummyVar("nllb-transformers"),
+            "whisper_translation_model": _DummyVar("facebook/nllb-200-distilled-600M"),
+            "whisper_translation_device": _DummyVar("cuda"),
+            "whisper_translation_compute_type": _DummyVar("float16"),
+            "whisper_translation_beam_size": _DummyVar("2"),
+            "whisper_translation_max_new_tokens": _DummyVar("128"),
+            "whisper_translation_backend_en": _DummyVar("whisper"),
+            "whisper_translation_model_en": _DummyVar(""),
+            "whisper_translation_device_en": _DummyVar("cuda"),
+            "whisper_translation_compute_type_en": _DummyVar("float16"),
+            "whisper_translation_beam_size_en": _DummyVar("1"),
+            "whisper_translation_max_new_tokens_en": _DummyVar("128"),
+            "whisper_translation_backend_ko": _DummyVar("nllb-transformers"),
+            "whisper_translation_model_ko": _DummyVar("facebook/nllb-200-distilled-600M"),
+            "whisper_translation_device_ko": _DummyVar("cuda"),
+            "whisper_translation_compute_type_ko": _DummyVar("float16"),
+            "whisper_translation_beam_size_ko": _DummyVar("2"),
+            "whisper_translation_max_new_tokens_ko": _DummyVar("128"),
+            "whisper_translation_backend_zh": _DummyVar("m2m100-transformers"),
+            "whisper_translation_model_zh": _DummyVar("facebook/m2m100_1.2B"),
+            "whisper_translation_device_zh": _DummyVar("cuda"),
+            "whisper_translation_compute_type_zh": _DummyVar("float16"),
+            "whisper_translation_beam_size_zh": _DummyVar("1"),
+            "whisper_translation_max_new_tokens_zh": _DummyVar("96"),
+        }
+        gui._widgets = {
+            "whisper_translation_backend": _DummyWidget(),
+            "whisper_translation_target_language": _DummyWidget(),
+            "whisper_translation_model": _DummyWidget(),
+        }
+        gui._whisper_translation_backend_frames = {
+            "whisper": _DummyFrame(),
+            "nllb-transformers": _DummyFrame(),
+            "m2m100-transformers": _DummyFrame(),
+            "mock": _DummyFrame(),
+        }
+        gui._schedule_update_scrollbar_state = lambda: None
+
+        self.module.ConfigGui._sync_whisper_translation_backend_options(gui)
+
+        self.assertNotIn("whisper", gui._widgets["whisper_translation_backend"].values)
+        self.assertEqual(gui.vars["whisper_translation_backend"].get(), "nllb-transformers")
+
+        gui.vars["whisper_translation_model"].set("facebook/nllb-200-1.3B")
+        gui.vars["whisper_translation_beam_size"].set("4")
+        gui.vars["whisper_translation_target_language"].set("中文 (zh)")
+        self.module.ConfigGui._on_whisper_translation_target_changed(gui)
+
+        self.assertEqual(gui.vars["whisper_translation_model_ko"].get(), "facebook/nllb-200-1.3B")
+        self.assertEqual(gui.vars["whisper_translation_beam_size_ko"].get(), "4")
+        self.assertEqual(gui.vars["whisper_translation_backend"].get(), "m2m100-transformers")
+        self.assertEqual(gui.vars["whisper_translation_model"].get(), "facebook/m2m100_1.2B")
+        self.assertEqual(gui.vars["whisper_translation_max_new_tokens"].get(), "96")
+
+        gui.vars["whisper_translation_target_language"].set("English (en)")
+        self.module.ConfigGui._on_whisper_translation_target_changed(gui)
+
+        self.assertIn("whisper", gui._widgets["whisper_translation_backend"].values)
+        self.assertEqual(gui.vars["whisper_translation_backend"].get(), "whisper")
+        self.assertEqual(gui.vars["whisper_translation_target_language"].get(), "English (en)")
 
     def test_resolve_and_validate_audio_runtime_devices_maps_display_values(self) -> None:
         with mock.patch.object(self.audio_devices.platform, "system", return_value="Linux"), mock.patch.object(
@@ -374,7 +449,7 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
 
         self.module.ConfigGui._remember_external_window_geometry_from_log(
             gui,
-            "[2026-06-12] [avc] whisper status: window geometry cached: key=whisperWindowGeometry geometry=780x420+50+119",
+            "[2026-06-12] [avc] Dictation AI status: window geometry cached: key=whisperWindowGeometry geometry=780x420+50+119",
         )
 
         self.assertEqual(gui._window_geometry_meta_cache["whisperWindowGeometry"], "780x420+50+119")
@@ -382,7 +457,7 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
     def test_parse_window_geometry_cache_log_rejects_invalid_geometry(self) -> None:
         self.assertIsNone(
             self.module._parse_window_geometry_cache_log(
-                "[avc] whisper status: window geometry cached: key=whisperWindowGeometry geometry=invalid"
+                "[avc] Dictation AI status: window geometry cached: key=whisperWindowGeometry geometry=invalid"
             )
         )
 
@@ -454,7 +529,7 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         remember.assert_any_call("whisperModelDownloadWindowGeometry", download_window)
 
 
-    def test_whisper_model_download_configure_schedules_geometry_capture(self) -> None:
+    def test_dictation_ai_model_download_configure_schedules_geometry_capture(self) -> None:
         download_window = object()
         gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
         gui._whisper_model_download_window = download_window
@@ -465,7 +540,7 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
 
         gui._schedule_save_window_geometry_meta.assert_called_once_with()
 
-    def test_whisper_model_download_configure_ignores_other_widgets(self) -> None:
+    def test_dictation_ai_model_download_configure_ignores_other_widgets(self) -> None:
         gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
         gui._whisper_model_download_window = object()
         gui._schedule_save_window_geometry_meta = mock.Mock()
@@ -505,7 +580,7 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         download_window.destroy.assert_called_once()
         gui._set_serve_status.assert_called_once()
 
-    def test_whisper_model_download_finished_reports_cancelled_state(self) -> None:
+    def test_dictation_ai_model_download_finished_reports_cancelled_state(self) -> None:
         gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
         gui._whisper_model_download_progress = types.SimpleNamespace(configure=mock.Mock())
         gui._whisper_model_download_btn = types.SimpleNamespace(state=mock.Mock())

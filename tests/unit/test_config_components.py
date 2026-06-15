@@ -1,7 +1,7 @@
 import unittest
 
 from scripts.config.components import format_slider_value, slider_decimal_places, snap_slider_value
-from scripts.config.whisper_options import whisper_stt_backend_runtime_option_keys
+from scripts.config.dictation_ai_options import whisper_stt_backend_runtime_option_keys
 
 
 class ConfigComponentsTest(unittest.TestCase):
@@ -21,7 +21,7 @@ class ConfigComponentsTest(unittest.TestCase):
         self.assertEqual(format_slider_value(2.5, 0.5), "2.5")
         self.assertEqual(format_slider_value(0.25, 0.01), "0.25")
 
-    def test_whisper_backend_runtime_option_keys_are_backend_specific(self) -> None:
+    def test_dictation_ai_backend_runtime_option_keys_are_backend_specific(self) -> None:
         self.assertEqual(
             whisper_stt_backend_runtime_option_keys("faster-whisper"),
             ("compute_type", "beam_size", "max_new_tokens", "temperature"),

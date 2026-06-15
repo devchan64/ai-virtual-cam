@@ -3,7 +3,7 @@ from __future__ import annotations
 import platform
 import subprocess
 
-from src.domain.whisper_defaults import whisper_default
+from src.domain.dictation_ai_defaults import whisper_default
 
 
 def _default_audio_output_device() -> str:
@@ -466,6 +466,24 @@ def build_config(
     whisper_translation_compute_type: str = whisper_default("translationComputeType"),
     whisper_translation_beam_size: int = whisper_default("translationBeamSize"),
     whisper_translation_max_new_tokens: int = whisper_default("translationMaxNewTokens"),
+    whisper_translation_backend_en: str | None = None,
+    whisper_translation_model_en: str | None = None,
+    whisper_translation_device_en: str | None = None,
+    whisper_translation_compute_type_en: str | None = None,
+    whisper_translation_beam_size_en: int | None = None,
+    whisper_translation_max_new_tokens_en: int | None = None,
+    whisper_translation_backend_ko: str | None = None,
+    whisper_translation_model_ko: str | None = None,
+    whisper_translation_device_ko: str | None = None,
+    whisper_translation_compute_type_ko: str | None = None,
+    whisper_translation_beam_size_ko: int | None = None,
+    whisper_translation_max_new_tokens_ko: int | None = None,
+    whisper_translation_backend_zh: str | None = None,
+    whisper_translation_model_zh: str | None = None,
+    whisper_translation_device_zh: str | None = None,
+    whisper_translation_compute_type_zh: str | None = None,
+    whisper_translation_beam_size_zh: int | None = None,
+    whisper_translation_max_new_tokens_zh: int | None = None,
     whisper_device: str = whisper_default("device"),
     whisper_compute_type: str = whisper_default("computeType"),
     whisper_chunk_seconds: float = whisper_default("chunkSeconds"),
@@ -525,6 +543,7 @@ def build_config(
     if whisper_window_seconds is None:
         whisper_window_seconds = whisper_chunk_seconds
     selected_whisper_language = str(whisper_language).strip().lower()
+    selected_translation_target = str(whisper_translation_target_language).strip().lower()
 
     def runtime_value(value, lang: str, default_key: str, selected_value):
         if value is not None:
@@ -557,6 +576,68 @@ def build_config(
     whisper_beam_size_zh = runtime_value(whisper_beam_size_zh, "zh", "beamSizeZh", whisper_beam_size)
     whisper_max_new_tokens_zh = runtime_value(whisper_max_new_tokens_zh, "zh", "maxNewTokensZh", whisper_max_new_tokens)
     whisper_temperature_zh = runtime_value(whisper_temperature_zh, "zh", "temperatureZh", whisper_temperature)
+
+    def translation_value(value, target: str, default_key: str, selected_value):
+        if value is not None:
+            return value
+        if selected_translation_target == target:
+            return selected_value
+        return whisper_default(default_key)
+
+    whisper_translation_backend_en = translation_value(
+        whisper_translation_backend_en, "en", "translationBackendEn", whisper_translation_backend
+    )
+    whisper_translation_model_en = translation_value(
+        whisper_translation_model_en, "en", "translationModelEn", whisper_translation_model
+    )
+    whisper_translation_device_en = translation_value(
+        whisper_translation_device_en, "en", "translationDeviceEn", whisper_translation_device
+    )
+    whisper_translation_compute_type_en = translation_value(
+        whisper_translation_compute_type_en, "en", "translationComputeTypeEn", whisper_translation_compute_type
+    )
+    whisper_translation_beam_size_en = translation_value(
+        whisper_translation_beam_size_en, "en", "translationBeamSizeEn", whisper_translation_beam_size
+    )
+    whisper_translation_max_new_tokens_en = translation_value(
+        whisper_translation_max_new_tokens_en, "en", "translationMaxNewTokensEn", whisper_translation_max_new_tokens
+    )
+    whisper_translation_backend_ko = translation_value(
+        whisper_translation_backend_ko, "ko", "translationBackendKo", whisper_translation_backend
+    )
+    whisper_translation_model_ko = translation_value(
+        whisper_translation_model_ko, "ko", "translationModelKo", whisper_translation_model
+    )
+    whisper_translation_device_ko = translation_value(
+        whisper_translation_device_ko, "ko", "translationDeviceKo", whisper_translation_device
+    )
+    whisper_translation_compute_type_ko = translation_value(
+        whisper_translation_compute_type_ko, "ko", "translationComputeTypeKo", whisper_translation_compute_type
+    )
+    whisper_translation_beam_size_ko = translation_value(
+        whisper_translation_beam_size_ko, "ko", "translationBeamSizeKo", whisper_translation_beam_size
+    )
+    whisper_translation_max_new_tokens_ko = translation_value(
+        whisper_translation_max_new_tokens_ko, "ko", "translationMaxNewTokensKo", whisper_translation_max_new_tokens
+    )
+    whisper_translation_backend_zh = translation_value(
+        whisper_translation_backend_zh, "zh", "translationBackendZh", whisper_translation_backend
+    )
+    whisper_translation_model_zh = translation_value(
+        whisper_translation_model_zh, "zh", "translationModelZh", whisper_translation_model
+    )
+    whisper_translation_device_zh = translation_value(
+        whisper_translation_device_zh, "zh", "translationDeviceZh", whisper_translation_device
+    )
+    whisper_translation_compute_type_zh = translation_value(
+        whisper_translation_compute_type_zh, "zh", "translationComputeTypeZh", whisper_translation_compute_type
+    )
+    whisper_translation_beam_size_zh = translation_value(
+        whisper_translation_beam_size_zh, "zh", "translationBeamSizeZh", whisper_translation_beam_size
+    )
+    whisper_translation_max_new_tokens_zh = translation_value(
+        whisper_translation_max_new_tokens_zh, "zh", "translationMaxNewTokensZh", whisper_translation_max_new_tokens
+    )
 
     tilt_smoothing = float(crop_pan_smoothing if crop_tilt_smoothing is None else crop_tilt_smoothing)
     tilt_kp = float(crop_pan_pid_kp if crop_tilt_pid_kp is None else crop_tilt_pid_kp)
@@ -668,6 +749,24 @@ def build_config(
             "translationComputeType": str(whisper_translation_compute_type),
             "translationBeamSize": int(whisper_translation_beam_size),
             "translationMaxNewTokens": int(whisper_translation_max_new_tokens),
+            "translationBackendEn": str(whisper_translation_backend_en),
+            "translationModelEn": str(whisper_translation_model_en),
+            "translationDeviceEn": str(whisper_translation_device_en),
+            "translationComputeTypeEn": str(whisper_translation_compute_type_en),
+            "translationBeamSizeEn": int(whisper_translation_beam_size_en),
+            "translationMaxNewTokensEn": int(whisper_translation_max_new_tokens_en),
+            "translationBackendKo": str(whisper_translation_backend_ko),
+            "translationModelKo": str(whisper_translation_model_ko),
+            "translationDeviceKo": str(whisper_translation_device_ko),
+            "translationComputeTypeKo": str(whisper_translation_compute_type_ko),
+            "translationBeamSizeKo": int(whisper_translation_beam_size_ko),
+            "translationMaxNewTokensKo": int(whisper_translation_max_new_tokens_ko),
+            "translationBackendZh": str(whisper_translation_backend_zh),
+            "translationModelZh": str(whisper_translation_model_zh),
+            "translationDeviceZh": str(whisper_translation_device_zh),
+            "translationComputeTypeZh": str(whisper_translation_compute_type_zh),
+            "translationBeamSizeZh": int(whisper_translation_beam_size_zh),
+            "translationMaxNewTokensZh": int(whisper_translation_max_new_tokens_zh),
             "device": str(whisper_device),
             "computeType": str(whisper_compute_type),
             "chunkSeconds": float(whisper_window_seconds),

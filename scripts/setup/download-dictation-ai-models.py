@@ -17,8 +17,8 @@ from src.app.model_cache import (
     is_hf_repo_cached,
     is_qwen_asr_model_cached,
 )
-from src.domain.contracts.whisper import resolve_qwen_asr_model_name
-from src.domain.whisper_defaults import whisper_default
+from src.domain.contracts.dictation_ai import resolve_qwen_asr_model_name
+from src.domain.dictation_ai_defaults import whisper_default
 
 
 def _log(message: str) -> None:
@@ -363,9 +363,9 @@ def main() -> int:
     if args.check_only:
         missing = check_model_assets(assets)
         if missing:
-            _log("Whisper model cache check failed")
+            _log("Dictation AI model cache check failed")
             return 3
-        _log("Whisper model cache check completed")
+        _log("Dictation AI model cache check completed")
         return 0
 
     for asset in assets:
@@ -385,7 +385,7 @@ def main() -> int:
         elif asset.kind == "translation":
             download_translation_model(asset.backend, asset.model)
 
-    _log("Whisper model pre-download completed")
+    _log("Dictation AI model pre-download completed")
     return 0
 
 

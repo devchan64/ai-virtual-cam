@@ -4,12 +4,13 @@ import unittest
 from pathlib import Path
 
 from src.domain.config import AppConfig, WhisperConfig
-from src.domain.contracts.whisper import (
+from src.domain.contracts.dictation_ai import (
     whisper_translation_backends_for_language,
+    whisper_translation_backends_for_target_language,
     whisper_translation_models_for_backend,
     whisper_translation_targets_for_backend,
 )
-from src.domain.whisper_defaults import whisper_default
+from src.domain.dictation_ai_defaults import whisper_default
 from src.tools.config_builder import build_config
 
 
@@ -137,6 +138,24 @@ class WhisperConfigTest(unittest.TestCase):
                 "translationComputeType": "float32",
                 "translationBeamSize": 3,
                 "translationMaxNewTokens": 256,
+                "translationBackendEn": "whisper",
+                "translationModelEn": "",
+                "translationDeviceEn": "cuda",
+                "translationComputeTypeEn": "float16",
+                "translationBeamSizeEn": 1,
+                "translationMaxNewTokensEn": 128,
+                "translationBackendKo": "nllb-transformers",
+                "translationModelKo": "facebook/nllb-200-distilled-600M",
+                "translationDeviceKo": "cpu",
+                "translationComputeTypeKo": "float32",
+                "translationBeamSizeKo": 3,
+                "translationMaxNewTokensKo": 256,
+                "translationBackendZh": "m2m100-transformers",
+                "translationModelZh": "facebook/m2m100_1.2B",
+                "translationDeviceZh": "cuda",
+                "translationComputeTypeZh": "float16",
+                "translationBeamSizeZh": 1,
+                "translationMaxNewTokensZh": 128,
                 "device": "cpu",
                 "computeType": "int8",
                 "chunkSeconds": 4.0,
@@ -285,6 +304,8 @@ class WhisperConfigTest(unittest.TestCase):
         self.assertEqual(loaded.whisper.translationComputeType, "float16")
         self.assertEqual(loaded.whisper.translationBeamSize, whisper_default("translationBeamSize"))
         self.assertEqual(loaded.whisper.translationMaxNewTokens, whisper_default("translationMaxNewTokens"))
+        self.assertEqual(loaded.whisper.translationBackendKo, whisper_default("translationBackendKo"))
+        self.assertEqual(loaded.whisper.translationBackendZh, whisper_default("translationBackendZh"))
         self.assertEqual(loaded.whisper.chunkSeconds, whisper_default("chunkSeconds"))
         self.assertEqual(loaded.whisper.stepSeconds, whisper_default("stepSeconds"))
         self.assertEqual(loaded.whisper.windowSeconds, whisper_default("windowSeconds"))
@@ -299,7 +320,7 @@ class WhisperConfigTest(unittest.TestCase):
 
 
 
-    def test_whisper_rejects_removed_chinese_funasr_stt_backend(self) -> None:
+    def test_dictation_ai_rejects_removed_chinese_funasr_stt_backend(self) -> None:
         with self.assertRaisesRegex(ValueError, "whisper.sttBackendZh"):
             WhisperConfig.from_dict({
                 "language": "zh",
@@ -308,7 +329,7 @@ class WhisperConfigTest(unittest.TestCase):
                 "sttModelZh": "paraformer-zh",
             })
 
-    def test_whisper_supports_manual_post_processing_only(self) -> None:
+    def test_dictation_ai_supports_manual_post_processing_only(self) -> None:
         loaded = WhisperConfig.from_dict({
             "language": "zh",
             "postProcessingProfile": "manual",
@@ -322,32 +343,34 @@ class WhisperConfigTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "whisper.postProcessingProfile"):
             WhisperConfig.from_dict({"postProcessingProfile": "auto-by-language"})
 
-    def test_whisper_rejects_invalid_backend(self) -> None:
+    def test_dictation_ai_rejects_invalid_backend(self) -> None:
         with self.assertRaisesRegex(ValueError, "whisper.backend"):
             WhisperConfig.from_dict({"backend": "invalid"})
 
-    def test_whisper_rejects_invalid_language(self) -> None:
+    def test_dictation_ai_rejects_invalid_language(self) -> None:
         with self.assertRaisesRegex(ValueError, "whisper.language"):
             WhisperConfig.from_dict({"language": "ja"})
         with self.assertRaisesRegex(ValueError, "whisper.language"):
             WhisperConfig.from_dict({"language": "auto"})
 
-    def test_whisper_treats_legacy_translate_task_as_translation_enabled(self) -> None:
+    def test_dictation_ai_treats_legacy_translate_task_as_translation_enabled(self) -> None:
         loaded = WhisperConfig.from_dict({"task": "translate"})
 
         self.assertTrue(loaded.translationEnabled)
         self.assertEqual(loaded.task, "translate")
 
-    def test_whisper_rejects_invalid_translation_target_language(self) -> None:
+    def test_dictation_ai_rejects_invalid_translation_target_language(self) -> None:
         with self.assertRaisesRegex(ValueError, "whisper.translationTargetLanguage"):
             WhisperConfig.from_dict({"translationTargetLanguage": "ja"})
 
-    def test_whisper_requires_english_target_for_whisper_translation_backend(self) -> None:
+    def test_dictation_ai_requires_english_target_for_whisper_translation_backend(self) -> None:
         with self.assertRaisesRegex(ValueError, "whisper.translationTargetLanguage"):
             WhisperConfig.from_dict({"translationEnabled": True, "translationBackend": "whisper", "translationTargetLanguage": "ko"})
 
-    def test_whisper_translation_contract_groups_by_language_and_backend(self) -> None:
+    def test_dictation_ai_translation_contract_groups_by_language_and_backend(self) -> None:
         self.assertIn("m2m100-transformers", whisper_translation_backends_for_language("zh"))
+        self.assertIn("whisper", whisper_translation_backends_for_target_language("en"))
+        self.assertNotIn("whisper", whisper_translation_backends_for_target_language("ko"))
         self.assertEqual(
             whisper_translation_targets_for_backend("zh", "whisper"),
             ("en",),
@@ -359,7 +382,7 @@ class WhisperConfigTest(unittest.TestCase):
         )
         self.assertIn("facebook/nllb-200-3.3B", whisper_translation_models_for_backend("nllb-transformers"))
 
-    def test_whisper_allows_multilingual_translation_target_with_nllb_backend(self) -> None:
+    def test_dictation_ai_allows_multilingual_translation_target_with_nllb_backend(self) -> None:
         loaded = WhisperConfig.from_dict({
             "translationEnabled": True,
             "translationBackend": "nllb-transformers",
@@ -370,8 +393,46 @@ class WhisperConfigTest(unittest.TestCase):
         self.assertEqual(loaded.task, "transcribe")
         self.assertEqual(loaded.translationTargetLanguage, "ko")
         self.assertEqual(loaded.translationBackend, "nllb-transformers")
+        self.assertEqual(loaded.translationBackendKo, "nllb-transformers")
 
-    def test_whisper_allows_m2m100_translation_backend(self) -> None:
+    def test_dictation_ai_translation_runtime_is_selected_by_target_language(self) -> None:
+        loaded = WhisperConfig.from_dict({
+            "language": "zh",
+            "translationEnabled": True,
+            "translationTargetLanguage": "zh",
+            "translationBackendKo": "nllb-transformers",
+            "translationModelKo": "facebook/nllb-200-distilled-600M",
+            "translationBeamSizeKo": 2,
+            "translationBackendZh": "m2m100-transformers",
+            "translationModelZh": "facebook/m2m100_1.2B",
+            "translationBeamSizeZh": 4,
+        })
+
+        self.assertEqual(loaded.translationTargetLanguage, "zh")
+        self.assertEqual(loaded.translationBackend, "m2m100-transformers")
+        self.assertEqual(loaded.translationModel, "facebook/m2m100_1.2B")
+        self.assertEqual(loaded.translationBeamSize, 4)
+        self.assertEqual(loaded.translationBeamSizeKo, 2)
+
+    def test_dictation_ai_validates_translation_target_language_groups(self) -> None:
+        with self.assertRaisesRegex(ValueError, "whisper.translationBackendZh"):
+            WhisperConfig.from_dict({
+                "language": "zh",
+                "translationEnabled": True,
+                "translationTargetLanguage": "ko",
+                "translationBackendZh": "whisper",
+            })
+
+        with self.assertRaisesRegex(ValueError, "whisper.translationDeviceKo"):
+            WhisperConfig.from_dict({
+                "language": "zh",
+                "translationEnabled": True,
+                "translationTargetLanguage": "ko",
+                "translationBackendKo": "nllb-transformers",
+                "translationDeviceKo": "cpu",
+            })
+
+    def test_dictation_ai_allows_m2m100_translation_backend(self) -> None:
         loaded = WhisperConfig.from_dict({
             "language": "zh",
             "translationEnabled": True,
@@ -383,7 +444,7 @@ class WhisperConfigTest(unittest.TestCase):
         self.assertEqual(loaded.translationBackend, "m2m100-transformers")
         self.assertEqual(loaded.translationModel, "facebook/m2m100_1.2B")
 
-    def test_whisper_rejects_translation_model_not_allowed_for_backend(self) -> None:
+    def test_dictation_ai_rejects_translation_model_not_allowed_for_backend(self) -> None:
         with self.assertRaisesRegex(ValueError, "whisper.translationModel"):
             WhisperConfig.from_dict({
                 "translationEnabled": True,
@@ -392,7 +453,7 @@ class WhisperConfigTest(unittest.TestCase):
                 "translationModel": "facebook/nllb-200-distilled-600M",
             })
 
-    def test_whisper_rejects_translate_task_for_nllb_backend(self) -> None:
+    def test_dictation_ai_rejects_translate_task_for_nllb_backend(self) -> None:
         with self.assertRaisesRegex(ValueError, "whisper.task"):
             WhisperConfig.from_dict({
                 "task": "translate",
@@ -401,7 +462,7 @@ class WhisperConfigTest(unittest.TestCase):
                 "translationTargetLanguage": "ko",
             })
 
-    def test_whisper_rejects_cpu_for_enabled_nllb_translation(self) -> None:
+    def test_dictation_ai_rejects_cpu_for_enabled_nllb_translation(self) -> None:
         with self.assertRaisesRegex(ValueError, "whisper.translationDevice"):
             WhisperConfig.from_dict({
                 "translationEnabled": True,
@@ -409,11 +470,11 @@ class WhisperConfigTest(unittest.TestCase):
                 "translationDevice": "cpu",
             })
 
-    def test_whisper_rejects_invalid_translation_backend(self) -> None:
+    def test_dictation_ai_rejects_invalid_translation_backend(self) -> None:
         with self.assertRaisesRegex(ValueError, "whisper.translationBackend"):
             WhisperConfig.from_dict({"translationBackend": "invalid"})
 
-    def test_whisper_rejects_invalid_translation_runtime_options(self) -> None:
+    def test_dictation_ai_rejects_invalid_translation_runtime_options(self) -> None:
         with self.assertRaisesRegex(ValueError, "whisper.translationDevice"):
             WhisperConfig.from_dict({"translationDevice": "auto"})
         with self.assertRaisesRegex(ValueError, "whisper.translationDevice"):
@@ -424,13 +485,13 @@ class WhisperConfigTest(unittest.TestCase):
             WhisperConfig.from_dict({"translationComputeType": "int8"})
 
 
-    def test_whisper_uses_chunk_seconds_as_legacy_window_seconds(self) -> None:
+    def test_dictation_ai_uses_chunk_seconds_as_legacy_window_seconds(self) -> None:
         loaded = WhisperConfig.from_dict({"chunkSeconds": 3.5})
 
         self.assertEqual(loaded.chunkSeconds, 3.5)
         self.assertEqual(loaded.windowSeconds, 3.5)
 
-    def test_whisper_uses_language_specific_runtime_defaults(self) -> None:
+    def test_dictation_ai_uses_language_specific_runtime_defaults(self) -> None:
         zh = WhisperConfig.from_dict({"language": "zh"})
         en = WhisperConfig.from_dict({"language": "en"})
         ko = WhisperConfig.from_dict({"language": "ko"})
@@ -441,7 +502,7 @@ class WhisperConfigTest(unittest.TestCase):
         self.assertEqual(en.windowSeconds, 7.0)
         self.assertEqual(ko.windowSeconds, 7.0)
 
-    def test_whisper_selected_language_migrates_legacy_runtime_values(self) -> None:
+    def test_dictation_ai_selected_language_migrates_legacy_runtime_values(self) -> None:
         loaded = WhisperConfig.from_dict({"language": "zh", "windowSeconds": 24.0, "stepSeconds": 1.0})
 
         self.assertEqual(loaded.windowSeconds, 24.0)
@@ -449,7 +510,7 @@ class WhisperConfigTest(unittest.TestCase):
         self.assertEqual(loaded.stepSecondsZh, 1.0)
         self.assertEqual(loaded.windowSecondsEn, 7.0)
 
-    def test_whisper_rejects_invalid_speed_parameters(self) -> None:
+    def test_dictation_ai_rejects_invalid_speed_parameters(self) -> None:
         with self.assertRaisesRegex(ValueError, "whisper.chunkSeconds"):
             WhisperConfig.from_dict({"chunkSeconds": 0.5})
         with self.assertRaisesRegex(ValueError, "whisper.stepSeconds"):

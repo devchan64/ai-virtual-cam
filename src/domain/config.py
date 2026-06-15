@@ -6,14 +6,14 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from src.domain.contracts.whisper import (
+from src.domain.contracts.dictation_ai import (
     whisper_spec,
     whisper_stt_backends_for_language,
     whisper_translation_backends_for_language,
     whisper_translation_models_for_backend,
     whisper_translation_targets_for_backend,
 )
-from src.domain.whisper_defaults import whisper_default
+from src.domain.dictation_ai_defaults import whisper_default
 
 
 def _default_audio_output_device() -> str:
@@ -750,6 +750,24 @@ class WhisperConfig:
     translationComputeType: str
     translationBeamSize: int
     translationMaxNewTokens: int
+    translationBackendEn: str
+    translationModelEn: str
+    translationDeviceEn: str
+    translationComputeTypeEn: str
+    translationBeamSizeEn: int
+    translationMaxNewTokensEn: int
+    translationBackendKo: str
+    translationModelKo: str
+    translationDeviceKo: str
+    translationComputeTypeKo: str
+    translationBeamSizeKo: int
+    translationMaxNewTokensKo: int
+    translationBackendZh: str
+    translationModelZh: str
+    translationDeviceZh: str
+    translationComputeTypeZh: str
+    translationBeamSizeZh: int
+    translationMaxNewTokensZh: int
     device: str
     computeType: str
     chunkSeconds: float
@@ -795,6 +813,7 @@ class WhisperConfig:
         translation_backend_default = "whisper" if legacy_translate_task else whisper_default("translationBackend")
         translation_target_default = "en" if legacy_translate_task else whisper_default("translationTargetLanguage")
         language = str(raw.get("language", whisper_default("language"))).strip()
+        translation_target_language = str(raw.get("translationTargetLanguage", translation_target_default)).strip()
 
         def lang_key(base: str, lang: str) -> str:
             return f"{base}{lang.title()}"
@@ -854,6 +873,66 @@ class WhisperConfig:
             ),
         }
         selected_runtime = runtime_by_language.get(language, runtime_by_language["en"])
+
+        def translation_value(base: str, target: str, legacy_key: str | None = None):
+            key = lang_key(base, target)
+            if key in raw:
+                return raw[key]
+            if translation_target_language == target and legacy_key and legacy_key in raw:
+                return raw[legacy_key]
+            return whisper_default(key)
+
+        translation_backend_en = str(translation_value("translationBackend", "en", "translationBackend")).strip()
+        translation_model_en = str(translation_value("translationModel", "en", "translationModel")).strip()
+        translation_device_en = str(translation_value("translationDevice", "en", "translationDevice")).strip()
+        translation_compute_type_en = str(translation_value("translationComputeType", "en", "translationComputeType")).strip()
+        translation_beam_size_en = int(translation_value("translationBeamSize", "en", "translationBeamSize"))
+        translation_max_new_tokens_en = int(
+            translation_value("translationMaxNewTokens", "en", "translationMaxNewTokens")
+        )
+        translation_backend_ko = str(translation_value("translationBackend", "ko", "translationBackend")).strip()
+        translation_model_ko = str(translation_value("translationModel", "ko", "translationModel")).strip()
+        translation_device_ko = str(translation_value("translationDevice", "ko", "translationDevice")).strip()
+        translation_compute_type_ko = str(translation_value("translationComputeType", "ko", "translationComputeType")).strip()
+        translation_beam_size_ko = int(translation_value("translationBeamSize", "ko", "translationBeamSize"))
+        translation_max_new_tokens_ko = int(
+            translation_value("translationMaxNewTokens", "ko", "translationMaxNewTokens")
+        )
+        translation_backend_zh = str(translation_value("translationBackend", "zh", "translationBackend")).strip()
+        translation_model_zh = str(translation_value("translationModel", "zh", "translationModel")).strip()
+        translation_device_zh = str(translation_value("translationDevice", "zh", "translationDevice")).strip()
+        translation_compute_type_zh = str(translation_value("translationComputeType", "zh", "translationComputeType")).strip()
+        translation_beam_size_zh = int(translation_value("translationBeamSize", "zh", "translationBeamSize"))
+        translation_max_new_tokens_zh = int(
+            translation_value("translationMaxNewTokens", "zh", "translationMaxNewTokens")
+        )
+        translation_by_target = {
+            "en": (
+                translation_backend_en,
+                translation_model_en,
+                translation_device_en,
+                translation_compute_type_en,
+                translation_beam_size_en,
+                translation_max_new_tokens_en,
+            ),
+            "ko": (
+                translation_backend_ko,
+                translation_model_ko,
+                translation_device_ko,
+                translation_compute_type_ko,
+                translation_beam_size_ko,
+                translation_max_new_tokens_ko,
+            ),
+            "zh": (
+                translation_backend_zh,
+                translation_model_zh,
+                translation_device_zh,
+                translation_compute_type_zh,
+                translation_beam_size_zh,
+                translation_max_new_tokens_zh,
+            ),
+        }
+        selected_translation = translation_by_target.get(translation_target_language, translation_by_target["ko"])
         config = cls(
             enabled=bool(raw.get("enabled", whisper_default("enabled"))),
             inputDevice=str(raw.get("inputDevice", _default_audio_input_device())).strip(),
@@ -869,13 +948,31 @@ class WhisperConfig:
             task=str(raw.get("task", whisper_default("task"))).strip(),
             translationEnabled=bool(raw.get("translationEnabled", raw.get("task") == "translate")),
             showSttStatusWindow=bool(raw.get("showSttStatusWindow", whisper_default("showSttStatusWindow"))),
-            translationTargetLanguage=str(raw.get("translationTargetLanguage", translation_target_default)).strip(),
-            translationBackend=str(raw.get("translationBackend", translation_backend_default)).strip(),
-            translationModel=str(raw.get("translationModel", whisper_default("translationModel"))).strip(),
-            translationDevice=str(raw.get("translationDevice", whisper_default("translationDevice"))).strip(),
-            translationComputeType=str(raw.get("translationComputeType", whisper_default("translationComputeType"))).strip(),
-            translationBeamSize=int(raw.get("translationBeamSize", whisper_default("translationBeamSize"))),
-            translationMaxNewTokens=int(raw.get("translationMaxNewTokens", whisper_default("translationMaxNewTokens"))),
+            translationTargetLanguage=translation_target_language,
+            translationBackend=selected_translation[0],
+            translationModel=selected_translation[1],
+            translationDevice=selected_translation[2],
+            translationComputeType=selected_translation[3],
+            translationBeamSize=selected_translation[4],
+            translationMaxNewTokens=selected_translation[5],
+            translationBackendEn=translation_backend_en,
+            translationModelEn=translation_model_en,
+            translationDeviceEn=translation_device_en,
+            translationComputeTypeEn=translation_compute_type_en,
+            translationBeamSizeEn=translation_beam_size_en,
+            translationMaxNewTokensEn=translation_max_new_tokens_en,
+            translationBackendKo=translation_backend_ko,
+            translationModelKo=translation_model_ko,
+            translationDeviceKo=translation_device_ko,
+            translationComputeTypeKo=translation_compute_type_ko,
+            translationBeamSizeKo=translation_beam_size_ko,
+            translationMaxNewTokensKo=translation_max_new_tokens_ko,
+            translationBackendZh=translation_backend_zh,
+            translationModelZh=translation_model_zh,
+            translationDeviceZh=translation_device_zh,
+            translationComputeTypeZh=translation_compute_type_zh,
+            translationBeamSizeZh=translation_beam_size_zh,
+            translationMaxNewTokensZh=translation_max_new_tokens_zh,
             device=str(raw.get("device", whisper_default("device"))).strip(),
             computeType=str(raw.get("computeType", whisper_default("computeType"))).strip(),
             chunkSeconds=selected_runtime[1],
@@ -969,6 +1066,77 @@ class WhisperConfig:
         whisper_spec("translationMaxNewTokens").validate_range(
             config.translationMaxNewTokens, path="whisper.translationMaxNewTokens"
         )
+        for target, suffix, backend, model, device, compute_type, beam_size, max_new_tokens in (
+            (
+                "en",
+                "En",
+                config.translationBackendEn,
+                config.translationModelEn,
+                config.translationDeviceEn,
+                config.translationComputeTypeEn,
+                config.translationBeamSizeEn,
+                config.translationMaxNewTokensEn,
+            ),
+            (
+                "ko",
+                "Ko",
+                config.translationBackendKo,
+                config.translationModelKo,
+                config.translationDeviceKo,
+                config.translationComputeTypeKo,
+                config.translationBeamSizeKo,
+                config.translationMaxNewTokensKo,
+            ),
+            (
+                "zh",
+                "Zh",
+                config.translationBackendZh,
+                config.translationModelZh,
+                config.translationDeviceZh,
+                config.translationComputeTypeZh,
+                config.translationBeamSizeZh,
+                config.translationMaxNewTokensZh,
+            ),
+        ):
+            whisper_spec(f"translationBackend{suffix}").validate_allowed(
+                backend, path=f"whisper.translationBackend{suffix}"
+            )
+            whisper_spec(f"translationDevice{suffix}").validate_allowed(
+                device, path=f"whisper.translationDevice{suffix}"
+            )
+            whisper_spec(f"translationComputeType{suffix}").validate_allowed(
+                compute_type, path=f"whisper.translationComputeType{suffix}"
+            )
+            whisper_spec(f"translationBeamSize{suffix}").validate_range(
+                beam_size, path=f"whisper.translationBeamSize{suffix}"
+            )
+            whisper_spec(f"translationMaxNewTokens{suffix}").validate_range(
+                max_new_tokens, path=f"whisper.translationMaxNewTokens{suffix}"
+            )
+            if not config.translationEnabled:
+                continue
+            allowed_group_backends = tuple(
+                allowed_backend
+                for allowed_backend in whisper_translation_backends_for_language(config.language)
+                if target in whisper_translation_targets_for_backend(config.language, allowed_backend)
+            )
+            if backend not in allowed_group_backends:
+                allowed_values = ", ".join(allowed_group_backends)
+                raise ValueError(
+                    f"whisper.translationBackend{suffix} must be one of "
+                    f"for language={config.language} target={target}: {allowed_values}"
+                )
+            allowed_group_models = whisper_translation_models_for_backend(backend)
+            if allowed_group_models and model not in allowed_group_models:
+                allowed_values = ", ".join(allowed_group_models)
+                raise ValueError(
+                    f"whisper.translationModel{suffix} must be one of for backend={backend}: {allowed_values}"
+                )
+            if backend in {"nllb-transformers", "m2m100-transformers"}:
+                if not model:
+                    raise ValueError(f"whisper.translationModel{suffix} is required when whisper.translationBackend{suffix}={backend}")
+                if device != "cuda":
+                    raise ValueError(f"whisper.translationDevice{suffix} must be cuda when whisper.translationBackend{suffix}={backend}")
         if config.translationEnabled and config.translationBackend in {"nllb-transformers", "m2m100-transformers"} and config.translationDevice != "cuda":
             raise ValueError(f"whisper.translationDevice must be cuda when whisper.translationBackend={config.translationBackend}")
         if not config.device:

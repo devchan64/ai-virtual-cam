@@ -1,6 +1,6 @@
 import unittest
 
-from src.domain.contracts.whisper import (
+from src.domain.contracts.dictation_ai import (
     WHISPER_CONTRACT,
     resolve_qwen_asr_model_name,
     whisper_stt_backends_for_language,
