@@ -51,17 +51,9 @@ def _join_text_units(units: list[str], separator: str) -> str:
     return separator.join(units).strip()
 
 
-def _stable_window_text(text: str, commit_lag_seconds: float, window_seconds: float) -> str:
+def _stable_window_text(text: str, *_unused_timing_args: float) -> str:
     normalized = _normalized_text(text)
-    if not normalized or commit_lag_seconds <= 0.0:
-        return normalized
-    units, separator = _text_units(normalized)
-    if len(units) <= 1:
-        return ""
-    ratio = min(max(commit_lag_seconds / max(window_seconds, 0.001), 0.0), 0.95)
-    hold_count = max(1, int(len(units) * ratio + 0.999))
-    stable_units = units[: max(0, len(units) - hold_count)]
-    return _join_text_units(stable_units, separator)
+    return normalized
 
 
 def _new_text_delta(committed_text: str, stable_text: str) -> str:

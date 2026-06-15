@@ -641,7 +641,6 @@ class WhisperTranscriptWorker:
         pending_step = 0
         step_seconds = float(self._cfg.stepSeconds)
         window_seconds = float(self._cfg.windowSeconds)
-        commit_lag_seconds = float(self._cfg.commitLagSeconds)
         sentence_finalize_age = int(getattr(self._cfg, "sentenceFinalizeAge", 3))
         step_samples = int(SAMPLE_RATE * step_seconds)
         window_samples = int(SAMPLE_RATE * window_seconds)
@@ -668,7 +667,7 @@ class WhisperTranscriptWorker:
         self._emit(
             "status",
             f"받아쓰기 AI 전사 루프 시작: step_seconds={step_seconds} window_seconds={window_seconds} "
-            f"commit_lag_seconds={commit_lag_seconds} language={self._cfg.language} "
+            f"language={self._cfg.language} "
             f"stt_backend={self._stt_settings_for_language()[0]} stt_model={self._stt_settings_for_language()[1]} "
             f"translation_enabled={self._cfg.translationEnabled} "
             f"translation_backend={self._cfg.translationBackend} "
@@ -971,7 +970,7 @@ class WhisperTranscriptWorker:
                 window_text, repeat_collapse_rules = _collapse_adjacent_repeated_phrase_details(raw_window_text)
                 log_collapse_diagnostic("window", raw_window_text, window_text, repeat_collapse_rules)
                 repeat_collapse_chars = max(0, len(_normalized_text(raw_window_text)) - len(_normalized_text(window_text)))
-                stable_text = _stable_window_text(window_text, commit_lag_seconds, window_seconds)
+                stable_text = _stable_window_text(window_text, 0.0, window_seconds)
                 delta_base_text = _append_committed_text(committed_text, pending_transcript_text)
                 text = _new_text_delta(delta_base_text, stable_text)
                 stt_elapsed = time.perf_counter() - stt_started_at
@@ -1167,7 +1166,7 @@ class WhisperTranscriptWorker:
                                 ).strip()
                                 translated_stable_text = _stable_window_text(
                                     translated_window_text,
-                                    commit_lag_seconds,
+                                    0.0,
                                     window_seconds,
                                 )
                                 translated_text = _new_text_delta(committed_translation_text, translated_stable_text)
@@ -1257,13 +1256,13 @@ class WhisperTranscriptWorker:
                     "status",
                     "받아쓰기 AI 성능: "
                     f"chunk={chunks} step={step_seconds:.2f}s window={window_seconds:.2f}s "
-                    f"commit_lag={commit_lag_seconds:.2f}s audio={chunk_audio_seconds:.2f}s "
+                    f"audio={chunk_audio_seconds:.2f}s "
                     f"stt={stt_elapsed:.2f}s stt_rtf={stt_elapsed / max(chunk_audio_seconds, 0.001):.2f} "
                     f"stt_step_load={stt_elapsed / max(step_seconds, 0.001):.2f} "
                     f"translation={translation_elapsed:.2f}s translation_enabled={self._cfg.translationEnabled and not translation_failed} "
                     f"total={total_elapsed:.2f}s total_rtf={total_elapsed / max(chunk_audio_seconds, 0.001):.2f} "
                     f"total_step_load={total_elapsed / max(step_seconds, 0.001):.2f} "
-                    f"effective_latency_estimate={window_seconds + commit_lag_seconds + total_elapsed:.2f}s "
+                    f"effective_latency_estimate={window_seconds + total_elapsed:.2f}s "
                     f"input_queue_drops={chunk_audio_queue_drops} input_queue_drops_total={current_audio_queue_drops} "
                     f"queue_size={self._audio_queue.qsize()} "
                     f"beam={self._cfg.beamSize} max_tokens={self._cfg.maxNewTokens} text_chars={len(text)}",

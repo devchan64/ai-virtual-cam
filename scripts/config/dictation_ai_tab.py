@@ -246,18 +246,6 @@ def build_whisper_tab(
         label_key="label.dictation_ai_window_seconds",
     )
     runtime_row += 1
-    gui._add_slider(
-        runtime_frame,
-        runtime_row,
-        "dictation_ai_commit_lag_seconds",
-        gui._tr("label.dictation_ai_commit_lag_seconds", "Tail 확정 지연(초)"),
-        dictation_ai_default("commitLagSeconds"),
-        0.0,
-        5.0,
-        resolution=0.5,
-        label_key="label.dictation_ai_commit_lag_seconds",
-    )
-    runtime_row += 1
     dictation_ai_beam_size_row = runtime_row
     gui._add_slider(
         runtime_frame,
@@ -303,7 +291,7 @@ def build_whisper_tab(
         runtime_frame,
         runtime_row,
         "hint.dictation_ai_speed",
-        "업데이트 간격/컨텍스트/확정 지연은 공통 STT 스트리밍 설정입니다. 확정 지연은 윈도우 끝의 불안정한 tail을 잠시 보류하는 값입니다. Beam, 최대 토큰, temperature, 연산 타입은 선택한 STT 모델 타입이 지원할 때만 표시됩니다.",
+        "업데이트 간격/컨텍스트는 공통 STT 스트리밍 설정입니다. 문장 확정 안정성은 STT 결과 문장 경계 처리의 문장 확정 관찰 횟수로 조정합니다. Beam, 최대 토큰, temperature, 연산 타입은 선택한 STT 모델 타입이 지원할 때만 표시됩니다.",
     )
     gui._dictation_ai_backend_option_parent = runtime_frame
     gui._dictation_ai_backend_option_rows = {

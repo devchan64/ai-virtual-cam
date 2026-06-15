@@ -631,7 +631,6 @@ class ConfigGui:
         return {
             "stepSeconds": float(dictation_ai_default(f"stepSeconds{suffix}")),
             "windowSeconds": float(dictation_ai_default(f"windowSeconds{suffix}")),
-            "commitLagSeconds": float(dictation_ai_default(f"commitLagSeconds{suffix}")),
             "sentenceFinalizeAge": float(dictation_ai_default(f"sentenceFinalizeAge{suffix}")),
             "beamSize": float(dictation_ai_default(f"beamSize{suffix}")),
             "maxNewTokens": float(dictation_ai_default(f"maxNewTokens{suffix}")),
@@ -642,7 +641,6 @@ class ConfigGui:
         return {
             "stepSeconds": float(self.vars["dictation_ai_step_seconds"].get()),
             "windowSeconds": float(self.vars["dictation_ai_window_seconds"].get()),
-            "commitLagSeconds": float(self.vars["dictation_ai_commit_lag_seconds"].get()),
             "sentenceFinalizeAge": float(self.vars["dictation_ai_sentence_finalize_age"].get()),
             "beamSize": float(self.vars["dictation_ai_beam_size"].get()),
             "maxNewTokens": float(self.vars["dictation_ai_max_new_tokens"].get()),
@@ -653,7 +651,6 @@ class ConfigGui:
         self._set_var("dictation_ai_chunk_seconds", values["windowSeconds"])
         self._set_var("dictation_ai_step_seconds", values["stepSeconds"])
         self._set_var("dictation_ai_window_seconds", values["windowSeconds"])
-        self._set_var("dictation_ai_commit_lag_seconds", values["commitLagSeconds"])
         self._set_var("dictation_ai_sentence_finalize_age", values["sentenceFinalizeAge"])
         self._set_var("dictation_ai_beam_size", values["beamSize"])
         self._set_var("dictation_ai_max_new_tokens", values["maxNewTokens"])
@@ -2123,28 +2120,24 @@ class ConfigGui:
             "dictation_ai_chunk_seconds": whisper["chunkSeconds"],
             "dictation_ai_step_seconds": whisper["stepSeconds"],
             "dictation_ai_window_seconds": whisper["windowSeconds"],
-            "dictation_ai_commit_lag_seconds": whisper["commitLagSeconds"],
             "dictation_ai_sentence_finalize_age": whisper["sentenceFinalizeAge"],
             "dictation_ai_beam_size": whisper["beamSize"],
             "dictation_ai_max_new_tokens": whisper["maxNewTokens"],
             "dictation_ai_temperature": whisper["temperature"],
             "dictation_ai_step_seconds_en": whisper["stepSecondsEn"],
             "dictation_ai_window_seconds_en": whisper["windowSecondsEn"],
-            "dictation_ai_commit_lag_seconds_en": whisper["commitLagSecondsEn"],
             "dictation_ai_sentence_finalize_age_en": whisper["sentenceFinalizeAgeEn"],
             "dictation_ai_beam_size_en": whisper["beamSizeEn"],
             "dictation_ai_max_new_tokens_en": whisper["maxNewTokensEn"],
             "dictation_ai_temperature_en": whisper["temperatureEn"],
             "dictation_ai_step_seconds_ko": whisper["stepSecondsKo"],
             "dictation_ai_window_seconds_ko": whisper["windowSecondsKo"],
-            "dictation_ai_commit_lag_seconds_ko": whisper["commitLagSecondsKo"],
             "dictation_ai_sentence_finalize_age_ko": whisper["sentenceFinalizeAgeKo"],
             "dictation_ai_beam_size_ko": whisper["beamSizeKo"],
             "dictation_ai_max_new_tokens_ko": whisper["maxNewTokensKo"],
             "dictation_ai_temperature_ko": whisper["temperatureKo"],
             "dictation_ai_step_seconds_zh": whisper["stepSecondsZh"],
             "dictation_ai_window_seconds_zh": whisper["windowSecondsZh"],
-            "dictation_ai_commit_lag_seconds_zh": whisper["commitLagSecondsZh"],
             "dictation_ai_sentence_finalize_age_zh": whisper["sentenceFinalizeAgeZh"],
             "dictation_ai_beam_size_zh": whisper["beamSizeZh"],
             "dictation_ai_max_new_tokens_zh": whisper["maxNewTokensZh"],
@@ -2523,7 +2516,6 @@ class ConfigGui:
             "dictation_ai_chunk_seconds",
             "dictation_ai_step_seconds",
             "dictation_ai_window_seconds",
-            "dictation_ai_commit_lag_seconds",
             "dictation_ai_sentence_finalize_age",
             "dictation_ai_beam_size",
             "dictation_ai_max_new_tokens",
@@ -2791,7 +2783,6 @@ class ConfigGui:
         self._set_var("dictation_ai_chunk_seconds", window_seconds)
         self._set_var("dictation_ai_step_seconds", whisper_cfg.get("stepSeconds", defaults["dictation_ai_step_seconds"]))
         self._set_var("dictation_ai_window_seconds", window_seconds)
-        self._set_var("dictation_ai_commit_lag_seconds", whisper_cfg.get("commitLagSeconds", defaults["dictation_ai_commit_lag_seconds"]))
         self._set_var(
             "dictation_ai_sentence_finalize_age",
             whisper_cfg.get("sentenceFinalizeAge", defaults["dictation_ai_sentence_finalize_age"]),
@@ -2813,12 +2804,6 @@ class ConfigGui:
                         whisper_cfg.get("windowSeconds", whisper_cfg.get("chunkSeconds", lang_defaults["windowSeconds"]))
                         if use_legacy
                         else lang_defaults["windowSeconds"],
-                    )
-                ),
-                "commitLagSeconds": float(
-                    whisper_cfg.get(
-                        f"commitLagSeconds{suffix}",
-                        whisper_cfg.get("commitLagSeconds", lang_defaults["commitLagSeconds"]) if use_legacy else lang_defaults["commitLagSeconds"],
                     )
                 ),
                 "sentenceFinalizeAge": float(
@@ -4780,28 +4765,24 @@ class ConfigGui:
             dictation_ai_chunk_seconds=float(runtime_selected["windowSeconds"]),
             dictation_ai_step_seconds=float(runtime_selected["stepSeconds"]),
             dictation_ai_window_seconds=float(runtime_selected["windowSeconds"]),
-            dictation_ai_commit_lag_seconds=float(runtime_selected["commitLagSeconds"]),
             dictation_ai_sentence_finalize_age=int(round(float(runtime_selected["sentenceFinalizeAge"]))),
             dictation_ai_beam_size=int(round(float(runtime_selected["beamSize"]))),
             dictation_ai_max_new_tokens=int(round(float(runtime_selected["maxNewTokens"]))),
             dictation_ai_temperature=float(runtime_selected["temperature"]),
             dictation_ai_step_seconds_en=float(runtime_en["stepSeconds"]),
             dictation_ai_window_seconds_en=float(runtime_en["windowSeconds"]),
-            dictation_ai_commit_lag_seconds_en=float(runtime_en["commitLagSeconds"]),
             dictation_ai_sentence_finalize_age_en=int(round(float(runtime_en["sentenceFinalizeAge"]))),
             dictation_ai_beam_size_en=int(round(float(runtime_en["beamSize"]))),
             dictation_ai_max_new_tokens_en=int(round(float(runtime_en["maxNewTokens"]))),
             dictation_ai_temperature_en=float(runtime_en["temperature"]),
             dictation_ai_step_seconds_ko=float(runtime_ko["stepSeconds"]),
             dictation_ai_window_seconds_ko=float(runtime_ko["windowSeconds"]),
-            dictation_ai_commit_lag_seconds_ko=float(runtime_ko["commitLagSeconds"]),
             dictation_ai_sentence_finalize_age_ko=int(round(float(runtime_ko["sentenceFinalizeAge"]))),
             dictation_ai_beam_size_ko=int(round(float(runtime_ko["beamSize"]))),
             dictation_ai_max_new_tokens_ko=int(round(float(runtime_ko["maxNewTokens"]))),
             dictation_ai_temperature_ko=float(runtime_ko["temperature"]),
             dictation_ai_step_seconds_zh=float(runtime_zh["stepSeconds"]),
             dictation_ai_window_seconds_zh=float(runtime_zh["windowSeconds"]),
-            dictation_ai_commit_lag_seconds_zh=float(runtime_zh["commitLagSeconds"]),
             dictation_ai_sentence_finalize_age_zh=int(round(float(runtime_zh["sentenceFinalizeAge"]))),
             dictation_ai_beam_size_zh=int(round(float(runtime_zh["beamSize"]))),
             dictation_ai_max_new_tokens_zh=int(round(float(runtime_zh["maxNewTokens"]))),

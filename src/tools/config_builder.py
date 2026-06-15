@@ -489,28 +489,24 @@ def build_config(
     dictation_ai_chunk_seconds: float = dictation_ai_default("chunkSeconds"),
     dictation_ai_step_seconds: float = dictation_ai_default("stepSeconds"),
     dictation_ai_window_seconds: float | None = None,
-    dictation_ai_commit_lag_seconds: float = dictation_ai_default("commitLagSeconds"),
     dictation_ai_sentence_finalize_age: int = dictation_ai_default("sentenceFinalizeAge"),
     dictation_ai_beam_size: int = dictation_ai_default("beamSize"),
     dictation_ai_max_new_tokens: int = dictation_ai_default("maxNewTokens"),
     dictation_ai_temperature: float = dictation_ai_default("temperature"),
     dictation_ai_step_seconds_en: float | None = None,
     dictation_ai_window_seconds_en: float | None = None,
-    dictation_ai_commit_lag_seconds_en: float | None = None,
     dictation_ai_sentence_finalize_age_en: int | None = None,
     dictation_ai_beam_size_en: int | None = None,
     dictation_ai_max_new_tokens_en: int | None = None,
     dictation_ai_temperature_en: float | None = None,
     dictation_ai_step_seconds_ko: float | None = None,
     dictation_ai_window_seconds_ko: float | None = None,
-    dictation_ai_commit_lag_seconds_ko: float | None = None,
     dictation_ai_sentence_finalize_age_ko: int | None = None,
     dictation_ai_beam_size_ko: int | None = None,
     dictation_ai_max_new_tokens_ko: int | None = None,
     dictation_ai_temperature_ko: float | None = None,
     dictation_ai_step_seconds_zh: float | None = None,
     dictation_ai_window_seconds_zh: float | None = None,
-    dictation_ai_commit_lag_seconds_zh: float | None = None,
     dictation_ai_sentence_finalize_age_zh: int | None = None,
     dictation_ai_beam_size_zh: int | None = None,
     dictation_ai_max_new_tokens_zh: int | None = None,
@@ -558,9 +554,6 @@ def build_config(
 
     dictation_ai_step_seconds_en = runtime_value(dictation_ai_step_seconds_en, "en", "stepSecondsEn", dictation_ai_step_seconds)
     dictation_ai_window_seconds_en = runtime_value(dictation_ai_window_seconds_en, "en", "windowSecondsEn", dictation_ai_window_seconds)
-    dictation_ai_commit_lag_seconds_en = runtime_value(
-        dictation_ai_commit_lag_seconds_en, "en", "commitLagSecondsEn", dictation_ai_commit_lag_seconds
-    )
     dictation_ai_sentence_finalize_age_en = runtime_value(
         dictation_ai_sentence_finalize_age_en, "en", "sentenceFinalizeAgeEn", dictation_ai_sentence_finalize_age
     )
@@ -569,9 +562,6 @@ def build_config(
     dictation_ai_temperature_en = runtime_value(dictation_ai_temperature_en, "en", "temperatureEn", dictation_ai_temperature)
     dictation_ai_step_seconds_ko = runtime_value(dictation_ai_step_seconds_ko, "ko", "stepSecondsKo", dictation_ai_step_seconds)
     dictation_ai_window_seconds_ko = runtime_value(dictation_ai_window_seconds_ko, "ko", "windowSecondsKo", dictation_ai_window_seconds)
-    dictation_ai_commit_lag_seconds_ko = runtime_value(
-        dictation_ai_commit_lag_seconds_ko, "ko", "commitLagSecondsKo", dictation_ai_commit_lag_seconds
-    )
     dictation_ai_sentence_finalize_age_ko = runtime_value(
         dictation_ai_sentence_finalize_age_ko, "ko", "sentenceFinalizeAgeKo", dictation_ai_sentence_finalize_age
     )
@@ -580,9 +570,6 @@ def build_config(
     dictation_ai_temperature_ko = runtime_value(dictation_ai_temperature_ko, "ko", "temperatureKo", dictation_ai_temperature)
     dictation_ai_step_seconds_zh = runtime_value(dictation_ai_step_seconds_zh, "zh", "stepSecondsZh", dictation_ai_step_seconds)
     dictation_ai_window_seconds_zh = runtime_value(dictation_ai_window_seconds_zh, "zh", "windowSecondsZh", dictation_ai_window_seconds)
-    dictation_ai_commit_lag_seconds_zh = runtime_value(
-        dictation_ai_commit_lag_seconds_zh, "zh", "commitLagSecondsZh", dictation_ai_commit_lag_seconds
-    )
     dictation_ai_sentence_finalize_age_zh = runtime_value(
         dictation_ai_sentence_finalize_age_zh, "zh", "sentenceFinalizeAgeZh", dictation_ai_sentence_finalize_age
     )
@@ -785,28 +772,24 @@ def build_config(
             "chunkSeconds": float(dictation_ai_window_seconds),
             "stepSeconds": float(dictation_ai_step_seconds),
             "windowSeconds": float(dictation_ai_window_seconds),
-            "commitLagSeconds": float(dictation_ai_commit_lag_seconds),
             "sentenceFinalizeAge": int(dictation_ai_sentence_finalize_age),
             "beamSize": int(dictation_ai_beam_size),
             "maxNewTokens": int(dictation_ai_max_new_tokens),
             "temperature": float(dictation_ai_temperature),
             "stepSecondsEn": float(dictation_ai_step_seconds_en),
             "windowSecondsEn": float(dictation_ai_window_seconds_en),
-            "commitLagSecondsEn": float(dictation_ai_commit_lag_seconds_en),
             "sentenceFinalizeAgeEn": int(dictation_ai_sentence_finalize_age_en),
             "beamSizeEn": int(dictation_ai_beam_size_en),
             "maxNewTokensEn": int(dictation_ai_max_new_tokens_en),
             "temperatureEn": float(dictation_ai_temperature_en),
             "stepSecondsKo": float(dictation_ai_step_seconds_ko),
             "windowSecondsKo": float(dictation_ai_window_seconds_ko),
-            "commitLagSecondsKo": float(dictation_ai_commit_lag_seconds_ko),
             "sentenceFinalizeAgeKo": int(dictation_ai_sentence_finalize_age_ko),
             "beamSizeKo": int(dictation_ai_beam_size_ko),
             "maxNewTokensKo": int(dictation_ai_max_new_tokens_ko),
             "temperatureKo": float(dictation_ai_temperature_ko),
             "stepSecondsZh": float(dictation_ai_step_seconds_zh),
             "windowSecondsZh": float(dictation_ai_window_seconds_zh),
-            "commitLagSecondsZh": float(dictation_ai_commit_lag_seconds_zh),
             "sentenceFinalizeAgeZh": int(dictation_ai_sentence_finalize_age_zh),
             "beamSizeZh": int(dictation_ai_beam_size_zh),
             "maxNewTokensZh": int(dictation_ai_max_new_tokens_zh),
