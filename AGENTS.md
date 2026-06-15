@@ -35,17 +35,17 @@
 - config의 stdout에는 사용자의 주요 버튼 동작(예: 저장, Serve 시작/중지, 가상 장치 생성/삭제)을 출력한다.
 - 소스코드는 파일당 1000라인을 넘지 않도록 한다. 가능하면 500라인 내외로 유지하는 것이 좋다.
 - 파일이 커지면 역할별 모듈로 분리하고, 특히 GUI 파일은 탭/위젯/동작 단위로 분할한다.
-- 오디오 AI의 문장 경계/중복 확정 문제는 케이스별 정규식 또는 언어별 ad-hoc 규칙 추가로 해결하지 않는다. 다국어 모델 기반 sentence boundary detector와 revision lifecycle 개선을 우선한다.
+- 받아쓰기 AI의 문장 경계/중복 확정 문제는 케이스별 정규식 또는 언어별 ad-hoc 규칙 추가로 해결하지 않는다. 다국어 모델 기반 sentence boundary detector와 revision lifecycle 개선을 우선한다.
 - `regex` 기반 문장 분할은 운영/설정 시나리오에서 폐기한다. 남아 있는 legacy helper는 과거 회귀 테스트 보존용이며 새 기능, 기본값, 비교 기준선으로 사용하지 않는다.
 
 ## 현재 프로젝트 문맥 요약
 
 - 실행 진입점은 `./bin/avc`이다. `config`는 설정/GUI, `serve`는 저장된 설정 실행만 담당한다.
 - 설정 GUI는 탭/위젯/동작 단위로 계속 분리한다. 큰 변경은 기존 `scripts/config/*_tab.py` 패턴을 따른다.
-- 사용자 기능 도메인은 큰 축 기준으로 `카메라`와 `오디오`로 구분한다. STT, 문장 추적, 번역, 모델 준비는 오디오의 하위 도메인인 `오디오 AI`로 부른다. Whisper는 오디오 AI의 백엔드/기술명일 뿐 사용자 기능명으로 확대하지 않는다.
-- 오디오 AI 전사/번역 창은 config GUI의 `Serve 시작`에서만 열며, 창에는 복사용 STT/번역 결과만 표시한다. 추적 로그는 stdout/stderr에 남긴다.
-- 오디오 AI 실시간 경로는 CUDA/float16 중심의 Fail-Fast 정책을 따른다. NLLB 선택 시 Whisper 백엔드는 `task=transcribe`만 수행하고 번역은 NLLB 경로만 사용한다.
-- 오디오 AI/설정 GUI 창 위치와 UI 언어는 `setting.json`의 `meta`에 저장한다. README 오디오 AI 문서는 `docs/images/whisper-config-runtime-sample.png` 기준으로 유지한다.
+- 사용자 기능 도메인은 큰 축 기준으로 `카메라`와 `오디오`로 구분한다. STT, 문장 추적, 번역, 모델 준비는 오디오의 하위 도메인인 `받아쓰기 AI`로 부른다. Whisper는 받아쓰기 AI의 백엔드/기술명일 뿐 사용자 기능명으로 확대하지 않는다.
+- 받아쓰기 AI 전사/번역 창은 config GUI의 `Serve 시작`에서만 열며, 창에는 복사용 STT/번역 결과만 표시한다. 추적 로그는 stdout/stderr에 남긴다.
+- 받아쓰기 AI 실시간 경로는 CUDA/float16 중심의 Fail-Fast 정책을 따른다. NLLB 선택 시 Whisper 백엔드는 `task=transcribe`만 수행하고 번역은 NLLB 경로만 사용한다.
+- 받아쓰기 AI/설정 GUI 창 위치와 UI 언어는 `setting.json`의 `meta`에 저장한다. README 받아쓰기 AI 문서는 `docs/images/whisper-config-runtime-sample.png` 기준으로 유지한다.
 
 ## 문서 배치 정책
 
@@ -59,4 +59,4 @@
 - 가상 비디오/오디오 장치 동작 계약(생성/상태/삭제)을 변경하는 패치에는 반드시 스펙 테스트를 포함한다.
 - `scripts/bin/avc-device`, `scripts/bin/avc-docker`, `scripts/config/create-config-gui.py` 변경 시 `./bin/avc test` 실행 결과를 확인한다.
 - 테스트 없이 가상장치 생성/검증 로직의 분기, 기본값, 권한/릴레이 경로를 변경하지 않는다.
-- 오디오 AI 성능 추적 테스트는 로그 기반 관측 케이스를 누적하고 개선 추이를 보는 용도다. `test_whisper_performance_tracking.py`의 unittest 성공/실패는 품질 게이트가 아니며, 출력되는 tracking rate와 gap을 줄이는 것을 성능 개선 목표로 삼는다.
+- 받아쓰기 AI 성능 추적 테스트는 로그 기반 관측 케이스를 누적하고 개선 추이를 보는 용도다. `test_dictation_ai_performance_tracking.py`의 unittest 성공/실패는 품질 게이트가 아니며, 출력되는 tracking rate와 gap을 줄이는 것을 성능 개선 목표로 삼는다.

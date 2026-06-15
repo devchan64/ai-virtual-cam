@@ -50,7 +50,7 @@ AVC_TENSORRT_ENGINE_URL="https://example.com/person-segmentation.engine" ./bin/a
 - 영상: 입력 카메라, 출력 해상도/FPS, 세그멘테이션, 배경, 프레이밍
 - 화질/비식별: 세그멘테이션 경계 기반 화질 보정, `비식별 처리(눈가림)` 옵션
 - 오디오: `audio.enabled`, 입/출력 장치, 게이트/노이즈캔슬
-- 오디오 AI: STT 입력 장치, 언어별 로컬 STT 모델, 문장 추적, 번역, 응답속도 파라미터
+- 받아쓰기 AI: STT 입력 장치, 언어별 로컬 STT 모델, 문장 추적, 번역, 응답속도 파라미터
 - 선택한 언어는 `setting.json`의 `meta.language`에 저장됩니다.
 
 설정 GUI 샘플:
@@ -60,10 +60,10 @@ AVC_TENSORRT_ENGINE_URL="https://example.com/person-segmentation.engine" ./bin/a
 
 ![config gui sample](docs/images/config-preview-sample-anon.png)
 
-오디오 AI 실행/번역 테스트 설정 GUI 샘플:
+받아쓰기 AI 실행/번역 테스트 설정 GUI 샘플:
 
 - 샘플 파일: [`docs/images/whisper-config-runtime-sample.png`](docs/images/whisper-config-runtime-sample.png)
-- 설명: `오디오 AI` 탭에서 STT 입력 장치, 언어별 STT 백엔드/모델, 단일 인식 언어, NLLB 번역 백엔드, 번역 대상 언어, CUDA 장치/연산 타입, 청크 길이/Beam 크기를 함께 설정하고 실행 결과 창을 확인하는 예시입니다.
+- 설명: `받아쓰기 AI` 탭에서 STT 입력 장치, 언어별 STT 백엔드/모델, 단일 인식 언어, NLLB 번역 백엔드, 번역 대상 언어, CUDA 장치/연산 타입, 청크 길이/Beam 크기를 함께 설정하고 실행 결과 창을 확인하는 예시입니다.
 - 테스트 설정 의도: STT와 번역 모두 로컬 모델로 처리하며, 실시간성 확보를 위해 GPU 실행(`cuda`)과 반정밀도 연산(`float16`)을 사용합니다.
 
 ![whisper runtime config sample](docs/images/whisper-config-runtime-sample.png)
@@ -312,30 +312,30 @@ Linux Docker 정책:
 - 누락 시 자동 탐색/대체 없이 즉시 종료
 - X11, Pulse/PipeWire 소켓도 누락 시 즉시 종료 또는 기능 실패로 반환
 
-## 오디오 AI 운영 가이드
+## 받아쓰기 AI 운영 가이드
 
-오디오 AI 활성화:
+받아쓰기 AI 활성화:
 
 ```bash
 ./bin/avc config
 ```
 
-- `오디오 AI` 탭에서 `오디오 AI 전사`를 켜고 입력 장치를 선택합니다.
-- `오디오 AI 입력 dB 미터`로 선택한 장치에 실제 신호가 들어오는지 확인합니다.
+- `받아쓰기 AI` 탭에서 `받아쓰기 AI 전사`를 켜고 입력 장치를 선택합니다.
+- `받아쓰기 AI 입력 dB 미터`로 선택한 장치에 실제 신호가 들어오는지 확인합니다.
 - `번역 창`을 켠 뒤 `번역 백엔드`를 선택합니다. `whisper`는 영어 번역만 지원하고, `nllb-transformers`는 `facebook/nllb-200-distilled-600M` 로컬 모델로 한국어/영어/중국어 대상 번역을 지원합니다.
 - Linux PulseAudio/PipeWire 장치는 `alsa_input...`, `*.monitor`, `ai-virtual-cam` 같은 원본 ID를 설정값으로 저장합니다.
-- 오디오 AI 탭의 설정값은 호환성을 위해 `setting.json`의 `whisper` 블록에 저장됩니다. 사용자 기능명은 오디오 AI이며, `whisper`는 기존 설정/코드 호환 키입니다. 주요 키는 `enabled`, `inputDevice`, `backend`, `model`, `language`, `translationEnabled`, `translationBackend`, `translationTargetLanguage`, `translationModel`, `translationDevice`, `translationComputeType`, `translationBeamSize`, `translationMaxNewTokens`, `device`, `computeType`, `chunkSeconds`, `stepSeconds`, `windowSeconds`, `commitLagSeconds`, `beamSize`, `maxNewTokens`, `temperature`입니다. STT 응답/성능 파라미터는 언어별로도 저장되며, 예를 들어 `windowSecondsEn`, `windowSecondsKo`, `windowSecondsZh`, `stepSecondsZh`, `maxNewTokensZh` 같은 키가 선택 언어별 실행값의 기준입니다.
+- 받아쓰기 AI 탭의 설정값은 호환성을 위해 `setting.json`의 `whisper` 블록에 저장됩니다. 사용자 기능명은 받아쓰기 AI이며, `whisper`는 기존 설정/코드 호환 키입니다. 주요 키는 `enabled`, `inputDevice`, `backend`, `model`, `language`, `translationEnabled`, `translationBackend`, `translationTargetLanguage`, `translationModel`, `translationDevice`, `translationComputeType`, `translationBeamSize`, `translationMaxNewTokens`, `device`, `computeType`, `chunkSeconds`, `stepSeconds`, `windowSeconds`, `commitLagSeconds`, `beamSize`, `maxNewTokens`, `temperature`입니다. STT 응답/성능 파라미터는 언어별로도 저장되며, 예를 들어 `windowSecondsEn`, `windowSecondsKo`, `windowSecondsZh`, `stepSecondsZh`, `maxNewTokensZh` 같은 키가 선택 언어별 실행값의 기준입니다.
 
 실행 동작:
 
-- config GUI의 `Serve 시작`으로 실행하면 별도 오디오 AI 전사 창이 열립니다.
-- CLI `./bin/avc serve`는 기본적으로 오디오 AI 창을 열지 않습니다.
+- config GUI의 `Serve 시작`으로 실행하면 별도 받아쓰기 AI 전사 창이 열립니다.
+- CLI `./bin/avc serve`는 기본적으로 받아쓰기 AI 창을 열지 않습니다.
 - 전사 창은 텍스트 선택, `Ctrl+C`, `Ctrl+A`, 우클릭 `Copy`/`Copy All`을 지원합니다.
 - STT 원문창을 켜면 문장 경계, pending, staged revision 처리 전의 raw STT 청크가 별도 창에 출력됩니다. 이 창은 모델이 현재 오디오 윈도우를 어떻게 전사했는지 확인하는 진단용이며, 최종 복사용 문장은 전사 창에만 출력됩니다.
 - `번역 창`을 켜면 원문 전사 창과 별도로 번역 창이 열립니다. 창 제목은 `meta.language` 설정에 따라 한글/영문으로 표시됩니다.
 - 전사/번역 창에는 복사용 텍스트만 표시합니다. 시간, `[ko]` 같은 언어 태그, `전사 결과 없음` 같은 추적 로그는 표시하지 않습니다.
 - stdout/stderr 로그에는 시간 prefix와 함께 모델 로딩, 입력 장치, chunk 처리, 오류 상태가 출력됩니다.
-- 오디오 AI 실행은 STT 모델, 번역 모델, 문장 경계/후처리 모델 준비가 모두 끝난 뒤 입력 장치를 열고 전사를 시작합니다. 모델 다운로드는 Serve 시작 전 캐시 검사와 모델 다운로드 안내창에서만 수행하며, Serve 런타임은 로컬 캐시만 사용합니다.
+- 받아쓰기 AI 실행은 STT 모델, 번역 모델, STT 결과 문장 경계 처리 모델 준비가 모두 끝난 뒤 입력 장치를 열고 전사를 시작합니다. 모델 다운로드는 Serve 시작 전 캐시 검사와 모델 다운로드 안내창에서만 수행하며, Serve 런타임은 로컬 캐시만 사용합니다.
 - 전사 창의 위치와 크기는 `setting.json`의 `meta.whisperWindowGeometry`, 번역 창의 위치와 크기는 `meta.whisperTranslationWindowGeometry`에 저장되고 다음 실행 때 재사용됩니다.
 - 설정 GUI 자체의 위치와 크기는 `meta.windowGeometry`, 카메라 미리보기 창은 `meta.previewWindowGeometry`, 설정 모달은 `meta.audioTuneWindowGeometry`/`meta.audioGateTestWindowGeometry`/`meta.inputMeterWindowGeometry`로 `JSON 저장` 시 `setting.json`에 저장됩니다.
 
@@ -343,14 +343,14 @@ Linux Docker 정책:
 
 - 기본 모델은 `large-v3`, CUDA 환경 기본 연산은 `float16`입니다.
 - `./bin/avc setup`은 Linux에서 `faster-whisper`, NLLB 번역용 `transformers`/`sentencepiece`, Qwen3-ASR 의존성, CUDA 런타임 의존성을 설치하고, PyTorch는 기본적으로 CUDA 12.8 휠 인덱스에서 설치합니다. Qwen3-ASR는 `qwen-asr==0.0.6`와 `transformers==4.57.6` 조합으로 고정하고, resolver 역추적을 줄이기 위해 qwen-asr UI 의존성인 `gradio==6.17.3`도 함께 고정합니다. SaT 문장 경계용 `wtpsplit`은 `huggingface-hub` 버전 충돌을 피하기 위해 `requirements.txt` resolver 대상에서 제외하고 `--no-deps`로 별도 설치합니다. 대신 `cached_property`, `mosestokenizer`, `skops`, `adapters` 같은 충돌 없는 wtpsplit 런타임 의존성은 `requirements.txt`에 명시합니다.
-- config GUI의 오디오 AI 탭에서 현재 선택한 STT/문장경계/번역 모델을 다운로드할 수 있습니다. 중국어 STT는 현재 Qwen3-ASR transformers 단발 추론을 우선 후보로 사용합니다. `qwen3-asr-vllm-streaming`은 vLLM 의존성이 `mediapipe`/`protobuf`와 충돌해 공유 `.venv`에서는 지원하지 않으며, 별도 격리 런타임 설계가 필요합니다. setup은 모델 다운로드를 수행하지 않고 런타임 의존성만 설치합니다.
+- config GUI의 받아쓰기 AI 탭에서 현재 선택한 STT/STT 결과 문장 경계 처리/번역 모델을 다운로드할 수 있습니다. 중국어 STT는 현재 Qwen3-ASR transformers 단발 추론을 우선 후보로 사용합니다. `qwen3-asr-vllm-streaming`은 vLLM 의존성이 `mediapipe`/`protobuf`와 충돌해 공유 `.venv`에서는 지원하지 않으며, 별도 격리 런타임 설계가 필요합니다. setup은 모델 다운로드를 수행하지 않고 런타임 의존성만 설치합니다.
 - 인식 언어는 단일 선택이며 자동 감지는 사용하지 않습니다. 현재 입력 언어를 `한국어 (ko)`, `English (en)`, `中文 (zh)` 중 하나로 명시합니다.
 - `whisper` 번역 백엔드는 Whisper의 `translate` 경로를 사용하므로 영어 번역만 지원합니다. 한국어/영어/중국어 대상 번역은 `nllb-transformers` 백엔드를 사용합니다.
 - `nllb-transformers` 번역을 선택하면 Whisper는 STT 전사(`task=transcribe`)만 수행하고, 번역은 외부 NLLB 텍스트 번역 경로에서만 수행합니다. 이때 `task=translate` 설정은 유효하지 않습니다.
 - NLLB 번역은 실시간 성능을 위해 `translationDevice=cuda`, `translationComputeType=float16`, `translationBeamSize=1`, `translationMaxNewTokens=128`을 기본 테스트값으로 사용하며 실행 단계의 자동 CPU fallback은 허용하지 않습니다.
 - 테스트 설정은 STT 장치와 번역 장치를 모두 `cuda`로 두고, 연산 타입을 `float16`으로 맞춥니다. Whisper large-v3와 NLLB 600M은 CPU/float32에서 지연이 커질 수 있으므로, 실시간 회의 자막처럼 짧은 주기로 전사/번역 창을 갱신하려면 GPU 텐서코어를 쓰는 반정밀도 실행이 유리합니다.
 - `float16`은 메모리 사용량과 연산량을 줄여 응답성을 높이는 대신, GPU와 PyTorch/CUDA 빌드가 해당 아키텍처를 지원해야 합니다. 지원하지 않으면 자동 CPU fallback 대신 즉시 실패하도록 두고, CUDA 빌드나 설정을 명확히 수정합니다.
-- config GUI의 `Serve 시작`은 저장된 설정에 적용된 모든 오디오 AI/STT/문장경계/번역 모델의 로컬 캐시를 먼저 검사합니다. 누락되거나 부분 다운로드 상태인 모델이 있으면 Serve를 시작하지 않고 모델 다운로드 안내창을 표시합니다.
+- config GUI의 `Serve 시작`은 저장된 설정에 적용된 모든 받아쓰기 AI/STT/STT 결과 문장 경계 처리/번역 모델의 로컬 캐시를 먼저 검사합니다. 누락되거나 부분 다운로드 상태인 모델이 있으면 Serve를 시작하지 않고 모델 다운로드 안내창을 표시합니다.
 
 안정화 확인 범위:
 
@@ -365,25 +365,25 @@ Linux Docker 정책:
 - `청크/윈도우 길이(초)`(`chunkSeconds`, `windowSeconds`): 최근 몇 초의 오디오 문맥을 STT 모델에 전달할지 결정합니다. 길게 잡으면 빠른 발화의 문장 완성도와 앞뒤 문맥 안정성에 유리하지만, tail echo와 후보 리비전 관리 부담이 늘 수 있습니다. 영어/한국어는 7초가 실시간성과 품질의 균형점으로 관측되어 기본 추천값은 `7.0`초입니다. 중국어/Qwen3-ASR는 원문창 기준 재검토에서 12초도 유효한 것으로 확인되어 `12.0`초를 시작점으로 사용합니다.
 - `갱신 주기(초)`(`stepSeconds`): 몇 초마다 새 STT 요청을 만들지 결정합니다. 영어/한국어/중국어 기본 추천값은 `1.0`초입니다. 중국어/Qwen3-ASR는 `windowSeconds=12.0`, `stepSeconds=1.0`을 시작점으로 사용합니다. 낮추면 화면 갱신은 빨라지지만 같은 문맥을 반복 처리하는 비율이 커집니다.
 - 성능 로그의 `stt_step_load` 또는 `total_step_load`가 `1.0`을 넘거나 `input_queue_drops`가 1 이상이면 실시간 처리량을 초과한 상태입니다. 특히 중국어 `windowSeconds=30.0`, `stepSeconds=1.0` 조합은 입력 큐 드롭이 관측되었으므로 품질 평가용 기본값으로 쓰지 않습니다.
-- `Tail 확정 지연(초)`(`commitLagSeconds`): 윈도우 끝단의 불안정한 tail을 즉시 확정하지 않기 위한 보류 구간입니다. 기본 추천값은 `2.0`초입니다. 이 값은 문장 경계 모델의 성능을 보완하는 전부가 아니라, 아직 STT가 다시 고쳐 쓸 수 있는 마지막 구간을 입력에서 잠시 제외하는 장치입니다.
-- 문장 후보 재확인: 문장 경계 모델이 완료 문장을 제안해도 즉시 final로 출력하지 않고, 다음 STT 윈도우에서 같은 후보가 다시 관측되는지 확인합니다. 이 단계는 `commitLagSeconds`와 별개이며, 문장 경계가 맞더라도 STT 후보 텍스트 자체가 뒤 청크에서 바뀌는 문제를 줄이기 위한 생명주기입니다.
+- `Tail 확정 지연(초)`(`commitLagSeconds`): 윈도우 끝단의 불안정한 tail을 즉시 확정하지 않기 위한 보류 구간입니다. 기본 추천값은 `1.0`초입니다. 이 값은 STT 결과 문장 경계 처리 모델의 성능을 보완하는 전부가 아니라, 아직 STT가 다시 고쳐 쓸 수 있는 마지막 구간을 입력에서 잠시 제외하는 장치입니다.
+- 문장 후보 재확인: STT 결과 문장 경계 처리 모델이 완료 문장을 제안해도 즉시 final로 출력하지 않고, 다음 STT 윈도우에서 같은 후보가 다시 관측되는지 확인합니다. 이 단계는 `commitLagSeconds`와 별개이며, 문장 경계가 맞더라도 STT 후보 텍스트 자체가 뒤 청크에서 바뀌는 문제를 줄이기 위한 생명주기입니다.
 - `Beam 크기`(`beamSize`): 디코딩 후보를 몇 갈래로 탐색할지 결정합니다. `1`은 가장 빠른 greedy 디코딩에 가깝고 지연을 줄이는 데 유리합니다. 값을 키우면 후보 탐색이 늘어 일부 발화의 정확도와 안정성이 좋아질 수 있지만, large-v3에서는 GPU 사용량과 디코딩 시간이 늘어 응답이 늦어질 수 있습니다.
 - 영어/한국어 빠른 발화와 문장 누락이 문제라면 우선 `windowSeconds=7.0`, `stepSeconds=1.0`, `commitLagSeconds=2.0`, `beamSize=3`, `temperature=0.0`, `maxNewTokens=192` 조합을 시작점으로 사용하세요.
 - 중국어는 `windowSeconds=12.0`, `stepSeconds=1.0`, `commitLagSeconds=2.0`, `beamSize=3`, `temperature=0.0`, `maxNewTokens=192`를 시작점으로 사용합니다. 문장이 여전히 흔들리면 `windowSeconds`를 `16.0`, `20.0`, `24.0`, 최대 `30.0`까지 단계적으로 늘려 비교합니다. 30초는 장문 문맥 안정성에는 유리하지만 final script 갱신이 늦고 긴 문장 확정 비용이 커질 수 있습니다.
 - GUI에서는 현재 선택한 STT 언어의 파라미터만 표시합니다. 언어를 바꾸면 이전 언어의 값은 메모리에 보존되고, `JSON 저장` 시 `setting.json`의 언어별 키로 함께 저장됩니다.
 - 속도는 충분하지만 고유명사나 짧은 발화 인식이 흔들리면 `beamSize`를 `3` 또는 `5`로 올려 비교합니다. 문장이 실제로 잘릴 때만 `maxNewTokens`를 `128` 또는 `192`로 올립니다. 짧은 청크에서는 이 값이 응답속도에 거의 영향을 주지 않을 수 있습니다.
 - 번역까지 포함한 지연은 NLLB `translationBeamSize`와 `translationMaxNewTokens`의 영향을 받습니다. 실시간 응답성은 `translationBeamSize=1`, `translationMaxNewTokens=128`에서 시작하고, 번역 품질이나 긴 문장 완성도가 부족하면 각각 `3` 또는 `256`으로 올려 비교합니다.
-- 실시간 번역은 기본적으로 확정된 final 전사 문장만 대상으로 합니다. staged/partial 문장은 뒤 청크에서 수정될 가능성이 높아 중복 번역과 premature translation을 만들 수 있으므로 기본값에서 번역하지 않습니다. 상세 설계와 참고 자료는 [`docs/2026-06-13-audio-ai-feature-design.md`](docs/2026-06-13-audio-ai-feature-design.md)를 확인합니다.
+- 실시간 번역은 기본적으로 확정된 final 전사 문장만 대상으로 합니다. staged/partial 문장은 뒤 청크에서 수정될 가능성이 높아 중복 번역과 premature translation을 만들 수 있으므로 기본값에서 번역하지 않습니다. 상세 설계와 참고 자료는 [`docs/2026-06-13-dictation-ai-feature-design.md`](docs/2026-06-13-dictation-ai-feature-design.md)를 확인합니다.
 
 성능 추적 테스트:
 
 ```bash
-python3 -m unittest tests.unit.test_whisper_performance_tracking
+python3 -m unittest tests.unit.test_dictation_ai_performance_tracking
 ```
 
-- `test_whisper_performance_tracking.py`는 누적 오디오 AI 로그에서 수집한 revision, distinct, collapse, stability 관측 케이스를 성능 추적용으로 실행합니다.
+- `test_dictation_ai_performance_tracking.py`는 누적 받아쓰기 AI 로그에서 수집한 revision, distinct, collapse, stability 관측 케이스를 성능 추적용으로 실행합니다.
 - 이 테스트의 unittest 성공/실패는 품질 통과율을 의미하지 않습니다. 테스트가 실행되면 `[whisper-tracking] ... rate=... target>=... rate_gap=...` 지표를 출력하고, 이 지표를 올려가는 것을 개선 목표로 삼습니다.
-- 새 로그에서 중복/누락/잘못된 revision 사례가 보이면 tracking case를 추가하고, 이후 알고리즘 변경으로 rate가 오르고 gap이 줄어드는지 비교합니다. 상세 기준과 근거는 [`docs/2026-06-13-audio-ai-feature-design.md`](docs/2026-06-13-audio-ai-feature-design.md)를 따릅니다.
+- 새 로그에서 중복/누락/잘못된 revision 사례가 보이면 tracking case를 추가하고, 이후 알고리즘 변경으로 rate가 오르고 gap이 줄어드는지 비교합니다. 상세 기준과 근거는 [`docs/2026-06-13-dictation-ai-feature-design.md`](docs/2026-06-13-dictation-ai-feature-design.md)를 따릅니다.
 
 ## 오디오 운영 가이드
 
@@ -468,8 +468,8 @@ python3 -m unittest tests.unit.test_whisper_performance_tracking
 - 카메라 입력 모드 후보 기반(해상도/FPS 세트)
 - 화질 탭: 감마/오프셋/채도/강도 보정(세그멘테이션 경계 기준 적용)
 - `오디오 게이트 테스트`, 각 탭별 기본값 복원 버튼
-- `오디오 AI` 탭: STT 입력 장치, dB 미터, 모델/언어, 문장 추적, 번역, 응답속도 조정
-- 탭 순서: `입출력 -> 세그멘테이션 -> 배경 -> 프레이밍 -> 화질 -> 오디오 -> 오디오 AI`
+- `받아쓰기 AI` 탭: STT 입력 장치, dB 미터, 모델/언어, 문장 추적, 번역, 응답속도 조정
+- 탭 순서: `입출력 -> 세그멘테이션 -> 배경 -> 프레이밍 -> 화질 -> 오디오 -> 받아쓰기 AI`
 - `faceEnhance` 구키(`brightness`, `blend`, `minSizeRatio`, `edgeDither`) 하위호환은 지원하지 않음
 
 ## 설정 예시

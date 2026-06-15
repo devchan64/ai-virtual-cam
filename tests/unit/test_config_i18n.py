@@ -31,7 +31,7 @@ class ConfigI18nTest(unittest.TestCase):
         loaded = load_language_pack("ko")
 
         self.assertEqual(loaded["button.save"], korean["button.save"])
-        self.assertEqual(loaded["label.whisper_sentence_boundary_model_zh"], korean["label.whisper_sentence_boundary_model_zh"])
+        self.assertEqual(loaded["label.dictation_ai_sentence_boundary_model_zh"], korean["label.dictation_ai_sentence_boundary_model_zh"])
         self.assertEqual(set(english), set(loaded))
 
     def test_unknown_language_uses_default_language(self) -> None:
