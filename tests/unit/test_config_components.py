@@ -1,7 +1,7 @@
 import unittest
 
 from scripts.config.components import format_slider_value, slider_decimal_places, snap_slider_value
-from scripts.config.dictation_ai_options import whisper_stt_backend_runtime_option_keys
+from scripts.config.dictation_ai_options import dictation_ai_stt_backend_runtime_option_keys
 
 
 class ConfigComponentsTest(unittest.TestCase):
@@ -23,12 +23,15 @@ class ConfigComponentsTest(unittest.TestCase):
 
     def test_dictation_ai_backend_runtime_option_keys_are_backend_specific(self) -> None:
         self.assertEqual(
-            whisper_stt_backend_runtime_option_keys("faster-whisper"),
+            dictation_ai_stt_backend_runtime_option_keys("faster-whisper"),
             ("compute_type", "beam_size", "max_new_tokens", "temperature"),
         )
-        self.assertEqual(whisper_stt_backend_runtime_option_keys("qwen3-asr-transformers"), ("compute_type", "max_new_tokens"))
         self.assertEqual(
-            whisper_stt_backend_runtime_option_keys("qwen3-asr-vllm-streaming"),
+            dictation_ai_stt_backend_runtime_option_keys("qwen3-asr-transformers"),
+            ("compute_type", "max_new_tokens"),
+        )
+        self.assertEqual(
+            dictation_ai_stt_backend_runtime_option_keys("qwen3-asr-vllm-streaming"),
             ("compute_type", "max_new_tokens"),
         )
 

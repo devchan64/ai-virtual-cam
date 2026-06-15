@@ -18,7 +18,7 @@ from src.app.model_cache import (
     is_qwen_asr_model_cached,
 )
 from src.domain.contracts.dictation_ai import resolve_qwen_asr_model_name
-from src.domain.dictation_ai_defaults import whisper_default
+from src.domain.dictation_ai_defaults import dictation_ai_default
 
 
 def _log(message: str) -> None:
@@ -322,10 +322,10 @@ def main() -> int:
             stt_backend_models = list(zip([str(item) for item in args.stt_backend], [str(item) for item in args.stt_model]))
         else:
             stt_backend_models = [
-                (whisper_default("backend"), whisper_default("model")),
-                (whisper_default("sttBackendEn"), whisper_default("sttModelEn")),
-                (whisper_default("sttBackendKo"), whisper_default("sttModelKo")),
-                (whisper_default("sttBackendZh"), whisper_default("sttModelZh")),
+                (dictation_ai_default("backend"), dictation_ai_default("model")),
+                (dictation_ai_default("sttBackendEn"), dictation_ai_default("sttModelEn")),
+                (dictation_ai_default("sttBackendKo"), dictation_ai_default("sttModelKo")),
+                (dictation_ai_default("sttBackendZh"), dictation_ai_default("sttModelZh")),
             ]
         for item in _unique([f"{backend}\t{model}" for backend, model in stt_backend_models]):
             backend_name, model_name = item.split("\t", 1)
@@ -338,10 +338,10 @@ def main() -> int:
             backend_models = list(zip([str(item) for item in args.boundary_backend], [str(item) for item in args.boundary_model]))
         else:
             backend_models = [
-                (whisper_default("sentenceBoundaryBackend"), whisper_default("sentenceBoundaryModel")),
-                (whisper_default("sentenceBoundaryBackendEn"), whisper_default("sentenceBoundaryModelEn")),
-                (whisper_default("sentenceBoundaryBackendKo"), whisper_default("sentenceBoundaryModelKo")),
-                (whisper_default("sentenceBoundaryBackendZh"), whisper_default("sentenceBoundaryModelZh")),
+                (dictation_ai_default("sentenceBoundaryBackend"), dictation_ai_default("sentenceBoundaryModel")),
+                (dictation_ai_default("sentenceBoundaryBackendEn"), dictation_ai_default("sentenceBoundaryModelEn")),
+                (dictation_ai_default("sentenceBoundaryBackendKo"), dictation_ai_default("sentenceBoundaryModelKo")),
+                (dictation_ai_default("sentenceBoundaryBackendZh"), dictation_ai_default("sentenceBoundaryModelZh")),
             ]
         for item in _unique([f"{backend}\t{model}" for backend, model in backend_models]):
             backend_name, model_name = item.split("\t", 1)
@@ -355,7 +355,7 @@ def main() -> int:
                 zip([str(item) for item in args.translation_backend], [str(item) for item in args.translation_model])
             )
         else:
-            translation_backend_models = [(str(whisper_default("translationBackend")), str(whisper_default("translationModel")))]
+            translation_backend_models = [(str(dictation_ai_default("translationBackend")), str(dictation_ai_default("translationModel")))]
         for item in _unique([f"{backend}\t{model}" for backend, model in translation_backend_models]):
             backend_name, model_name = item.split("\t", 1)
             assets.append(ModelAsset("translation", backend_name, model_name))

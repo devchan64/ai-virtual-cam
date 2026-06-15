@@ -1,21 +1,21 @@
 import unittest
 
 from src.domain.contracts.dictation_ai import (
-    WHISPER_CONTRACT,
+    DICTATION_AI_CONTRACT,
     resolve_qwen_asr_model_name,
-    whisper_stt_backends_for_language,
-    whisper_allowed,
-    whisper_default,
-    whisper_defaults,
-    whisper_spec,
+    dictation_ai_stt_backends_for_language,
+    dictation_ai_allowed,
+    dictation_ai_default,
+    dictation_ai_defaults,
+    dictation_ai_spec,
 )
 
 
 class WhisperContractTest(unittest.TestCase):
     def test_contract_defaults_match_exported_defaults(self) -> None:
-        defaults = whisper_defaults()
+        defaults = dictation_ai_defaults()
 
-        self.assertEqual(set(defaults), set(WHISPER_CONTRACT))
+        self.assertEqual(set(defaults), set(DICTATION_AI_CONTRACT))
         self.assertEqual(defaults["language"], "en")
         self.assertEqual(defaults["sttBackendZh"], "qwen3-asr-transformers")
         self.assertEqual(defaults["sttModelZh"], "qwen3-asr-0.6b")
@@ -30,22 +30,22 @@ class WhisperContractTest(unittest.TestCase):
         self.assertEqual(defaults["commitLagSeconds"], 1.0)
         self.assertEqual(defaults["maxNewTokens"], 192)
         self.assertEqual(defaults["postProcessingProfile"], "manual")
-        self.assertEqual(whisper_default("sentenceBoundaryBackendZh"), "sat")
+        self.assertEqual(dictation_ai_default("sentenceBoundaryBackendZh"), "sat")
 
     def test_contract_exposes_allowed_values(self) -> None:
-        self.assertEqual(whisper_allowed("language"), ("ko", "en", "zh"))
-        self.assertIn("qwen3-asr-transformers", whisper_allowed("sttBackendZh"))
-        self.assertIn("qwen3-asr-vllm-streaming", whisper_allowed("sttBackendZh"))
-        self.assertNotIn("auto", whisper_allowed("language"))
-        self.assertEqual(whisper_allowed("postProcessingProfile"), ("manual",))
+        self.assertEqual(dictation_ai_allowed("language"), ("ko", "en", "zh"))
+        self.assertIn("qwen3-asr-transformers", dictation_ai_allowed("sttBackendZh"))
+        self.assertIn("qwen3-asr-vllm-streaming", dictation_ai_allowed("sttBackendZh"))
+        self.assertNotIn("auto", dictation_ai_allowed("language"))
+        self.assertEqual(dictation_ai_allowed("postProcessingProfile"), ("manual",))
 
 
 
     def test_contract_limits_stt_backends_by_language(self) -> None:
-        self.assertEqual(whisper_stt_backends_for_language("en"), ("faster-whisper", "mock"))
-        self.assertEqual(whisper_stt_backends_for_language("ko"), ("faster-whisper", "mock"))
+        self.assertEqual(dictation_ai_stt_backends_for_language("en"), ("faster-whisper", "mock"))
+        self.assertEqual(dictation_ai_stt_backends_for_language("ko"), ("faster-whisper", "mock"))
         self.assertEqual(
-            whisper_stt_backends_for_language("zh"),
+            dictation_ai_stt_backends_for_language("zh"),
             ("faster-whisper", "qwen3-asr-transformers", "qwen3-asr-vllm-streaming", "mock"),
         )
 
@@ -55,14 +55,14 @@ class WhisperContractTest(unittest.TestCase):
         self.assertEqual(resolve_qwen_asr_model_name("Qwen/custom"), "Qwen/custom")
 
     def test_contract_validates_allowed_values(self) -> None:
-        whisper_spec("language").validate_allowed("ko", path="whisper.language")
-        with self.assertRaisesRegex(ValueError, "whisper.language"):
-            whisper_spec("language").validate_allowed("auto", path="whisper.language")
+        dictation_ai_spec("language").validate_allowed("ko", path="dictationAi.language")
+        with self.assertRaisesRegex(ValueError, "dictationAi.language"):
+            dictation_ai_spec("language").validate_allowed("auto", path="dictationAi.language")
 
     def test_contract_validates_ranges(self) -> None:
-        whisper_spec("beamSize").validate_range(3, path="whisper.beamSize")
-        with self.assertRaisesRegex(ValueError, "whisper.beamSize"):
-            whisper_spec("beamSize").validate_range(0, path="whisper.beamSize")
+        dictation_ai_spec("beamSize").validate_range(3, path="dictationAi.beamSize")
+        with self.assertRaisesRegex(ValueError, "dictationAi.beamSize"):
+            dictation_ai_spec("beamSize").validate_range(0, path="dictationAi.beamSize")
 
 
 if __name__ == "__main__":

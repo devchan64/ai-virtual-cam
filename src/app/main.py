@@ -69,7 +69,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--with-whisper-window",
         action="store_true",
-        help="Open the selectable Dictation AI transcript window when whisper.enabled=true.",
+        help="Open the selectable Dictation AI transcript window when dictationAi.enabled=true.",
     )
     return parser.parse_args()
 
@@ -108,7 +108,7 @@ def main() -> int:
     else:
         _log("[avc] camera pipeline disabled by config (cameraServer.enabled=false)")
     whisper_process: subprocess.Popen | None = None
-    if args.with_whisper_window and config.whisper.enabled:
+    if args.with_whisper_window and config.dictationAi.enabled:
         whisper_cmd = [sys.executable, "-m", "src.app.dictation_window", "--config", str(config_path)]
         try:
             whisper_process = subprocess.Popen(whisper_cmd, env=_child_env_with_nvidia_libraries())
@@ -116,11 +116,11 @@ def main() -> int:
         except Exception as exc:
             raise RuntimeError(
                 "받아쓰기 AI 출력 창을 시작하지 못했습니다. "
-                f"config whisper={config.whisper}. 실패 원인: {exc}. "
+                f"config dictationAi={config.dictationAi}. 실패 원인: {exc}. "
                 "DISPLAY/Tkinter/CUDA/STT 모델 설치 상태를 확인하세요."
             ) from exc
     elif args.with_whisper_window:
-        _log("[avc] Dictation AI transcript window disabled by config (whisper.enabled=false)")
+        _log("[avc] Dictation AI transcript window disabled by config (dictationAi.enabled=false)")
     else:
         _log("[avc] Dictation AI transcript window disabled for CLI serve (use config GUI Serve to open it)")
 

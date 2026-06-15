@@ -8,7 +8,7 @@ from unittest import mock
 from types import SimpleNamespace
 from pathlib import Path
 
-from src.domain.config import WhisperConfig
+from src.domain.config import DictationAiConfig
 from src.app.dictation_window import (
     DEFAULT_WINDOW_GEOMETRY_META,
     FINAL_TEXT_COLOR,
@@ -53,30 +53,30 @@ class WhisperWindowGeometryTest(unittest.TestCase):
     def test_caches_geometry_by_log_without_writing_config_meta(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "setting.json"
-            path.write_text(json.dumps({"whisper": {"enabled": True}, "meta": {"language": "ko"}}), encoding="utf-8")
+            path.write_text(json.dumps({"dictationAi": {"enabled": True}, "meta": {"language": "ko"}}), encoding="utf-8")
 
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
-                _save_window_geometry(path, "whisperWindowGeometry", "820x460+120+80")
+                _save_window_geometry(path, "dictationAiWindowGeometry", "820x460+120+80")
 
             raw = json.loads(path.read_text(encoding="utf-8"))
 
         self.assertEqual(raw["meta"], {"language": "ko"})
-        self.assertIn("window geometry cached: key=whisperWindowGeometry geometry=820x460+120+80", stdout.getvalue())
+        self.assertIn("window geometry cached: key=dictationAiWindowGeometry geometry=820x460+120+80", stdout.getvalue())
 
     def test_caches_translation_geometry_by_log_without_writing_config_meta(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "setting.json"
-            path.write_text(json.dumps({"whisper": {"enabled": True}, "meta": {"whisperWindowGeometry": "820x460+120+80"}}), encoding="utf-8")
+            path.write_text(json.dumps({"dictationAi": {"enabled": True}, "meta": {"dictationAiWindowGeometry": "820x460+120+80"}}), encoding="utf-8")
 
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
-                _save_window_geometry(path, "whisperTranslationWindowGeometry", "780x420+300+140")
+                _save_window_geometry(path, "dictationAiTranslationWindowGeometry", "780x420+300+140")
 
             raw = json.loads(path.read_text(encoding="utf-8"))
 
-        self.assertEqual(raw["meta"], {"whisperWindowGeometry": "820x460+120+80"})
-        self.assertIn("window geometry cached: key=whisperTranslationWindowGeometry geometry=780x420+300+140", stdout.getvalue())
+        self.assertEqual(raw["meta"], {"dictationAiWindowGeometry": "820x460+120+80"})
+        self.assertIn("window geometry cached: key=dictationAiTranslationWindowGeometry geometry=780x420+300+140", stdout.getvalue())
 
     def test_loads_localized_window_titles_from_config_meta_language(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -105,15 +105,15 @@ class WhisperWindowGeometryTest(unittest.TestCase):
     def test_skips_invalid_geometry_cache_log(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "setting.json"
-            path.write_text(json.dumps({"meta": {"whisperWindowGeometry": "820x460+120+80"}}), encoding="utf-8")
+            path.write_text(json.dumps({"meta": {"dictationAiWindowGeometry": "820x460+120+80"}}), encoding="utf-8")
 
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
-                _save_window_geometry(path, "whisperWindowGeometry", "820x460+5000+80", 1920, 1080)
+                _save_window_geometry(path, "dictationAiWindowGeometry", "820x460+5000+80", 1920, 1080)
 
             raw = json.loads(path.read_text(encoding="utf-8"))
 
-        self.assertEqual(raw["meta"]["whisperWindowGeometry"], "820x460+120+80")
+        self.assertEqual(raw["meta"]["dictationAiWindowGeometry"], "820x460+120+80")
         self.assertIn("window geometry cache skipped", stdout.getvalue())
 
 
@@ -249,10 +249,10 @@ class WhisperWindowGeometryTest(unittest.TestCase):
 
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
-                geometry = _load_window_geometry(path, "whisperWindowGeometry", Root())
+                geometry = _load_window_geometry(path, "dictationAiWindowGeometry", Root())
 
-        self.assertEqual(geometry, DEFAULT_WINDOW_GEOMETRY_META["whisperWindowGeometry"])
-        self.assertIn("window geometry defaulted: key=whisperWindowGeometry", stdout.getvalue())
+        self.assertEqual(geometry, DEFAULT_WINDOW_GEOMETRY_META["dictationAiWindowGeometry"])
+        self.assertIn("window geometry defaulted: key=dictationAiWindowGeometry", stdout.getvalue())
 
     def test_load_stt_status_window_geometry_uses_default_when_saved_value_missing(self) -> None:
         class Root:
@@ -274,10 +274,10 @@ class WhisperWindowGeometryTest(unittest.TestCase):
 
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
-                geometry = _load_window_geometry(path, "whisperSttStatusWindowGeometry", Root())
+                geometry = _load_window_geometry(path, "dictationAiSttStatusWindowGeometry", Root())
 
-        self.assertEqual(geometry, DEFAULT_WINDOW_GEOMETRY_META["whisperSttStatusWindowGeometry"])
-        self.assertIn("window geometry defaulted: key=whisperSttStatusWindowGeometry", stdout.getvalue())
+        self.assertEqual(geometry, DEFAULT_WINDOW_GEOMETRY_META["dictationAiSttStatusWindowGeometry"])
+        self.assertIn("window geometry defaulted: key=dictationAiSttStatusWindowGeometry", stdout.getvalue())
 
     def test_load_window_geometry_uses_saved_value_before_default(self) -> None:
         class Root:
@@ -295,9 +295,9 @@ class WhisperWindowGeometryTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "setting.json"
-            path.write_text(json.dumps({"meta": {"whisperWindowGeometry": "820x460+120+80"}}), encoding="utf-8")
+            path.write_text(json.dumps({"meta": {"dictationAiWindowGeometry": "820x460+120+80"}}), encoding="utf-8")
 
-            geometry = _load_window_geometry(path, "whisperWindowGeometry", Root())
+            geometry = _load_window_geometry(path, "dictationAiWindowGeometry", Root())
 
         self.assertEqual(geometry, "820x460+120+80")
 
@@ -555,7 +555,7 @@ class WhisperWindowGeometryTest(unittest.TestCase):
 
     def test_preloads_sentence_boundary_model_before_transcribe_loop_for_configured_language(self) -> None:
         worker = WhisperTranscriptWorker(
-            WhisperConfig.from_dict({"inputDevice": "default", "language": "zh"}),
+            DictationAiConfig.from_dict({"inputDevice": "default", "language": "zh"}),
             queue.Queue(),
         )
 
@@ -565,7 +565,7 @@ class WhisperWindowGeometryTest(unittest.TestCase):
         sync_detector.assert_called_once_with("zh")
 
     def test_filters_low_confidence_segments(self) -> None:
-        worker = WhisperTranscriptWorker(WhisperConfig.from_dict({"inputDevice": "default"}), queue.Queue())
+        worker = WhisperTranscriptWorker(DictationAiConfig.from_dict({"inputDevice": "default"}), queue.Queue())
         segments = [
             SimpleNamespace(text=" 정상 문장 ", avg_logprob=-0.2, no_speech_prob=0.1),
             SimpleNamespace(text=" 무음 환각 ", avg_logprob=-0.2, no_speech_prob=0.9),
@@ -582,7 +582,7 @@ class WhisperWindowGeometryTest(unittest.TestCase):
 
 
     def test_accepts_long_chinese_segment_with_borderline_no_speech(self) -> None:
-        worker = WhisperTranscriptWorker(WhisperConfig.from_dict({"inputDevice": "default", "language": "zh"}), queue.Queue())
+        worker = WhisperTranscriptWorker(DictationAiConfig.from_dict({"inputDevice": "default", "language": "zh"}), queue.Queue())
         segments = [
             SimpleNamespace(
                 text="到我和朋友兩個人臨陣起手直接唱陰謀歌好吧不陰謀的完全不點阻擋",
@@ -598,7 +598,7 @@ class WhisperWindowGeometryTest(unittest.TestCase):
         self.assertIsNotNone(boundary_confidence)
 
     def test_rejects_short_chinese_segment_with_high_no_speech(self) -> None:
-        worker = WhisperTranscriptWorker(WhisperConfig.from_dict({"inputDevice": "default", "language": "zh"}), queue.Queue())
+        worker = WhisperTranscriptWorker(DictationAiConfig.from_dict({"inputDevice": "default", "language": "zh"}), queue.Queue())
         segments = [SimpleNamespace(text="片。", avg_logprob=-0.2, no_speech_prob=0.86)]
 
         texts, rejected, boundary_confidence = worker._accepted_segment_texts(segments)
@@ -609,7 +609,7 @@ class WhisperWindowGeometryTest(unittest.TestCase):
         self.assertIsNone(boundary_confidence)
 
     def test_rejects_repeated_short_transcripts(self) -> None:
-        worker = WhisperTranscriptWorker(WhisperConfig.from_dict({"inputDevice": "default"}), queue.Queue())
+        worker = WhisperTranscriptWorker(DictationAiConfig.from_dict({"inputDevice": "default"}), queue.Queue())
         worker._remember_transcript("다음 영상에서 만나요.")
         worker._remember_transcript("다음 영상에서 만나요.")
 

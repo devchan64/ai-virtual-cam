@@ -3,7 +3,7 @@ from __future__ import annotations
 import platform
 import subprocess
 
-from src.domain.dictation_ai_defaults import whisper_default
+from src.domain.dictation_ai_defaults import dictation_ai_default
 
 
 def _default_audio_output_device() -> str:
@@ -445,83 +445,83 @@ def build_config(
     face_enhance_min_size_ratio: float = 0.12,
     face_enhance_edge_dither: float = 0.25,
     face_deidentify_enabled: bool = False,
-    whisper_enabled: bool = whisper_default("enabled"),
-    whisper_input_device: str | None = None,
-    whisper_backend: str = whisper_default("backend"),
-    whisper_model: str = whisper_default("model"),
-    whisper_stt_backend_en: str = whisper_default("sttBackendEn"),
-    whisper_stt_model_en: str = whisper_default("sttModelEn"),
-    whisper_stt_backend_ko: str = whisper_default("sttBackendKo"),
-    whisper_stt_model_ko: str = whisper_default("sttModelKo"),
-    whisper_stt_backend_zh: str = whisper_default("sttBackendZh"),
-    whisper_stt_model_zh: str = whisper_default("sttModelZh"),
-    whisper_language: str = whisper_default("language"),
-    whisper_task: str = whisper_default("task"),
-    whisper_show_stt_status_window: bool = whisper_default("showSttStatusWindow"),
-    whisper_translation_enabled: bool = whisper_default("translationEnabled"),
-    whisper_translation_target_language: str = whisper_default("translationTargetLanguage"),
-    whisper_translation_backend: str = whisper_default("translationBackend"),
-    whisper_translation_model: str = whisper_default("translationModel"),
-    whisper_translation_device: str = whisper_default("translationDevice"),
-    whisper_translation_compute_type: str = whisper_default("translationComputeType"),
-    whisper_translation_beam_size: int = whisper_default("translationBeamSize"),
-    whisper_translation_max_new_tokens: int = whisper_default("translationMaxNewTokens"),
-    whisper_translation_backend_en: str | None = None,
-    whisper_translation_model_en: str | None = None,
-    whisper_translation_device_en: str | None = None,
-    whisper_translation_compute_type_en: str | None = None,
-    whisper_translation_beam_size_en: int | None = None,
-    whisper_translation_max_new_tokens_en: int | None = None,
-    whisper_translation_backend_ko: str | None = None,
-    whisper_translation_model_ko: str | None = None,
-    whisper_translation_device_ko: str | None = None,
-    whisper_translation_compute_type_ko: str | None = None,
-    whisper_translation_beam_size_ko: int | None = None,
-    whisper_translation_max_new_tokens_ko: int | None = None,
-    whisper_translation_backend_zh: str | None = None,
-    whisper_translation_model_zh: str | None = None,
-    whisper_translation_device_zh: str | None = None,
-    whisper_translation_compute_type_zh: str | None = None,
-    whisper_translation_beam_size_zh: int | None = None,
-    whisper_translation_max_new_tokens_zh: int | None = None,
-    whisper_device: str = whisper_default("device"),
-    whisper_compute_type: str = whisper_default("computeType"),
-    whisper_chunk_seconds: float = whisper_default("chunkSeconds"),
-    whisper_step_seconds: float = whisper_default("stepSeconds"),
-    whisper_window_seconds: float | None = None,
-    whisper_commit_lag_seconds: float = whisper_default("commitLagSeconds"),
-    whisper_beam_size: int = whisper_default("beamSize"),
-    whisper_max_new_tokens: int = whisper_default("maxNewTokens"),
-    whisper_temperature: float = whisper_default("temperature"),
-    whisper_step_seconds_en: float | None = None,
-    whisper_window_seconds_en: float | None = None,
-    whisper_commit_lag_seconds_en: float | None = None,
-    whisper_beam_size_en: int | None = None,
-    whisper_max_new_tokens_en: int | None = None,
-    whisper_temperature_en: float | None = None,
-    whisper_step_seconds_ko: float | None = None,
-    whisper_window_seconds_ko: float | None = None,
-    whisper_commit_lag_seconds_ko: float | None = None,
-    whisper_beam_size_ko: int | None = None,
-    whisper_max_new_tokens_ko: int | None = None,
-    whisper_temperature_ko: float | None = None,
-    whisper_step_seconds_zh: float | None = None,
-    whisper_window_seconds_zh: float | None = None,
-    whisper_commit_lag_seconds_zh: float | None = None,
-    whisper_beam_size_zh: int | None = None,
-    whisper_max_new_tokens_zh: int | None = None,
-    whisper_temperature_zh: float | None = None,
-    whisper_post_processing_profile: str = whisper_default("postProcessingProfile"),
-    whisper_sentence_boundary_backend: str = whisper_default("sentenceBoundaryBackend"),
-    whisper_sentence_boundary_model: str = whisper_default("sentenceBoundaryModel"),
-    whisper_sentence_boundary_backend_en: str = whisper_default("sentenceBoundaryBackendEn"),
-    whisper_sentence_boundary_model_en: str = whisper_default("sentenceBoundaryModelEn"),
-    whisper_sentence_boundary_backend_ko: str = whisper_default("sentenceBoundaryBackendKo"),
-    whisper_sentence_boundary_model_ko: str = whisper_default("sentenceBoundaryModelKo"),
-    whisper_sentence_boundary_backend_zh: str = whisper_default("sentenceBoundaryBackendZh"),
-    whisper_sentence_boundary_model_zh: str = whisper_default("sentenceBoundaryModelZh"),
-    whisper_sentence_boundary_device: str = whisper_default("sentenceBoundaryDevice"),
-    whisper_sentence_boundary_compute_type: str = whisper_default("sentenceBoundaryComputeType"),
+    dictation_ai_enabled: bool = dictation_ai_default("enabled"),
+    dictation_ai_input_device: str | None = None,
+    dictation_ai_backend: str = dictation_ai_default("backend"),
+    dictation_ai_model: str = dictation_ai_default("model"),
+    dictation_ai_stt_backend_en: str = dictation_ai_default("sttBackendEn"),
+    dictation_ai_stt_model_en: str = dictation_ai_default("sttModelEn"),
+    dictation_ai_stt_backend_ko: str = dictation_ai_default("sttBackendKo"),
+    dictation_ai_stt_model_ko: str = dictation_ai_default("sttModelKo"),
+    dictation_ai_stt_backend_zh: str = dictation_ai_default("sttBackendZh"),
+    dictation_ai_stt_model_zh: str = dictation_ai_default("sttModelZh"),
+    dictation_ai_language: str = dictation_ai_default("language"),
+    dictation_ai_task: str = dictation_ai_default("task"),
+    dictation_ai_show_stt_status_window: bool = dictation_ai_default("showSttStatusWindow"),
+    dictation_ai_translation_enabled: bool = dictation_ai_default("translationEnabled"),
+    dictation_ai_translation_target_language: str = dictation_ai_default("translationTargetLanguage"),
+    dictation_ai_translation_backend: str = dictation_ai_default("translationBackend"),
+    dictation_ai_translation_model: str = dictation_ai_default("translationModel"),
+    dictation_ai_translation_device: str = dictation_ai_default("translationDevice"),
+    dictation_ai_translation_compute_type: str = dictation_ai_default("translationComputeType"),
+    dictation_ai_translation_beam_size: int = dictation_ai_default("translationBeamSize"),
+    dictation_ai_translation_max_new_tokens: int = dictation_ai_default("translationMaxNewTokens"),
+    dictation_ai_translation_backend_en: str | None = None,
+    dictation_ai_translation_model_en: str | None = None,
+    dictation_ai_translation_device_en: str | None = None,
+    dictation_ai_translation_compute_type_en: str | None = None,
+    dictation_ai_translation_beam_size_en: int | None = None,
+    dictation_ai_translation_max_new_tokens_en: int | None = None,
+    dictation_ai_translation_backend_ko: str | None = None,
+    dictation_ai_translation_model_ko: str | None = None,
+    dictation_ai_translation_device_ko: str | None = None,
+    dictation_ai_translation_compute_type_ko: str | None = None,
+    dictation_ai_translation_beam_size_ko: int | None = None,
+    dictation_ai_translation_max_new_tokens_ko: int | None = None,
+    dictation_ai_translation_backend_zh: str | None = None,
+    dictation_ai_translation_model_zh: str | None = None,
+    dictation_ai_translation_device_zh: str | None = None,
+    dictation_ai_translation_compute_type_zh: str | None = None,
+    dictation_ai_translation_beam_size_zh: int | None = None,
+    dictation_ai_translation_max_new_tokens_zh: int | None = None,
+    dictation_ai_device: str = dictation_ai_default("device"),
+    dictation_ai_compute_type: str = dictation_ai_default("computeType"),
+    dictation_ai_chunk_seconds: float = dictation_ai_default("chunkSeconds"),
+    dictation_ai_step_seconds: float = dictation_ai_default("stepSeconds"),
+    dictation_ai_window_seconds: float | None = None,
+    dictation_ai_commit_lag_seconds: float = dictation_ai_default("commitLagSeconds"),
+    dictation_ai_beam_size: int = dictation_ai_default("beamSize"),
+    dictation_ai_max_new_tokens: int = dictation_ai_default("maxNewTokens"),
+    dictation_ai_temperature: float = dictation_ai_default("temperature"),
+    dictation_ai_step_seconds_en: float | None = None,
+    dictation_ai_window_seconds_en: float | None = None,
+    dictation_ai_commit_lag_seconds_en: float | None = None,
+    dictation_ai_beam_size_en: int | None = None,
+    dictation_ai_max_new_tokens_en: int | None = None,
+    dictation_ai_temperature_en: float | None = None,
+    dictation_ai_step_seconds_ko: float | None = None,
+    dictation_ai_window_seconds_ko: float | None = None,
+    dictation_ai_commit_lag_seconds_ko: float | None = None,
+    dictation_ai_beam_size_ko: int | None = None,
+    dictation_ai_max_new_tokens_ko: int | None = None,
+    dictation_ai_temperature_ko: float | None = None,
+    dictation_ai_step_seconds_zh: float | None = None,
+    dictation_ai_window_seconds_zh: float | None = None,
+    dictation_ai_commit_lag_seconds_zh: float | None = None,
+    dictation_ai_beam_size_zh: int | None = None,
+    dictation_ai_max_new_tokens_zh: int | None = None,
+    dictation_ai_temperature_zh: float | None = None,
+    dictation_ai_post_processing_profile: str = dictation_ai_default("postProcessingProfile"),
+    dictation_ai_sentence_boundary_backend: str = dictation_ai_default("sentenceBoundaryBackend"),
+    dictation_ai_sentence_boundary_model: str = dictation_ai_default("sentenceBoundaryModel"),
+    dictation_ai_sentence_boundary_backend_en: str = dictation_ai_default("sentenceBoundaryBackendEn"),
+    dictation_ai_sentence_boundary_model_en: str = dictation_ai_default("sentenceBoundaryModelEn"),
+    dictation_ai_sentence_boundary_backend_ko: str = dictation_ai_default("sentenceBoundaryBackendKo"),
+    dictation_ai_sentence_boundary_model_ko: str = dictation_ai_default("sentenceBoundaryModelKo"),
+    dictation_ai_sentence_boundary_backend_zh: str = dictation_ai_default("sentenceBoundaryBackendZh"),
+    dictation_ai_sentence_boundary_model_zh: str = dictation_ai_default("sentenceBoundaryModelZh"),
+    dictation_ai_sentence_boundary_device: str = dictation_ai_default("sentenceBoundaryDevice"),
+    dictation_ai_sentence_boundary_compute_type: str = dictation_ai_default("sentenceBoundaryComputeType"),
 ) -> dict:
     if audio_output_device is None:
         audio_output_device = _default_audio_output_device()
@@ -535,108 +535,108 @@ def build_config(
     else:
         audio_input_device = str(audio_input_device).strip()
 
-    if not whisper_input_device:
-        whisper_input_device = audio_input_device
+    if not dictation_ai_input_device:
+        dictation_ai_input_device = audio_input_device
     else:
-        whisper_input_device = str(whisper_input_device).strip()
+        dictation_ai_input_device = str(dictation_ai_input_device).strip()
 
-    if whisper_window_seconds is None:
-        whisper_window_seconds = whisper_chunk_seconds
-    selected_whisper_language = str(whisper_language).strip().lower()
-    selected_translation_target = str(whisper_translation_target_language).strip().lower()
+    if dictation_ai_window_seconds is None:
+        dictation_ai_window_seconds = dictation_ai_chunk_seconds
+    selected_dictation_ai_language = str(dictation_ai_language).strip().lower()
+    selected_translation_target = str(dictation_ai_translation_target_language).strip().lower()
 
     def runtime_value(value, lang: str, default_key: str, selected_value):
         if value is not None:
             return value
-        if selected_whisper_language == lang:
+        if selected_dictation_ai_language == lang:
             return selected_value
-        return whisper_default(default_key)
+        return dictation_ai_default(default_key)
 
-    whisper_step_seconds_en = runtime_value(whisper_step_seconds_en, "en", "stepSecondsEn", whisper_step_seconds)
-    whisper_window_seconds_en = runtime_value(whisper_window_seconds_en, "en", "windowSecondsEn", whisper_window_seconds)
-    whisper_commit_lag_seconds_en = runtime_value(
-        whisper_commit_lag_seconds_en, "en", "commitLagSecondsEn", whisper_commit_lag_seconds
+    dictation_ai_step_seconds_en = runtime_value(dictation_ai_step_seconds_en, "en", "stepSecondsEn", dictation_ai_step_seconds)
+    dictation_ai_window_seconds_en = runtime_value(dictation_ai_window_seconds_en, "en", "windowSecondsEn", dictation_ai_window_seconds)
+    dictation_ai_commit_lag_seconds_en = runtime_value(
+        dictation_ai_commit_lag_seconds_en, "en", "commitLagSecondsEn", dictation_ai_commit_lag_seconds
     )
-    whisper_beam_size_en = runtime_value(whisper_beam_size_en, "en", "beamSizeEn", whisper_beam_size)
-    whisper_max_new_tokens_en = runtime_value(whisper_max_new_tokens_en, "en", "maxNewTokensEn", whisper_max_new_tokens)
-    whisper_temperature_en = runtime_value(whisper_temperature_en, "en", "temperatureEn", whisper_temperature)
-    whisper_step_seconds_ko = runtime_value(whisper_step_seconds_ko, "ko", "stepSecondsKo", whisper_step_seconds)
-    whisper_window_seconds_ko = runtime_value(whisper_window_seconds_ko, "ko", "windowSecondsKo", whisper_window_seconds)
-    whisper_commit_lag_seconds_ko = runtime_value(
-        whisper_commit_lag_seconds_ko, "ko", "commitLagSecondsKo", whisper_commit_lag_seconds
+    dictation_ai_beam_size_en = runtime_value(dictation_ai_beam_size_en, "en", "beamSizeEn", dictation_ai_beam_size)
+    dictation_ai_max_new_tokens_en = runtime_value(dictation_ai_max_new_tokens_en, "en", "maxNewTokensEn", dictation_ai_max_new_tokens)
+    dictation_ai_temperature_en = runtime_value(dictation_ai_temperature_en, "en", "temperatureEn", dictation_ai_temperature)
+    dictation_ai_step_seconds_ko = runtime_value(dictation_ai_step_seconds_ko, "ko", "stepSecondsKo", dictation_ai_step_seconds)
+    dictation_ai_window_seconds_ko = runtime_value(dictation_ai_window_seconds_ko, "ko", "windowSecondsKo", dictation_ai_window_seconds)
+    dictation_ai_commit_lag_seconds_ko = runtime_value(
+        dictation_ai_commit_lag_seconds_ko, "ko", "commitLagSecondsKo", dictation_ai_commit_lag_seconds
     )
-    whisper_beam_size_ko = runtime_value(whisper_beam_size_ko, "ko", "beamSizeKo", whisper_beam_size)
-    whisper_max_new_tokens_ko = runtime_value(whisper_max_new_tokens_ko, "ko", "maxNewTokensKo", whisper_max_new_tokens)
-    whisper_temperature_ko = runtime_value(whisper_temperature_ko, "ko", "temperatureKo", whisper_temperature)
-    whisper_step_seconds_zh = runtime_value(whisper_step_seconds_zh, "zh", "stepSecondsZh", whisper_step_seconds)
-    whisper_window_seconds_zh = runtime_value(whisper_window_seconds_zh, "zh", "windowSecondsZh", whisper_window_seconds)
-    whisper_commit_lag_seconds_zh = runtime_value(
-        whisper_commit_lag_seconds_zh, "zh", "commitLagSecondsZh", whisper_commit_lag_seconds
+    dictation_ai_beam_size_ko = runtime_value(dictation_ai_beam_size_ko, "ko", "beamSizeKo", dictation_ai_beam_size)
+    dictation_ai_max_new_tokens_ko = runtime_value(dictation_ai_max_new_tokens_ko, "ko", "maxNewTokensKo", dictation_ai_max_new_tokens)
+    dictation_ai_temperature_ko = runtime_value(dictation_ai_temperature_ko, "ko", "temperatureKo", dictation_ai_temperature)
+    dictation_ai_step_seconds_zh = runtime_value(dictation_ai_step_seconds_zh, "zh", "stepSecondsZh", dictation_ai_step_seconds)
+    dictation_ai_window_seconds_zh = runtime_value(dictation_ai_window_seconds_zh, "zh", "windowSecondsZh", dictation_ai_window_seconds)
+    dictation_ai_commit_lag_seconds_zh = runtime_value(
+        dictation_ai_commit_lag_seconds_zh, "zh", "commitLagSecondsZh", dictation_ai_commit_lag_seconds
     )
-    whisper_beam_size_zh = runtime_value(whisper_beam_size_zh, "zh", "beamSizeZh", whisper_beam_size)
-    whisper_max_new_tokens_zh = runtime_value(whisper_max_new_tokens_zh, "zh", "maxNewTokensZh", whisper_max_new_tokens)
-    whisper_temperature_zh = runtime_value(whisper_temperature_zh, "zh", "temperatureZh", whisper_temperature)
+    dictation_ai_beam_size_zh = runtime_value(dictation_ai_beam_size_zh, "zh", "beamSizeZh", dictation_ai_beam_size)
+    dictation_ai_max_new_tokens_zh = runtime_value(dictation_ai_max_new_tokens_zh, "zh", "maxNewTokensZh", dictation_ai_max_new_tokens)
+    dictation_ai_temperature_zh = runtime_value(dictation_ai_temperature_zh, "zh", "temperatureZh", dictation_ai_temperature)
 
     def translation_value(value, target: str, default_key: str, selected_value):
         if value is not None:
             return value
         if selected_translation_target == target:
             return selected_value
-        return whisper_default(default_key)
+        return dictation_ai_default(default_key)
 
-    whisper_translation_backend_en = translation_value(
-        whisper_translation_backend_en, "en", "translationBackendEn", whisper_translation_backend
+    dictation_ai_translation_backend_en = translation_value(
+        dictation_ai_translation_backend_en, "en", "translationBackendEn", dictation_ai_translation_backend
     )
-    whisper_translation_model_en = translation_value(
-        whisper_translation_model_en, "en", "translationModelEn", whisper_translation_model
+    dictation_ai_translation_model_en = translation_value(
+        dictation_ai_translation_model_en, "en", "translationModelEn", dictation_ai_translation_model
     )
-    whisper_translation_device_en = translation_value(
-        whisper_translation_device_en, "en", "translationDeviceEn", whisper_translation_device
+    dictation_ai_translation_device_en = translation_value(
+        dictation_ai_translation_device_en, "en", "translationDeviceEn", dictation_ai_translation_device
     )
-    whisper_translation_compute_type_en = translation_value(
-        whisper_translation_compute_type_en, "en", "translationComputeTypeEn", whisper_translation_compute_type
+    dictation_ai_translation_compute_type_en = translation_value(
+        dictation_ai_translation_compute_type_en, "en", "translationComputeTypeEn", dictation_ai_translation_compute_type
     )
-    whisper_translation_beam_size_en = translation_value(
-        whisper_translation_beam_size_en, "en", "translationBeamSizeEn", whisper_translation_beam_size
+    dictation_ai_translation_beam_size_en = translation_value(
+        dictation_ai_translation_beam_size_en, "en", "translationBeamSizeEn", dictation_ai_translation_beam_size
     )
-    whisper_translation_max_new_tokens_en = translation_value(
-        whisper_translation_max_new_tokens_en, "en", "translationMaxNewTokensEn", whisper_translation_max_new_tokens
+    dictation_ai_translation_max_new_tokens_en = translation_value(
+        dictation_ai_translation_max_new_tokens_en, "en", "translationMaxNewTokensEn", dictation_ai_translation_max_new_tokens
     )
-    whisper_translation_backend_ko = translation_value(
-        whisper_translation_backend_ko, "ko", "translationBackendKo", whisper_translation_backend
+    dictation_ai_translation_backend_ko = translation_value(
+        dictation_ai_translation_backend_ko, "ko", "translationBackendKo", dictation_ai_translation_backend
     )
-    whisper_translation_model_ko = translation_value(
-        whisper_translation_model_ko, "ko", "translationModelKo", whisper_translation_model
+    dictation_ai_translation_model_ko = translation_value(
+        dictation_ai_translation_model_ko, "ko", "translationModelKo", dictation_ai_translation_model
     )
-    whisper_translation_device_ko = translation_value(
-        whisper_translation_device_ko, "ko", "translationDeviceKo", whisper_translation_device
+    dictation_ai_translation_device_ko = translation_value(
+        dictation_ai_translation_device_ko, "ko", "translationDeviceKo", dictation_ai_translation_device
     )
-    whisper_translation_compute_type_ko = translation_value(
-        whisper_translation_compute_type_ko, "ko", "translationComputeTypeKo", whisper_translation_compute_type
+    dictation_ai_translation_compute_type_ko = translation_value(
+        dictation_ai_translation_compute_type_ko, "ko", "translationComputeTypeKo", dictation_ai_translation_compute_type
     )
-    whisper_translation_beam_size_ko = translation_value(
-        whisper_translation_beam_size_ko, "ko", "translationBeamSizeKo", whisper_translation_beam_size
+    dictation_ai_translation_beam_size_ko = translation_value(
+        dictation_ai_translation_beam_size_ko, "ko", "translationBeamSizeKo", dictation_ai_translation_beam_size
     )
-    whisper_translation_max_new_tokens_ko = translation_value(
-        whisper_translation_max_new_tokens_ko, "ko", "translationMaxNewTokensKo", whisper_translation_max_new_tokens
+    dictation_ai_translation_max_new_tokens_ko = translation_value(
+        dictation_ai_translation_max_new_tokens_ko, "ko", "translationMaxNewTokensKo", dictation_ai_translation_max_new_tokens
     )
-    whisper_translation_backend_zh = translation_value(
-        whisper_translation_backend_zh, "zh", "translationBackendZh", whisper_translation_backend
+    dictation_ai_translation_backend_zh = translation_value(
+        dictation_ai_translation_backend_zh, "zh", "translationBackendZh", dictation_ai_translation_backend
     )
-    whisper_translation_model_zh = translation_value(
-        whisper_translation_model_zh, "zh", "translationModelZh", whisper_translation_model
+    dictation_ai_translation_model_zh = translation_value(
+        dictation_ai_translation_model_zh, "zh", "translationModelZh", dictation_ai_translation_model
     )
-    whisper_translation_device_zh = translation_value(
-        whisper_translation_device_zh, "zh", "translationDeviceZh", whisper_translation_device
+    dictation_ai_translation_device_zh = translation_value(
+        dictation_ai_translation_device_zh, "zh", "translationDeviceZh", dictation_ai_translation_device
     )
-    whisper_translation_compute_type_zh = translation_value(
-        whisper_translation_compute_type_zh, "zh", "translationComputeTypeZh", whisper_translation_compute_type
+    dictation_ai_translation_compute_type_zh = translation_value(
+        dictation_ai_translation_compute_type_zh, "zh", "translationComputeTypeZh", dictation_ai_translation_compute_type
     )
-    whisper_translation_beam_size_zh = translation_value(
-        whisper_translation_beam_size_zh, "zh", "translationBeamSizeZh", whisper_translation_beam_size
+    dictation_ai_translation_beam_size_zh = translation_value(
+        dictation_ai_translation_beam_size_zh, "zh", "translationBeamSizeZh", dictation_ai_translation_beam_size
     )
-    whisper_translation_max_new_tokens_zh = translation_value(
-        whisper_translation_max_new_tokens_zh, "zh", "translationMaxNewTokensZh", whisper_translation_max_new_tokens
+    dictation_ai_translation_max_new_tokens_zh = translation_value(
+        dictation_ai_translation_max_new_tokens_zh, "zh", "translationMaxNewTokensZh", dictation_ai_translation_max_new_tokens
     )
 
     tilt_smoothing = float(crop_pan_smoothing if crop_tilt_smoothing is None else crop_tilt_smoothing)
@@ -727,83 +727,83 @@ def build_config(
                 "enabled": bool(face_deidentify_enabled),
             },
         },
-        "whisper": {
-            "enabled": bool(whisper_enabled),
-            "inputDevice": whisper_input_device,
-            "backend": str(whisper_backend),
-            "model": str(whisper_model),
-            "sttBackendEn": str(whisper_stt_backend_en),
-            "sttModelEn": str(whisper_stt_model_en),
-            "sttBackendKo": str(whisper_stt_backend_ko),
-            "sttModelKo": str(whisper_stt_model_ko),
-            "sttBackendZh": str(whisper_stt_backend_zh),
-            "sttModelZh": str(whisper_stt_model_zh),
-            "language": str(whisper_language),
-            "task": str(whisper_task),
-            "showSttStatusWindow": bool(whisper_show_stt_status_window),
-            "translationEnabled": bool(whisper_translation_enabled),
-            "translationTargetLanguage": str(whisper_translation_target_language),
-            "translationBackend": str(whisper_translation_backend),
-            "translationModel": str(whisper_translation_model),
-            "translationDevice": str(whisper_translation_device),
-            "translationComputeType": str(whisper_translation_compute_type),
-            "translationBeamSize": int(whisper_translation_beam_size),
-            "translationMaxNewTokens": int(whisper_translation_max_new_tokens),
-            "translationBackendEn": str(whisper_translation_backend_en),
-            "translationModelEn": str(whisper_translation_model_en),
-            "translationDeviceEn": str(whisper_translation_device_en),
-            "translationComputeTypeEn": str(whisper_translation_compute_type_en),
-            "translationBeamSizeEn": int(whisper_translation_beam_size_en),
-            "translationMaxNewTokensEn": int(whisper_translation_max_new_tokens_en),
-            "translationBackendKo": str(whisper_translation_backend_ko),
-            "translationModelKo": str(whisper_translation_model_ko),
-            "translationDeviceKo": str(whisper_translation_device_ko),
-            "translationComputeTypeKo": str(whisper_translation_compute_type_ko),
-            "translationBeamSizeKo": int(whisper_translation_beam_size_ko),
-            "translationMaxNewTokensKo": int(whisper_translation_max_new_tokens_ko),
-            "translationBackendZh": str(whisper_translation_backend_zh),
-            "translationModelZh": str(whisper_translation_model_zh),
-            "translationDeviceZh": str(whisper_translation_device_zh),
-            "translationComputeTypeZh": str(whisper_translation_compute_type_zh),
-            "translationBeamSizeZh": int(whisper_translation_beam_size_zh),
-            "translationMaxNewTokensZh": int(whisper_translation_max_new_tokens_zh),
-            "device": str(whisper_device),
-            "computeType": str(whisper_compute_type),
-            "chunkSeconds": float(whisper_window_seconds),
-            "stepSeconds": float(whisper_step_seconds),
-            "windowSeconds": float(whisper_window_seconds),
-            "commitLagSeconds": float(whisper_commit_lag_seconds),
-            "beamSize": int(whisper_beam_size),
-            "maxNewTokens": int(whisper_max_new_tokens),
-            "temperature": float(whisper_temperature),
-            "stepSecondsEn": float(whisper_step_seconds_en),
-            "windowSecondsEn": float(whisper_window_seconds_en),
-            "commitLagSecondsEn": float(whisper_commit_lag_seconds_en),
-            "beamSizeEn": int(whisper_beam_size_en),
-            "maxNewTokensEn": int(whisper_max_new_tokens_en),
-            "temperatureEn": float(whisper_temperature_en),
-            "stepSecondsKo": float(whisper_step_seconds_ko),
-            "windowSecondsKo": float(whisper_window_seconds_ko),
-            "commitLagSecondsKo": float(whisper_commit_lag_seconds_ko),
-            "beamSizeKo": int(whisper_beam_size_ko),
-            "maxNewTokensKo": int(whisper_max_new_tokens_ko),
-            "temperatureKo": float(whisper_temperature_ko),
-            "stepSecondsZh": float(whisper_step_seconds_zh),
-            "windowSecondsZh": float(whisper_window_seconds_zh),
-            "commitLagSecondsZh": float(whisper_commit_lag_seconds_zh),
-            "beamSizeZh": int(whisper_beam_size_zh),
-            "maxNewTokensZh": int(whisper_max_new_tokens_zh),
-            "temperatureZh": float(whisper_temperature_zh),
-            "postProcessingProfile": str(whisper_post_processing_profile),
-            "sentenceBoundaryBackend": str(whisper_sentence_boundary_backend),
-            "sentenceBoundaryModel": str(whisper_sentence_boundary_model),
-            "sentenceBoundaryBackendEn": str(whisper_sentence_boundary_backend_en),
-            "sentenceBoundaryModelEn": str(whisper_sentence_boundary_model_en),
-            "sentenceBoundaryBackendKo": str(whisper_sentence_boundary_backend_ko),
-            "sentenceBoundaryModelKo": str(whisper_sentence_boundary_model_ko),
-            "sentenceBoundaryBackendZh": str(whisper_sentence_boundary_backend_zh),
-            "sentenceBoundaryModelZh": str(whisper_sentence_boundary_model_zh),
-            "sentenceBoundaryDevice": str(whisper_sentence_boundary_device),
-            "sentenceBoundaryComputeType": str(whisper_sentence_boundary_compute_type),
+        "dictationAi": {
+            "enabled": bool(dictation_ai_enabled),
+            "inputDevice": dictation_ai_input_device,
+            "backend": str(dictation_ai_backend),
+            "model": str(dictation_ai_model),
+            "sttBackendEn": str(dictation_ai_stt_backend_en),
+            "sttModelEn": str(dictation_ai_stt_model_en),
+            "sttBackendKo": str(dictation_ai_stt_backend_ko),
+            "sttModelKo": str(dictation_ai_stt_model_ko),
+            "sttBackendZh": str(dictation_ai_stt_backend_zh),
+            "sttModelZh": str(dictation_ai_stt_model_zh),
+            "language": str(dictation_ai_language),
+            "task": str(dictation_ai_task),
+            "showSttStatusWindow": bool(dictation_ai_show_stt_status_window),
+            "translationEnabled": bool(dictation_ai_translation_enabled),
+            "translationTargetLanguage": str(dictation_ai_translation_target_language),
+            "translationBackend": str(dictation_ai_translation_backend),
+            "translationModel": str(dictation_ai_translation_model),
+            "translationDevice": str(dictation_ai_translation_device),
+            "translationComputeType": str(dictation_ai_translation_compute_type),
+            "translationBeamSize": int(dictation_ai_translation_beam_size),
+            "translationMaxNewTokens": int(dictation_ai_translation_max_new_tokens),
+            "translationBackendEn": str(dictation_ai_translation_backend_en),
+            "translationModelEn": str(dictation_ai_translation_model_en),
+            "translationDeviceEn": str(dictation_ai_translation_device_en),
+            "translationComputeTypeEn": str(dictation_ai_translation_compute_type_en),
+            "translationBeamSizeEn": int(dictation_ai_translation_beam_size_en),
+            "translationMaxNewTokensEn": int(dictation_ai_translation_max_new_tokens_en),
+            "translationBackendKo": str(dictation_ai_translation_backend_ko),
+            "translationModelKo": str(dictation_ai_translation_model_ko),
+            "translationDeviceKo": str(dictation_ai_translation_device_ko),
+            "translationComputeTypeKo": str(dictation_ai_translation_compute_type_ko),
+            "translationBeamSizeKo": int(dictation_ai_translation_beam_size_ko),
+            "translationMaxNewTokensKo": int(dictation_ai_translation_max_new_tokens_ko),
+            "translationBackendZh": str(dictation_ai_translation_backend_zh),
+            "translationModelZh": str(dictation_ai_translation_model_zh),
+            "translationDeviceZh": str(dictation_ai_translation_device_zh),
+            "translationComputeTypeZh": str(dictation_ai_translation_compute_type_zh),
+            "translationBeamSizeZh": int(dictation_ai_translation_beam_size_zh),
+            "translationMaxNewTokensZh": int(dictation_ai_translation_max_new_tokens_zh),
+            "device": str(dictation_ai_device),
+            "computeType": str(dictation_ai_compute_type),
+            "chunkSeconds": float(dictation_ai_window_seconds),
+            "stepSeconds": float(dictation_ai_step_seconds),
+            "windowSeconds": float(dictation_ai_window_seconds),
+            "commitLagSeconds": float(dictation_ai_commit_lag_seconds),
+            "beamSize": int(dictation_ai_beam_size),
+            "maxNewTokens": int(dictation_ai_max_new_tokens),
+            "temperature": float(dictation_ai_temperature),
+            "stepSecondsEn": float(dictation_ai_step_seconds_en),
+            "windowSecondsEn": float(dictation_ai_window_seconds_en),
+            "commitLagSecondsEn": float(dictation_ai_commit_lag_seconds_en),
+            "beamSizeEn": int(dictation_ai_beam_size_en),
+            "maxNewTokensEn": int(dictation_ai_max_new_tokens_en),
+            "temperatureEn": float(dictation_ai_temperature_en),
+            "stepSecondsKo": float(dictation_ai_step_seconds_ko),
+            "windowSecondsKo": float(dictation_ai_window_seconds_ko),
+            "commitLagSecondsKo": float(dictation_ai_commit_lag_seconds_ko),
+            "beamSizeKo": int(dictation_ai_beam_size_ko),
+            "maxNewTokensKo": int(dictation_ai_max_new_tokens_ko),
+            "temperatureKo": float(dictation_ai_temperature_ko),
+            "stepSecondsZh": float(dictation_ai_step_seconds_zh),
+            "windowSecondsZh": float(dictation_ai_window_seconds_zh),
+            "commitLagSecondsZh": float(dictation_ai_commit_lag_seconds_zh),
+            "beamSizeZh": int(dictation_ai_beam_size_zh),
+            "maxNewTokensZh": int(dictation_ai_max_new_tokens_zh),
+            "temperatureZh": float(dictation_ai_temperature_zh),
+            "postProcessingProfile": str(dictation_ai_post_processing_profile),
+            "sentenceBoundaryBackend": str(dictation_ai_sentence_boundary_backend),
+            "sentenceBoundaryModel": str(dictation_ai_sentence_boundary_model),
+            "sentenceBoundaryBackendEn": str(dictation_ai_sentence_boundary_backend_en),
+            "sentenceBoundaryModelEn": str(dictation_ai_sentence_boundary_model_en),
+            "sentenceBoundaryBackendKo": str(dictation_ai_sentence_boundary_backend_ko),
+            "sentenceBoundaryModelKo": str(dictation_ai_sentence_boundary_model_ko),
+            "sentenceBoundaryBackendZh": str(dictation_ai_sentence_boundary_backend_zh),
+            "sentenceBoundaryModelZh": str(dictation_ai_sentence_boundary_model_zh),
+            "sentenceBoundaryDevice": str(dictation_ai_sentence_boundary_device),
+            "sentenceBoundaryComputeType": str(dictation_ai_sentence_boundary_compute_type),
         },
     }

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from src.domain.contracts.dictation_ai import WHISPER_CONTRACT, whisper_default, whisper_defaults
+from src.domain.contracts.dictation_ai import DICTATION_AI_CONTRACT, dictation_ai_default, dictation_ai_defaults
 
-WHISPER_DEFAULTS = whisper_defaults()
+DICTATION_AI_DEFAULTS = dictation_ai_defaults()
 
-__all__ = ["WHISPER_CONTRACT", "WHISPER_DEFAULTS", "whisper_default", "whisper_defaults"]
+__all__ = ["DICTATION_AI_CONTRACT", "DICTATION_AI_DEFAULTS", "dictation_ai_default", "dictation_ai_defaults"]

@@ -336,7 +336,7 @@ Linux Docker 정책:
 - 전사/번역 창에는 복사용 텍스트만 표시합니다. 시간, `[ko]` 같은 언어 태그, `전사 결과 없음` 같은 추적 로그는 표시하지 않습니다.
 - stdout/stderr 로그에는 시간 prefix와 함께 모델 로딩, 입력 장치, chunk 처리, 오류 상태가 출력됩니다.
 - 받아쓰기 AI 실행은 STT 모델, 번역 모델, STT 결과 문장 경계 처리 모델 준비가 모두 끝난 뒤 입력 장치를 열고 전사를 시작합니다. 모델 다운로드는 Serve 시작 전 캐시 검사와 모델 다운로드 안내창에서만 수행하며, Serve 런타임은 로컬 캐시만 사용합니다.
-- 전사 창의 위치와 크기는 `setting.json`의 `meta.whisperWindowGeometry`, 번역 창의 위치와 크기는 `meta.whisperTranslationWindowGeometry`에 저장되고 다음 실행 때 재사용됩니다.
+- 전사 창의 위치와 크기는 `setting.json`의 `meta.dictationAiWindowGeometry`, 번역 창의 위치와 크기는 `meta.dictationAiTranslationWindowGeometry`에 저장되고 다음 실행 때 재사용됩니다.
 - 설정 GUI 자체의 위치와 크기는 `meta.windowGeometry`, 카메라 미리보기 창은 `meta.previewWindowGeometry`, 설정 모달은 `meta.audioTuneWindowGeometry`/`meta.audioGateTestWindowGeometry`/`meta.inputMeterWindowGeometry`로 `JSON 저장` 시 `setting.json`에 저장됩니다.
 
 모델/언어 설정:
@@ -574,7 +574,7 @@ python3 -m unittest tests.unit.test_dictation_ai_performance_tracking
       "minVoiceBandRatio": 0.5
     }
   },
-  "whisper": {
+  "dictationAi": {
     "enabled": true,
     "inputDevice": "alsa_input.pci-0000_00_1f.3-platform-skl_hda_dsp_generic.HiFi__hw_sofhdadsp_6__source",
     "backend": "faster-whisper",

@@ -45,7 +45,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from src.tools.config_builder import build_config
-from src.domain.dictation_ai_defaults import whisper_default, whisper_defaults
+from src.domain.dictation_ai_defaults import dictation_ai_default, dictation_ai_defaults
 from src.tools.config_io import discover_camera_mode_options, discover_cameras, write_config
 from src.audio.gate import AudioGateConfig, NoiseGate
 from scripts.config.audio_devices import (
@@ -80,17 +80,17 @@ from scripts.config.io_tab import build_io_tab
 from scripts.config.segmentation_tab import build_segmentation_tab
 from scripts.config.dictation_ai_tab import build_whisper_tab
 from scripts.config.dictation_ai_options import (
-    whisper_language_display_from_raw as _whisper_language_display_from_raw,
-    whisper_language_raw_from_display as _whisper_language_raw_from_display,
-    whisper_sentence_boundary_model_options as _whisper_sentence_boundary_model_options,
-    whisper_stt_backend_options as _whisper_stt_backend_options,
-    whisper_stt_backend_runtime_option_keys as _whisper_stt_backend_runtime_option_keys,
-    whisper_stt_model_options as _whisper_stt_model_options,
-    whisper_translation_backend_options_for_target as _whisper_translation_backend_options_for_target,
-    whisper_translation_model_options as _whisper_translation_model_options,
-    whisper_translation_target_display_from_raw as _whisper_translation_target_display_from_raw,
-    whisper_translation_target_options_for_backend as _whisper_translation_target_options_for_backend,
-    whisper_translation_target_raw_from_display as _whisper_translation_target_raw_from_display,
+    dictation_ai_language_display_from_raw as _dictation_ai_language_display_from_raw,
+    dictation_ai_language_raw_from_display as _dictation_ai_language_raw_from_display,
+    dictation_ai_sentence_boundary_model_options as _dictation_ai_sentence_boundary_model_options,
+    dictation_ai_stt_backend_options as _dictation_ai_stt_backend_options,
+    dictation_ai_stt_backend_runtime_option_keys as _dictation_ai_stt_backend_runtime_option_keys,
+    dictation_ai_stt_model_options as _dictation_ai_stt_model_options,
+    dictation_ai_translation_backend_options_for_target as _dictation_ai_translation_backend_options_for_target,
+    dictation_ai_translation_model_options as _dictation_ai_translation_model_options,
+    dictation_ai_translation_target_display_from_raw as _dictation_ai_translation_target_display_from_raw,
+    dictation_ai_translation_target_options_for_backend as _dictation_ai_translation_target_options_for_backend,
+    dictation_ai_translation_target_raw_from_display as _dictation_ai_translation_target_raw_from_display,
 )
 
 
@@ -129,9 +129,9 @@ DEFAULT_WINDOW_GEOMETRY_META = {
     "audioTuneWindowGeometry": "640x480+100+100",
     "audioGateTestWindowGeometry": "640x480+120+120",
     "inputMeterWindowGeometry": "640x480+140+140",
-    "whisperWindowGeometry": "780x420+50+119",
-    "whisperTranslationWindowGeometry": "780x420+860+119",
-    "whisperModelDownloadWindowGeometry": "720x420+160+160",
+    "dictationAiWindowGeometry": "780x420+50+119",
+    "dictationAiTranslationWindowGeometry": "780x420+860+119",
+    "dictationAiModelDownloadWindowGeometry": "720x420+160+160",
 }
 MIN_WINDOW_WIDTH = 640
 MIN_WINDOW_HEIGHT = 480
@@ -555,18 +555,18 @@ class ConfigGui:
         self._serve_stop_btn: ttk.Button | None = None
         self._serve_output_thread: threading.Thread | None = None
         self._serve_stop_requested = False
-        self._whisper_model_download_process: subprocess.Popen[str] | None = None
-        self._whisper_model_download_thread: threading.Thread | None = None
-        self._whisper_model_download_btn: ttk.Button | None = None
-        self._whisper_model_download_progress: ttk.Progressbar | None = None
-        self._whisper_model_download_window: tk.Toplevel | None = None
-        self._whisper_model_download_log_text: tk.Text | None = None
-        self._whisper_model_download_on_success: Callable[[], None] | None = None
-        self._whisper_model_download_cancelled = False
-        self._whisper_model_download_status_var = tk.StringVar(
+        self._dictation_ai_model_download_process: subprocess.Popen[str] | None = None
+        self._dictation_ai_model_download_thread: threading.Thread | None = None
+        self._dictation_ai_model_download_btn: ttk.Button | None = None
+        self._dictation_ai_model_download_progress: ttk.Progressbar | None = None
+        self._dictation_ai_model_download_window: tk.Toplevel | None = None
+        self._dictation_ai_model_download_log_text: tk.Text | None = None
+        self._dictation_ai_model_download_on_success: Callable[[], None] | None = None
+        self._dictation_ai_model_download_cancelled = False
+        self._dictation_ai_model_download_status_var = tk.StringVar(
             value=self._tr("status.dictation_ai_model_download_idle", "모델 다운로드 대기 중")
         )
-        self._whisper_model_download_status_label: ttk.Label | None = None
+        self._dictation_ai_model_download_status_label: ttk.Label | None = None
         self._language_var = tk.StringVar(value=self._lang)
         self._language_var.trace_add("write", lambda *_args: self._on_language_changed())
         self._language_label: ttk.Label | None = None
@@ -607,45 +607,57 @@ class ConfigGui:
 
     def _register_hidden_whisper_vars(self) -> None:
         defaults = self._build_video_defaults()
-        for key in (
-            "whisper_sentence_boundary_device",
-            "whisper_sentence_boundary_compute_type",
-        ):
+        hidden_keys = [
+            "dictation_ai_sentence_boundary_device",
+            "dictation_ai_sentence_boundary_compute_type",
+        ]
+        for lang in ("en", "ko", "zh"):
+            hidden_keys.extend(
+                [
+                    f"dictation_ai_translation_backend_{lang}",
+                    f"dictation_ai_translation_model_{lang}",
+                    f"dictation_ai_translation_device_{lang}",
+                    f"dictation_ai_translation_compute_type_{lang}",
+                    f"dictation_ai_translation_beam_size_{lang}",
+                    f"dictation_ai_translation_max_new_tokens_{lang}",
+                ]
+            )
+        for key in hidden_keys:
             if key not in self.vars:
                 self.vars[key] = tk.StringVar(value=str(defaults[key]))
 
     def _default_whisper_runtime_for_language(self, language: str) -> dict[str, float]:
         suffix = {"en": "En", "ko": "Ko", "zh": "Zh"}[language]
         return {
-            "stepSeconds": float(whisper_default(f"stepSeconds{suffix}")),
-            "windowSeconds": float(whisper_default(f"windowSeconds{suffix}")),
-            "commitLagSeconds": float(whisper_default(f"commitLagSeconds{suffix}")),
-            "beamSize": float(whisper_default(f"beamSize{suffix}")),
-            "maxNewTokens": float(whisper_default(f"maxNewTokens{suffix}")),
-            "temperature": float(whisper_default(f"temperature{suffix}")),
+            "stepSeconds": float(dictation_ai_default(f"stepSeconds{suffix}")),
+            "windowSeconds": float(dictation_ai_default(f"windowSeconds{suffix}")),
+            "commitLagSeconds": float(dictation_ai_default(f"commitLagSeconds{suffix}")),
+            "beamSize": float(dictation_ai_default(f"beamSize{suffix}")),
+            "maxNewTokens": float(dictation_ai_default(f"maxNewTokens{suffix}")),
+            "temperature": float(dictation_ai_default(f"temperature{suffix}")),
         }
 
     def _current_whisper_runtime_values(self) -> dict[str, float]:
         return {
-            "stepSeconds": float(self.vars["whisper_step_seconds"].get()),
-            "windowSeconds": float(self.vars["whisper_window_seconds"].get()),
-            "commitLagSeconds": float(self.vars["whisper_commit_lag_seconds"].get()),
-            "beamSize": float(self.vars["whisper_beam_size"].get()),
-            "maxNewTokens": float(self.vars["whisper_max_new_tokens"].get()),
-            "temperature": float(self.vars["whisper_temperature"].get()),
+            "stepSeconds": float(self.vars["dictation_ai_step_seconds"].get()),
+            "windowSeconds": float(self.vars["dictation_ai_window_seconds"].get()),
+            "commitLagSeconds": float(self.vars["dictation_ai_commit_lag_seconds"].get()),
+            "beamSize": float(self.vars["dictation_ai_beam_size"].get()),
+            "maxNewTokens": float(self.vars["dictation_ai_max_new_tokens"].get()),
+            "temperature": float(self.vars["dictation_ai_temperature"].get()),
         }
 
     def _set_whisper_runtime_values(self, values: dict[str, float]) -> None:
-        self._set_var("whisper_chunk_seconds", values["windowSeconds"])
-        self._set_var("whisper_step_seconds", values["stepSeconds"])
-        self._set_var("whisper_window_seconds", values["windowSeconds"])
-        self._set_var("whisper_commit_lag_seconds", values["commitLagSeconds"])
-        self._set_var("whisper_beam_size", values["beamSize"])
-        self._set_var("whisper_max_new_tokens", values["maxNewTokens"])
-        self._set_var("whisper_temperature", values["temperature"])
+        self._set_var("dictation_ai_chunk_seconds", values["windowSeconds"])
+        self._set_var("dictation_ai_step_seconds", values["stepSeconds"])
+        self._set_var("dictation_ai_window_seconds", values["windowSeconds"])
+        self._set_var("dictation_ai_commit_lag_seconds", values["commitLagSeconds"])
+        self._set_var("dictation_ai_beam_size", values["beamSize"])
+        self._set_var("dictation_ai_max_new_tokens", values["maxNewTokens"])
+        self._set_var("dictation_ai_temperature", values["temperature"])
 
     def _store_visible_whisper_runtime_for_language(self, language: str | None = None) -> None:
-        if not self.vars or "whisper_window_seconds" not in self.vars:
+        if not self.vars or "dictation_ai_window_seconds" not in self.vars:
             return
         lang = language or self._whisper_selected_stt_language
         if lang not in {"en", "ko", "zh"}:
@@ -836,15 +848,15 @@ class ConfigGui:
         self._serve_output_thread = threading.Thread(target=self._serve_output_worker, args=(self._serve_process,), daemon=True)
         self._serve_output_thread.start()
 
-    def _whisper_enabled_in_config(self, config: dict) -> bool:
-        whisper_cfg = config.get("whisper") if isinstance(config.get("whisper"), dict) else {}
-        return bool(whisper_cfg.get("enabled"))
+    def _dictation_ai_enabled_in_config(self, config: dict) -> bool:
+        dictation_ai_cfg = config.get("dictationAi") if isinstance(config.get("dictationAi"), dict) else {}
+        return bool(dictation_ai_cfg.get("enabled"))
 
-    def _check_whisper_models_ready_for_serve(self, config: dict, serve_cmd: list[str]) -> bool:
-        if not self._whisper_enabled_in_config(config):
-            _log("Dictation AI model cache check skipped: whisper.enabled=false")
+    def _check_dictation_ai_models_ready_for_serve(self, config: dict, serve_cmd: list[str]) -> bool:
+        if not self._dictation_ai_enabled_in_config(config):
+            _log("Dictation AI model cache check skipped: dictationAi.enabled=false")
             return True
-        check_cmd = self._build_whisper_model_download_command(config, check_only=True)
+        check_cmd = self._build_dictation_ai_model_download_command(config, check_only=True)
         print(f"[avc] Dictation AI model cache check starting: {' '.join(check_cmd)}", flush=True)
         try:
             result = subprocess.run(
@@ -859,7 +871,7 @@ class ConfigGui:
         except Exception as exc:
             output = f"Dictation AI model cache check failed to run: {exc}"
             print(f"[avc] {output}", flush=True)
-            self._show_whisper_model_download_dialog(config, serve_cmd, output)
+            self._show_dictation_ai_model_download_dialog(config, serve_cmd, output)
             return False
         output = result.stdout or ""
         for line in output.splitlines():
@@ -868,10 +880,10 @@ class ConfigGui:
             print("[avc] Dictation AI model cache check ok", flush=True)
             return True
         print(f"[avc] Dictation AI model cache check missing models: code={result.returncode}", flush=True)
-        self._show_whisper_model_download_dialog(config, serve_cmd, output)
+        self._show_dictation_ai_model_download_dialog(config, serve_cmd, output)
         return False
 
-    def _show_whisper_model_download_dialog_for_current_config(self) -> None:
+    def _show_dictation_ai_model_download_dialog_for_current_config(self) -> None:
         try:
             config = self._build_config()
             self._apply_persistent_meta(config)
@@ -880,21 +892,21 @@ class ConfigGui:
             self._show_error(self._tr("msg.validation_error.title", "Validation error"), str(exc))
             return
         print("[avc] Dictation AI selected model download dialog opened", flush=True)
-        self._show_whisper_model_download_dialog(config, None, "")
+        self._show_dictation_ai_model_download_dialog(config, None, "")
 
-    def _show_whisper_model_download_dialog(self, config: dict, serve_cmd: list[str] | None, check_output: str) -> None:
-        if self._whisper_model_download_window is not None and self._whisper_model_download_window.winfo_exists():
-            self._whisper_model_download_window.lift()
+    def _show_dictation_ai_model_download_dialog(self, config: dict, serve_cmd: list[str] | None, check_output: str) -> None:
+        if self._dictation_ai_model_download_window is not None and self._dictation_ai_model_download_window.winfo_exists():
+            self._dictation_ai_model_download_window.lift()
             return
         window = tk.Toplevel(self.root)
-        self._whisper_model_download_window = window
+        self._dictation_ai_model_download_window = window
         window.title(self._tr("title.dictation_ai_model_download", "받아쓰기 AI 모델 다운로드"))
         window.transient(self.root)
         window.columnconfigure(0, weight=1)
         window.rowconfigure(2, weight=1)
-        self._restore_named_window_geometry(window, "whisperModelDownloadWindowGeometry")
-        window.bind("<Configure>", self._on_whisper_model_download_configure)
-        window.protocol("WM_DELETE_WINDOW", lambda: self._close_whisper_model_download_dialog(False))
+        self._restore_named_window_geometry(window, "dictationAiModelDownloadWindowGeometry")
+        window.bind("<Configure>", self._on_dictation_ai_model_download_configure)
+        window.protocol("WM_DELETE_WINDOW", lambda: self._close_dictation_ai_model_download_dialog(False))
 
         ttk.Label(
             window,
@@ -907,20 +919,20 @@ class ConfigGui:
             wraplength=680,
         ).grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 6))
 
-        self._whisper_model_download_progress = ttk.Progressbar(window, mode="determinate", maximum=100)
-        self._whisper_model_download_progress.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 6))
+        self._dictation_ai_model_download_progress = ttk.Progressbar(window, mode="determinate", maximum=100)
+        self._dictation_ai_model_download_progress.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 6))
 
         log_text = tk.Text(window, height=12, wrap="word")
         log_text.grid(row=2, column=0, sticky="nsew", padx=12, pady=(0, 6))
         if check_output.strip():
             log_text.insert("end", check_output.strip() + "\n")
         log_text.configure(state="disabled")
-        self._whisper_model_download_log_text = log_text
+        self._dictation_ai_model_download_log_text = log_text
 
-        self._whisper_model_download_status_var.set(
+        self._dictation_ai_model_download_status_var.set(
             self._tr("status.dictation_ai_model_download_required", "모델 다운로드가 필요합니다.")
         )
-        ttk.Label(window, textvariable=self._whisper_model_download_status_var, foreground="#666", wraplength=680).grid(
+        ttk.Label(window, textvariable=self._dictation_ai_model_download_status_var, foreground="#666", wraplength=680).grid(
             row=3, column=0, sticky="ew", padx=12, pady=(0, 6)
         )
 
@@ -929,26 +941,26 @@ class ConfigGui:
         button_frame.columnconfigure(0, weight=1)
         button_frame.columnconfigure(1, weight=0)
         button_frame.columnconfigure(2, weight=0)
-        self._whisper_model_download_btn = ttk.Button(
+        self._dictation_ai_model_download_btn = ttk.Button(
             button_frame,
             text=self._tr("button.dictation_ai_model_download", "모델 다운로드"),
-            command=lambda: self._start_whisper_model_download(
+            command=lambda: self._start_dictation_ai_model_download(
                 config=config,
                 on_success=(lambda: self._launch_serve_command(serve_cmd)) if serve_cmd is not None else None,
             ),
         )
-        self._whisper_model_download_btn.grid(row=0, column=1, sticky="e", padx=(4, 4))
+        self._dictation_ai_model_download_btn.grid(row=0, column=1, sticky="e", padx=(4, 4))
         ttk.Button(
             button_frame,
             text=self._tr("button.cancel", "취소"),
-            command=lambda: self._close_whisper_model_download_dialog(False),
+            command=lambda: self._close_dictation_ai_model_download_dialog(False),
         ).grid(row=0, column=2, sticky="e")
 
-    def _close_whisper_model_download_dialog(self, downloaded: bool) -> None:
-        process = self._whisper_model_download_process
+    def _close_dictation_ai_model_download_dialog(self, downloaded: bool) -> None:
+        process = self._dictation_ai_model_download_process
         if process is not None and process.poll() is None:
-            self._whisper_model_download_cancelled = True
-            self._set_whisper_model_download_status(
+            self._dictation_ai_model_download_cancelled = True
+            self._set_dictation_ai_model_download_status(
                 self._tr("status.dictation_ai_model_download_cancelled", "모델 다운로드를 취소했습니다.")
             )
             try:
@@ -960,14 +972,14 @@ class ConfigGui:
                     process.terminate()
                 except Exception:
                     pass
-        window = self._whisper_model_download_window
+        window = self._dictation_ai_model_download_window
         if window is not None:
-            self._remember_named_window_geometry("whisperModelDownloadWindowGeometry", window)
-        self._whisper_model_download_window = None
-        self._whisper_model_download_btn = None
-        self._whisper_model_download_progress = None
-        self._whisper_model_download_log_text = None
-        self._whisper_model_download_on_success = None
+            self._remember_named_window_geometry("dictationAiModelDownloadWindowGeometry", window)
+        self._dictation_ai_model_download_window = None
+        self._dictation_ai_model_download_btn = None
+        self._dictation_ai_model_download_progress = None
+        self._dictation_ai_model_download_log_text = None
+        self._dictation_ai_model_download_on_success = None
         if window is not None:
             try:
                 window.destroy()
@@ -1026,16 +1038,16 @@ class ConfigGui:
             )
             return
 
-        if not self._check_whisper_models_ready_for_serve(config, cmd):
+        if not self._check_dictation_ai_models_ready_for_serve(config, cmd):
             return
         self._launch_serve_command(cmd)
 
-    def _set_whisper_model_download_status(self, message: str) -> None:
-        self._whisper_model_download_status_var.set(message)
+    def _set_dictation_ai_model_download_status(self, message: str) -> None:
+        self._dictation_ai_model_download_status_var.set(message)
 
-    def _on_whisper_model_download_line(self, message: str) -> None:
-        self._set_whisper_model_download_status(message)
-        log_text = self._whisper_model_download_log_text
+    def _on_dictation_ai_model_download_line(self, message: str) -> None:
+        self._set_dictation_ai_model_download_status(message)
+        log_text = self._dictation_ai_model_download_log_text
         if log_text is not None:
             try:
                 log_text.configure(state="normal")
@@ -1044,7 +1056,7 @@ class ConfigGui:
                 log_text.configure(state="disabled")
             except Exception:
                 pass
-        progress = self._whisper_model_download_progress
+        progress = self._dictation_ai_model_download_progress
         if progress is None:
             return
         lower = message.lower()
@@ -1073,7 +1085,7 @@ class ConfigGui:
             value = 100
         progress.configure(value=value)
 
-    def _build_whisper_model_download_command(self, config: dict | None = None, *, check_only: bool = False) -> list[str]:
+    def _build_dictation_ai_model_download_command(self, config: dict | None = None, *, check_only: bool = False) -> list[str]:
         if config is None:
             config = self._build_config(validate_audio=False)
         whisper_cfg = config.get("whisper") if isinstance(config.get("whisper"), dict) else {}
@@ -1135,35 +1147,35 @@ class ConfigGui:
             cmd.append("--skip-translation")
         return cmd
 
-    def _start_whisper_model_download(self, *, config: dict | None = None, on_success: Callable[[], None] | None = None) -> None:
-        process = self._whisper_model_download_process
+    def _start_dictation_ai_model_download(self, *, config: dict | None = None, on_success: Callable[[], None] | None = None) -> None:
+        process = self._dictation_ai_model_download_process
         if process is not None and process.poll() is None:
-            self._set_whisper_model_download_status(
+            self._set_dictation_ai_model_download_status(
                 self._tr("status.dictation_ai_model_download_running", "모델 다운로드가 이미 진행 중입니다.")
             )
             return
-        self._whisper_model_download_cancelled = False
+        self._dictation_ai_model_download_cancelled = False
         self._sync_whisper_runtime_options()
-        self._sync_whisper_translation_backend_options()
+        self._sync_dictation_ai_translation_backend_options()
         try:
-            cmd = self._build_whisper_model_download_command(config)
+            cmd = self._build_dictation_ai_model_download_command(config)
         except Exception as exc:
             message = f"Dictation AI model download command build failed: {exc}"
             print(f"[avc] {message}", flush=True)
             self._show_error(self._tr("msg.dictation_ai_model_download_error.title", "모델 다운로드 오류"), str(exc))
             return
 
-        self._whisper_model_download_on_success = on_success
+        self._dictation_ai_model_download_on_success = on_success
         print(f"[avc] Dictation AI model download starting: {' '.join(cmd)}", flush=True)
-        self._set_whisper_model_download_status(
+        self._set_dictation_ai_model_download_status(
             self._tr("status.dictation_ai_model_download_starting", "모델 다운로드를 시작합니다.")
         )
-        if self._whisper_model_download_btn is not None:
-            self._whisper_model_download_btn.state(["disabled"])
-        if self._whisper_model_download_progress is not None:
-            self._whisper_model_download_progress.configure(value=5)
+        if self._dictation_ai_model_download_btn is not None:
+            self._dictation_ai_model_download_btn.state(["disabled"])
+        if self._dictation_ai_model_download_progress is not None:
+            self._dictation_ai_model_download_progress.configure(value=5)
         try:
-            self._whisper_model_download_process = subprocess.Popen(
+            self._dictation_ai_model_download_process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -1173,24 +1185,24 @@ class ConfigGui:
                 env=dict(os.environ),
             )
         except Exception as exc:
-            self._whisper_model_download_process = None
-            if self._whisper_model_download_progress is not None:
-                self._whisper_model_download_progress.configure(value=0)
-            if self._whisper_model_download_btn is not None:
-                self._whisper_model_download_btn.state(["!disabled"])
+            self._dictation_ai_model_download_process = None
+            if self._dictation_ai_model_download_progress is not None:
+                self._dictation_ai_model_download_progress.configure(value=0)
+            if self._dictation_ai_model_download_btn is not None:
+                self._dictation_ai_model_download_btn.state(["!disabled"])
             print(f"[avc] Dictation AI model download start failed: {exc}", flush=True)
             self._show_error(self._tr("msg.dictation_ai_model_download_error.title", "모델 다운로드 오류"), str(exc))
-            self._set_whisper_model_download_status(str(exc))
+            self._set_dictation_ai_model_download_status(str(exc))
             return
 
-        self._whisper_model_download_thread = threading.Thread(
-            target=self._whisper_model_download_worker,
-            args=(self._whisper_model_download_process,),
+        self._dictation_ai_model_download_thread = threading.Thread(
+            target=self._dictation_ai_model_download_worker,
+            args=(self._dictation_ai_model_download_process,),
             daemon=True,
         )
-        self._whisper_model_download_thread.start()
+        self._dictation_ai_model_download_thread.start()
 
-    def _whisper_model_download_worker(self, process: subprocess.Popen[str]) -> None:
+    def _dictation_ai_model_download_worker(self, process: subprocess.Popen[str]) -> None:
         last_line = ""
         try:
             if process.stdout is not None:
@@ -1201,7 +1213,7 @@ class ConfigGui:
                     last_line = clean_line
                     print(clean_line, flush=True)
                     try:
-                        self.root.after(0, lambda msg=clean_line: self._on_whisper_model_download_line(msg))
+                        self.root.after(0, lambda msg=clean_line: self._on_dictation_ai_model_download_line(msg))
                     except RuntimeError:
                         pass
             return_code = process.wait()
@@ -1210,29 +1222,29 @@ class ConfigGui:
             print(f"[avc] Dictation AI model download watcher failed: {exc}", flush=True)
             return_code = process.returncode if process is not None else 1
         try:
-            self.root.after(0, lambda code=return_code, msg=last_line: self._whisper_model_download_finished(code, msg))
+            self.root.after(0, lambda code=return_code, msg=last_line: self._dictation_ai_model_download_finished(code, msg))
         except RuntimeError:
-            self._whisper_model_download_process = None
-            self._whisper_model_download_thread = None
+            self._dictation_ai_model_download_process = None
+            self._dictation_ai_model_download_thread = None
 
-    def _whisper_model_download_finished(self, return_code: int | None, last_line: str) -> None:
-        self._whisper_model_download_process = None
-        self._whisper_model_download_thread = None
-        if self._whisper_model_download_progress is not None:
-            self._whisper_model_download_progress.configure(value=100 if return_code == 0 else 0)
-        if self._whisper_model_download_btn is not None:
-            self._whisper_model_download_btn.state(["!disabled"])
-        if self._whisper_model_download_cancelled:
-            self._whisper_model_download_cancelled = False
-            self._set_whisper_model_download_status(
+    def _dictation_ai_model_download_finished(self, return_code: int | None, last_line: str) -> None:
+        self._dictation_ai_model_download_process = None
+        self._dictation_ai_model_download_thread = None
+        if self._dictation_ai_model_download_progress is not None:
+            self._dictation_ai_model_download_progress.configure(value=100 if return_code == 0 else 0)
+        if self._dictation_ai_model_download_btn is not None:
+            self._dictation_ai_model_download_btn.state(["!disabled"])
+        if self._dictation_ai_model_download_cancelled:
+            self._dictation_ai_model_download_cancelled = False
+            self._set_dictation_ai_model_download_status(
                 self._tr("status.dictation_ai_model_download_cancelled", "모델 다운로드가 취소되었습니다.")
             )
             return
         if return_code == 0:
             message = self._tr("status.dictation_ai_model_download_done", "모델 다운로드가 완료되었습니다.")
             print(f"[avc] Dictation AI model download finished", flush=True)
-            on_success = self._whisper_model_download_on_success
-            self._close_whisper_model_download_dialog(True)
+            on_success = self._dictation_ai_model_download_on_success
+            self._close_dictation_ai_model_download_dialog(True)
             if on_success is not None:
                 on_success()
             return
@@ -1246,7 +1258,7 @@ class ConfigGui:
                 running=False,
                 status_key="status.serve_stopped",
             )
-        self._set_whisper_model_download_status(message)
+        self._set_dictation_ai_model_download_status(message)
 
     def _serve_output_worker(self, process: subprocess.Popen[str]) -> None:
         try:
@@ -1341,8 +1353,8 @@ class ConfigGui:
             return
         self._schedule_save_window_geometry_meta()
 
-    def _on_whisper_model_download_configure(self, event) -> None:
-        window = getattr(self, "_whisper_model_download_window", None)
+    def _on_dictation_ai_model_download_configure(self, event) -> None:
+        window = getattr(self, "_dictation_ai_model_download_window", None)
         if window is None or event.widget != window:
             return
         self._schedule_save_window_geometry_meta()
@@ -1462,7 +1474,7 @@ class ConfigGui:
             self._remember_named_window_geometry("audioTuneWindowGeometry", getattr(self, "_audio_tune_window", None))
             self._remember_named_window_geometry("audioGateTestWindowGeometry", getattr(self, "_audio_gate_test_window", None))
             self._remember_named_window_geometry("inputMeterWindowGeometry", getattr(self, "_audio_input_meter_window", None))
-            self._remember_named_window_geometry("whisperModelDownloadWindowGeometry", getattr(self, "_whisper_model_download_window", None))
+            self._remember_named_window_geometry("dictationAiModelDownloadWindowGeometry", getattr(self, "_dictation_ai_model_download_window", None))
         except Exception as exc:
             _log(f"ERROR [Window geometry capture] {exc}")
 
@@ -1657,26 +1669,26 @@ class ConfigGui:
         seg_backend_widget = self._widgets.get("seg_backend")
         if seg_backend_widget is not None:
             seg_backend_widget.bind("<<ComboboxSelected>>", self._on_seg_backend_changed)
-        whisper_translation_backend_widget = self._widgets.get("whisper_translation_backend")
-        if whisper_translation_backend_widget is not None:
-            whisper_translation_backend_widget.bind("<<ComboboxSelected>>", self._on_whisper_translation_backend_changed)
-        whisper_translation_target_widget = self._widgets.get("whisper_translation_target_language")
-        if whisper_translation_target_widget is not None:
-            whisper_translation_target_widget.bind("<<ComboboxSelected>>", self._on_whisper_translation_target_changed)
+        dictation_ai_translation_backend_widget = self._widgets.get("dictation_ai_translation_backend")
+        if dictation_ai_translation_backend_widget is not None:
+            dictation_ai_translation_backend_widget.bind("<<ComboboxSelected>>", self._on_dictation_ai_translation_backend_changed)
+        dictation_ai_translation_target_widget = self._widgets.get("dictation_ai_translation_target_language")
+        if dictation_ai_translation_target_widget is not None:
+            dictation_ai_translation_target_widget.bind("<<ComboboxSelected>>", self._on_dictation_ai_translation_target_changed)
         for key in (
-            "whisper_language",
-            "whisper_backend",
-            "whisper_stt_backend_en",
-            "whisper_stt_backend_ko",
-            "whisper_stt_backend_zh",
-            "whisper_sentence_boundary_backend",
+            "dictation_ai_language",
+            "dictation_ai_backend",
+            "dictation_ai_stt_backend_en",
+            "dictation_ai_stt_backend_ko",
+            "dictation_ai_stt_backend_zh",
+            "dictation_ai_sentence_boundary_backend",
         ):
             widget = self._widgets.get(key)
             if widget is not None:
                 widget.bind("<<ComboboxSelected>>", self._on_whisper_runtime_selection_changed)
         self._on_seg_backend_changed()
         self._sync_whisper_runtime_options()
-        self._sync_whisper_translation_backend_options()
+        self._sync_dictation_ai_translation_backend_options()
         self._refresh_localized_texts()
         self._schedule_update_scrollbar_state()
 
@@ -1995,7 +2007,7 @@ class ConfigGui:
             self.vars["bg_image"].set(selected)
 
     def _build_video_defaults(self) -> dict[str, float | int | str]:
-        whisper = whisper_defaults()
+        whisper = dictation_ai_defaults()
         is_macos = platform.system() == "Darwin"
         cameras = discover_cameras()
         camera_values = [c["devicePath"] for c in cameras] or (["0"] if is_macos else ["/dev/video0"])
@@ -2064,82 +2076,82 @@ class ConfigGui:
             "face_enhance_min_size_ratio": 0.12,
             "face_enhance_edge_dither": 0.25,
             "face_deidentify_enabled": False,
-            "whisper_enabled": whisper["enabled"],
-            "whisper_input_device": _audio_default_input_device(),
-            "whisper_backend": whisper["backend"],
-            "whisper_model": whisper["model"],
-            "whisper_stt_backend_en": whisper["sttBackendEn"],
-            "whisper_stt_model_en": whisper["sttModelEn"],
-            "whisper_stt_backend_ko": whisper["sttBackendKo"],
-            "whisper_stt_model_ko": whisper["sttModelKo"],
-            "whisper_stt_backend_zh": whisper["sttBackendZh"],
-            "whisper_stt_model_zh": whisper["sttModelZh"],
-            "whisper_language": _whisper_language_display_from_raw(whisper["language"]),
-            "whisper_task": whisper["task"],
-            "whisper_translation_enabled": whisper["translationEnabled"],
-            "whisper_show_stt_status_window": whisper["showSttStatusWindow"],
-            "whisper_translation_backend": whisper["translationBackend"],
-            "whisper_translation_target_language": _whisper_translation_target_display_from_raw(whisper["translationTargetLanguage"]),
-            "whisper_translation_model": whisper["translationModel"],
-            "whisper_translation_device": whisper["translationDevice"],
-            "whisper_translation_compute_type": whisper["translationComputeType"],
-            "whisper_translation_beam_size": whisper["translationBeamSize"],
-            "whisper_translation_max_new_tokens": whisper["translationMaxNewTokens"],
-            "whisper_translation_backend_en": whisper["translationBackendEn"],
-            "whisper_translation_model_en": whisper["translationModelEn"],
-            "whisper_translation_device_en": whisper["translationDeviceEn"],
-            "whisper_translation_compute_type_en": whisper["translationComputeTypeEn"],
-            "whisper_translation_beam_size_en": whisper["translationBeamSizeEn"],
-            "whisper_translation_max_new_tokens_en": whisper["translationMaxNewTokensEn"],
-            "whisper_translation_backend_ko": whisper["translationBackendKo"],
-            "whisper_translation_model_ko": whisper["translationModelKo"],
-            "whisper_translation_device_ko": whisper["translationDeviceKo"],
-            "whisper_translation_compute_type_ko": whisper["translationComputeTypeKo"],
-            "whisper_translation_beam_size_ko": whisper["translationBeamSizeKo"],
-            "whisper_translation_max_new_tokens_ko": whisper["translationMaxNewTokensKo"],
-            "whisper_translation_backend_zh": whisper["translationBackendZh"],
-            "whisper_translation_model_zh": whisper["translationModelZh"],
-            "whisper_translation_device_zh": whisper["translationDeviceZh"],
-            "whisper_translation_compute_type_zh": whisper["translationComputeTypeZh"],
-            "whisper_translation_beam_size_zh": whisper["translationBeamSizeZh"],
-            "whisper_translation_max_new_tokens_zh": whisper["translationMaxNewTokensZh"],
-            "whisper_device": whisper["device"],
-            "whisper_compute_type": whisper["computeType"],
-            "whisper_chunk_seconds": whisper["chunkSeconds"],
-            "whisper_step_seconds": whisper["stepSeconds"],
-            "whisper_window_seconds": whisper["windowSeconds"],
-            "whisper_commit_lag_seconds": whisper["commitLagSeconds"],
-            "whisper_beam_size": whisper["beamSize"],
-            "whisper_max_new_tokens": whisper["maxNewTokens"],
-            "whisper_temperature": whisper["temperature"],
-            "whisper_step_seconds_en": whisper["stepSecondsEn"],
-            "whisper_window_seconds_en": whisper["windowSecondsEn"],
-            "whisper_commit_lag_seconds_en": whisper["commitLagSecondsEn"],
-            "whisper_beam_size_en": whisper["beamSizeEn"],
-            "whisper_max_new_tokens_en": whisper["maxNewTokensEn"],
-            "whisper_temperature_en": whisper["temperatureEn"],
-            "whisper_step_seconds_ko": whisper["stepSecondsKo"],
-            "whisper_window_seconds_ko": whisper["windowSecondsKo"],
-            "whisper_commit_lag_seconds_ko": whisper["commitLagSecondsKo"],
-            "whisper_beam_size_ko": whisper["beamSizeKo"],
-            "whisper_max_new_tokens_ko": whisper["maxNewTokensKo"],
-            "whisper_temperature_ko": whisper["temperatureKo"],
-            "whisper_step_seconds_zh": whisper["stepSecondsZh"],
-            "whisper_window_seconds_zh": whisper["windowSecondsZh"],
-            "whisper_commit_lag_seconds_zh": whisper["commitLagSecondsZh"],
-            "whisper_beam_size_zh": whisper["beamSizeZh"],
-            "whisper_max_new_tokens_zh": whisper["maxNewTokensZh"],
-            "whisper_temperature_zh": whisper["temperatureZh"],
-            "whisper_sentence_boundary_backend": whisper["sentenceBoundaryBackend"],
-            "whisper_sentence_boundary_model": whisper["sentenceBoundaryModel"],
-            "whisper_sentence_boundary_backend_en": whisper["sentenceBoundaryBackendEn"],
-            "whisper_sentence_boundary_model_en": whisper["sentenceBoundaryModelEn"],
-            "whisper_sentence_boundary_backend_ko": whisper["sentenceBoundaryBackendKo"],
-            "whisper_sentence_boundary_model_ko": whisper["sentenceBoundaryModelKo"],
-            "whisper_sentence_boundary_backend_zh": whisper["sentenceBoundaryBackendZh"],
-            "whisper_sentence_boundary_model_zh": whisper["sentenceBoundaryModelZh"],
-            "whisper_sentence_boundary_device": whisper["sentenceBoundaryDevice"],
-            "whisper_sentence_boundary_compute_type": whisper["sentenceBoundaryComputeType"],
+            "dictation_ai_enabled": whisper["enabled"],
+            "dictation_ai_input_device": _audio_default_input_device(),
+            "dictation_ai_backend": whisper["backend"],
+            "dictation_ai_model": whisper["model"],
+            "dictation_ai_stt_backend_en": whisper["sttBackendEn"],
+            "dictation_ai_stt_model_en": whisper["sttModelEn"],
+            "dictation_ai_stt_backend_ko": whisper["sttBackendKo"],
+            "dictation_ai_stt_model_ko": whisper["sttModelKo"],
+            "dictation_ai_stt_backend_zh": whisper["sttBackendZh"],
+            "dictation_ai_stt_model_zh": whisper["sttModelZh"],
+            "dictation_ai_language": _dictation_ai_language_display_from_raw(whisper["language"]),
+            "dictation_ai_task": whisper["task"],
+            "dictation_ai_translation_enabled": whisper["translationEnabled"],
+            "dictation_ai_show_stt_status_window": whisper["showSttStatusWindow"],
+            "dictation_ai_translation_backend": whisper["translationBackend"],
+            "dictation_ai_translation_target_language": _dictation_ai_translation_target_display_from_raw(whisper["translationTargetLanguage"]),
+            "dictation_ai_translation_model": whisper["translationModel"],
+            "dictation_ai_translation_device": whisper["translationDevice"],
+            "dictation_ai_translation_compute_type": whisper["translationComputeType"],
+            "dictation_ai_translation_beam_size": whisper["translationBeamSize"],
+            "dictation_ai_translation_max_new_tokens": whisper["translationMaxNewTokens"],
+            "dictation_ai_translation_backend_en": whisper["translationBackendEn"],
+            "dictation_ai_translation_model_en": whisper["translationModelEn"],
+            "dictation_ai_translation_device_en": whisper["translationDeviceEn"],
+            "dictation_ai_translation_compute_type_en": whisper["translationComputeTypeEn"],
+            "dictation_ai_translation_beam_size_en": whisper["translationBeamSizeEn"],
+            "dictation_ai_translation_max_new_tokens_en": whisper["translationMaxNewTokensEn"],
+            "dictation_ai_translation_backend_ko": whisper["translationBackendKo"],
+            "dictation_ai_translation_model_ko": whisper["translationModelKo"],
+            "dictation_ai_translation_device_ko": whisper["translationDeviceKo"],
+            "dictation_ai_translation_compute_type_ko": whisper["translationComputeTypeKo"],
+            "dictation_ai_translation_beam_size_ko": whisper["translationBeamSizeKo"],
+            "dictation_ai_translation_max_new_tokens_ko": whisper["translationMaxNewTokensKo"],
+            "dictation_ai_translation_backend_zh": whisper["translationBackendZh"],
+            "dictation_ai_translation_model_zh": whisper["translationModelZh"],
+            "dictation_ai_translation_device_zh": whisper["translationDeviceZh"],
+            "dictation_ai_translation_compute_type_zh": whisper["translationComputeTypeZh"],
+            "dictation_ai_translation_beam_size_zh": whisper["translationBeamSizeZh"],
+            "dictation_ai_translation_max_new_tokens_zh": whisper["translationMaxNewTokensZh"],
+            "dictation_ai_device": whisper["device"],
+            "dictation_ai_compute_type": whisper["computeType"],
+            "dictation_ai_chunk_seconds": whisper["chunkSeconds"],
+            "dictation_ai_step_seconds": whisper["stepSeconds"],
+            "dictation_ai_window_seconds": whisper["windowSeconds"],
+            "dictation_ai_commit_lag_seconds": whisper["commitLagSeconds"],
+            "dictation_ai_beam_size": whisper["beamSize"],
+            "dictation_ai_max_new_tokens": whisper["maxNewTokens"],
+            "dictation_ai_temperature": whisper["temperature"],
+            "dictation_ai_step_seconds_en": whisper["stepSecondsEn"],
+            "dictation_ai_window_seconds_en": whisper["windowSecondsEn"],
+            "dictation_ai_commit_lag_seconds_en": whisper["commitLagSecondsEn"],
+            "dictation_ai_beam_size_en": whisper["beamSizeEn"],
+            "dictation_ai_max_new_tokens_en": whisper["maxNewTokensEn"],
+            "dictation_ai_temperature_en": whisper["temperatureEn"],
+            "dictation_ai_step_seconds_ko": whisper["stepSecondsKo"],
+            "dictation_ai_window_seconds_ko": whisper["windowSecondsKo"],
+            "dictation_ai_commit_lag_seconds_ko": whisper["commitLagSecondsKo"],
+            "dictation_ai_beam_size_ko": whisper["beamSizeKo"],
+            "dictation_ai_max_new_tokens_ko": whisper["maxNewTokensKo"],
+            "dictation_ai_temperature_ko": whisper["temperatureKo"],
+            "dictation_ai_step_seconds_zh": whisper["stepSecondsZh"],
+            "dictation_ai_window_seconds_zh": whisper["windowSecondsZh"],
+            "dictation_ai_commit_lag_seconds_zh": whisper["commitLagSecondsZh"],
+            "dictation_ai_beam_size_zh": whisper["beamSizeZh"],
+            "dictation_ai_max_new_tokens_zh": whisper["maxNewTokensZh"],
+            "dictation_ai_temperature_zh": whisper["temperatureZh"],
+            "dictation_ai_sentence_boundary_backend": whisper["sentenceBoundaryBackend"],
+            "dictation_ai_sentence_boundary_model": whisper["sentenceBoundaryModel"],
+            "dictation_ai_sentence_boundary_backend_en": whisper["sentenceBoundaryBackendEn"],
+            "dictation_ai_sentence_boundary_model_en": whisper["sentenceBoundaryModelEn"],
+            "dictation_ai_sentence_boundary_backend_ko": whisper["sentenceBoundaryBackendKo"],
+            "dictation_ai_sentence_boundary_model_ko": whisper["sentenceBoundaryModelKo"],
+            "dictation_ai_sentence_boundary_backend_zh": whisper["sentenceBoundaryBackendZh"],
+            "dictation_ai_sentence_boundary_model_zh": whisper["sentenceBoundaryModelZh"],
+            "dictation_ai_sentence_boundary_device": whisper["sentenceBoundaryDevice"],
+            "dictation_ai_sentence_boundary_compute_type": whisper["sentenceBoundaryComputeType"],
         }
 
     def _create_virtual_camera(self) -> None:
@@ -2485,39 +2497,39 @@ class ConfigGui:
             "zh": self._default_whisper_runtime_for_language("zh"),
         }
         for key in (
-            "whisper_enabled",
-            "whisper_input_device",
-            "whisper_backend",
-            "whisper_model",
-            "whisper_language",
-            "whisper_translation_enabled",
-            "whisper_translation_backend",
-            "whisper_show_stt_status_window",
-            "whisper_translation_target_language",
-            "whisper_translation_model",
-            "whisper_translation_device",
-            "whisper_translation_compute_type",
-            "whisper_translation_beam_size",
-            "whisper_translation_max_new_tokens",
-            "whisper_device",
-            "whisper_compute_type",
-            "whisper_chunk_seconds",
-            "whisper_step_seconds",
-            "whisper_window_seconds",
-            "whisper_commit_lag_seconds",
-            "whisper_beam_size",
-            "whisper_max_new_tokens",
-            "whisper_temperature",
-            "whisper_sentence_boundary_backend",
-            "whisper_sentence_boundary_model",
-            "whisper_sentence_boundary_device",
-            "whisper_sentence_boundary_compute_type",
+            "dictation_ai_enabled",
+            "dictation_ai_input_device",
+            "dictation_ai_backend",
+            "dictation_ai_model",
+            "dictation_ai_language",
+            "dictation_ai_translation_enabled",
+            "dictation_ai_translation_backend",
+            "dictation_ai_show_stt_status_window",
+            "dictation_ai_translation_target_language",
+            "dictation_ai_translation_model",
+            "dictation_ai_translation_device",
+            "dictation_ai_translation_compute_type",
+            "dictation_ai_translation_beam_size",
+            "dictation_ai_translation_max_new_tokens",
+            "dictation_ai_device",
+            "dictation_ai_compute_type",
+            "dictation_ai_chunk_seconds",
+            "dictation_ai_step_seconds",
+            "dictation_ai_window_seconds",
+            "dictation_ai_commit_lag_seconds",
+            "dictation_ai_beam_size",
+            "dictation_ai_max_new_tokens",
+            "dictation_ai_temperature",
+            "dictation_ai_sentence_boundary_backend",
+            "dictation_ai_sentence_boundary_model",
+            "dictation_ai_sentence_boundary_device",
+            "dictation_ai_sentence_boundary_compute_type",
         ):
             self._set_var(key, defaults.get(key))
-        selected_language = _whisper_language_raw_from_display(self.vars["whisper_language"].get())
+        selected_language = _dictation_ai_language_raw_from_display(self.vars["dictation_ai_language"].get())
         self._whisper_selected_stt_language = selected_language
         self._load_visible_whisper_runtime_for_language(selected_language)
-        self._sync_whisper_translation_backend_options()
+        self._sync_dictation_ai_translation_backend_options()
 
     def _load_existing_config(self):
         config_path = Path(self.output_path).expanduser()
@@ -2555,7 +2567,7 @@ class ConfigGui:
         crop_cfg = raw.get("crop") or {}
         audio_cfg = raw.get("audio") or {}
         face_cfg = raw.get("faceEnhance") or {}
-        whisper_cfg = raw.get("whisper") or {}
+        dictation_ai_cfg = raw.get("dictationAi") or {}
 
         self._set_var("camera_server_enabled", camera_server_cfg.get("enabled", True))
         self._set_var("input_device", input_cfg.get("devicePath"))
@@ -2617,7 +2629,7 @@ class ConfigGui:
         self._set_var("face_enhance_min_size_ratio", face_cfg.get("minRegionRatio"))
         self._set_var("face_enhance_edge_dither", face_cfg.get("edgeNoise"))
         self._set_var("face_deidentify_enabled", (face_cfg.get("deidentify") or {}).get("enabled"))
-        self._load_whisper_settings_from_config(whisper_cfg)
+        self._load_whisper_settings_from_config(dictation_ai_cfg)
         self._load_audio_settings_from_config(audio_cfg)
         self._on_input_device_changed()
         self._on_input_width_changed()
@@ -2688,11 +2700,11 @@ class ConfigGui:
 
     def _load_whisper_settings_from_config(self, whisper_cfg: dict) -> None:
         defaults = self._build_video_defaults()
-        self._set_var("whisper_enabled", whisper_cfg.get("enabled", defaults["whisper_enabled"]))
+        self._set_var("dictation_ai_enabled", whisper_cfg.get("enabled", defaults["dictation_ai_enabled"]))
         raw_input_device = str(whisper_cfg.get("inputDevice", "")).strip() if isinstance(whisper_cfg.get("inputDevice"), str) else ""
-        resolved_input_device = defaults["whisper_input_device"] if not raw_input_device else raw_input_device
-        self._set_var("whisper_input_device", resolved_input_device)
-        input_widget = self._widgets.get("whisper_input_device")
+        resolved_input_device = defaults["dictation_ai_input_device"] if not raw_input_device else raw_input_device
+        self._set_var("dictation_ai_input_device", resolved_input_device)
+        input_widget = self._widgets.get("dictation_ai_input_device")
         if isinstance(input_widget, ttk.Combobox):
             input_values = list(input_widget["values"])
             input_display = next(
@@ -2702,80 +2714,80 @@ class ConfigGui:
             if input_display not in input_values:
                 input_widget["values"] = tuple(input_values + [input_display])
                 getattr(self, "_whisper_input_display_to_raw", {})[input_display] = resolved_input_device
-            self.vars["whisper_input_device"].set(input_display)
-        self._set_var("whisper_backend", whisper_cfg.get("backend", defaults["whisper_backend"]))
-        self._set_var("whisper_model", whisper_cfg.get("model", defaults["whisper_model"]))
-        self._set_var("whisper_stt_backend_en", whisper_cfg.get("sttBackendEn", defaults["whisper_stt_backend_en"]))
-        self._set_var("whisper_stt_model_en", whisper_cfg.get("sttModelEn", defaults["whisper_stt_model_en"]))
-        self._set_var("whisper_stt_backend_ko", whisper_cfg.get("sttBackendKo", defaults["whisper_stt_backend_ko"]))
-        self._set_var("whisper_stt_model_ko", whisper_cfg.get("sttModelKo", defaults["whisper_stt_model_ko"]))
-        self._set_var("whisper_stt_backend_zh", whisper_cfg.get("sttBackendZh", defaults["whisper_stt_backend_zh"]))
-        self._set_var("whisper_stt_model_zh", whisper_cfg.get("sttModelZh", defaults["whisper_stt_model_zh"]))
+            self.vars["dictation_ai_input_device"].set(input_display)
+        self._set_var("dictation_ai_backend", whisper_cfg.get("backend", defaults["dictation_ai_backend"]))
+        self._set_var("dictation_ai_model", whisper_cfg.get("model", defaults["dictation_ai_model"]))
+        self._set_var("dictation_ai_stt_backend_en", whisper_cfg.get("sttBackendEn", defaults["dictation_ai_stt_backend_en"]))
+        self._set_var("dictation_ai_stt_model_en", whisper_cfg.get("sttModelEn", defaults["dictation_ai_stt_model_en"]))
+        self._set_var("dictation_ai_stt_backend_ko", whisper_cfg.get("sttBackendKo", defaults["dictation_ai_stt_backend_ko"]))
+        self._set_var("dictation_ai_stt_model_ko", whisper_cfg.get("sttModelKo", defaults["dictation_ai_stt_model_ko"]))
+        self._set_var("dictation_ai_stt_backend_zh", whisper_cfg.get("sttBackendZh", defaults["dictation_ai_stt_backend_zh"]))
+        self._set_var("dictation_ai_stt_model_zh", whisper_cfg.get("sttModelZh", defaults["dictation_ai_stt_model_zh"]))
         self._set_var(
-            "whisper_language",
-            _whisper_language_display_from_raw(whisper_cfg.get("language", _whisper_language_raw_from_display(defaults["whisper_language"]))),
+            "dictation_ai_language",
+            _dictation_ai_language_display_from_raw(whisper_cfg.get("language", _dictation_ai_language_raw_from_display(defaults["dictation_ai_language"]))),
         )
         legacy_translation_enabled = whisper_cfg.get("task") == "translate"
         self._set_var(
-            "whisper_translation_enabled",
-            whisper_cfg.get("translationEnabled", legacy_translation_enabled or defaults["whisper_translation_enabled"]),
+            "dictation_ai_translation_enabled",
+            whisper_cfg.get("translationEnabled", legacy_translation_enabled or defaults["dictation_ai_translation_enabled"]),
         )
         self._set_var(
-            "whisper_show_stt_status_window",
-            whisper_cfg.get("showSttStatusWindow", defaults["whisper_show_stt_status_window"]),
+            "dictation_ai_show_stt_status_window",
+            whisper_cfg.get("showSttStatusWindow", defaults["dictation_ai_show_stt_status_window"]),
         )
-        self._set_var("whisper_translation_backend", whisper_cfg.get("translationBackend", defaults["whisper_translation_backend"]))
+        self._set_var("dictation_ai_translation_backend", whisper_cfg.get("translationBackend", defaults["dictation_ai_translation_backend"]))
         self._set_var(
-            "whisper_translation_target_language",
-            _whisper_translation_target_display_from_raw(
+            "dictation_ai_translation_target_language",
+            _dictation_ai_translation_target_display_from_raw(
                 whisper_cfg.get(
                     "translationTargetLanguage",
-                    _whisper_translation_target_raw_from_display(defaults["whisper_translation_target_language"]),
+                    _dictation_ai_translation_target_raw_from_display(defaults["dictation_ai_translation_target_language"]),
                 )
             ),
         )
-        self._set_var("whisper_translation_model", whisper_cfg.get("translationModel", defaults["whisper_translation_model"]))
-        self._set_var("whisper_translation_device", whisper_cfg.get("translationDevice", defaults["whisper_translation_device"]))
-        self._set_var("whisper_translation_compute_type", whisper_cfg.get("translationComputeType", defaults["whisper_translation_compute_type"]))
-        self._set_var("whisper_translation_beam_size", whisper_cfg.get("translationBeamSize", defaults["whisper_translation_beam_size"]))
-        self._set_var("whisper_translation_max_new_tokens", whisper_cfg.get("translationMaxNewTokens", defaults["whisper_translation_max_new_tokens"]))
+        self._set_var("dictation_ai_translation_model", whisper_cfg.get("translationModel", defaults["dictation_ai_translation_model"]))
+        self._set_var("dictation_ai_translation_device", whisper_cfg.get("translationDevice", defaults["dictation_ai_translation_device"]))
+        self._set_var("dictation_ai_translation_compute_type", whisper_cfg.get("translationComputeType", defaults["dictation_ai_translation_compute_type"]))
+        self._set_var("dictation_ai_translation_beam_size", whisper_cfg.get("translationBeamSize", defaults["dictation_ai_translation_beam_size"]))
+        self._set_var("dictation_ai_translation_max_new_tokens", whisper_cfg.get("translationMaxNewTokens", defaults["dictation_ai_translation_max_new_tokens"]))
         for lang in ("en", "ko", "zh"):
             suffix = lang.title()
             self._set_var(
-                f"whisper_translation_backend_{lang}",
-                whisper_cfg.get(f"translationBackend{suffix}", defaults[f"whisper_translation_backend_{lang}"]),
+                f"dictation_ai_translation_backend_{lang}",
+                whisper_cfg.get(f"translationBackend{suffix}", defaults[f"dictation_ai_translation_backend_{lang}"]),
             )
             self._set_var(
-                f"whisper_translation_model_{lang}",
-                whisper_cfg.get(f"translationModel{suffix}", defaults[f"whisper_translation_model_{lang}"]),
+                f"dictation_ai_translation_model_{lang}",
+                whisper_cfg.get(f"translationModel{suffix}", defaults[f"dictation_ai_translation_model_{lang}"]),
             )
             self._set_var(
-                f"whisper_translation_device_{lang}",
-                whisper_cfg.get(f"translationDevice{suffix}", defaults[f"whisper_translation_device_{lang}"]),
+                f"dictation_ai_translation_device_{lang}",
+                whisper_cfg.get(f"translationDevice{suffix}", defaults[f"dictation_ai_translation_device_{lang}"]),
             )
             self._set_var(
-                f"whisper_translation_compute_type_{lang}",
-                whisper_cfg.get(f"translationComputeType{suffix}", defaults[f"whisper_translation_compute_type_{lang}"]),
+                f"dictation_ai_translation_compute_type_{lang}",
+                whisper_cfg.get(f"translationComputeType{suffix}", defaults[f"dictation_ai_translation_compute_type_{lang}"]),
             )
             self._set_var(
-                f"whisper_translation_beam_size_{lang}",
-                whisper_cfg.get(f"translationBeamSize{suffix}", defaults[f"whisper_translation_beam_size_{lang}"]),
+                f"dictation_ai_translation_beam_size_{lang}",
+                whisper_cfg.get(f"translationBeamSize{suffix}", defaults[f"dictation_ai_translation_beam_size_{lang}"]),
             )
             self._set_var(
-                f"whisper_translation_max_new_tokens_{lang}",
-                whisper_cfg.get(f"translationMaxNewTokens{suffix}", defaults[f"whisper_translation_max_new_tokens_{lang}"]),
+                f"dictation_ai_translation_max_new_tokens_{lang}",
+                whisper_cfg.get(f"translationMaxNewTokens{suffix}", defaults[f"dictation_ai_translation_max_new_tokens_{lang}"]),
             )
-        self._set_var("whisper_device", whisper_cfg.get("device", defaults["whisper_device"]))
-        self._set_var("whisper_compute_type", whisper_cfg.get("computeType", defaults["whisper_compute_type"]))
-        window_seconds = whisper_cfg.get("windowSeconds", whisper_cfg.get("chunkSeconds", defaults["whisper_window_seconds"]))
-        self._set_var("whisper_chunk_seconds", window_seconds)
-        self._set_var("whisper_step_seconds", whisper_cfg.get("stepSeconds", defaults["whisper_step_seconds"]))
-        self._set_var("whisper_window_seconds", window_seconds)
-        self._set_var("whisper_commit_lag_seconds", whisper_cfg.get("commitLagSeconds", defaults["whisper_commit_lag_seconds"]))
-        self._set_var("whisper_beam_size", whisper_cfg.get("beamSize", defaults["whisper_beam_size"]))
-        self._set_var("whisper_max_new_tokens", whisper_cfg.get("maxNewTokens", defaults["whisper_max_new_tokens"]))
-        self._set_var("whisper_temperature", whisper_cfg.get("temperature", defaults["whisper_temperature"]))
-        selected_language = _whisper_language_raw_from_display(self.vars["whisper_language"].get())
+        self._set_var("dictation_ai_device", whisper_cfg.get("device", defaults["dictation_ai_device"]))
+        self._set_var("dictation_ai_compute_type", whisper_cfg.get("computeType", defaults["dictation_ai_compute_type"]))
+        window_seconds = whisper_cfg.get("windowSeconds", whisper_cfg.get("chunkSeconds", defaults["dictation_ai_window_seconds"]))
+        self._set_var("dictation_ai_chunk_seconds", window_seconds)
+        self._set_var("dictation_ai_step_seconds", whisper_cfg.get("stepSeconds", defaults["dictation_ai_step_seconds"]))
+        self._set_var("dictation_ai_window_seconds", window_seconds)
+        self._set_var("dictation_ai_commit_lag_seconds", whisper_cfg.get("commitLagSeconds", defaults["dictation_ai_commit_lag_seconds"]))
+        self._set_var("dictation_ai_beam_size", whisper_cfg.get("beamSize", defaults["dictation_ai_beam_size"]))
+        self._set_var("dictation_ai_max_new_tokens", whisper_cfg.get("maxNewTokens", defaults["dictation_ai_max_new_tokens"]))
+        self._set_var("dictation_ai_temperature", whisper_cfg.get("temperature", defaults["dictation_ai_temperature"]))
+        selected_language = _dictation_ai_language_raw_from_display(self.vars["dictation_ai_language"].get())
         for lang, suffix in (("en", "En"), ("ko", "Ko"), ("zh", "Zh")):
             lang_defaults = self._default_whisper_runtime_for_language(lang)
             use_legacy = selected_language == lang
@@ -2815,12 +2827,12 @@ class ConfigGui:
             }
         self._whisper_selected_stt_language = selected_language
         self._load_visible_whisper_runtime_for_language(selected_language)
-        self._set_var("whisper_sentence_boundary_backend", whisper_cfg.get("sentenceBoundaryBackend", defaults["whisper_sentence_boundary_backend"]))
-        self._set_var("whisper_sentence_boundary_model", whisper_cfg.get("sentenceBoundaryModel", defaults["whisper_sentence_boundary_model"]))
-        self._set_var("whisper_sentence_boundary_device", whisper_cfg.get("sentenceBoundaryDevice", defaults["whisper_sentence_boundary_device"]))
-        self._set_var("whisper_sentence_boundary_compute_type", whisper_cfg.get("sentenceBoundaryComputeType", defaults["whisper_sentence_boundary_compute_type"]))
+        self._set_var("dictation_ai_sentence_boundary_backend", whisper_cfg.get("sentenceBoundaryBackend", defaults["dictation_ai_sentence_boundary_backend"]))
+        self._set_var("dictation_ai_sentence_boundary_model", whisper_cfg.get("sentenceBoundaryModel", defaults["dictation_ai_sentence_boundary_model"]))
+        self._set_var("dictation_ai_sentence_boundary_device", whisper_cfg.get("sentenceBoundaryDevice", defaults["dictation_ai_sentence_boundary_device"]))
+        self._set_var("dictation_ai_sentence_boundary_compute_type", whisper_cfg.get("sentenceBoundaryComputeType", defaults["dictation_ai_sentence_boundary_compute_type"]))
         self._sync_whisper_runtime_options()
-        self._sync_whisper_translation_backend_options()
+        self._sync_dictation_ai_translation_backend_options()
 
     def _set_var(self, key: str, value):
         if value is None:
@@ -4329,7 +4341,7 @@ class ConfigGui:
 
     def _on_whisper_runtime_selection_changed(self, _event=None) -> None:
         self._sync_whisper_runtime_options()
-        self._sync_whisper_translation_backend_options()
+        self._sync_dictation_ai_translation_backend_options()
 
     def _grid_rows(self, parent, rows: list[int], visible: bool) -> None:
         if parent is None:
@@ -4370,8 +4382,8 @@ class ConfigGui:
             var.set(values[0])
 
     def _sync_whisper_runtime_options(self) -> None:
-        language_var = self.vars.get("whisper_language")
-        selected_language = _whisper_language_raw_from_display(language_var.get()) if language_var is not None else "en"
+        language_var = self.vars.get("dictation_ai_language")
+        selected_language = _dictation_ai_language_raw_from_display(language_var.get()) if language_var is not None else "en"
         if selected_language not in {"en", "ko", "zh"}:
             selected_language = "en"
         if self._whisper_selected_stt_language is None:
@@ -4385,20 +4397,20 @@ class ConfigGui:
         for row in getattr(self, "_whisper_global_stt_rows", []):
             self._grid_rows(global_stt_parent, [row], False)
 
-        stt_frame = getattr(self, "_whisper_stt_frame", None)
+        stt_frame = getattr(self, "_dictation_ai_stt_frame", None)
         if stt_frame is not None:
             stt_frame.grid()
-        for lang, rows in getattr(self, "_whisper_stt_language_rows", {}).items():
+        for lang, rows in getattr(self, "_dictation_ai_stt_language_rows", {}).items():
             self._grid_rows(stt_frame, rows, lang == selected_language)
 
         stt_boundary_parent = getattr(
             self,
-            "_whisper_stt_boundary_parent",
+            "_dictation_ai_stt_boundary_parent",
             getattr(self, "_whisper_manual_boundary_parent", getattr(self, "_whisper_tab", None)),
         )
         stt_boundary_rows = getattr(
             self,
-            "_whisper_stt_boundary_rows",
+            "_dictation_ai_stt_boundary_rows",
             getattr(self, "_whisper_manual_boundary_rows", []),
         )
         for row in stt_boundary_rows:
@@ -4406,11 +4418,11 @@ class ConfigGui:
 
         active_stt_backend = "faster-whisper"
         for lang in ("en", "ko", "zh"):
-            stt_backend_key = f"whisper_stt_backend_{lang}"
-            stt_model_key = f"whisper_stt_model_{lang}"
+            stt_backend_key = f"dictation_ai_stt_backend_{lang}"
+            stt_model_key = f"dictation_ai_stt_model_{lang}"
             stt_backend_widget = self._widgets.get(stt_backend_key)
             stt_backend_var = self.vars.get(stt_backend_key)
-            stt_backend_values = _whisper_stt_backend_options(lang)
+            stt_backend_values = _dictation_ai_stt_backend_options(lang)
             if stt_backend_widget is not None:
                 stt_backend_widget["values"] = tuple(stt_backend_values)
             if stt_backend_var is not None and stt_backend_var.get().strip() not in stt_backend_values:
@@ -4418,93 +4430,93 @@ class ConfigGui:
             stt_backend = stt_backend_var.get().strip() if stt_backend_var is not None else "faster-whisper"
             self._set_combobox_values_for_backend(
                 stt_model_key,
-                _whisper_stt_model_options(stt_backend, lang),
+                _dictation_ai_stt_model_options(stt_backend, lang),
             )
             if lang == selected_language:
                 active_stt_backend = stt_backend
 
-        active_boundary_backend_key = "whisper_sentence_boundary_backend"
-        active_boundary_model_key = "whisper_sentence_boundary_model"
+        active_boundary_backend_key = "dictation_ai_sentence_boundary_backend"
+        active_boundary_model_key = "dictation_ai_sentence_boundary_model"
         active_boundary_backend_var = self.vars.get(active_boundary_backend_key)
         active_boundary_backend = active_boundary_backend_var.get().strip() if active_boundary_backend_var is not None else "sat"
         self._set_combobox_values_for_backend(
             active_boundary_model_key,
-            _whisper_sentence_boundary_model_options(active_boundary_backend),
+            _dictation_ai_sentence_boundary_model_options(active_boundary_backend),
         )
 
-        active_stt_option_keys = set(_whisper_stt_backend_runtime_option_keys(active_stt_backend))
-        backend_option_parent = getattr(self, "_whisper_backend_option_parent", getattr(self, "_whisper_tab", None))
-        for option_key, row in getattr(self, "_whisper_backend_option_rows", {}).items():
+        active_stt_option_keys = set(_dictation_ai_stt_backend_runtime_option_keys(active_stt_backend))
+        backend_option_parent = getattr(self, "_dictation_ai_backend_option_parent", getattr(self, "_whisper_tab", None))
+        for option_key, row in getattr(self, "_dictation_ai_backend_option_rows", {}).items():
             self._grid_rows(backend_option_parent, [row], option_key in active_stt_option_keys)
 
         self._schedule_update_scrollbar_state()
 
-    def _on_whisper_translation_backend_changed(self, _event=None) -> None:
-        self._sync_whisper_translation_backend_options()
+    def _on_dictation_ai_translation_backend_changed(self, _event=None) -> None:
+        self._sync_dictation_ai_translation_backend_options()
 
-    def _on_whisper_translation_target_changed(self, _event=None) -> None:
-        self._sync_whisper_translation_backend_options(target_changed=True)
+    def _on_dictation_ai_translation_target_changed(self, _event=None) -> None:
+        self._sync_dictation_ai_translation_backend_options(target_changed=True)
 
-    def _store_visible_whisper_translation_for_target(self, target: str) -> None:
+    def _store_visible_dictation_ai_translation_for_target(self, target: str) -> None:
         if target not in {"en", "ko", "zh"}:
             return
         mapping = {
-            "backend": "whisper_translation_backend",
-            "model": "whisper_translation_model",
-            "device": "whisper_translation_device",
-            "compute_type": "whisper_translation_compute_type",
-            "beam_size": "whisper_translation_beam_size",
-            "max_new_tokens": "whisper_translation_max_new_tokens",
+            "backend": "dictation_ai_translation_backend",
+            "model": "dictation_ai_translation_model",
+            "device": "dictation_ai_translation_device",
+            "compute_type": "dictation_ai_translation_compute_type",
+            "beam_size": "dictation_ai_translation_beam_size",
+            "max_new_tokens": "dictation_ai_translation_max_new_tokens",
         }
         for name, visible_key in mapping.items():
             var = self.vars.get(visible_key)
             if var is not None:
-                self._set_var(f"whisper_translation_{name}_{target}", var.get())
+                self._set_var(f"dictation_ai_translation_{name}_{target}", var.get())
 
-    def _load_visible_whisper_translation_for_target(self, target: str) -> None:
+    def _load_visible_dictation_ai_translation_for_target(self, target: str) -> None:
         if target not in {"en", "ko", "zh"}:
             return
         mapping = {
-            "backend": "whisper_translation_backend",
-            "model": "whisper_translation_model",
-            "device": "whisper_translation_device",
-            "compute_type": "whisper_translation_compute_type",
-            "beam_size": "whisper_translation_beam_size",
-            "max_new_tokens": "whisper_translation_max_new_tokens",
+            "backend": "dictation_ai_translation_backend",
+            "model": "dictation_ai_translation_model",
+            "device": "dictation_ai_translation_device",
+            "compute_type": "dictation_ai_translation_compute_type",
+            "beam_size": "dictation_ai_translation_beam_size",
+            "max_new_tokens": "dictation_ai_translation_max_new_tokens",
         }
         for name, visible_key in mapping.items():
-            hidden_key = f"whisper_translation_{name}_{target}"
+            hidden_key = f"dictation_ai_translation_{name}_{target}"
             hidden_var = self.vars.get(hidden_key)
             if hidden_var is not None:
                 self._set_var(visible_key, hidden_var.get())
 
-    def _sync_whisper_translation_backend_options(self, *, target_changed: bool = False) -> None:
-        language_var = self.vars.get("whisper_language")
+    def _sync_dictation_ai_translation_backend_options(self, *, target_changed: bool = False) -> None:
+        language_var = self.vars.get("dictation_ai_language")
         language_display = language_var.get().strip() if language_var is not None else "en"
-        language = _whisper_language_raw_from_display(language_display)
-        target_var = self.vars.get("whisper_translation_target_language")
+        language = _dictation_ai_language_raw_from_display(language_display)
+        target_var = self.vars.get("dictation_ai_translation_target_language")
         target_display = target_var.get().strip() if target_var is not None else ""
-        target_language = _whisper_translation_target_raw_from_display(target_display) if target_display else "ko"
+        target_language = _dictation_ai_translation_target_raw_from_display(target_display) if target_display else "ko"
         if target_language not in {"en", "ko", "zh"}:
             target_language = "ko"
         if not hasattr(self, "_whisper_selected_translation_target"):
             self._whisper_selected_translation_target = target_language
-            self._load_visible_whisper_translation_for_target(target_language)
+            self._load_visible_dictation_ai_translation_for_target(target_language)
         elif target_changed and target_language != self._whisper_selected_translation_target:
-            self._store_visible_whisper_translation_for_target(self._whisper_selected_translation_target)
+            self._store_visible_dictation_ai_translation_for_target(self._whisper_selected_translation_target)
             self._whisper_selected_translation_target = target_language
-            self._load_visible_whisper_translation_for_target(target_language)
-        backend_var = self.vars.get("whisper_translation_backend")
+            self._load_visible_dictation_ai_translation_for_target(target_language)
+        backend_var = self.vars.get("dictation_ai_translation_backend")
         backend = backend_var.get().strip() if backend_var is not None else "whisper"
-        backend_options = _whisper_translation_backend_options_for_target(target_language)
-        backend_widget = self._widgets.get("whisper_translation_backend")
+        backend_options = _dictation_ai_translation_backend_options_for_target(target_language)
+        backend_widget = self._widgets.get("dictation_ai_translation_backend")
         if backend_widget is not None:
             backend_widget["values"] = tuple(backend_options)
         if backend not in backend_options:
             backend = backend_options[0] if backend_options else "whisper"
-            self._set_var("whisper_translation_backend", backend)
+            self._set_var("dictation_ai_translation_backend", backend)
 
-        frames = getattr(self, "_whisper_translation_backend_frames", {})
+        frames = getattr(self, "_dictation_ai_translation_backend_frames", {})
         selected_frame = frames.get(backend)
         seen_frame_ids: set[int] = set()
         for frame in frames.values():
@@ -4517,36 +4529,36 @@ class ConfigGui:
             else:
                 frame.grid_remove()
 
-        target_options = _whisper_translation_target_options_for_backend(language, backend)
-        target_widget = self._widgets.get("whisper_translation_target_language")
+        target_options = _dictation_ai_translation_target_options_for_backend(language, backend)
+        target_widget = self._widgets.get("dictation_ai_translation_target_language")
         if target_widget is not None:
             target_widget["values"] = tuple(target_options)
-        target_var = self.vars.get("whisper_translation_target_language")
+        target_var = self.vars.get("dictation_ai_translation_target_language")
         target_display = target_var.get().strip() if target_var is not None else ""
         if target_options and target_display not in target_options:
             previous_target = getattr(self, "_whisper_selected_translation_target", target_language)
-            self._store_visible_whisper_translation_for_target(previous_target)
-            self._set_var("whisper_translation_target_language", target_options[0])
-            target_language = _whisper_translation_target_raw_from_display(target_options[0])
+            self._store_visible_dictation_ai_translation_for_target(previous_target)
+            self._set_var("dictation_ai_translation_target_language", target_options[0])
+            target_language = _dictation_ai_translation_target_raw_from_display(target_options[0])
             self._whisper_selected_translation_target = target_language
-            self._load_visible_whisper_translation_for_target(target_language)
+            self._load_visible_dictation_ai_translation_for_target(target_language)
 
-        model_options = _whisper_translation_model_options(backend)
-        self._set_combobox_values_for_backend("whisper_translation_model", model_options)
+        model_options = _dictation_ai_translation_model_options(backend)
+        self._set_combobox_values_for_backend("dictation_ai_translation_model", model_options)
 
         if backend == "whisper":
             previous_target = getattr(self, "_whisper_selected_translation_target", target_language)
-            self._store_visible_whisper_translation_for_target(previous_target)
-            self._set_var("whisper_translation_target_language", _whisper_translation_target_display_from_raw("en"))
+            self._store_visible_dictation_ai_translation_for_target(previous_target)
+            self._set_var("dictation_ai_translation_target_language", _dictation_ai_translation_target_display_from_raw("en"))
             target_language = "en"
             self._whisper_selected_translation_target = target_language
-            self._load_visible_whisper_translation_for_target(target_language)
+            self._load_visible_dictation_ai_translation_for_target(target_language)
         elif backend in {"nllb-transformers", "m2m100-transformers"}:
-            self._set_var("whisper_translation_device", "cuda")
-            compute_var = self.vars.get("whisper_translation_compute_type")
+            self._set_var("dictation_ai_translation_device", "cuda")
+            compute_var = self.vars.get("dictation_ai_translation_compute_type")
             compute_type = compute_var.get().strip() if compute_var is not None else ""
             if compute_type not in {"float16", "float32"}:
-                self._set_var("whisper_translation_compute_type", "float16")
+                self._set_var("dictation_ai_translation_compute_type", "float16")
 
         self._schedule_update_scrollbar_state()
 
@@ -4625,18 +4637,18 @@ class ConfigGui:
                 getattr(self, "_audio_output_display_to_raw", {}),
             )
         seg_engine_options = self._collect_seg_engine_options_from_form()
-        selected_whisper_language = _whisper_language_raw_from_display(iv["whisper_language"].get())
-        self._store_visible_whisper_runtime_for_language(selected_whisper_language)
-        selected_translation_target = _whisper_translation_target_raw_from_display(
-            iv["whisper_translation_target_language"].get()
+        selected_dictation_ai_language = _dictation_ai_language_raw_from_display(iv["dictation_ai_language"].get())
+        self._store_visible_whisper_runtime_for_language(selected_dictation_ai_language)
+        selected_translation_target = _dictation_ai_translation_target_raw_from_display(
+            iv["dictation_ai_translation_target_language"].get()
         )
-        self._store_visible_whisper_translation_for_target(selected_translation_target)
+        self._store_visible_dictation_ai_translation_for_target(selected_translation_target)
         runtime_en = self._whisper_runtime_by_language.get("en", self._default_whisper_runtime_for_language("en"))
         runtime_ko = self._whisper_runtime_by_language.get("ko", self._default_whisper_runtime_for_language("ko"))
         runtime_zh = self._whisper_runtime_by_language.get("zh", self._default_whisper_runtime_for_language("zh"))
         runtime_selected = self._whisper_runtime_by_language.get(
-            selected_whisper_language,
-            self._default_whisper_runtime_for_language(selected_whisper_language if selected_whisper_language in {"en", "ko", "zh"} else "en"),
+            selected_dictation_ai_language,
+            self._default_whisper_runtime_for_language(selected_dictation_ai_language if selected_dictation_ai_language in {"en", "ko", "zh"} else "en"),
         )
 
         return build_config(
@@ -4699,88 +4711,88 @@ class ConfigGui:
             face_enhance_min_size_ratio=float(iv["face_enhance_min_size_ratio"].get()),
             face_enhance_edge_dither=float(iv["face_enhance_edge_dither"].get()),
             face_deidentify_enabled=self._parse_bool(iv["face_deidentify_enabled"].get()),
-            whisper_enabled=self._parse_bool(iv["whisper_enabled"].get()),
-            whisper_input_device=_audio_device_raw_from_display(
-                iv["whisper_input_device"].get().strip(),
+            dictation_ai_enabled=self._parse_bool(iv["dictation_ai_enabled"].get()),
+            dictation_ai_input_device=_audio_device_raw_from_display(
+                iv["dictation_ai_input_device"].get().strip(),
                 getattr(self, "_whisper_input_display_to_raw", {}),
             ),
-            whisper_backend=iv["whisper_backend"].get().strip(),
-            whisper_model=iv["whisper_model"].get().strip(),
-            whisper_stt_backend_en=iv["whisper_stt_backend_en"].get().strip(),
-            whisper_stt_model_en=iv["whisper_stt_model_en"].get().strip(),
-            whisper_stt_backend_ko=iv["whisper_stt_backend_ko"].get().strip(),
-            whisper_stt_model_ko=iv["whisper_stt_model_ko"].get().strip(),
-            whisper_stt_backend_zh=iv["whisper_stt_backend_zh"].get().strip(),
-            whisper_stt_model_zh=iv["whisper_stt_model_zh"].get().strip(),
-            whisper_language=selected_whisper_language,
-            whisper_task="transcribe",
-            whisper_translation_enabled=self._parse_bool(iv["whisper_translation_enabled"].get()),
-            whisper_show_stt_status_window=self._parse_bool(iv["whisper_show_stt_status_window"].get()),
-            whisper_translation_backend=iv["whisper_translation_backend"].get().strip(),
-            whisper_translation_target_language=_whisper_translation_target_raw_from_display(
-                iv["whisper_translation_target_language"].get()
+            dictation_ai_backend=iv["dictation_ai_backend"].get().strip(),
+            dictation_ai_model=iv["dictation_ai_model"].get().strip(),
+            dictation_ai_stt_backend_en=iv["dictation_ai_stt_backend_en"].get().strip(),
+            dictation_ai_stt_model_en=iv["dictation_ai_stt_model_en"].get().strip(),
+            dictation_ai_stt_backend_ko=iv["dictation_ai_stt_backend_ko"].get().strip(),
+            dictation_ai_stt_model_ko=iv["dictation_ai_stt_model_ko"].get().strip(),
+            dictation_ai_stt_backend_zh=iv["dictation_ai_stt_backend_zh"].get().strip(),
+            dictation_ai_stt_model_zh=iv["dictation_ai_stt_model_zh"].get().strip(),
+            dictation_ai_language=selected_dictation_ai_language,
+            dictation_ai_task="transcribe",
+            dictation_ai_translation_enabled=self._parse_bool(iv["dictation_ai_translation_enabled"].get()),
+            dictation_ai_show_stt_status_window=self._parse_bool(iv["dictation_ai_show_stt_status_window"].get()),
+            dictation_ai_translation_backend=iv["dictation_ai_translation_backend"].get().strip(),
+            dictation_ai_translation_target_language=_dictation_ai_translation_target_raw_from_display(
+                iv["dictation_ai_translation_target_language"].get()
             ),
-            whisper_translation_model=iv["whisper_translation_model"].get().strip(),
-            whisper_translation_device=iv["whisper_translation_device"].get().strip(),
-            whisper_translation_compute_type=iv["whisper_translation_compute_type"].get().strip(),
-            whisper_translation_beam_size=int(round(float(iv["whisper_translation_beam_size"].get()))),
-            whisper_translation_max_new_tokens=int(round(float(iv["whisper_translation_max_new_tokens"].get()))),
-            whisper_translation_backend_en=iv["whisper_translation_backend_en"].get().strip(),
-            whisper_translation_model_en=iv["whisper_translation_model_en"].get().strip(),
-            whisper_translation_device_en=iv["whisper_translation_device_en"].get().strip(),
-            whisper_translation_compute_type_en=iv["whisper_translation_compute_type_en"].get().strip(),
-            whisper_translation_beam_size_en=int(round(float(iv["whisper_translation_beam_size_en"].get()))),
-            whisper_translation_max_new_tokens_en=int(round(float(iv["whisper_translation_max_new_tokens_en"].get()))),
-            whisper_translation_backend_ko=iv["whisper_translation_backend_ko"].get().strip(),
-            whisper_translation_model_ko=iv["whisper_translation_model_ko"].get().strip(),
-            whisper_translation_device_ko=iv["whisper_translation_device_ko"].get().strip(),
-            whisper_translation_compute_type_ko=iv["whisper_translation_compute_type_ko"].get().strip(),
-            whisper_translation_beam_size_ko=int(round(float(iv["whisper_translation_beam_size_ko"].get()))),
-            whisper_translation_max_new_tokens_ko=int(round(float(iv["whisper_translation_max_new_tokens_ko"].get()))),
-            whisper_translation_backend_zh=iv["whisper_translation_backend_zh"].get().strip(),
-            whisper_translation_model_zh=iv["whisper_translation_model_zh"].get().strip(),
-            whisper_translation_device_zh=iv["whisper_translation_device_zh"].get().strip(),
-            whisper_translation_compute_type_zh=iv["whisper_translation_compute_type_zh"].get().strip(),
-            whisper_translation_beam_size_zh=int(round(float(iv["whisper_translation_beam_size_zh"].get()))),
-            whisper_translation_max_new_tokens_zh=int(round(float(iv["whisper_translation_max_new_tokens_zh"].get()))),
-            whisper_device=iv["whisper_device"].get().strip(),
-            whisper_compute_type=iv["whisper_compute_type"].get().strip(),
-            whisper_chunk_seconds=float(runtime_selected["windowSeconds"]),
-            whisper_step_seconds=float(runtime_selected["stepSeconds"]),
-            whisper_window_seconds=float(runtime_selected["windowSeconds"]),
-            whisper_commit_lag_seconds=float(runtime_selected["commitLagSeconds"]),
-            whisper_beam_size=int(round(float(runtime_selected["beamSize"]))),
-            whisper_max_new_tokens=int(round(float(runtime_selected["maxNewTokens"]))),
-            whisper_temperature=float(runtime_selected["temperature"]),
-            whisper_step_seconds_en=float(runtime_en["stepSeconds"]),
-            whisper_window_seconds_en=float(runtime_en["windowSeconds"]),
-            whisper_commit_lag_seconds_en=float(runtime_en["commitLagSeconds"]),
-            whisper_beam_size_en=int(round(float(runtime_en["beamSize"]))),
-            whisper_max_new_tokens_en=int(round(float(runtime_en["maxNewTokens"]))),
-            whisper_temperature_en=float(runtime_en["temperature"]),
-            whisper_step_seconds_ko=float(runtime_ko["stepSeconds"]),
-            whisper_window_seconds_ko=float(runtime_ko["windowSeconds"]),
-            whisper_commit_lag_seconds_ko=float(runtime_ko["commitLagSeconds"]),
-            whisper_beam_size_ko=int(round(float(runtime_ko["beamSize"]))),
-            whisper_max_new_tokens_ko=int(round(float(runtime_ko["maxNewTokens"]))),
-            whisper_temperature_ko=float(runtime_ko["temperature"]),
-            whisper_step_seconds_zh=float(runtime_zh["stepSeconds"]),
-            whisper_window_seconds_zh=float(runtime_zh["windowSeconds"]),
-            whisper_commit_lag_seconds_zh=float(runtime_zh["commitLagSeconds"]),
-            whisper_beam_size_zh=int(round(float(runtime_zh["beamSize"]))),
-            whisper_max_new_tokens_zh=int(round(float(runtime_zh["maxNewTokens"]))),
-            whisper_temperature_zh=float(runtime_zh["temperature"]),
-            whisper_post_processing_profile=whisper_default("postProcessingProfile"),
-            whisper_sentence_boundary_backend=iv["whisper_sentence_boundary_backend"].get().strip(),
-            whisper_sentence_boundary_model=iv["whisper_sentence_boundary_model"].get().strip(),
-            whisper_sentence_boundary_backend_en=whisper_default("sentenceBoundaryBackendEn"),
-            whisper_sentence_boundary_model_en=whisper_default("sentenceBoundaryModelEn"),
-            whisper_sentence_boundary_backend_ko=whisper_default("sentenceBoundaryBackendKo"),
-            whisper_sentence_boundary_model_ko=whisper_default("sentenceBoundaryModelKo"),
-            whisper_sentence_boundary_backend_zh=whisper_default("sentenceBoundaryBackendZh"),
-            whisper_sentence_boundary_model_zh=whisper_default("sentenceBoundaryModelZh"),
-            whisper_sentence_boundary_device=iv["whisper_sentence_boundary_device"].get().strip(),
-            whisper_sentence_boundary_compute_type=iv["whisper_sentence_boundary_compute_type"].get().strip(),
+            dictation_ai_translation_model=iv["dictation_ai_translation_model"].get().strip(),
+            dictation_ai_translation_device=iv["dictation_ai_translation_device"].get().strip(),
+            dictation_ai_translation_compute_type=iv["dictation_ai_translation_compute_type"].get().strip(),
+            dictation_ai_translation_beam_size=int(round(float(iv["dictation_ai_translation_beam_size"].get()))),
+            dictation_ai_translation_max_new_tokens=int(round(float(iv["dictation_ai_translation_max_new_tokens"].get()))),
+            dictation_ai_translation_backend_en=iv["dictation_ai_translation_backend_en"].get().strip(),
+            dictation_ai_translation_model_en=iv["dictation_ai_translation_model_en"].get().strip(),
+            dictation_ai_translation_device_en=iv["dictation_ai_translation_device_en"].get().strip(),
+            dictation_ai_translation_compute_type_en=iv["dictation_ai_translation_compute_type_en"].get().strip(),
+            dictation_ai_translation_beam_size_en=int(round(float(iv["dictation_ai_translation_beam_size_en"].get()))),
+            dictation_ai_translation_max_new_tokens_en=int(round(float(iv["dictation_ai_translation_max_new_tokens_en"].get()))),
+            dictation_ai_translation_backend_ko=iv["dictation_ai_translation_backend_ko"].get().strip(),
+            dictation_ai_translation_model_ko=iv["dictation_ai_translation_model_ko"].get().strip(),
+            dictation_ai_translation_device_ko=iv["dictation_ai_translation_device_ko"].get().strip(),
+            dictation_ai_translation_compute_type_ko=iv["dictation_ai_translation_compute_type_ko"].get().strip(),
+            dictation_ai_translation_beam_size_ko=int(round(float(iv["dictation_ai_translation_beam_size_ko"].get()))),
+            dictation_ai_translation_max_new_tokens_ko=int(round(float(iv["dictation_ai_translation_max_new_tokens_ko"].get()))),
+            dictation_ai_translation_backend_zh=iv["dictation_ai_translation_backend_zh"].get().strip(),
+            dictation_ai_translation_model_zh=iv["dictation_ai_translation_model_zh"].get().strip(),
+            dictation_ai_translation_device_zh=iv["dictation_ai_translation_device_zh"].get().strip(),
+            dictation_ai_translation_compute_type_zh=iv["dictation_ai_translation_compute_type_zh"].get().strip(),
+            dictation_ai_translation_beam_size_zh=int(round(float(iv["dictation_ai_translation_beam_size_zh"].get()))),
+            dictation_ai_translation_max_new_tokens_zh=int(round(float(iv["dictation_ai_translation_max_new_tokens_zh"].get()))),
+            dictation_ai_device=iv["dictation_ai_device"].get().strip(),
+            dictation_ai_compute_type=iv["dictation_ai_compute_type"].get().strip(),
+            dictation_ai_chunk_seconds=float(runtime_selected["windowSeconds"]),
+            dictation_ai_step_seconds=float(runtime_selected["stepSeconds"]),
+            dictation_ai_window_seconds=float(runtime_selected["windowSeconds"]),
+            dictation_ai_commit_lag_seconds=float(runtime_selected["commitLagSeconds"]),
+            dictation_ai_beam_size=int(round(float(runtime_selected["beamSize"]))),
+            dictation_ai_max_new_tokens=int(round(float(runtime_selected["maxNewTokens"]))),
+            dictation_ai_temperature=float(runtime_selected["temperature"]),
+            dictation_ai_step_seconds_en=float(runtime_en["stepSeconds"]),
+            dictation_ai_window_seconds_en=float(runtime_en["windowSeconds"]),
+            dictation_ai_commit_lag_seconds_en=float(runtime_en["commitLagSeconds"]),
+            dictation_ai_beam_size_en=int(round(float(runtime_en["beamSize"]))),
+            dictation_ai_max_new_tokens_en=int(round(float(runtime_en["maxNewTokens"]))),
+            dictation_ai_temperature_en=float(runtime_en["temperature"]),
+            dictation_ai_step_seconds_ko=float(runtime_ko["stepSeconds"]),
+            dictation_ai_window_seconds_ko=float(runtime_ko["windowSeconds"]),
+            dictation_ai_commit_lag_seconds_ko=float(runtime_ko["commitLagSeconds"]),
+            dictation_ai_beam_size_ko=int(round(float(runtime_ko["beamSize"]))),
+            dictation_ai_max_new_tokens_ko=int(round(float(runtime_ko["maxNewTokens"]))),
+            dictation_ai_temperature_ko=float(runtime_ko["temperature"]),
+            dictation_ai_step_seconds_zh=float(runtime_zh["stepSeconds"]),
+            dictation_ai_window_seconds_zh=float(runtime_zh["windowSeconds"]),
+            dictation_ai_commit_lag_seconds_zh=float(runtime_zh["commitLagSeconds"]),
+            dictation_ai_beam_size_zh=int(round(float(runtime_zh["beamSize"]))),
+            dictation_ai_max_new_tokens_zh=int(round(float(runtime_zh["maxNewTokens"]))),
+            dictation_ai_temperature_zh=float(runtime_zh["temperature"]),
+            dictation_ai_post_processing_profile=dictation_ai_default("postProcessingProfile"),
+            dictation_ai_sentence_boundary_backend=iv["dictation_ai_sentence_boundary_backend"].get().strip(),
+            dictation_ai_sentence_boundary_model=iv["dictation_ai_sentence_boundary_model"].get().strip(),
+            dictation_ai_sentence_boundary_backend_en=dictation_ai_default("sentenceBoundaryBackendEn"),
+            dictation_ai_sentence_boundary_model_en=dictation_ai_default("sentenceBoundaryModelEn"),
+            dictation_ai_sentence_boundary_backend_ko=dictation_ai_default("sentenceBoundaryBackendKo"),
+            dictation_ai_sentence_boundary_model_ko=dictation_ai_default("sentenceBoundaryModelKo"),
+            dictation_ai_sentence_boundary_backend_zh=dictation_ai_default("sentenceBoundaryBackendZh"),
+            dictation_ai_sentence_boundary_model_zh=dictation_ai_default("sentenceBoundaryModelZh"),
+            dictation_ai_sentence_boundary_device=iv["dictation_ai_sentence_boundary_device"].get().strip(),
+            dictation_ai_sentence_boundary_compute_type=iv["dictation_ai_sentence_boundary_compute_type"].get().strip(),
         )
 
 
@@ -4808,10 +4820,10 @@ def _run_check(output_path: str) -> int:
     print(
         "[avc] config check ok: "
         f"path={config_path} "
-        f"whisper.enabled={config.whisper.enabled} "
-        f"whisper.input={config.whisper.inputDevice} "
-        f"whisper.backend={config.whisper.backend} "
-        f"whisper.model={config.whisper.model}",
+        f"dictationAi.enabled={config.dictationAi.enabled} "
+        f"dictationAi.input={config.dictationAi.inputDevice} "
+        f"dictationAi.backend={config.dictationAi.backend} "
+        f"dictationAi.model={config.dictationAi.model}",
         flush=True,
     )
     return 0

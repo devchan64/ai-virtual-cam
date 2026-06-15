@@ -7,13 +7,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from src.domain.contracts.dictation_ai import (
-    whisper_spec,
-    whisper_stt_backends_for_language,
-    whisper_translation_backends_for_language,
-    whisper_translation_models_for_backend,
-    whisper_translation_targets_for_backend,
+    dictation_ai_spec,
+    dictation_ai_stt_backends_for_language,
+    dictation_ai_translation_backends_for_language,
+    dictation_ai_translation_models_for_backend,
+    dictation_ai_translation_targets_for_backend,
 )
-from src.domain.dictation_ai_defaults import whisper_default
+from src.domain.dictation_ai_defaults import dictation_ai_default
 
 
 def _default_audio_output_device() -> str:
@@ -728,7 +728,7 @@ class FaceEnhanceConfig:
 
 
 @dataclass(frozen=True)
-class WhisperConfig:
+class DictationAiConfig:
     enabled: bool
     inputDevice: str
     backend: str
@@ -808,11 +808,11 @@ class WhisperConfig:
     sentenceBoundaryComputeType: str
 
     @classmethod
-    def from_dict(cls, raw: dict) -> "WhisperConfig":
+    def from_dict(cls, raw: dict) -> "DictationAiConfig":
         legacy_translate_task = raw.get("task") == "translate"
-        translation_backend_default = "whisper" if legacy_translate_task else whisper_default("translationBackend")
-        translation_target_default = "en" if legacy_translate_task else whisper_default("translationTargetLanguage")
-        language = str(raw.get("language", whisper_default("language"))).strip()
+        translation_backend_default = "whisper" if legacy_translate_task else dictation_ai_default("translationBackend")
+        translation_target_default = "en" if legacy_translate_task else dictation_ai_default("translationTargetLanguage")
+        language = str(raw.get("language", dictation_ai_default("language"))).strip()
         translation_target_language = str(raw.get("translationTargetLanguage", translation_target_default)).strip()
 
         def lang_key(base: str, lang: str) -> str:
@@ -826,7 +826,7 @@ class WhisperConfig:
                 return raw[legacy_key]
             if language == lang and base == "windowSeconds" and "chunkSeconds" in raw:
                 return raw["chunkSeconds"]
-            return whisper_default(key)
+            return dictation_ai_default(key)
 
         step_seconds_en = float(lang_value("stepSeconds", "en", "stepSeconds"))
         window_seconds_en = float(lang_value("windowSeconds", "en", "windowSeconds"))
@@ -880,7 +880,7 @@ class WhisperConfig:
                 return raw[key]
             if translation_target_language == target and legacy_key and legacy_key in raw:
                 return raw[legacy_key]
-            return whisper_default(key)
+            return dictation_ai_default(key)
 
         translation_backend_en = str(translation_value("translationBackend", "en", "translationBackend")).strip()
         translation_model_en = str(translation_value("translationModel", "en", "translationModel")).strip()
@@ -934,20 +934,20 @@ class WhisperConfig:
         }
         selected_translation = translation_by_target.get(translation_target_language, translation_by_target["ko"])
         config = cls(
-            enabled=bool(raw.get("enabled", whisper_default("enabled"))),
+            enabled=bool(raw.get("enabled", dictation_ai_default("enabled"))),
             inputDevice=str(raw.get("inputDevice", _default_audio_input_device())).strip(),
-            backend=str(raw.get("backend", whisper_default("backend"))).strip(),
-            model=str(raw.get("model", whisper_default("model"))).strip(),
-            sttBackendEn=str(raw.get("sttBackendEn", whisper_default("sttBackendEn"))).strip(),
-            sttModelEn=str(raw.get("sttModelEn", whisper_default("sttModelEn"))).strip(),
-            sttBackendKo=str(raw.get("sttBackendKo", whisper_default("sttBackendKo"))).strip(),
-            sttModelKo=str(raw.get("sttModelKo", whisper_default("sttModelKo"))).strip(),
-            sttBackendZh=str(raw.get("sttBackendZh", whisper_default("sttBackendZh"))).strip(),
-            sttModelZh=str(raw.get("sttModelZh", whisper_default("sttModelZh"))).strip(),
+            backend=str(raw.get("backend", dictation_ai_default("backend"))).strip(),
+            model=str(raw.get("model", dictation_ai_default("model"))).strip(),
+            sttBackendEn=str(raw.get("sttBackendEn", dictation_ai_default("sttBackendEn"))).strip(),
+            sttModelEn=str(raw.get("sttModelEn", dictation_ai_default("sttModelEn"))).strip(),
+            sttBackendKo=str(raw.get("sttBackendKo", dictation_ai_default("sttBackendKo"))).strip(),
+            sttModelKo=str(raw.get("sttModelKo", dictation_ai_default("sttModelKo"))).strip(),
+            sttBackendZh=str(raw.get("sttBackendZh", dictation_ai_default("sttBackendZh"))).strip(),
+            sttModelZh=str(raw.get("sttModelZh", dictation_ai_default("sttModelZh"))).strip(),
             language=language,
-            task=str(raw.get("task", whisper_default("task"))).strip(),
+            task=str(raw.get("task", dictation_ai_default("task"))).strip(),
             translationEnabled=bool(raw.get("translationEnabled", raw.get("task") == "translate")),
-            showSttStatusWindow=bool(raw.get("showSttStatusWindow", whisper_default("showSttStatusWindow"))),
+            showSttStatusWindow=bool(raw.get("showSttStatusWindow", dictation_ai_default("showSttStatusWindow"))),
             translationTargetLanguage=translation_target_language,
             translationBackend=selected_translation[0],
             translationModel=selected_translation[1],
@@ -973,8 +973,8 @@ class WhisperConfig:
             translationComputeTypeZh=translation_compute_type_zh,
             translationBeamSizeZh=translation_beam_size_zh,
             translationMaxNewTokensZh=translation_max_new_tokens_zh,
-            device=str(raw.get("device", whisper_default("device"))).strip(),
-            computeType=str(raw.get("computeType", whisper_default("computeType"))).strip(),
+            device=str(raw.get("device", dictation_ai_default("device"))).strip(),
+            computeType=str(raw.get("computeType", dictation_ai_default("computeType"))).strip(),
             chunkSeconds=selected_runtime[1],
             stepSeconds=selected_runtime[0],
             windowSeconds=selected_runtime[1],
@@ -1000,71 +1000,71 @@ class WhisperConfig:
             beamSizeZh=beam_size_zh,
             maxNewTokensZh=max_new_tokens_zh,
             temperatureZh=temperature_zh,
-            postProcessingProfile=str(raw.get("postProcessingProfile", whisper_default("postProcessingProfile"))).strip(),
-            sentenceBoundaryBackend=str(raw.get("sentenceBoundaryBackend", whisper_default("sentenceBoundaryBackend"))).strip(),
-            sentenceBoundaryModel=str(raw.get("sentenceBoundaryModel", whisper_default("sentenceBoundaryModel"))).strip(),
-            sentenceBoundaryBackendEn=str(raw.get("sentenceBoundaryBackendEn", whisper_default("sentenceBoundaryBackendEn"))).strip(),
-            sentenceBoundaryModelEn=str(raw.get("sentenceBoundaryModelEn", whisper_default("sentenceBoundaryModelEn"))).strip(),
-            sentenceBoundaryBackendKo=str(raw.get("sentenceBoundaryBackendKo", whisper_default("sentenceBoundaryBackendKo"))).strip(),
-            sentenceBoundaryModelKo=str(raw.get("sentenceBoundaryModelKo", whisper_default("sentenceBoundaryModelKo"))).strip(),
-            sentenceBoundaryBackendZh=str(raw.get("sentenceBoundaryBackendZh", whisper_default("sentenceBoundaryBackendZh"))).strip(),
-            sentenceBoundaryModelZh=str(raw.get("sentenceBoundaryModelZh", whisper_default("sentenceBoundaryModelZh"))).strip(),
-            sentenceBoundaryDevice=str(raw.get("sentenceBoundaryDevice", whisper_default("sentenceBoundaryDevice"))).strip(),
-            sentenceBoundaryComputeType=str(raw.get("sentenceBoundaryComputeType", whisper_default("sentenceBoundaryComputeType"))).strip(),
+            postProcessingProfile=str(raw.get("postProcessingProfile", dictation_ai_default("postProcessingProfile"))).strip(),
+            sentenceBoundaryBackend=str(raw.get("sentenceBoundaryBackend", dictation_ai_default("sentenceBoundaryBackend"))).strip(),
+            sentenceBoundaryModel=str(raw.get("sentenceBoundaryModel", dictation_ai_default("sentenceBoundaryModel"))).strip(),
+            sentenceBoundaryBackendEn=str(raw.get("sentenceBoundaryBackendEn", dictation_ai_default("sentenceBoundaryBackendEn"))).strip(),
+            sentenceBoundaryModelEn=str(raw.get("sentenceBoundaryModelEn", dictation_ai_default("sentenceBoundaryModelEn"))).strip(),
+            sentenceBoundaryBackendKo=str(raw.get("sentenceBoundaryBackendKo", dictation_ai_default("sentenceBoundaryBackendKo"))).strip(),
+            sentenceBoundaryModelKo=str(raw.get("sentenceBoundaryModelKo", dictation_ai_default("sentenceBoundaryModelKo"))).strip(),
+            sentenceBoundaryBackendZh=str(raw.get("sentenceBoundaryBackendZh", dictation_ai_default("sentenceBoundaryBackendZh"))).strip(),
+            sentenceBoundaryModelZh=str(raw.get("sentenceBoundaryModelZh", dictation_ai_default("sentenceBoundaryModelZh"))).strip(),
+            sentenceBoundaryDevice=str(raw.get("sentenceBoundaryDevice", dictation_ai_default("sentenceBoundaryDevice"))).strip(),
+            sentenceBoundaryComputeType=str(raw.get("sentenceBoundaryComputeType", dictation_ai_default("sentenceBoundaryComputeType"))).strip(),
         )
-        whisper_spec("backend").validate_allowed(config.backend, path="whisper.backend")
+        dictation_ai_spec("backend").validate_allowed(config.backend, path="dictationAi.backend")
         for lang, backend_key, model_key, backend, model in (
             ("en", "sttBackendEn", "sttModelEn", config.sttBackendEn, config.sttModelEn),
             ("ko", "sttBackendKo", "sttModelKo", config.sttBackendKo, config.sttModelKo),
             ("zh", "sttBackendZh", "sttModelZh", config.sttBackendZh, config.sttModelZh),
         ):
-            allowed_stt_backends = whisper_stt_backends_for_language(lang)
+            allowed_stt_backends = dictation_ai_stt_backends_for_language(lang)
             if backend not in allowed_stt_backends:
                 allowed_values = ", ".join(allowed_stt_backends)
-                raise ValueError(f"whisper.{backend_key} must be one of: {allowed_values}")
+                raise ValueError(f"dictationAi.{backend_key} must be one of: {allowed_values}")
             if not model:
-                raise ValueError(f"whisper.{model_key} is required")
+                raise ValueError(f"dictationAi.{model_key} is required")
         if not config.inputDevice:
-            raise ValueError("whisper.inputDevice is required")
+            raise ValueError("dictationAi.inputDevice is required")
         if not config.model:
-            raise ValueError("whisper.model is required")
-        whisper_spec("language").validate_allowed(config.language, path="whisper.language")
-        whisper_spec("task").validate_allowed(config.task, path="whisper.task")
-        whisper_spec("translationTargetLanguage").validate_allowed(
-            config.translationTargetLanguage, path="whisper.translationTargetLanguage"
+            raise ValueError("dictationAi.model is required")
+        dictation_ai_spec("language").validate_allowed(config.language, path="dictationAi.language")
+        dictation_ai_spec("task").validate_allowed(config.task, path="dictationAi.task")
+        dictation_ai_spec("translationTargetLanguage").validate_allowed(
+            config.translationTargetLanguage, path="dictationAi.translationTargetLanguage"
         )
-        whisper_spec("translationBackend").validate_allowed(config.translationBackend, path="whisper.translationBackend")
+        dictation_ai_spec("translationBackend").validate_allowed(config.translationBackend, path="dictationAi.translationBackend")
         if config.translationEnabled:
-            allowed_translation_backends = whisper_translation_backends_for_language(config.language)
+            allowed_translation_backends = dictation_ai_translation_backends_for_language(config.language)
             if config.translationBackend not in allowed_translation_backends:
                 allowed_values = ", ".join(allowed_translation_backends)
                 raise ValueError(
-                    f"whisper.translationBackend must be one of for language={config.language}: {allowed_values}"
+                    f"dictationAi.translationBackend must be one of for language={config.language}: {allowed_values}"
                 )
-            allowed_translation_targets = whisper_translation_targets_for_backend(config.language, config.translationBackend)
+            allowed_translation_targets = dictation_ai_translation_targets_for_backend(config.language, config.translationBackend)
             if config.translationTargetLanguage not in allowed_translation_targets:
                 allowed_values = ", ".join(allowed_translation_targets)
                 raise ValueError(
-                    "whisper.translationTargetLanguage must be one of "
+                    "dictationAi.translationTargetLanguage must be one of "
                     f"for language={config.language} backend={config.translationBackend}: {allowed_values}"
                 )
-            allowed_translation_models = whisper_translation_models_for_backend(config.translationBackend)
+            allowed_translation_models = dictation_ai_translation_models_for_backend(config.translationBackend)
             if allowed_translation_models and config.translationModel not in allowed_translation_models:
                 allowed_values = ", ".join(allowed_translation_models)
                 raise ValueError(
-                    f"whisper.translationModel must be one of for backend={config.translationBackend}: {allowed_values}"
+                    f"dictationAi.translationModel must be one of for backend={config.translationBackend}: {allowed_values}"
                 )
         if config.translationEnabled and config.translationBackend == "whisper" and config.translationTargetLanguage != "en":
-            raise ValueError("whisper.translationTargetLanguage must be en when whisper.translationBackend=whisper")
+            raise ValueError("dictationAi.translationTargetLanguage must be en when dictationAi.translationBackend=whisper")
         if config.translationEnabled and config.translationBackend != "whisper" and config.task == "translate":
-            raise ValueError("whisper.task must be transcribe when whisper.translationBackend is not whisper")
+            raise ValueError("dictationAi.task must be transcribe when dictationAi.translationBackend is not whisper")
         if config.translationEnabled and config.translationBackend in {"nllb-transformers", "m2m100-transformers"} and not config.translationModel:
-            raise ValueError(f"whisper.translationModel is required when whisper.translationBackend={config.translationBackend}")
-        whisper_spec("translationDevice").validate_allowed(config.translationDevice, path="whisper.translationDevice")
-        whisper_spec("translationComputeType").validate_allowed(config.translationComputeType, path="whisper.translationComputeType")
-        whisper_spec("translationBeamSize").validate_range(config.translationBeamSize, path="whisper.translationBeamSize")
-        whisper_spec("translationMaxNewTokens").validate_range(
-            config.translationMaxNewTokens, path="whisper.translationMaxNewTokens"
+            raise ValueError(f"dictationAi.translationModel is required when dictationAi.translationBackend={config.translationBackend}")
+        dictation_ai_spec("translationDevice").validate_allowed(config.translationDevice, path="dictationAi.translationDevice")
+        dictation_ai_spec("translationComputeType").validate_allowed(config.translationComputeType, path="dictationAi.translationComputeType")
+        dictation_ai_spec("translationBeamSize").validate_range(config.translationBeamSize, path="dictationAi.translationBeamSize")
+        dictation_ai_spec("translationMaxNewTokens").validate_range(
+            config.translationMaxNewTokens, path="dictationAi.translationMaxNewTokens"
         )
         for target, suffix, backend, model, device, compute_type, beam_size, max_new_tokens in (
             (
@@ -1098,101 +1098,101 @@ class WhisperConfig:
                 config.translationMaxNewTokensZh,
             ),
         ):
-            whisper_spec(f"translationBackend{suffix}").validate_allowed(
-                backend, path=f"whisper.translationBackend{suffix}"
+            dictation_ai_spec(f"translationBackend{suffix}").validate_allowed(
+                backend, path=f"dictationAi.translationBackend{suffix}"
             )
-            whisper_spec(f"translationDevice{suffix}").validate_allowed(
-                device, path=f"whisper.translationDevice{suffix}"
+            dictation_ai_spec(f"translationDevice{suffix}").validate_allowed(
+                device, path=f"dictationAi.translationDevice{suffix}"
             )
-            whisper_spec(f"translationComputeType{suffix}").validate_allowed(
-                compute_type, path=f"whisper.translationComputeType{suffix}"
+            dictation_ai_spec(f"translationComputeType{suffix}").validate_allowed(
+                compute_type, path=f"dictationAi.translationComputeType{suffix}"
             )
-            whisper_spec(f"translationBeamSize{suffix}").validate_range(
-                beam_size, path=f"whisper.translationBeamSize{suffix}"
+            dictation_ai_spec(f"translationBeamSize{suffix}").validate_range(
+                beam_size, path=f"dictationAi.translationBeamSize{suffix}"
             )
-            whisper_spec(f"translationMaxNewTokens{suffix}").validate_range(
-                max_new_tokens, path=f"whisper.translationMaxNewTokens{suffix}"
+            dictation_ai_spec(f"translationMaxNewTokens{suffix}").validate_range(
+                max_new_tokens, path=f"dictationAi.translationMaxNewTokens{suffix}"
             )
             if not config.translationEnabled:
                 continue
             allowed_group_backends = tuple(
                 allowed_backend
-                for allowed_backend in whisper_translation_backends_for_language(config.language)
-                if target in whisper_translation_targets_for_backend(config.language, allowed_backend)
+                for allowed_backend in dictation_ai_translation_backends_for_language(config.language)
+                if target in dictation_ai_translation_targets_for_backend(config.language, allowed_backend)
             )
             if backend not in allowed_group_backends:
                 allowed_values = ", ".join(allowed_group_backends)
                 raise ValueError(
-                    f"whisper.translationBackend{suffix} must be one of "
+                    f"dictationAi.translationBackend{suffix} must be one of "
                     f"for language={config.language} target={target}: {allowed_values}"
                 )
-            allowed_group_models = whisper_translation_models_for_backend(backend)
+            allowed_group_models = dictation_ai_translation_models_for_backend(backend)
             if allowed_group_models and model not in allowed_group_models:
                 allowed_values = ", ".join(allowed_group_models)
                 raise ValueError(
-                    f"whisper.translationModel{suffix} must be one of for backend={backend}: {allowed_values}"
+                    f"dictationAi.translationModel{suffix} must be one of for backend={backend}: {allowed_values}"
                 )
             if backend in {"nllb-transformers", "m2m100-transformers"}:
                 if not model:
-                    raise ValueError(f"whisper.translationModel{suffix} is required when whisper.translationBackend{suffix}={backend}")
+                    raise ValueError(f"dictationAi.translationModel{suffix} is required when dictationAi.translationBackend{suffix}={backend}")
                 if device != "cuda":
-                    raise ValueError(f"whisper.translationDevice{suffix} must be cuda when whisper.translationBackend{suffix}={backend}")
+                    raise ValueError(f"dictationAi.translationDevice{suffix} must be cuda when dictationAi.translationBackend{suffix}={backend}")
         if config.translationEnabled and config.translationBackend in {"nllb-transformers", "m2m100-transformers"} and config.translationDevice != "cuda":
-            raise ValueError(f"whisper.translationDevice must be cuda when whisper.translationBackend={config.translationBackend}")
+            raise ValueError(f"dictationAi.translationDevice must be cuda when dictationAi.translationBackend={config.translationBackend}")
         if not config.device:
-            raise ValueError("whisper.device is required")
+            raise ValueError("dictationAi.device is required")
         if not config.computeType:
-            raise ValueError("whisper.computeType is required")
+            raise ValueError("dictationAi.computeType is required")
         if "windowSeconds" in raw:
-            whisper_spec("windowSeconds").validate_range(config.windowSeconds, path="whisper.windowSeconds")
-        whisper_spec("chunkSeconds").validate_range(config.chunkSeconds, path="whisper.chunkSeconds")
-        whisper_spec("stepSeconds").validate_range(config.stepSeconds, path="whisper.stepSeconds")
-        whisper_spec("windowSeconds").validate_range(config.windowSeconds, path="whisper.windowSeconds")
+            dictation_ai_spec("windowSeconds").validate_range(config.windowSeconds, path="dictationAi.windowSeconds")
+        dictation_ai_spec("chunkSeconds").validate_range(config.chunkSeconds, path="dictationAi.chunkSeconds")
+        dictation_ai_spec("stepSeconds").validate_range(config.stepSeconds, path="dictationAi.stepSeconds")
+        dictation_ai_spec("windowSeconds").validate_range(config.windowSeconds, path="dictationAi.windowSeconds")
         if config.stepSeconds > config.windowSeconds:
             selected_suffix = config.language.title()
             if f"stepSeconds{selected_suffix}" in raw or f"windowSeconds{selected_suffix}" in raw:
                 raise ValueError(
-                    f"whisper.stepSeconds{selected_suffix} must be less than or equal to whisper.windowSeconds{selected_suffix}"
+                    f"dictationAi.stepSeconds{selected_suffix} must be less than or equal to dictationAi.windowSeconds{selected_suffix}"
                 )
-            raise ValueError("whisper.stepSeconds must be less than or equal to whisper.windowSeconds")
+            raise ValueError("dictationAi.stepSeconds must be less than or equal to dictationAi.windowSeconds")
         if not 0.0 <= config.commitLagSeconds < config.windowSeconds:
             selected_suffix = config.language.title()
             if f"commitLagSeconds{selected_suffix}" in raw or f"windowSeconds{selected_suffix}" in raw:
                 raise ValueError(
-                    f"whisper.commitLagSeconds{selected_suffix} must be between 0.0 and less than whisper.windowSeconds{selected_suffix}"
+                    f"dictationAi.commitLagSeconds{selected_suffix} must be between 0.0 and less than dictationAi.windowSeconds{selected_suffix}"
                 )
-            raise ValueError("whisper.commitLagSeconds must be between 0.0 and less than whisper.windowSeconds")
-        whisper_spec("beamSize").validate_range(config.beamSize, path="whisper.beamSize")
-        whisper_spec("maxNewTokens").validate_range(config.maxNewTokens, path="whisper.maxNewTokens")
-        whisper_spec("temperature").validate_range(config.temperature, path="whisper.temperature")
+            raise ValueError("dictationAi.commitLagSeconds must be between 0.0 and less than dictationAi.windowSeconds")
+        dictation_ai_spec("beamSize").validate_range(config.beamSize, path="dictationAi.beamSize")
+        dictation_ai_spec("maxNewTokens").validate_range(config.maxNewTokens, path="dictationAi.maxNewTokens")
+        dictation_ai_spec("temperature").validate_range(config.temperature, path="dictationAi.temperature")
         for lang, suffix in (("en", "En"), ("ko", "Ko"), ("zh", "Zh")):
             step = getattr(config, f"stepSeconds{suffix}")
             window = getattr(config, f"windowSeconds{suffix}")
             commit_lag = getattr(config, f"commitLagSeconds{suffix}")
-            whisper_spec(f"stepSeconds{suffix}").validate_range(step, path=f"whisper.stepSeconds{suffix}")
-            whisper_spec(f"windowSeconds{suffix}").validate_range(window, path=f"whisper.windowSeconds{suffix}")
+            dictation_ai_spec(f"stepSeconds{suffix}").validate_range(step, path=f"dictationAi.stepSeconds{suffix}")
+            dictation_ai_spec(f"windowSeconds{suffix}").validate_range(window, path=f"dictationAi.windowSeconds{suffix}")
             if step > window:
-                raise ValueError(f"whisper.stepSeconds{suffix} must be less than or equal to whisper.windowSeconds{suffix}")
+                raise ValueError(f"dictationAi.stepSeconds{suffix} must be less than or equal to dictationAi.windowSeconds{suffix}")
             if not 0.0 <= commit_lag < window:
                 raise ValueError(
-                    f"whisper.commitLagSeconds{suffix} must be between 0.0 and less than whisper.windowSeconds{suffix}"
+                    f"dictationAi.commitLagSeconds{suffix} must be between 0.0 and less than dictationAi.windowSeconds{suffix}"
                 )
-            whisper_spec(f"beamSize{suffix}").validate_range(getattr(config, f"beamSize{suffix}"), path=f"whisper.beamSize{suffix}")
-            whisper_spec(f"maxNewTokens{suffix}").validate_range(
-                getattr(config, f"maxNewTokens{suffix}"), path=f"whisper.maxNewTokens{suffix}"
+            dictation_ai_spec(f"beamSize{suffix}").validate_range(getattr(config, f"beamSize{suffix}"), path=f"dictationAi.beamSize{suffix}")
+            dictation_ai_spec(f"maxNewTokens{suffix}").validate_range(
+                getattr(config, f"maxNewTokens{suffix}"), path=f"dictationAi.maxNewTokens{suffix}"
             )
-            whisper_spec(f"temperature{suffix}").validate_range(
-                getattr(config, f"temperature{suffix}"), path=f"whisper.temperature{suffix}"
+            dictation_ai_spec(f"temperature{suffix}").validate_range(
+                getattr(config, f"temperature{suffix}"), path=f"dictationAi.temperature{suffix}"
             )
             del lang
-        whisper_spec("postProcessingProfile").validate_allowed(
-            config.postProcessingProfile, path="whisper.postProcessingProfile"
+        dictation_ai_spec("postProcessingProfile").validate_allowed(
+            config.postProcessingProfile, path="dictationAi.postProcessingProfile"
         )
-        whisper_spec("sentenceBoundaryBackend").validate_allowed(
-            config.sentenceBoundaryBackend, path="whisper.sentenceBoundaryBackend"
+        dictation_ai_spec("sentenceBoundaryBackend").validate_allowed(
+            config.sentenceBoundaryBackend, path="dictationAi.sentenceBoundaryBackend"
         )
         if not config.sentenceBoundaryModel:
-            raise ValueError("whisper.sentenceBoundaryModel is required")
+            raise ValueError("dictationAi.sentenceBoundaryModel is required")
         for lang, backend_key, model_key, backend, model in (
             (
                 "en",
@@ -1217,14 +1217,14 @@ class WhisperConfig:
             ),
         ):
             del lang
-            whisper_spec(backend_key).validate_allowed(backend, path=f"whisper.{backend_key}")
+            dictation_ai_spec(backend_key).validate_allowed(backend, path=f"dictationAi.{backend_key}")
             if not model:
-                raise ValueError(f"whisper.{model_key} is required")
-        whisper_spec("sentenceBoundaryDevice").validate_allowed(
-            config.sentenceBoundaryDevice, path="whisper.sentenceBoundaryDevice"
+                raise ValueError(f"dictationAi.{model_key} is required")
+        dictation_ai_spec("sentenceBoundaryDevice").validate_allowed(
+            config.sentenceBoundaryDevice, path="dictationAi.sentenceBoundaryDevice"
         )
-        whisper_spec("sentenceBoundaryComputeType").validate_allowed(
-            config.sentenceBoundaryComputeType, path="whisper.sentenceBoundaryComputeType"
+        dictation_ai_spec("sentenceBoundaryComputeType").validate_allowed(
+            config.sentenceBoundaryComputeType, path="dictationAi.sentenceBoundaryComputeType"
         )
         return config
 
@@ -1239,7 +1239,7 @@ class AppConfig:
     cameraServer: CameraServerConfig = field(default_factory=lambda: CameraServerConfig.from_dict({}))
     audio: AudioMixerConfig | None = None
     faceEnhance: FaceEnhanceConfig = field(default_factory=lambda: FaceEnhanceConfig.from_dict({}))
-    whisper: WhisperConfig = field(default_factory=lambda: WhisperConfig.from_dict({}))
+    dictationAi: DictationAiConfig = field(default_factory=lambda: DictationAiConfig.from_dict({}))
 
     @classmethod
     def load(cls, path: Path) -> "AppConfig":
@@ -1260,7 +1260,7 @@ class AppConfig:
             cameraServer=CameraServerConfig.from_dict(raw.get("cameraServer") or raw.get("camera")),
             audio=AudioMixerConfig.from_dict(raw["audio"]) if raw.get("audio") else None,
             faceEnhance=FaceEnhanceConfig.from_dict(raw.get("faceEnhance") or {}),
-            whisper=WhisperConfig.from_dict(raw.get("whisper") or {}),
+            dictationAi=DictationAiConfig.from_dict(raw.get("dictationAi") or {}),
         )
 
 

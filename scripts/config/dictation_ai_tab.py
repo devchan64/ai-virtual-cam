@@ -1,20 +1,20 @@
 from __future__ import annotations
 
-from src.domain.dictation_ai_defaults import whisper_default
+from src.domain.dictation_ai_defaults import dictation_ai_default
 
 from scripts.config.dictation_ai_options import (
-    whisper_backend_options,
-    whisper_language_display_from_raw,
-    whisper_language_options,
-    whisper_model_options,
-    whisper_sentence_boundary_backend_options,
-    whisper_sentence_boundary_model_options,
-    whisper_stt_backend_options,
-    whisper_stt_model_options,
-    whisper_translation_backend_options_for_target,
-    whisper_translation_model_options,
-    whisper_translation_target_display_from_raw,
-    whisper_translation_target_options,
+    dictation_ai_backend_options,
+    dictation_ai_language_display_from_raw,
+    dictation_ai_language_options,
+    dictation_ai_model_options,
+    dictation_ai_sentence_boundary_backend_options,
+    dictation_ai_sentence_boundary_model_options,
+    dictation_ai_stt_backend_options,
+    dictation_ai_stt_model_options,
+    dictation_ai_translation_backend_options_for_target,
+    dictation_ai_translation_model_options,
+    dictation_ai_translation_target_display_from_raw,
+    dictation_ai_translation_target_options,
 )
 
 
@@ -55,7 +55,7 @@ def build_whisper_tab(
     gui._add_bool_switch(
         input_frame,
         input_row,
-        "whisper_enabled",
+        "dictation_ai_enabled",
         gui._tr("label.dictation_ai_enabled", "받아쓰기 AI 전사"),
         False,
         label_key="label.dictation_ai_enabled",
@@ -76,7 +76,7 @@ def build_whisper_tab(
     gui._add_combo(
         input_frame,
         input_row,
-        "whisper_input_device",
+        "dictation_ai_input_device",
         gui._tr("label.dictation_ai_input_device", "입력 장치"),
         whisper_input_display_values,
         whisper_input_default_display,
@@ -92,15 +92,15 @@ def build_whisper_tab(
     gui._register_localized_widget(whisper_input_meter_btn, "button.dictation_ai_input_meter", "받아쓰기 AI 입력 dB 미터")
     whisper_input_meter_btn.grid(row=input_row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0))
     input_row += 1
-    whisper_model_download_btn = ttk.Button(
+    dictation_ai_model_download_btn = ttk.Button(
         input_frame,
         text=gui._tr("button.dictation_ai_model_download_selected", "선택 모델 다운로드"),
-        command=gui._show_whisper_model_download_dialog_for_current_config,
+        command=gui._show_dictation_ai_model_download_dialog_for_current_config,
     )
     gui._register_localized_widget(
-        whisper_model_download_btn, "button.dictation_ai_model_download_selected", "선택 모델 다운로드"
+        dictation_ai_model_download_btn, "button.dictation_ai_model_download_selected", "선택 모델 다운로드"
     )
-    whisper_model_download_btn.grid(row=input_row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0))
+    dictation_ai_model_download_btn.grid(row=input_row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0))
     input_row += 1
 
     stt_frame, row = _add_group(gui, ttk, tab_whisper, row, "label.dictation_ai_group_stt", "STT 언어/모델")
@@ -108,10 +108,10 @@ def build_whisper_tab(
     gui._add_combo(
         stt_frame,
         stt_row,
-        "whisper_language",
+        "dictation_ai_language",
         gui._tr("label.dictation_ai_language", "인식 언어(단일 선택)"),
-        whisper_language_options(),
-        whisper_language_display_from_raw(whisper_default("language")),
+        dictation_ai_language_options(),
+        dictation_ai_language_display_from_raw(dictation_ai_default("language")),
         label_key="label.dictation_ai_language",
     )
     stt_row += 1
@@ -128,10 +128,10 @@ def build_whisper_tab(
     gui._add_combo(
         stt_frame,
         stt_row,
-        "whisper_backend",
+        "dictation_ai_backend",
         gui._tr("label.dictation_ai_backend", "기본 STT 백엔드"),
-        whisper_backend_options(),
-        whisper_default("backend"),
+        dictation_ai_backend_options(),
+        dictation_ai_default("backend"),
         label_key="label.dictation_ai_backend",
     )
     stt_row += 1
@@ -139,10 +139,10 @@ def build_whisper_tab(
     gui._add_combo(
         stt_frame,
         stt_row,
-        "whisper_model",
+        "dictation_ai_model",
         gui._tr("label.dictation_ai_model", "기본 STT 모델"),
-        whisper_model_options(),
-        whisper_default("model"),
+        dictation_ai_model_options(),
+        dictation_ai_default("model"),
         label_key="label.dictation_ai_model",
     )
     stt_row += 1
@@ -152,17 +152,17 @@ def build_whisper_tab(
     stt_language_rows = {}
     for lang_code, lang_label in (("en", "영어"), ("ko", "한국어"), ("zh", "중국어")):
         lang_rows = []
-        backend_key = f"whisper_stt_backend_{lang_code}"
-        model_key = f"whisper_stt_model_{lang_code}"
-        backend_default = whisper_default(f"sttBackend{lang_code.title()}")
-        model_default = whisper_default(f"sttModel{lang_code.title()}")
+        backend_key = f"dictation_ai_stt_backend_{lang_code}"
+        model_key = f"dictation_ai_stt_model_{lang_code}"
+        backend_default = dictation_ai_default(f"sttBackend{lang_code.title()}")
+        model_default = dictation_ai_default(f"sttModel{lang_code.title()}")
         lang_rows.append(stt_row)
         gui._add_combo(
             stt_frame,
             stt_row,
             backend_key,
             gui._tr(f"label.{backend_key}", f"{lang_label} STT 모델 타입"),
-            whisper_stt_backend_options(lang_code),
+            dictation_ai_stt_backend_options(lang_code),
             backend_default,
             label_key=f"label.{backend_key}",
         )
@@ -173,14 +173,14 @@ def build_whisper_tab(
             stt_row,
             model_key,
             gui._tr(f"label.{model_key}", f"{lang_label} STT 모델"),
-            whisper_stt_model_options(backend_default, lang_code),
+            dictation_ai_stt_model_options(backend_default, lang_code),
             model_default,
             label_key=f"label.{model_key}",
         )
         stt_row += 1
         stt_language_rows[lang_code] = lang_rows
-    gui._whisper_stt_frame = stt_frame
-    gui._whisper_stt_language_rows = stt_language_rows
+    gui._dictation_ai_stt_frame = stt_frame
+    gui._dictation_ai_stt_language_rows = stt_language_rows
     _add_hint(
         gui,
         ttk,
@@ -195,39 +195,39 @@ def build_whisper_tab(
     gui._add_bool_switch(
         runtime_frame,
         runtime_row,
-        "whisper_show_stt_status_window",
+        "dictation_ai_show_stt_status_window",
         gui._tr("label.dictation_ai_show_stt_status_window", "STT 원문창 보기"),
-        whisper_default("showSttStatusWindow"),
+        dictation_ai_default("showSttStatusWindow"),
         label_key="label.dictation_ai_show_stt_status_window",
     )
     runtime_row += 1
     gui._add_combo(
         runtime_frame,
         runtime_row,
-        "whisper_device",
+        "dictation_ai_device",
         gui._tr("label.dictation_ai_device", "STT 장치"),
         ["auto", "cpu", "cuda", "mps"],
-        whisper_default("device"),
+        dictation_ai_default("device"),
         label_key="label.dictation_ai_device",
     )
     runtime_row += 1
-    whisper_compute_type_row = runtime_row
+    dictation_ai_compute_type_row = runtime_row
     gui._add_combo(
         runtime_frame,
         runtime_row,
-        "whisper_compute_type",
+        "dictation_ai_compute_type",
         gui._tr("label.dictation_ai_compute_type", "STT 연산 타입"),
         ["auto", "int8", "float16", "float32"],
-        whisper_default("computeType"),
+        dictation_ai_default("computeType"),
         label_key="label.dictation_ai_compute_type",
     )
     runtime_row += 1
     gui._add_slider(
         runtime_frame,
         runtime_row,
-        "whisper_step_seconds",
+        "dictation_ai_step_seconds",
         gui._tr("label.dictation_ai_step_seconds", "업데이트 간격(초)"),
-        whisper_default("stepSeconds"),
+        dictation_ai_default("stepSeconds"),
         0.5,
         5.0,
         resolution=0.5,
@@ -237,9 +237,9 @@ def build_whisper_tab(
     gui._add_slider(
         runtime_frame,
         runtime_row,
-        "whisper_window_seconds",
+        "dictation_ai_window_seconds",
         gui._tr("label.dictation_ai_window_seconds", "컨텍스트 윈도우(초)"),
-        whisper_default("windowSeconds"),
+        dictation_ai_default("windowSeconds"),
         1.0,
         30.0,
         resolution=0.5,
@@ -249,48 +249,48 @@ def build_whisper_tab(
     gui._add_slider(
         runtime_frame,
         runtime_row,
-        "whisper_commit_lag_seconds",
+        "dictation_ai_commit_lag_seconds",
         gui._tr("label.dictation_ai_commit_lag_seconds", "Tail 확정 지연(초)"),
-        whisper_default("commitLagSeconds"),
+        dictation_ai_default("commitLagSeconds"),
         0.0,
         5.0,
         resolution=0.5,
         label_key="label.dictation_ai_commit_lag_seconds",
     )
     runtime_row += 1
-    whisper_beam_size_row = runtime_row
+    dictation_ai_beam_size_row = runtime_row
     gui._add_slider(
         runtime_frame,
         runtime_row,
-        "whisper_beam_size",
+        "dictation_ai_beam_size",
         gui._tr("label.dictation_ai_beam_size", "Beam 크기"),
-        whisper_default("beamSize"),
+        dictation_ai_default("beamSize"),
         1,
         8,
         resolution=1,
         label_key="label.dictation_ai_beam_size",
     )
     runtime_row += 1
-    whisper_max_new_tokens_row = runtime_row
+    dictation_ai_max_new_tokens_row = runtime_row
     gui._add_slider(
         runtime_frame,
         runtime_row,
-        "whisper_max_new_tokens",
+        "dictation_ai_max_new_tokens",
         gui._tr("label.dictation_ai_max_new_tokens", "STT 최대 토큰"),
-        whisper_default("maxNewTokens"),
+        dictation_ai_default("maxNewTokens"),
         16,
         512,
         resolution=16,
         label_key="label.dictation_ai_max_new_tokens",
     )
     runtime_row += 1
-    whisper_temperature_row = runtime_row
+    dictation_ai_temperature_row = runtime_row
     gui._add_slider(
         runtime_frame,
         runtime_row,
-        "whisper_temperature",
+        "dictation_ai_temperature",
         gui._tr("label.dictation_ai_temperature", "STT temperature"),
-        whisper_default("temperature"),
+        dictation_ai_default("temperature"),
         0.0,
         1.0,
         resolution=0.1,
@@ -305,14 +305,14 @@ def build_whisper_tab(
         "hint.dictation_ai_speed",
         "업데이트 간격/컨텍스트/확정 지연은 공통 STT 스트리밍 설정입니다. 확정 지연은 윈도우 끝의 불안정한 tail을 잠시 보류하는 값이며, STT 결과 문장 경계 처리 모델이 찾은 후보도 별도 재확인 과정을 거친 뒤 final로 출력됩니다. Beam, 최대 토큰, temperature, 연산 타입은 선택한 STT 모델 타입이 지원할 때만 표시됩니다.",
     )
-    gui._whisper_backend_option_parent = runtime_frame
-    gui._whisper_backend_option_rows = {
-        "compute_type": whisper_compute_type_row,
-        "beam_size": whisper_beam_size_row,
-        "max_new_tokens": whisper_max_new_tokens_row,
-        "temperature": whisper_temperature_row,
+    gui._dictation_ai_backend_option_parent = runtime_frame
+    gui._dictation_ai_backend_option_rows = {
+        "compute_type": dictation_ai_compute_type_row,
+        "beam_size": dictation_ai_beam_size_row,
+        "max_new_tokens": dictation_ai_max_new_tokens_row,
+        "temperature": dictation_ai_temperature_row,
     }
-    gui._whisper_backend_specific_rows = list(gui._whisper_backend_option_rows.values())
+    gui._dictation_ai_backend_specific_rows = list(gui._dictation_ai_backend_option_rows.values())
 
     boundary_frame, row = _add_group(gui, ttk, tab_whisper, row, "label.dictation_ai_group_boundary", "STT 결과 문장 경계 처리")
     boundary_row = 0
@@ -320,10 +320,10 @@ def build_whisper_tab(
     gui._add_combo(
         boundary_frame,
         boundary_row,
-        "whisper_sentence_boundary_backend",
+        "dictation_ai_sentence_boundary_backend",
         gui._tr("label.dictation_ai_sentence_boundary_backend", "STT 결과 문장 경계 처리 백엔드"),
-        whisper_sentence_boundary_backend_options(),
-        whisper_default("sentenceBoundaryBackend"),
+        dictation_ai_sentence_boundary_backend_options(),
+        dictation_ai_default("sentenceBoundaryBackend"),
         label_key="label.dictation_ai_sentence_boundary_backend",
     )
     boundary_row += 1
@@ -331,10 +331,10 @@ def build_whisper_tab(
     gui._add_combo(
         boundary_frame,
         boundary_row,
-        "whisper_sentence_boundary_model",
+        "dictation_ai_sentence_boundary_model",
         gui._tr("label.dictation_ai_sentence_boundary_model", "STT 결과 문장 경계 처리 모델"),
-        whisper_sentence_boundary_model_options(whisper_default("sentenceBoundaryBackend")),
-        whisper_default("sentenceBoundaryModel"),
+        dictation_ai_sentence_boundary_model_options(dictation_ai_default("sentenceBoundaryBackend")),
+        dictation_ai_default("sentenceBoundaryModel"),
         label_key="label.dictation_ai_sentence_boundary_model",
     )
     boundary_row += 1
@@ -347,48 +347,48 @@ def build_whisper_tab(
         "hint.dictation_ai_sentence_boundary",
         "STT 결과 문장 경계 처리는 STT가 만든 텍스트를 completed/pending 후보로 나누는 단계입니다. 모든 STT 언어에서 이 backend/model을 사용합니다.",
     )
-    gui._whisper_stt_boundary_parent = boundary_frame
-    gui._whisper_stt_boundary_rows = [stt_boundary_backend_row, stt_boundary_model_row, stt_boundary_hint_row]
+    gui._dictation_ai_stt_boundary_parent = boundary_frame
+    gui._dictation_ai_stt_boundary_rows = [stt_boundary_backend_row, stt_boundary_model_row, stt_boundary_hint_row]
 
     translation_group, row = _add_group(gui, ttk, tab_whisper, row, "label.dictation_ai_group_translation", "번역")
     translation_row = 0
     gui._add_bool_switch(
         translation_group,
         translation_row,
-        "whisper_translation_enabled",
+        "dictation_ai_translation_enabled",
         gui._tr("label.dictation_ai_translation_enabled", "번역 창"),
-        whisper_default("translationEnabled"),
+        dictation_ai_default("translationEnabled"),
         label_key="label.dictation_ai_translation_enabled",
     )
     translation_row += 1
     gui._add_combo(
         translation_group,
         translation_row,
-        "whisper_translation_target_language",
+        "dictation_ai_translation_target_language",
         gui._tr("label.dictation_ai_translation_target_language", "번역 대상 언어"),
-        whisper_translation_target_options(),
-        whisper_translation_target_display_from_raw(whisper_default("translationTargetLanguage")),
+        dictation_ai_translation_target_options(),
+        dictation_ai_translation_target_display_from_raw(dictation_ai_default("translationTargetLanguage")),
         label_key="label.dictation_ai_translation_target_language",
     )
     translation_row += 1
     gui._add_combo(
         translation_group,
         translation_row,
-        "whisper_translation_backend",
+        "dictation_ai_translation_backend",
         gui._tr("label.dictation_ai_translation_backend", "번역 백엔드"),
-        whisper_translation_backend_options_for_target(whisper_default("translationTargetLanguage")),
-        whisper_default("translationBackend"),
+        dictation_ai_translation_backend_options_for_target(dictation_ai_default("translationTargetLanguage")),
+        dictation_ai_default("translationBackend"),
         label_key="label.dictation_ai_translation_backend",
     )
     translation_row += 1
 
-    whisper_translation_frame = ttk.Frame(translation_group)
-    whisper_translation_frame.grid(row=translation_row, column=0, columnspan=4, sticky="ew", padx=0, pady=(0, 4))
-    whisper_translation_frame.columnconfigure(0, weight=1)
+    dictation_ai_translation_frame = ttk.Frame(translation_group)
+    dictation_ai_translation_frame.grid(row=translation_row, column=0, columnspan=4, sticky="ew", padx=0, pady=(0, 4))
+    dictation_ai_translation_frame.columnconfigure(0, weight=1)
     _add_hint(
         gui,
         ttk,
-        whisper_translation_frame,
+        dictation_ai_translation_frame,
         0,
         "hint.dictation_ai_translation_builtin_backend",
         "Whisper 내장 번역은 영어 출력만 지원하며 외부 번역 모델 설정을 사용하지 않습니다.",
@@ -403,39 +403,39 @@ def build_whisper_tab(
     gui._add_combo(
         nllb_translation_frame,
         nllb_row,
-        "whisper_translation_model",
+        "dictation_ai_translation_model",
         gui._tr("label.dictation_ai_translation_model", "번역 모델"),
-        whisper_translation_model_options(),
-        whisper_default("translationModel"),
+        dictation_ai_translation_model_options(),
+        dictation_ai_default("translationModel"),
         label_key="label.dictation_ai_translation_model",
     )
     nllb_row += 1
     gui._add_combo(
         nllb_translation_frame,
         nllb_row,
-        "whisper_translation_device",
+        "dictation_ai_translation_device",
         gui._tr("label.dictation_ai_translation_device", "번역 장치"),
         ["cuda"],
-        whisper_default("translationDevice"),
+        dictation_ai_default("translationDevice"),
         label_key="label.dictation_ai_translation_device",
     )
     nllb_row += 1
     gui._add_combo(
         nllb_translation_frame,
         nllb_row,
-        "whisper_translation_compute_type",
+        "dictation_ai_translation_compute_type",
         gui._tr("label.dictation_ai_translation_compute_type", "번역 연산 타입"),
         ["float16", "float32"],
-        whisper_default("translationComputeType"),
+        dictation_ai_default("translationComputeType"),
         label_key="label.dictation_ai_translation_compute_type",
     )
     nllb_row += 1
     gui._add_slider(
         nllb_translation_frame,
         nllb_row,
-        "whisper_translation_beam_size",
+        "dictation_ai_translation_beam_size",
         gui._tr("label.dictation_ai_translation_beam_size", "번역 Beam 크기"),
-        whisper_default("translationBeamSize"),
+        dictation_ai_default("translationBeamSize"),
         1,
         8,
         resolution=1,
@@ -445,9 +445,9 @@ def build_whisper_tab(
     gui._add_slider(
         nllb_translation_frame,
         nllb_row,
-        "whisper_translation_max_new_tokens",
+        "dictation_ai_translation_max_new_tokens",
         gui._tr("label.dictation_ai_translation_max_new_tokens", "번역 최대 토큰"),
-        whisper_default("translationMaxNewTokens"),
+        dictation_ai_default("translationMaxNewTokens"),
         16,
         512,
         resolution=16,
@@ -462,9 +462,9 @@ def build_whisper_tab(
         "hint.dictation_ai_translation_target_language",
         "외부 번역 모델은 백엔드와 STT 언어에 따라 사용 가능한 대상 언어와 모델이 제한됩니다. 실시간 성능을 위해 CUDA가 필요합니다.",
     )
-    gui._whisper_translation_backend_frames = {
-        "whisper": whisper_translation_frame,
-        "mock": whisper_translation_frame,
+    gui._dictation_ai_translation_backend_frames = {
+        "whisper": dictation_ai_translation_frame,
+        "mock": dictation_ai_translation_frame,
         "nllb-transformers": nllb_translation_frame,
         "m2m100-transformers": nllb_translation_frame,
     }

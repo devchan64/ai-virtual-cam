@@ -16,7 +16,7 @@
 | 구현 기술 | Whisper/faster-whisper | 받아쓰기 AI에서 선택 가능한 STT 또는 영어 번역 백엔드 |
 | 구현 기술 | SaT/NLLB/M2M100 | 받아쓰기 AI에서 선택 가능한 STT, 문장 경계, 번역 백엔드 |
 
-따라서 사용자에게 보이는 탭/창/문서 제목은 `받아쓰기 AI`를 사용한다. 기존 `setting.json`의 `whisper` 블록, `WhisperConfig`, 일부 파일명은 호환성 유지를 위한 내부 계약 이름으로 남긴다. 내부 키를 즉시 변경하면 기존 설정 파일과 테스트 자산을 깨뜨리므로, 별도 마이그레이션 설계 전까지는 사용자 노출 이름과 내부 호환 키를 분리한다.
+따라서 사용자에게 보이는 탭/창/문서 제목은 `받아쓰기 AI`를 사용한다. 기존 `setting.json`의 `whisper` 블록, `DictationAiConfig`, 일부 파일명은 호환성 유지를 위한 내부 계약 이름으로 남긴다. 내부 키를 즉시 변경하면 기존 설정 파일과 테스트 자산을 깨뜨리므로, 별도 마이그레이션 설계 전까지는 사용자 노출 이름과 내부 호환 키를 분리한다.
 
 ## 0) 개정 배포 배경
 
@@ -296,15 +296,15 @@ class SentenceBoundaryDetector:
 초기/실험 backend 정렬:
 - `sat`: 현재 운영 기본 backend. `wtpsplit.SaT` 모델을 로드하며 `device=cuda`, `compute=float16` 경로를 기본으로 한다.
 - `mock`: 테스트/격리용 backend. 실제 운영 품질 비교군으로 사용하지 않는다.
-- `legacy-regex`: 과거 회귀 테스트 보존용 helper. 운영 backend와 기준선 비교용으로 사용하지 않으며 `WhisperConfig`에서도 허용하지 않는다.
+- `legacy-regex`: 과거 회귀 테스트 보존용 helper. 운영 backend와 기준선 비교용으로 사용하지 않으며 `DictationAiConfig`에서도 허용하지 않는다.
 
 STT 결과 문장 경계 처리:
 - STT 결과 문장 경계 처리는 STT가 만든 텍스트를 completed/pending 후보로 나누고, 리비전 생명주기가 final 전사로 확정할 수 있는 입력을 제공하는 단계다.
-- `postProcessingProfile=manual`은 기존 `setting.json`과 `WhisperConfig` 호환을 위해 남긴 내부 계약값이다. 사용자 기능명이나 GUI 개념으로 노출하지 않는다.
+- `postProcessingProfile=manual`은 기존 `setting.json`과 `DictationAiConfig` 호환을 위해 남긴 내부 계약값이다. 사용자 기능명이나 GUI 개념으로 노출하지 않는다.
 - STT backend/model은 STT 결과 문장 경계 처리 backend/model과 분리한다. 영어/한국어/중국어는 각각 `sttBackendEn`, `sttBackendKo`, `sttBackendZh`와 대응 모델 설정으로 교체 가능하다. config GUI는 `language` 단일 선택값에 맞는 언어의 백엔드/모델만 표시하고, 언어를 바꾸면 해당 언어의 후보 목록으로 전환한다.
 - 현재 영어/한국어의 STT 모델 타입은 `faster-whisper`와 테스트용 `mock`만 제공한다. 영어/한국어용 추가 모델이 검증되면 언어별 backend 후보에 추가한다.
 - 중국어 STT 품질 후보군은 `qwen3-asr-transformers`, 후속 `qwen3-asr-vllm-streaming`, Dolphin-CN-Dialect, WeNet으로 재정리한다. `faster-whisper`는 중국어 정확도가 부족해 비교 기준선으로만 유지한다. FunASR STT 계열은 후보군에서 제외하고 폐기 예정으로 둔다.
-- 백엔드별 실행 속성은 `whisper_stt_backend_runtime_option_keys()`에서 정의한다. `faster-whisper`는 `computeType`, `beamSize`, `maxNewTokens`, `temperature`를 노출하고, `qwen3-asr-transformers`와 `qwen3-asr-vllm-streaming`은 `computeType`, `maxNewTokens`를 노출한다. 제거된 FunASR STT 계열 속성은 더 이상 화면에 노출하지 않는다.
+- 백엔드별 실행 속성은 `dictation_ai_stt_backend_runtime_option_keys()`에서 정의한다. `faster-whisper`는 `computeType`, `beamSize`, `maxNewTokens`, `temperature`를 노출하고, `qwen3-asr-transformers`와 `qwen3-asr-vllm-streaming`은 `computeType`, `maxNewTokens`를 노출한다. 제거된 FunASR STT 계열 속성은 더 이상 화면에 노출하지 않는다.
 - config GUI는 후처리 프로필 선택을 제공하지 않는다. 화면에는 실제 운영되는 `sentenceBoundaryBackend`/`sentenceBoundaryModel`을 `STT 결과 문장 경계 처리` 그룹으로 노출한다.
 - config GUI의 받아쓰기 AI 탭은 `입력/실행`, `STT 언어/모델`, `STT 응답/성능`, `STT 결과 문장 경계 처리`, `번역` 그룹으로 구분한다. 선택 언어와 선택 STT 백엔드에 맞는 설정만 해당 그룹 안에서 표시한다.
 - 중국어 처리는 의미 보정/문장 경계 결정을 문자 단위 CJK 토큰화나 suffix overlap 휴리스틱에 맡기지 않는다. 공백 없는 텍스트의 경계와 구두점은 후처리 모델의 책임으로 둔다. 다만 pending 텍스트와 다음 STT 윈도우가 같은 CJK no-space 구간을 내부 중간부터 다시 내보내는 경우, 중복 연결을 막기 위한 결합 단계의 overlap 제거는 허용한다. 이 로직은 문장 경계 판단이 아니라 append-only 버퍼 접합 무결성 보정이며, `pending_chars_per_chunk`, `repeat_collapse_chars`, `candidate_duplicate_suppressed`, `final_quality_cjk_internal_gap`로 회귀를 관찰한다.
@@ -491,7 +491,7 @@ STT 모델과 STT 결과 문장 경계 처리 모델의 책임을 분리해 검�
 
 2026-06-13 구현 상태:
 
-- `WhisperConfig`/`setting.json`에 `sttBackendEn`, `sttModelEn`, `sttBackendKo`, `sttModelKo`, `sttBackendZh`, `sttModelZh`를 추가했다. 후처리는 manual만 지원한다.
+- `DictationAiConfig`/`setting.json`에 `sttBackendEn`, `sttModelEn`, `sttBackendKo`, `sttModelKo`, `sttBackendZh`, `sttModelZh`를 추가했다. 후처리는 manual만 지원한다.
 - 명시 인식 언어가 `zh`이면 현재 기본값은 `sttBackendZh=qwen3-asr-transformers`, `sttModelZh=qwen3-asr-0.6b`다. `faster-whisper`/`large-v3`는 중국어 품질 기준선 비교군으로만 유지한다.
 - 영어/한국어 기본 STT는 `faster-whisper` + `large-v3`를 유지한다.
 - `src/app/stt_model.py`가 faster-whisper와 Qwen3-ASR를 동일한 `transcribe()` 인터페이스로 감싼다. FunASR STT 경로는 제거했다.
@@ -791,7 +791,7 @@ perf_samples=1064 max_stt=0.350s max_total=0.370s avg_total_rtf=0.010 translatio
 
 ## 12.5 2026-06-15 중국어 pending 내부 재시작 관측
 
-최근 3개 회전 로그(`avc-whisper.log`, `.1`, `.2`) 집계에서 계산 성능은 병목이 아니었다.
+최근 3개 회전 로그(`avc-dictationAi.log`, `.1`, `.2`) 집계에서 계산 성능은 병목이 아니었다.
 
 ```text
 diag=2494 duplicate=491 final=271 replace=160 discard=155 suppressed=29
@@ -872,7 +872,7 @@ unit test discover: 567 passed
 - STT backend/model, STT 실행 파라미터, STT 결과 문장 경계 처리 backend/model은 STT 인식 언어(`language`)를 기준으로 묶는다. 예를 들어 중국어를 선택하면 `sttBackendZh`, `sttModelZh`, `windowSecondsZh`, `sentenceBoundaryBackendZh` 묶음이 화면과 실행값의 기준이 된다.
 - 번역 backend/model/device/compute/beam/token은 번역 대상 언어(`translationTargetLanguage`)를 기준으로 묶는다. 예를 들어 한국어 번역을 선택하면 `translationBackendKo`, `translationModelKo`, `translationDeviceKo`, `translationComputeTypeKo`, `translationBeamSizeKo`, `translationMaxNewTokensKo` 묶음이 화면과 실행값의 기준이 된다.
 - 기존 `translationBackend`, `translationModel`, `translationDevice`, `translationComputeType`, `translationBeamSize`, `translationMaxNewTokens`는 호환성을 위한 현재 선택 대상 언어의 active projection으로 유지한다. 새 설정 저장 시에는 대상 언어별 묶음도 함께 저장한다.
-- 번역 backend 후보는 STT 언어의 source language 지원과 번역 대상 언어의 target language 지원을 모두 만족해야 한다. 계약 데이터(`WHISPER_TRANSLATION_GROUPS`)는 source/target/model 가능 조합을 함께 정의한다.
+- 번역 backend 후보는 STT 언어의 source language 지원과 번역 대상 언어의 target language 지원을 모두 만족해야 한다. 계약 데이터(`DICTATION_AI_TRANSLATION_GROUPS`)는 source/target/model 가능 조합을 함께 정의한다.
 - GUI는 선택된 STT 언어에는 해당 STT/문장 경계 묶음만 표시하고, 선택된 번역 대상 언어에는 해당 번역 묶음만 표시한다.
 - 모델 다운로드 검사는 현재 active 값만 보지 않고 언어별 STT, STT 결과 문장 경계 처리, 번역 묶음 전체의 모델 자산을 확인한다.
 - 저장 검증은 GUI와 같은 계약 데이터를 사용하며, 허용되지 않은 조합은 실행 전 Fail-Fast로 거부한다.

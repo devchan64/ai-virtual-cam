@@ -63,17 +63,17 @@ from src.app.dictation_transcript_logic import (
 )
 
 
-from src.domain.dictation_ai_defaults import whisper_default
-from src.domain.config import AppConfig, WhisperConfig
+from src.domain.dictation_ai_defaults import dictation_ai_default
+from src.domain.config import AppConfig, DictationAiConfig
 
 
 SAMPLE_RATE = 16000
-DEFAULT_CHUNK_SECONDS = float(whisper_default("chunkSeconds"))
+DEFAULT_CHUNK_SECONDS = float(dictation_ai_default("chunkSeconds"))
 DEFAULT_WINDOW_GEOMETRY = "780x420"
 DEFAULT_WINDOW_GEOMETRY_META = {
-    "whisperWindowGeometry": "780x420+50+119",
-    "whisperTranslationWindowGeometry": "780x420+860+119",
-    "whisperSttStatusWindowGeometry": "780x420+50+560",
+    "dictationAiWindowGeometry": "780x420+50+119",
+    "dictationAiTranslationWindowGeometry": "780x420+860+119",
+    "dictationAiSttStatusWindowGeometry": "780x420+50+560",
 }
 MIN_WINDOW_WIDTH = 520
 MIN_WINDOW_HEIGHT = 280
@@ -304,7 +304,7 @@ def _is_modal_output_event(event: TranscriptEvent) -> bool:
 
 
 class WhisperTranscriptWorker:
-    def __init__(self, config: WhisperConfig, events: queue.Queue[TranscriptEvent]) -> None:
+    def __init__(self, config: DictationAiConfig, events: queue.Queue[TranscriptEvent]) -> None:
         self._cfg = config
         self._events = events
         self._stop = threading.Event()
@@ -486,7 +486,7 @@ class WhisperTranscriptWorker:
                 return
             if self._cfg.translationEnabled and self._cfg.translationBackend == "whisper" and stt_backend != "faster-whisper":
                 raise RuntimeError(
-                    "whisper.translationBackend=whisper는 faster-whisper STT backend에서만 지원됩니다. "
+                    "dictationAi.translationBackend=whisper는 faster-whisper STT backend에서만 지원됩니다. "
                     f"현재 STT backend={stt_backend}. NLLB 번역을 사용하거나 언어별 STT backend를 faster-whisper로 변경하세요."
                 )
 
@@ -1419,8 +1419,8 @@ class WhisperTranscriptWorker:
 
 class WhisperTranscriptWindow:
     def __init__(self, app_config: AppConfig, config_path: Path) -> None:
-        if not app_config.whisper.enabled:
-            raise RuntimeError("whisper.enabled=false 입니다. config에서 받아쓰기 AI 전사를 켠 뒤 serve를 실행하세요.")
+        if not app_config.dictationAi.enabled:
+            raise RuntimeError("dictationAi.enabled=false 입니다. config에서 받아쓰기 AI 전사를 켠 뒤 serve를 실행하세요.")
         try:
             import tkinter as tk
             from tkinter import ttk
@@ -1431,7 +1431,7 @@ class WhisperTranscriptWindow:
         self._ttk = ttk
         self._config_path = config_path
         self._ui_language = _load_ui_language(config_path)
-        self._whisper_config = app_config.whisper
+        self._whisper_config = app_config.dictationAi
         self._geometry_save_after_id: str | None = None
         self._translation_geometry_save_after_id: str | None = None
         self._stt_status_geometry_save_after_id: str | None = None
@@ -1444,11 +1444,11 @@ class WhisperTranscriptWindow:
         self._transcript_partial_active = False
         self._translation_partial_active = False
         self._events: queue.Queue[TranscriptEvent] = queue.Queue()
-        self._worker = WhisperTranscriptWorker(app_config.whisper, self._events)
+        self._worker = WhisperTranscriptWorker(app_config.dictationAi, self._events)
         self._thread = threading.Thread(target=self._worker.run, daemon=True)
         self._root = tk.Tk()
         self._root.title(_window_title("transcript", self._ui_language))
-        restored_geometry = _load_window_geometry(self._config_path, "whisperWindowGeometry", self._root)
+        restored_geometry = _load_window_geometry(self._config_path, "dictationAiWindowGeometry", self._root)
         self._root.geometry(restored_geometry or DEFAULT_WINDOW_GEOMETRY)
         self._root.minsize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
         self._root.columnconfigure(0, weight=1)
@@ -1489,7 +1489,7 @@ class WhisperTranscriptWindow:
         self._stt_status_root = tk.Toplevel(self._root)
         self._stt_status_root.title(_window_title("sttStatus", self._ui_language))
         restored_geometry = _load_window_geometry(
-            self._config_path, "whisperSttStatusWindowGeometry", self._stt_status_root
+            self._config_path, "dictationAiSttStatusWindowGeometry", self._stt_status_root
         )
         self._stt_status_root.geometry(restored_geometry or DEFAULT_WINDOW_GEOMETRY)
         self._stt_status_root.minsize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
@@ -1524,7 +1524,7 @@ class WhisperTranscriptWindow:
         self._translation_root = tk.Toplevel(self._root)
         self._translation_root.title(_window_title("translation", self._ui_language))
         restored_geometry = _load_window_geometry(
-            self._config_path, "whisperTranslationWindowGeometry", self._translation_root
+            self._config_path, "dictationAiTranslationWindowGeometry", self._translation_root
         )
         self._translation_root.geometry(restored_geometry or DEFAULT_WINDOW_GEOMETRY)
         self._translation_root.minsize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
@@ -1732,7 +1732,7 @@ class WhisperTranscriptWindow:
         self._geometry_save_after_id = None
         _save_window_geometry(
             self._config_path,
-            "whisperWindowGeometry",
+            "dictationAiWindowGeometry",
             self._current_geometry(),
             *_window_restore_extent(self._root),
         )
@@ -1743,7 +1743,7 @@ class WhisperTranscriptWindow:
             return
         _save_window_geometry(
             self._config_path,
-            "whisperTranslationWindowGeometry",
+            "dictationAiTranslationWindowGeometry",
             _window_manager_geometry(self._translation_root),
             *_window_restore_extent(self._translation_root),
         )
@@ -1754,7 +1754,7 @@ class WhisperTranscriptWindow:
             return
         _save_window_geometry(
             self._config_path,
-            "whisperSttStatusWindowGeometry",
+            "dictationAiSttStatusWindowGeometry",
             _window_manager_geometry(self._stt_status_root),
             *_window_restore_extent(self._stt_status_root),
         )

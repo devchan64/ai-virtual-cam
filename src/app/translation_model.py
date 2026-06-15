@@ -38,7 +38,7 @@ class MockTextTranslator(LocalTextTranslator):
 class NllbTransformersTranslator(LocalTextTranslator):
     def __init__(self, model_name: str, device: str, compute_type: str, beam_size: int = 1, max_new_tokens: int = 128) -> None:
         if not model_name:
-            raise RuntimeError("whisper.translationModel is required for nllb-transformers")
+            raise RuntimeError("dictationAi.translationModel is required for nllb-transformers")
         try:
             import torch
             from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
@@ -53,8 +53,8 @@ class NllbTransformersTranslator(LocalTextTranslator):
         self._model_name = model_name
         self._requested_device = str(device or "auto").strip()
         self._requested_compute_type = str(compute_type or "auto").strip()
-        self._beam_size = _validate_generation_int("whisper.translationBeamSize", beam_size, 1, 8)
-        self._max_new_tokens = _validate_generation_int("whisper.translationMaxNewTokens", max_new_tokens, 16, 512)
+        self._beam_size = _validate_generation_int("dictationAi.translationBeamSize", beam_size, 1, 8)
+        self._max_new_tokens = _validate_generation_int("dictationAi.translationMaxNewTokens", max_new_tokens, 16, 512)
         require_hf_repo_cached(model_name, purpose="NLLB translation")
         try:
             self._tokenizer = AutoTokenizer.from_pretrained(model_name, local_files_only=True)
@@ -75,11 +75,11 @@ class NllbTransformersTranslator(LocalTextTranslator):
     def _resolve_device(torch, device: str) -> str:
         normalized = str(device or "").strip().lower()
         if normalized == "auto":
-            raise RuntimeError("whisper.translationDevice=auto 는 실행 단계에서 허용하지 않습니다. cuda 또는 cpu를 명시하세요.")
+            raise RuntimeError("dictationAi.translationDevice=auto 는 실행 단계에서 허용하지 않습니다. cuda 또는 cpu를 명시하세요.")
         if normalized == "cuda":
             if not torch.cuda.is_available():
                 raise RuntimeError(
-                    "whisper.translationDevice=cuda 이지만 torch CUDA를 사용할 수 없습니다. "
+                    "dictationAi.translationDevice=cuda 이지만 torch CUDA를 사용할 수 없습니다. "
                     "CUDA 런타임과 현재 GPU를 지원하는 PyTorch/CUDA 빌드를 확인하세요."
                 )
             _validate_torch_cuda_supports_current_gpu(torch)
@@ -91,7 +91,7 @@ class NllbTransformersTranslator(LocalTextTranslator):
     def _resolve_dtype(torch, compute_type: str, device: str):
         normalized = str(compute_type or "").strip().lower()
         if normalized == "auto":
-            raise RuntimeError("whisper.translationComputeType=auto 는 실행 단계에서 허용하지 않습니다. float16 또는 float32를 명시하세요.")
+            raise RuntimeError("dictationAi.translationComputeType=auto 는 실행 단계에서 허용하지 않습니다. float16 또는 float32를 명시하세요.")
         if normalized == "float16":
             if device != "cuda":
                 raise RuntimeError("translation computeType=float16은 cuda 장치에서만 사용하세요. CPU에서는 float32를 설정하세요.")
@@ -99,8 +99,8 @@ class NllbTransformersTranslator(LocalTextTranslator):
         if normalized == "float32":
             return torch.float32
         if normalized == "int8":
-            raise RuntimeError("whisper.translationComputeType=int8은 nllb-transformers에서 지원하지 않습니다. float16 또는 float32를 사용하세요.")
-        raise RuntimeError(f"whisper.translationComputeType은 float16/float32 중 하나여야 합니다. 설정값={compute_type}")
+            raise RuntimeError("dictationAi.translationComputeType=int8은 nllb-transformers에서 지원하지 않습니다. float16 또는 float32를 사용하세요.")
+        raise RuntimeError(f"dictationAi.translationComputeType은 float16/float32 중 하나여야 합니다. 설정값={compute_type}")
 
     def translate(self, request: TranslationRequest) -> str:
         source = _nllb_language_code(request.source_language)
@@ -137,7 +137,7 @@ class NllbTransformersTranslator(LocalTextTranslator):
 class M2M100TransformersTranslator(LocalTextTranslator):
     def __init__(self, model_name: str, device: str, compute_type: str, beam_size: int = 1, max_new_tokens: int = 128) -> None:
         if not model_name:
-            raise RuntimeError("whisper.translationModel is required for m2m100-transformers")
+            raise RuntimeError("dictationAi.translationModel is required for m2m100-transformers")
         try:
             import torch
             from transformers import M2M100ForConditionalGeneration, M2M100Tokenizer
@@ -152,8 +152,8 @@ class M2M100TransformersTranslator(LocalTextTranslator):
         self._model_name = model_name
         self._requested_device = str(device or "auto").strip()
         self._requested_compute_type = str(compute_type or "auto").strip()
-        self._beam_size = _validate_generation_int("whisper.translationBeamSize", beam_size, 1, 8)
-        self._max_new_tokens = _validate_generation_int("whisper.translationMaxNewTokens", max_new_tokens, 16, 512)
+        self._beam_size = _validate_generation_int("dictationAi.translationBeamSize", beam_size, 1, 8)
+        self._max_new_tokens = _validate_generation_int("dictationAi.translationMaxNewTokens", max_new_tokens, 16, 512)
         require_hf_repo_cached(model_name, purpose="M2M100 translation")
         try:
             self._tokenizer = M2M100Tokenizer.from_pretrained(model_name, local_files_only=True)
@@ -264,7 +264,7 @@ def _validate_torch_cuda_supports_current_gpu(torch) -> None:
     except Exception:
         pass
     raise RuntimeError(
-        "whisper.translationDevice=cuda 이지만 현재 PyTorch CUDA 빌드가 GPU 아키텍처를 지원하지 않습니다. "
+        "dictationAi.translationDevice=cuda 이지만 현재 PyTorch CUDA 빌드가 GPU 아키텍처를 지원하지 않습니다. "
         f"gpu={device_name} capability={arch_tag} supported={','.join(supported_arches)}. "
         "권장 조치: 현재 GPU 아키텍처를 지원하는 PyTorch/CUDA 빌드를 설치하세요."
     )
@@ -329,4 +329,4 @@ def build_text_translator(
         return NllbTransformersTranslator(model_name, device, compute_type, beam_size, max_new_tokens)
     if normalized == "m2m100-transformers":
         return M2M100TransformersTranslator(model_name, device, compute_type, beam_size, max_new_tokens)
-    raise RuntimeError(f"지원하지 않는 whisper.translationBackend입니다: {backend}")
+    raise RuntimeError(f"지원하지 않는 dictationAi.translationBackend입니다: {backend}")
