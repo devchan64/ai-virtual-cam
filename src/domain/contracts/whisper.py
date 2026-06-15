@@ -120,14 +120,14 @@ WHISPER_CONTRACT: dict[str, ConfigFieldSpec] = {
     "chunkSeconds": ConfigFieldSpec("chunkSeconds", 7.0, float, min_value=1.0, max_value=30.0),
     "stepSeconds": ConfigFieldSpec("stepSeconds", 2.0, float, min_value=0.5, max_value=5.0),
     "windowSeconds": ConfigFieldSpec("windowSeconds", 7.0, float, min_value=1.0, max_value=30.0),
-    "commitLagSeconds": ConfigFieldSpec("commitLagSeconds", 2.0, float, min_value=0.0),
+    "commitLagSeconds": ConfigFieldSpec("commitLagSeconds", 1.0, float, min_value=0.0),
     "beamSize": ConfigFieldSpec("beamSize", 3, int, min_value=1, max_value=8),
     "maxNewTokens": ConfigFieldSpec("maxNewTokens", 192, int, min_value=16, max_value=512),
     "temperature": ConfigFieldSpec("temperature", 0.0, float, min_value=0.0, max_value=1.0),
     "stepSecondsEn": ConfigFieldSpec("stepSecondsEn", 1.0, float, min_value=0.5, max_value=5.0, ui_group="runtime.en"),
     "windowSecondsEn": ConfigFieldSpec("windowSecondsEn", 7.0, float, min_value=1.0, max_value=30.0, ui_group="runtime.en"),
     "commitLagSecondsEn": ConfigFieldSpec(
-        "commitLagSecondsEn", 2.0, float, min_value=0.0, ui_group="runtime.en"
+        "commitLagSecondsEn", 1.0, float, min_value=0.0, ui_group="runtime.en"
     ),
     "beamSizeEn": ConfigFieldSpec("beamSizeEn", 3, int, min_value=1, max_value=8, ui_group="runtime.en"),
     "maxNewTokensEn": ConfigFieldSpec("maxNewTokensEn", 192, int, min_value=16, max_value=512, ui_group="runtime.en"),
@@ -135,7 +135,7 @@ WHISPER_CONTRACT: dict[str, ConfigFieldSpec] = {
     "stepSecondsKo": ConfigFieldSpec("stepSecondsKo", 1.0, float, min_value=0.5, max_value=5.0, ui_group="runtime.ko"),
     "windowSecondsKo": ConfigFieldSpec("windowSecondsKo", 7.0, float, min_value=1.0, max_value=30.0, ui_group="runtime.ko"),
     "commitLagSecondsKo": ConfigFieldSpec(
-        "commitLagSecondsKo", 2.0, float, min_value=0.0, ui_group="runtime.ko"
+        "commitLagSecondsKo", 1.0, float, min_value=0.0, ui_group="runtime.ko"
     ),
     "beamSizeKo": ConfigFieldSpec("beamSizeKo", 3, int, min_value=1, max_value=8, ui_group="runtime.ko"),
     "maxNewTokensKo": ConfigFieldSpec("maxNewTokensKo", 192, int, min_value=16, max_value=512, ui_group="runtime.ko"),
@@ -143,7 +143,7 @@ WHISPER_CONTRACT: dict[str, ConfigFieldSpec] = {
     "stepSecondsZh": ConfigFieldSpec("stepSecondsZh", 1.0, float, min_value=0.5, max_value=5.0, ui_group="runtime.zh"),
     "windowSecondsZh": ConfigFieldSpec("windowSecondsZh", 12.0, float, min_value=1.0, max_value=30.0, ui_group="runtime.zh"),
     "commitLagSecondsZh": ConfigFieldSpec(
-        "commitLagSecondsZh", 2.0, float, min_value=0.0, ui_group="runtime.zh"
+        "commitLagSecondsZh", 1.0, float, min_value=0.0, ui_group="runtime.zh"
     ),
     "beamSizeZh": ConfigFieldSpec("beamSizeZh", 3, int, min_value=1, max_value=8, ui_group="runtime.zh"),
     "maxNewTokensZh": ConfigFieldSpec("maxNewTokensZh", 192, int, min_value=16, max_value=512, ui_group="runtime.zh"),

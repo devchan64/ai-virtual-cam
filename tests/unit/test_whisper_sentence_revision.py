@@ -335,6 +335,25 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         self.assertFalse(_should_confirm_staged_sentence(staged, 3, False))
         self.assertFalse(_should_translate_final_sentence(staged, "zh"))
 
+    def test_cjk_revision_prefers_clean_stage_over_repeated_ngram_candidate_from_monitoring(self) -> None:
+        # Regression from 2026-06-15 monitoring chunks 417-418. A later window
+        # restarted inside the same utterance and produced a longer candidate,
+        # but that candidate contained a repeated CJK span.
+        staged = (
+            "对对对，所以它比较咸，你一定要配饭吃。我再把它拿起来，来直接拿起来，然后挤。"
+            "它非常制好挤。上面直接挤在这碗。对对对对。"
+        )
+        candidate = (
+            "好你一定要配饭的吃，我再把它拿起来来直接拿起来然后挤，它非常之好挤，"
+            "上面直接挤在这碗，对对对对对，好你挤吧，它它很我再把它拿起来，来直接拿起来，"
+            "然后挤。它非常之好挤，上面直接挤在纸碗。对对对对。好，你挤吧。它很烂。"
+        )
+
+        self.assertTrue(_sentences_are_revisions(staged, candidate))
+        self.assertIn("cjk_repeated_ngram", _final_sentence_diagnostic_flags(candidate, "zh"))
+        self.assertNotIn("cjk_repeated_ngram", _final_sentence_diagnostic_flags(staged, "zh"))
+        self.assertEqual(_prefer_sentence_revision(staged, candidate), staged)
+
     def test_pending_cjk_ngram_repetition_is_diagnosed_from_monitoring(self) -> None:
         # Regression from 2026-06-15 16s/1s Chinese monitoring chunks 26-28.
         # No completed sentence was produced, while the pending tail kept
@@ -713,11 +732,11 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         self.assertEqual(_replacement_decision_reason(staged, candidate, 3, False, 0), "confirmed")
         self.assertTrue(_should_finalize_replaced_sentence(staged, candidate, 3, False, 0))
 
-    def test_chinese_completed_fragments_from_same_chunk_are_coalesced(self) -> None:
+    def test_chinese_completed_fragments_from_same_chunk_preserve_boundary_units(self) -> None:
         # Regression from 2026-06-14 zh monitoring chunks 121-122. Prior Chinese STT
         # punctuation can return multiple completed fragments for one sliding
-        # window; staging them one by one discards the earlier fragment before
-        # it can be revised.
+        # window. Preserve detector output so finalization can happen more
+        # frequently at model-provided boundaries.
         completed = [
             "放了放一下吧，自己迷你韩美就是使劲夸夸，我们知道吗？",
             "魔法师你在吸我。",
@@ -725,7 +744,7 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
 
         self.assertEqual(
             _coalesce_completed_sentences_for_staging(completed, "zh"),
-            ["放了放一下吧，自己迷你韩美就是使劲夸夸，我们知道吗？魔法师你在吸我。"],
+            completed,
         )
         self.assertEqual(_coalesce_completed_sentences_for_staging(completed, "ko"), completed)
 

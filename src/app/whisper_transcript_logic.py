@@ -28,16 +28,7 @@ SHORT_CJK_FINAL_UNITS = 10
 
 def _coalesce_completed_sentences_for_staging(sentences: list[str], language: str) -> list[str]:
     normalized_sentences = [_normalized_text(sentence) for sentence in sentences if _normalized_text(sentence)]
-    if len(normalized_sentences) <= 1:
-        return normalized_sentences
-    normalized_language = str(language or "").strip().lower()
-    if normalized_language != "zh":
-        return normalized_sentences
-    # Model punctuation can split several CJK fragments from the same sliding
-    # window. The runtime has one staged revision slot, so staging each fragment
-    # independently causes unconfirmed earlier fragments to be discarded inside
-    # the same chunk. Keep the model output as one observed revision unit.
-    return [_normalized_text("".join(normalized_sentences))]
+    return normalized_sentences
 
 
 def _normalized_text(text: str) -> str:
@@ -1196,6 +1187,13 @@ def _prefer_sentence_revision(left: str, right: str) -> str:
     right = _trim_repeated_cjk_revision_prefix(left, right)
     left_words = _word_units(left)
     right_words = _word_units(right)
+    if _is_cjk_text(left) or _is_cjk_text(right):
+        left_flags = set(_final_sentence_diagnostic_flags(left, "zh"))
+        right_flags = set(_final_sentence_diagnostic_flags(right, "zh"))
+        if "cjk_repeated_ngram" in right_flags and "cjk_repeated_ngram" not in left_flags:
+            return _normalized_text(left)
+        if "cjk_repeated_ngram" in left_flags and "cjk_repeated_ngram" not in right_flags:
+            return _normalized_text(right)
     left_signature = _short_revision_signature(left_words)
     right_signature = _short_revision_signature(right_words)
     if left_signature and left_signature == right_signature:

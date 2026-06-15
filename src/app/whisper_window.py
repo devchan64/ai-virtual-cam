@@ -769,6 +769,11 @@ class WhisperTranscriptWorker:
                     count_metric("stage_revision_changed")
                     if _is_cjk_text(staged_before) or _is_cjk_text(preferred):
                         count_metric("stage_revision_confirmation_reset")
+                else:
+                    candidate_flags = set(_final_sentence_diagnostic_flags(candidate, detected))
+                    staged_flags = set(_final_sentence_diagnostic_flags(staged_before, detected))
+                    if "cjk_repeated_ngram" in candidate_flags and "cjk_repeated_ngram" not in staged_flags:
+                        count_metric("stage_revision_candidate_quality_blocked")
                 staged_sentence = preferred
                 staged_confirmations = _next_revision_confirmation_count(
                     staged_before,
@@ -1050,13 +1055,15 @@ class WhisperTranscriptWorker:
                                 repeat_collapse_rules.extend(f"forced_{rule}" for rule in forced_collapse_rules)
                             completed_sentences = [forced_sentence]
                             forced_candidate_pending = True
-                    for sentence in completed_sentences:
+                    for sentence_index, sentence in enumerate(completed_sentences):
                         produced_sentences = stage_completed_sentence(sentence, detected, forced=bool(forced_by))
                         final_sentences.extend(produced_sentences)
                         for produced_sentence in produced_sentences:
                             pending_transcript_text = _consume_committed_prefix(pending_transcript_text, produced_sentence)
                             if not pending_transcript_text:
                                 pending_chunks = 0
+                        if sentence_index < len(completed_sentences) - 1 and staged_sentence:
+                            final_sentences.extend(finalize_staged_sentence(detected, "boundary_next_candidate"))
                     if pending_transcript_text and not forced_candidate_pending:
                         self._emit(
                             "status",
@@ -1085,13 +1092,15 @@ class WhisperTranscriptWorker:
                                 repeat_collapse_rules.extend(f"forced_{rule}" for rule in forced_collapse_rules)
                             completed_sentences = [forced_sentence]
                             forced_candidate_pending = True
-                            for sentence in completed_sentences:
+                            for sentence_index, sentence in enumerate(completed_sentences):
                                 produced_sentences = stage_completed_sentence(sentence, detected, forced=bool(forced_by))
                                 final_sentences.extend(produced_sentences)
                                 for produced_sentence in produced_sentences:
                                     pending_transcript_text = _consume_committed_prefix(pending_transcript_text, produced_sentence)
                                     if not pending_transcript_text:
                                         pending_chunks = 0
+                                if sentence_index < len(completed_sentences) - 1 and staged_sentence:
+                                    final_sentences.extend(finalize_staged_sentence(detected, "boundary_next_candidate"))
                         else:
                             final_sentences.extend(age_staged_sentence(detected, pending_transcript_text))
                     else:

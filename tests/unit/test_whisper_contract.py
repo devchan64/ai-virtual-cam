@@ -27,7 +27,7 @@ class WhisperContractTest(unittest.TestCase):
         self.assertEqual(defaults["windowSecondsKo"], 7.0)
         self.assertEqual(defaults["stepSecondsZh"], 1.0)
         self.assertEqual(defaults["windowSecondsZh"], 12.0)
-        self.assertEqual(defaults["commitLagSeconds"], 2.0)
+        self.assertEqual(defaults["commitLagSeconds"], 1.0)
         self.assertEqual(defaults["maxNewTokens"], 192)
         self.assertEqual(defaults["postProcessingProfile"], "manual")
         self.assertEqual(whisper_default("sentenceBoundaryBackendZh"), "sat")
