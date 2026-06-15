@@ -120,23 +120,4 @@ Streaming punctuation은 raw ASR의 readability와 boundary score를 개선한�
 
 ## 참고 문헌
 
-1. Ryo Fukuda, Katsuhito Sudoh, Satoshi Nakamura. “Speech Segmentation Optimization using Segmented Bilingual Speech Corpus for End-to-end Speech Translation.” Interspeech 2022. https://www.isca-archive.org/interspeech_2022/fukuda22b_interspeech.pdf
-2. Nina Zhou, Xuancong Wang, AiTi Aw. “Dynamic Boundary Detection for Speech Translation.” APSIPA ASC 2017. https://www.apsipa.org/proceedings/2017/CONTENTS/papers2017/13DecWednesday/Poster%202/WP-P2.20.pdf
-3. Ruiqing Zhang, Chuanqi Tan, Tiejun Zhao, et al. “Dynamic Sentence Boundary Detection for Simultaneous Translation.” AutoSimTrans 2020. https://aclanthology.org/2020.autosimtrans-1.1.pdf
-4. Md Kamrul Hasan, et al. “Multi-pass sentence-end detection of lecture speech.” Interspeech 2014. https://www.isca-archive.org/interspeech_2014/hasan14_interspeech.pdf
-5. Yang Liu, et al. “Enriching Speech Recognition with Automatic Detection of Sentence Boundaries and Disfluencies.” IEEE TASLP 2006. https://www.sri.com/wp-content/uploads/2021/12/enriching_speech_recognition_with_automatic.pdf
-6. Elizabeth Shriberg, Andreas Stolcke, et al. “Prosody-Based Automatic Segmentation of Speech into Sentences and Topics.” Speech Communication 2000. https://www.sri.com/wp-content/uploads/2021/12/prosody-based_automatic_segmentation_of_speech_into_sente.pdf
-7. Ulf Hermjakob, Kevin Knight, Hal Daumé III. “Optimizing Sentence Segmentation for Speech Translation.” IWSLT 2002. https://aclanthology.org/2002.iwslt-1.15.pdf
-8. Gabriel Papi, Marco Gaido, Matteo Negri, Marco Turchi. “Don’t Discard Fixed-Window Audio Segmentation in Speech-to-Text Translation.” WMT 2022. https://aclanthology.org/2022.wmt-1.13.pdf
-9. Parth Vyas, Bowen Shi, Matthew Wiesner, et al. “Long-Form Speech Translation through Segmentation with Finite-State Decoding Constraints on Large Language Models.” Findings of EMNLP 2023. https://aclanthology.org/2023.findings-emnlp.19.pdf
-10. Shubham Toshniwal, Tara N. Sainath, Ron J. Weiss, et al. “Streaming Punctuation for Long-form Dictation with Transformers.” arXiv 2022. https://arxiv.org/abs/2210.05756
-11. Martin Poláček, et al. “Online Punctuation Restoration using ELECTRA Model for streaming ASR Systems.” Interspeech 2023. https://www.isca-archive.org/interspeech_2023/polacek23_interspeech.html
-12. “Efficient Punctuation Restoration via Weighted Lookahead Scoring Method for Streaming ASR Systems.” arXiv 2026. https://arxiv.org/html/2606.05179v1
-13. Saeed Madad, et al. “A light-weight and efficient punctuation and word casing prediction model for on-device streaming ASR.” arXiv 2024. https://arxiv.org/abs/2407.13142
-14. Benjamin Minixhofer, Jonas Pfeiffer, Ivan Vulić. “Where’s the Point? Self-Supervised Multilingual Punctuation-Agnostic Sentence Segmentation.” arXiv 2023. https://arxiv.org/abs/2305.18893
-15. Benjamin Minixhofer, et al. “Segment Any Text: A Universal Approach for Robust, Efficient and Adaptable Sentence Segmentation.” EMNLP 2024. https://aclanthology.org/2024.emnlp-main.665/
-16. Macháček, et al. “Whisper-Streaming: Turning Whisper into Real-Time Transcription System.” IJCNLP-AACL 2023. https://aclanthology.org/2023.ijcnlp-demo.3/
-17. Erik Ekstedt, Gabriel Skantze. “Real-time and Continuous Turn-taking Prediction Using Voice Activity Projection.” arXiv 2024. https://arxiv.org/abs/2401.04868
-18. Erik Ekstedt, Gabriel Skantze. “Multilingual Turn-taking Prediction Using Voice Activity Projection.” LREC-COLING 2024. https://aclanthology.org/2024.lrec-main.1036/
-19. Chao-Wei Huang, et al. “Turn-Taking Prediction for Natural Conversational Speech.” Interspeech 2022. https://www.isca-archive.org/interspeech_2022/chang22_interspeech.pdf
-20. Sean Ekstedt, Gabriel Skantze. “TurnGPT: a Transformer-based Language Model for Predicting Turn-taking in Spoken Dialog.” Findings of ACL 2021. https://aclanthology.org/2021.findings-acl.205/
+프레젠테이션 긴 발화 세그먼트, SBD, SaT, streaming punctuation, VAD/turn-taking 비교군 참고 문헌은 [받아쓰기 AI 참조 레퍼런스 모음](2026-06-16-dictation-ai-reference-index.md)에 통합한다.

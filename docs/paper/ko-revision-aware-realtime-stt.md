@@ -127,7 +127,7 @@ Whisper 계열 모델은 강력한 오프라인 전사 성능을 보이지만, �
 
 ## 참고 문헌
 
-상세 참고 문헌과 프레젠테이션 긴 발화 세그먼트 설계 근거는 [`docs/2026-06-15-presentation-dictation-segmentation-references.md`](../2026-06-15-presentation-dictation-segmentation-references.md)에 별도로 정리한다. 핵심 근거는 다음과 같다.
+상세 참고 문헌은 [받아쓰기 AI 참조 레퍼런스 모음](../2026-06-16-dictation-ai-reference-index.md)에 통합한다. 프레젠테이션 긴 발화 세그먼트 설계 근거는 [프레젠테이션 실시간 전사/번역 세그먼트 설계 참고](../2026-06-15-presentation-dictation-segmentation-references.md)를 따른다. 핵심 근거는 다음과 같다.
 
 - Whisper-Streaming: local agreement policy와 self-adaptive latency
 - WhisperPipe: overlapping context window와 dynamic buffering
