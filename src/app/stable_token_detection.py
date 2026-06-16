@@ -27,8 +27,6 @@ class StableWindowAnalysis:
     stable_internal_ratio: float
     stable_token_ratio: float
     stable_overlap_source: str
-    stage_support_score: float
-    stage_support_bucket: str
     boundary_confidence: float | None
 
 
@@ -101,39 +99,6 @@ def stable_overlap_units(previous_units: list[str], current_units: list[str]) ->
     return 0, "none"
 
 
-def stable_stage_support_score(
-    *,
-    stable_token_ratio: float,
-    stable_internal_ratio: float,
-    stable_prefix_chars: int,
-    unstable_tail_chars: int,
-    stable_internal_chars: int,
-    stable_overlap_source: str,
-) -> float:
-    prefix_score = stable_token_ratio
-    internal_score = 0.0
-    if stable_overlap_source == "none" and stable_internal_chars >= 18:
-        internal_score = min(stable_internal_ratio, 0.85)
-    score = max(prefix_score, internal_score)
-    if score <= 0.0:
-        return 0.0
-    if stable_prefix_chars >= 12 and unstable_tail_chars <= 12:
-        score += 0.10
-    elif unstable_tail_chars > max(stable_prefix_chars, stable_internal_chars, 1):
-        score -= 0.15
-    return max(0.0, min(1.0, score))
-
-
-def stable_stage_support_bucket(score: float) -> str:
-    if score >= 0.75:
-        return "high"
-    if score >= 0.55:
-        return "mid"
-    if score > 0.0:
-        return "low"
-    return "none"
-
-
 def analyze_stable_window(previous_text: str, current_text: str, language: str) -> StableWindowAnalysis:
     previous = normalized_text(previous_text)
     current = normalized_text(current_text)
@@ -164,14 +129,6 @@ def analyze_stable_window(previous_text: str, current_text: str, language: str) 
         confidence = 0.55
     else:
         confidence = 0.35
-    support_score = stable_stage_support_score(
-        stable_token_ratio=ratio,
-        stable_internal_ratio=stable_internal_ratio,
-        stable_prefix_chars=len(stable_prefix),
-        unstable_tail_chars=len(unstable_tail),
-        stable_internal_chars=len(stable_internal_text),
-        stable_overlap_source=stable_overlap_source,
-    )
     return StableWindowAnalysis(
         previous_text=previous,
         current_text=current,
@@ -186,8 +143,6 @@ def analyze_stable_window(previous_text: str, current_text: str, language: str) 
         stable_internal_ratio=stable_internal_ratio,
         stable_token_ratio=ratio,
         stable_overlap_source=stable_overlap_source,
-        stage_support_score=support_score,
-        stage_support_bucket=stable_stage_support_bucket(support_score),
         boundary_confidence=confidence,
     )
 
@@ -195,12 +150,7 @@ def analyze_stable_window(previous_text: str, current_text: str, language: str) 
 def combine_boundary_confidence(
     segment_confidence: float | None,
     stability_confidence: float | None,
-    stage_support_score: float | None = None,
 ) -> float | None:
-    if stage_support_score is not None and stage_support_score >= 0.75:
-        stability_confidence = max(stability_confidence or 0.0, 0.70)
-    elif stage_support_score is not None and 0.55 <= stage_support_score < 0.75:
-        stability_confidence = max(stability_confidence or 0.0, 0.55)
     if segment_confidence is None:
         return stability_confidence
     if stability_confidence is None:

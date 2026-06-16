@@ -39,7 +39,6 @@ from src.app.dictation_transcript_logic import (
     _is_cjk_text,
     _prefer_sentence_revision,
     _sentence_end_count,
-    _effective_sentence_required_confirmations,
     _sentence_max_age_chunks,
     _sentence_output_delta,
     _sentence_required_confirmations,
@@ -620,9 +619,6 @@ class WhisperTranscriptWorker:
         staged_age = 0
         staged_forced = False
         previous_window_text = ""
-        current_stable_stage_support_score = 0.0
-        current_boundary_signal_score = 0.0
-        current_boundary_end_probability = 0.0
         lifecycle_metrics: dict[str, int] = {}
         chunk_lifecycle_metrics: dict[str, int] = {}
         last_audio_queue_drops = self._audio_queue_drop_count()
@@ -759,7 +755,6 @@ class WhisperTranscriptWorker:
                     "status",
                     "받아쓰기 AI stage 시작: "
                     f"chunk={chunks} forced={forced} candidate_chars={len(_normalized_text(candidate))} "
-                    f"stable_support={stable_analysis.stage_support_bucket}:{stable_analysis.stage_support_score:.3f} "
                     f"candidate_tail={_diagnostic_tail(candidate)} committed_chars={len(_normalized_text(committed_text))}",
                     display=False,
                 )
@@ -808,18 +803,12 @@ class WhisperTranscriptWorker:
                 )
                 staged_age = 0
                 staged_forced = staged_forced or forced
-                required_confirmations = _effective_sentence_required_confirmations(
-                    staged_forced,
-                    stable_analysis.stage_support_score,
-                    current_boundary_signal_score,
-                    current_boundary_end_probability,
-                )
+                required_confirmations = _sentence_required_confirmations(staged_forced)
                 self._emit(
                     "status",
                     "받아쓰기 AI stage 리비전: "
                     f"chunk={chunks} confirmations={staged_confirmations}/{required_confirmations} "
                     f"forced={staged_forced} preferred_changed={preferred_changed} "
-                    f"stable_support={stable_analysis.stage_support_bucket}:{stable_analysis.stage_support_score:.3f} "
                     f"staged_before={_diagnostic_tail(staged_before)} candidate={_diagnostic_tail(candidate)} "
                     f"preferred={_diagnostic_tail(preferred)}",
                     display=False,
@@ -828,9 +817,6 @@ class WhisperTranscriptWorker:
                     staged_sentence,
                     staged_confirmations,
                     staged_forced,
-                    stable_analysis.stage_support_score,
-                    current_boundary_signal_score,
-                    current_boundary_end_probability,
                 ):
                     return finalize_staged_sentence(detected, "confirmed_forced" if staged_forced else "confirmed")
                 self._emit("transcript", staged_sentence, log_text=f"[{detected}] {staged_sentence}", final=False)
@@ -843,9 +829,6 @@ class WhisperTranscriptWorker:
                 staged_forced,
                 staged_age,
                 sentence_finalize_age,
-                stable_analysis.stage_support_score,
-                current_boundary_signal_score,
-                current_boundary_end_probability,
             )
             count_metric(f"stage_replace_decision_{replacement_reason}")
             self._emit(
@@ -863,9 +846,6 @@ class WhisperTranscriptWorker:
                 staged_forced,
                 staged_age,
                 sentence_finalize_age,
-                stable_analysis.stage_support_score,
-                current_boundary_signal_score,
-                current_boundary_end_probability,
             ):
                 finalized = finalize_staged_sentence(detected, f"replaced_{replacement_reason}")
             elif _should_finalize_before_replacement(
@@ -875,21 +855,13 @@ class WhisperTranscriptWorker:
                 staged_age,
                 sentence_finalize_age,
                 staged_forced,
-                stable_analysis.stage_support_score,
-                current_boundary_signal_score,
-                current_boundary_end_probability,
             ):
                 count_metric("stage_finalize_before_replace")
                 finalized = finalize_staged_sentence(detected, "next_completed")
             else:
                 count_metric("stage_replaced_unconfirmed")
                 count_segment_state("suppressed")
-                required_confirmations = _effective_sentence_required_confirmations(
-                    staged_forced,
-                    stable_analysis.stage_support_score,
-                    current_boundary_signal_score,
-                    current_boundary_end_probability,
-                )
+                required_confirmations = _sentence_required_confirmations(staged_forced)
                 self._emit(
                     "status",
                     "받아쓰기 AI stage 미확정 교체: "
@@ -914,7 +886,6 @@ class WhisperTranscriptWorker:
                 "status",
                 "받아쓰기 AI stage 시작: "
                     f"chunk={chunks} forced={forced} candidate_chars={len(_normalized_text(candidate))} "
-                    f"stable_support={stable_analysis.stage_support_bucket}:{stable_analysis.stage_support_score:.3f} "
                     f"candidate_tail={_diagnostic_tail(candidate)} committed_chars={len(_normalized_text(committed_text))}",
                     display=False,
                 )
@@ -937,27 +908,13 @@ class WhisperTranscriptWorker:
             nonlocal staged_age
             if not staged_sentence:
                 return []
-            if not _should_age_staged_sentence(
-                staged_sentence,
-                pending_text,
-                current_stable_stage_support_score,
-                current_boundary_end_probability,
-            ):
+            if not _should_age_staged_sentence(staged_sentence, pending_text):
                 count_metric("stage_age_hold")
-                if (
-                    pending_text
-                    and (_is_cjk_text(staged_sentence) or _is_cjk_text(pending_text))
-                    and current_stable_stage_support_score < 0.55
-                    and current_boundary_end_probability < 0.85
-                ):
-                    count_metric("stage_policy_pending_hold_low_stability")
                 staged_age = 0
                 self._emit(
                     "status",
                     "받아쓰기 AI staged aging 보류: "
-                    f"chunk={chunks} stable_support={current_stable_stage_support_score:.3f} "
-                    f"boundary_end_probability={current_boundary_end_probability:.3f} "
-                    f"staged={staged_sentence!r} pending={pending_text!r}",
+                    f"chunk={chunks} staged={staged_sentence!r} pending={pending_text!r}",
                     display=False,
                 )
                 return []
@@ -985,8 +942,6 @@ class WhisperTranscriptWorker:
 
             chunks += 1
             chunk_lifecycle_metrics.clear()
-            current_boundary_signal_score = 0.0
-            current_boundary_end_probability = 0.0
             self._emit("status", f"받아쓰기 AI 전사 요청: chunk={chunks} samples={buffered}", display=False)
             audio = np.concatenate(list(audio_blocks)).astype(np.float32, copy=False)
             chunk_audio_seconds = float(audio.shape[0]) / float(SAMPLE_RATE)
@@ -1026,7 +981,6 @@ class WhisperTranscriptWorker:
                 repeat_collapse_chars = max(0, len(_normalized_text(raw_window_text)) - len(_normalized_text(window_text)))
                 stable_text = _stable_window_text(window_text, 0.0, window_seconds)
                 stable_analysis = analyze_stable_window(previous_window_text, window_text, language)
-                current_stable_stage_support_score = stable_analysis.stage_support_score
                 previous_window_text = window_text
                 if stable_analysis.current_units:
                     count_metric("stable_window_observed")
@@ -1038,21 +992,11 @@ class WhisperTranscriptWorker:
                         int(round(stable_analysis.stable_internal_ratio * 1000)),
                     )
                     count_metric("stable_token_ratio_per_1000", int(round(stable_analysis.stable_token_ratio * 1000)))
-                    count_metric("stable_stage_support_score_per_1000", int(round(stable_analysis.stage_support_score * 1000)))
-                    count_metric(f"stable_stage_support_{stable_analysis.stage_support_bucket}")
                     count_metric(f"stable_overlap_source_{stable_analysis.stable_overlap_source}")
                 adjusted_boundary_confidence = combine_boundary_confidence(
                     boundary_confidence,
                     stable_analysis.boundary_confidence,
-                    stable_analysis.stage_support_score,
                 )
-                if (
-                    stable_analysis.stage_support_score >= 0.75
-                    and stable_analysis.boundary_confidence is not None
-                    and adjusted_boundary_confidence is not None
-                    and adjusted_boundary_confidence > stable_analysis.boundary_confidence
-                ):
-                    count_metric("boundary_confidence_boosted_stable_support")
                 delta_base_text = _append_committed_text(committed_text, pending_transcript_text)
                 text = _new_text_delta(delta_base_text, stable_text)
                 stt_elapsed = time.perf_counter() - stt_started_at
@@ -1072,9 +1016,6 @@ class WhisperTranscriptWorker:
                 boundary_soft = 0
                 boundary_end_marks = 0
                 boundary_right_context_starts = 0
-                boundary_signal_score = 0.0
-                boundary_end_probability = 0.0
-                pending_join_strategy = "none"
                 boundary_confidence_display = (
                     f"{adjusted_boundary_confidence:.2f}" if adjusted_boundary_confidence is not None else "n/a"
                 )
@@ -1105,26 +1046,10 @@ class WhisperTranscriptWorker:
                     boundary_soft = boundary_result.soft_boundary_count
                     boundary_end_marks = boundary_result.end_mark_count
                     boundary_right_context_starts = boundary_result.right_context_start_count
-                    boundary_signal_score = boundary_result.boundary_signal_score
-                    boundary_end_probability = boundary_result.end_probability
-                    pending_join_strategy = boundary_result.join_strategy
-                    count_metric(f"pending_join_strategy_{pending_join_strategy}")
-                    current_boundary_signal_score = boundary_signal_score
-                    current_boundary_end_probability = boundary_end_probability
-                    if (
-                        stable_analysis.stage_support_score >= 0.75
-                        and boundary_signal_score >= 0.65
-                        and boundary_end_probability >= 0.85
-                    ):
-                        count_metric("stage_policy_fast_confirm_candidate")
                     if boundary_end_marks:
                         count_metric("boundary_end_marks", boundary_end_marks)
                     if boundary_right_context_starts:
                         count_metric("boundary_right_context_starts", boundary_right_context_starts)
-                    if boundary_signal_score > 0.0:
-                        count_metric("boundary_signal_score_per_1000", int(round(boundary_signal_score * 1000)))
-                    if boundary_end_probability > 0.0:
-                        count_metric("boundary_end_probability_per_1000", int(round(boundary_end_probability * 1000)))
                     if completed_sentences:
                         coalesced_completed_sentences = _coalesce_completed_sentences_for_staging(completed_sentences, str(detected))
                         if len(coalesced_completed_sentences) != len(completed_sentences):
@@ -1216,8 +1141,6 @@ class WhisperTranscriptWorker:
                     f"boundary_backend={self._sentence_boundary_detector.backend} "
                     f"boundary_complete={boundary_complete} boundary_soft={boundary_soft} boundary_conf={boundary_confidence_display} "
                     f"boundary_end_marks={boundary_end_marks} boundary_right_context={boundary_right_context_starts} "
-                    f"boundary_signal_score={boundary_signal_score:.3f} boundary_end_probability={boundary_end_probability:.3f} "
-                    f"pending_join_strategy={pending_join_strategy} "
                     f"boundary_conf_segment={boundary_confidence if boundary_confidence is not None else 'n/a'} "
                     f"boundary_conf_stable={stable_analysis.boundary_confidence if stable_analysis.boundary_confidence is not None else 'n/a'} "
                     f"pending_chars={len(pending_transcript_text)} pending_chunks={pending_chunks} "
@@ -1228,7 +1151,6 @@ class WhisperTranscriptWorker:
                     f"stable_internal_chars={stable_analysis.stable_internal_chars} "
                     f"stable_internal_ratio={stable_analysis.stable_internal_ratio:.3f} "
                     f"stable_token_ratio={stable_analysis.stable_token_ratio:.3f} "
-                    f"stable_stage_support={stable_analysis.stage_support_bucket}:{stable_analysis.stage_support_score:.3f} "
                     f"stable_overlap_source={stable_analysis.stable_overlap_source} "
                     f"repeat_collapse_chars={repeat_collapse_chars} repeat_collapse_rules={','.join(repeat_collapse_rules) or 'none'} "
                     f"delta_chars={len(_normalized_text(text))} "
@@ -1366,45 +1288,6 @@ class WhisperTranscriptWorker:
                 stable_internal_chars = chunk_lifecycle_metrics.get("stable_internal_chars", 0)
                 stable_internal_ratio_per_1000 = chunk_lifecycle_metrics.get("stable_internal_ratio_per_1000", 0)
                 stable_token_ratio_per_1000 = chunk_lifecycle_metrics.get("stable_token_ratio_per_1000", 0)
-                stable_stage_support_score_per_1000 = chunk_lifecycle_metrics.get(
-                    "stable_stage_support_score_per_1000",
-                    0,
-                )
-                stable_stage_support_high_count = chunk_lifecycle_metrics.get("stable_stage_support_high", 0)
-                stable_stage_support_mid_count = chunk_lifecycle_metrics.get("stable_stage_support_mid", 0)
-                stable_stage_support_low_count = chunk_lifecycle_metrics.get("stable_stage_support_low", 0)
-                stable_stage_support_none_count = chunk_lifecycle_metrics.get("stable_stage_support_none", 0)
-                boundary_confidence_boosted_count = chunk_lifecycle_metrics.get(
-                    "boundary_confidence_boosted_stable_support",
-                    0,
-                )
-                stage_policy_fast_confirm_count = chunk_lifecycle_metrics.get("stage_policy_fast_confirm_candidate", 0)
-                stage_policy_pending_hold_count = chunk_lifecycle_metrics.get(
-                    "stage_policy_pending_hold_low_stability",
-                    0,
-                )
-                pending_join_overlap_count = sum(
-                    value
-                    for key, value in chunk_lifecycle_metrics.items()
-                    if key.startswith("pending_join_strategy_")
-                    and key
-                    in {
-                        "pending_join_strategy_suffix_prefix_overlap",
-                        "pending_join_strategy_internal_restart",
-                        "pending_join_strategy_new_restarts_pending",
-                        "pending_join_strategy_short_pending_internal_restart",
-                    }
-                )
-                pending_join_append_count = sum(
-                    value
-                    for key, value in chunk_lifecycle_metrics.items()
-                    if key
-                    in {
-                        "pending_join_strategy_append",
-                        "pending_join_strategy_append_cjk",
-                        "pending_join_strategy_append_mixed_units",
-                    }
-                )
                 stage_candidate_quality_blocked_count = chunk_lifecycle_metrics.get("stage_candidate_quality_blocked", 0)
                 stage_candidate_quality_count = sum(
                     value
@@ -1448,16 +1331,6 @@ class WhisperTranscriptWorker:
                     f"stable_internal_chars={stable_internal_chars} "
                     f"stable_internal_ratio={stable_internal_ratio_per_1000 / 1000:.3f} "
                     f"stable_token_ratio={stable_token_ratio_per_1000 / 1000:.3f} "
-                    f"stable_stage_support_score={stable_stage_support_score_per_1000 / 1000:.3f} "
-                    f"stable_stage_support_high={stable_stage_support_high_count} "
-                    f"stable_stage_support_mid={stable_stage_support_mid_count} "
-                    f"stable_stage_support_low={stable_stage_support_low_count} "
-                    f"stable_stage_support_none={stable_stage_support_none_count} "
-                    f"boundary_confidence_boosted_stable_support={boundary_confidence_boosted_count} "
-                    f"stage_policy_fast_confirm_candidate={stage_policy_fast_confirm_count} "
-                    f"stage_policy_pending_hold_low_stability={stage_policy_pending_hold_count} "
-                    f"pending_join_overlap={pending_join_overlap_count} "
-                    f"pending_join_append={pending_join_append_count} "
                     f"stage_candidate_quality_blocked={stage_candidate_quality_blocked_count} "
                     f"stage_candidate_quality={stage_candidate_quality_count} "
                     f"stage_candidate_quality_cjk_internal_gap={stage_candidate_quality_cjk_internal_gap_count} "

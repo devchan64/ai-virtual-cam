@@ -265,7 +265,6 @@ class SentenceBoundaryResult:
     soft_boundary_count: int = 0
     end_mark_count: int = 0
     right_context_start_count: int = 0
-    boundary_signal_score: float = 0.0
 
 
 class SentenceBoundaryDetector:
@@ -392,7 +391,7 @@ NLLB 번역 기본 테스트값:
 3개 축:
 
 1. 안정성 축: 리비전 빈도와 규모 감소 (`UPWR`, `UPSR`, `replaced ratio`, `rollback_rate`)
-2. 경계 축: 문장 경계 추정 품질 (`pending_chars`, `forced_by`, `boundary_latency`, `end_marks_stable`, `boundary_signal_score`, `boundary_right_context`)
+2. 경계 축: 문장 경계 추정 품질 (`pending_chars`, `forced_by`, `boundary_latency`, `end_marks_stable`, `boundary_right_context`)
 3. 지연/번역 축: 실시간성 (`stt_rtf`, `total_rtf`), 번역 부하 (`confirmed_only_delta`, `translation_redundant_ratio`)
 
 권장 실험 절차:
@@ -435,7 +434,7 @@ NLLB 번역 기본 테스트값:
 
 | 이벤트 | 권장 필드 |
 | --- | --- |
-| split event | `chunk`, `completed`, `final`, `pending_text`, `forced_by`, `pending_overrun`, `pending_join_strategy`, `pending_join_overlap`, `pending_join_append`, `boundary_backend`, `boundary_end_marks`, `boundary_right_context`, `boundary_signal_score`, `boundary_end_probability`, `segment_state_pending`, `segment_state_staged`, `segment_state_final`, `segment_state_suppressed`, `segment_state_revised`, `pending_chars`, `pending_chunks`, `pending_chars_per_chunk` |
+| split event | `chunk`, `completed`, `final`, `pending_text`, `forced_by`, `pending_overrun`, `boundary_backend`, `boundary_end_marks`, `boundary_right_context`, `segment_state_pending`, `segment_state_staged`, `segment_state_final`, `segment_state_suppressed`, `segment_state_revised`, `pending_chars`, `pending_chunks`, `pending_chars_per_chunk` |
 | commit event | `step`, `window`, `stt_elapsed`, `stt_rtf`, `translation_elapsed`, `total_elapsed`, `total_rtf`, `beam`, `max_tokens`, `text_chars` |
 | transcript fragment | `delta_text`, `state`, `revision_id` |
 
@@ -572,7 +571,7 @@ stable token 지표를 추가한 뒤 같은 중국어 실시간 경로를 약 5�
 
 추가 반영 판단:
 
-- `stable_internal_chars`, `stable_internal_ratio`를 진단 지표로 추가한다. 이 값은 이전/현재 window의 최장 내부 공통 구간을 측정한다. 이후 내부 overlap은 CJK revision confirmation 보존의 보조 feature로 승격했고, 이번 패치에서는 stage support score/bucket 관측 지표에도 반영한다.
+- `stable_internal_chars`, `stable_internal_ratio`를 진단 지표로 추가한다. 이 값은 이전/현재 window의 최장 내부 공통 구간을 측정한다. 이후 내부 overlap은 CJK revision confirmation 보존의 보조 feature로 승격했다.
 - `stable_overlap_source=none`이면서 `stable_internal_ratio`가 높은 케이스를 추적 테스트에 추가한다. 이후 같은 패턴이 반복되면 내부 공통 구간을 revision lifecycle의 보조 feature로 승격할지 별도 검증한다.
 - 안정성 요약 로그에 `stage_candidate_quality_cjk_internal_gap`, `stage_candidate_quality_mixed_latin_zh`를 추가한다. `mixed_latin_zh` 단독 stage 차단은 하지 않지만, 오염 후보가 다른 차단 flag와 함께 얼마나 나타나는지 관측한다.
 - 추적 테스트의 stable metric 케이스를 4개로 늘려 prefix, suffix-prefix, 내부 overlap, stage 후보 품질 차단을 모두 유지한다.
@@ -583,12 +582,6 @@ stable token 지표를 추가한 뒤 같은 중국어 실시간 경로를 약 5�
 - 이 조건에서는 final 확정 기준을 완화하지 않는다. 대신 `stage_revision_confirmation_reset`을 올리지 않고 기존 confirmation count를 유지한다.
 - 안정성 요약 로그에 `revision_preserved_internal`을 추가해 reset 감소와 보존 증가를 함께 본다.
 - 추적 테스트에 `stage_revision_confirmation_preserved_internal`을 추가한다. 다음 운영 관측에서는 `revision_preserved_internal` 증가가 오확정 증가로 이어지는지 `final_quality`, `translation_skip_final_quality`, recent echo 억제 지표와 함께 검증한다.
-
-stage support 관측 지표 추가:
-
-- `stable_stage_support_score_per_1000`과 `stable_stage_support_high/mid/low/none`을 runtime metric에 추가한다.
-- 점수는 stable prefix/suffix-prefix ratio를 기본으로 하고, CJK window 시작점이 흔들려 prefix가 0인 경우에는 충분히 긴 내부 공통 구간을 보조 신호로 사용한다.
-- 이 값은 아직 final 직접 트리거가 아니다. 다음 관측에서는 support bucket별 `stage_replaced_unconfirmed`, `raw_without_final`, `final_quality`, `translation_skip_final_quality`를 비교해 confirmation 튜닝 여부를 판단한다.
 
 상태 전환 metric 추가:
 

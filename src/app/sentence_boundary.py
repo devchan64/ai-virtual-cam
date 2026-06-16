@@ -59,16 +59,6 @@ class SentenceBoundaryResult:
     soft_boundary_count: int = 0
     end_mark_count: int = 0
     right_context_start_count: int = 0
-    boundary_signal_score: float = 0.0
-    end_probability: float = 0.0
-    join_strategy: str = "none"
-
-
-@dataclass(frozen=True)
-class PendingJoinResult:
-    text: str
-    strategy: str
-    overlap_units: int = 0
 
 
 class SentenceBoundaryDetector(Protocol):
@@ -160,7 +150,7 @@ def _suffix_prefix_overlap(left_keys: list[str], right_keys: list[str]) -> int:
     return 0
 
 
-def _combine_by_internal_restart(pending: str, new: str, pending_units: list[_JoinUnit], new_units: list[_JoinUnit]) -> PendingJoinResult | None:
+def _combine_by_internal_restart(pending: str, new: str, pending_units: list[_JoinUnit], new_units: list[_JoinUnit]) -> str | None:
     if len(pending_units) < 12 or len(new_units) < 12:
         return None
     pending_keys = _unit_keys(pending_units)
@@ -179,10 +169,10 @@ def _combine_by_internal_restart(pending: str, new: str, pending_units: list[_Jo
     if best_len / max(len(new_keys), 1) < 0.45:
         return None
     prefix = normalized_text(pending[: pending_units[best_i].start])
-    return PendingJoinResult(join_text_fragments(prefix, new), "internal_restart", best_len)
+    return join_text_fragments(prefix, new)
 
 
-def _combine_by_token_overlap(pending: str, new: str) -> PendingJoinResult | None:
+def _combine_by_token_overlap(pending: str, new: str) -> str | None:
     pending_units = join_units_for_text(pending)
     new_units = join_units_for_text(new)
     if not pending_units or not new_units:
@@ -190,16 +180,16 @@ def _combine_by_token_overlap(pending: str, new: str) -> PendingJoinResult | Non
     pending_keys = _unit_keys(pending_units)
     new_keys = _unit_keys(new_units)
     if len(new_keys) >= len(pending_keys) and new_keys[: len(pending_keys)] == pending_keys:
-        return PendingJoinResult(new, "new_restarts_pending", len(pending_keys))
+        return new
     internal_restart = _combine_by_internal_restart(pending, new, pending_units, new_units)
     if internal_restart is not None:
         return internal_restart
     overlap = _suffix_prefix_overlap(pending_keys, new_keys)
     if overlap > 0:
         if overlap >= len(new_units):
-            return PendingJoinResult(pending, "suffix_prefix_overlap", overlap)
+            return pending
         suffix = new[new_units[overlap].start :]
-        return PendingJoinResult(join_text_fragments(pending, suffix), "suffix_prefix_overlap", overlap)
+        return join_text_fragments(pending, suffix)
     return None
 
 
@@ -228,48 +218,44 @@ def starts_with_ack_sentence(text: str) -> bool:
     return len(words) == 1 and words[0] in ACK_SENTENCE_WORDS
 
 
-def pending_new_text_joined(pending_text: str, new_text: str) -> PendingJoinResult:
+def pending_new_text_combined(pending_text: str, new_text: str) -> str:
     pending = normalized_text(pending_text)
     new = normalized_text(new_text)
     if not pending:
-        return PendingJoinResult(new, "new_only")
+        return new
     if not new:
-        return PendingJoinResult(pending, "pending_only")
+        return pending
     pending_words = word_units(pending)
     new_words = word_units(new)
     if pending_words and new_words[: len(pending_words)] == pending_words:
-        return PendingJoinResult(new, "new_restarts_pending", len(pending_words))
+        return new
     dangling_connectives = {"and", "but", "so", "or"}
     if len(pending_words) == 1 and pending_words[0] in dangling_connectives and new_words:
-        return PendingJoinResult(new, "drop_dangling_connective", 1)
+        return new
     if pending_words and len(pending_words) <= 4:
         max_start = len(new_words) - len(pending_words)
         for start in range(1, max_start + 1):
             if new_words[start : start + len(pending_words)] == pending_words:
-                return PendingJoinResult(new, "short_pending_internal_restart", len(pending_words))
+                return new
     if has_incomplete_tail(pending) and starts_with_ack_sentence(new):
-        return PendingJoinResult(new, "drop_incomplete_tail_before_ack")
+        return new
     connective_words = {"and", "but", "because", "so", "or"}
     if pending_words and new_words and len(pending_words) <= 2 and pending_words[0] in connective_words and new_words[0] in connective_words:
-        return PendingJoinResult(new, "replace_duplicate_connective", 1)
+        return new
     token_join = _combine_by_token_overlap(pending, new)
     if token_join is not None:
         return token_join
     pending_units, pending_separator = text_units(pending)
     new_units, new_separator = text_units(new)
     if pending_separator != new_separator:
-        return PendingJoinResult(join_text_fragments(pending, new), "append_mixed_units")
+        return join_text_fragments(pending, new)
     max_overlap = min(len(pending_units), len(new_units))
     for overlap in range(max_overlap, 0, -1):
         if pending_units[-overlap:] == new_units[:overlap]:
-            return PendingJoinResult(join_text_units(pending_units + new_units[overlap:], pending_separator), "suffix_prefix_overlap", overlap)
+            return join_text_units(pending_units + new_units[overlap:], pending_separator)
     if pending_separator == "" and has_cjk_chars(pending) and has_cjk_chars(new):
-        return PendingJoinResult(join_text_units(pending_units + new_units, ""), "append_cjk")
-    return PendingJoinResult(join_text_fragments(pending, new), "append")
-
-
-def pending_new_text_combined(pending_text: str, new_text: str) -> str:
-    return pending_new_text_joined(pending_text, new_text).text
+        return join_text_units(pending_units + new_units, "")
+    return join_text_fragments(pending, new)
 
 
 def sentence_end_count(text: str) -> int:
@@ -283,45 +269,6 @@ def _right_context_start_count(completed: list[str], pending: str, soft_boundary
     return max(hard_contexts, soft_boundary_count)
 
 
-def _boundary_signal_score(
-    completed: list[str],
-    pending: str,
-    end_mark_count: int,
-    right_context_start_count: int,
-    soft_boundary_count: int,
-) -> float:
-    if not completed:
-        return 0.0
-    score = 0.10
-    if end_mark_count > 0:
-        score += 0.55
-    if right_context_start_count > 0:
-        score += 0.25
-    if soft_boundary_count > 0:
-        score += 0.25
-    if not normalized_text(pending):
-        score += 0.05
-    return min(1.0, score)
-
-
-def _boundary_end_probability(
-    completed: list[str],
-    pending: str,
-    end_mark_count: int,
-    soft_boundary_count: int,
-) -> float:
-    if not completed:
-        return 0.0
-    normalized_pending = normalized_text(pending)
-    if end_mark_count > 0 and not normalized_pending:
-        return 0.95
-    if end_mark_count > 0:
-        return 0.85
-    if soft_boundary_count > 0:
-        return 0.65
-    return 0.50
-
-
 def _boundary_result(
     completed: list[str],
     pending: str,
@@ -330,7 +277,6 @@ def _boundary_result(
     boundary_count: int | None = None,
     soft_boundary_count: int = 0,
     source_text: str = "",
-    join_strategy: str = "none",
 ) -> SentenceBoundaryResult:
     normalized_pending = normalized_text(pending)
     normalized_completed = [normalized_text(sentence) for sentence in completed if normalized_text(sentence)]
@@ -338,13 +284,6 @@ def _boundary_result(
     signal_text = source_text or " ".join([*normalized_completed, normalized_pending]).strip()
     end_marks = sentence_end_count(signal_text)
     right_contexts = _right_context_start_count(normalized_completed, normalized_pending, soft_boundary_count)
-    signal_score = _boundary_signal_score(
-        normalized_completed,
-        normalized_pending,
-        end_marks,
-        right_contexts,
-        soft_boundary_count,
-    )
     return SentenceBoundaryResult(
         normalized_completed,
         normalized_pending,
@@ -353,14 +292,6 @@ def _boundary_result(
         soft_boundary_count,
         end_marks,
         right_contexts,
-        signal_score,
-        _boundary_end_probability(
-            normalized_completed,
-            normalized_pending,
-            end_marks,
-            soft_boundary_count,
-        ),
-        join_strategy,
     )
 
 
@@ -408,8 +339,7 @@ class SatSentenceBoundaryDetector:
     ) -> SentenceBoundaryResult:
         del language
         del boundary_confidence
-        joined = pending_new_text_joined(pending_text, new_text)
-        combined = joined.text
+        combined = pending_new_text_combined(pending_text, new_text)
         if not combined:
             return _boundary_result([], "", self.backend)
         normalized = normalized_text(combined)
@@ -427,14 +357,14 @@ class SatSentenceBoundaryDetector:
         if len(segments) == 1:
             only = segments[0]
             if sentence_end_count(only) > 0:
-                return _boundary_result([only], "", self.backend, boundary_count=1, source_text=normalized, join_strategy=joined.strategy)
-            return _boundary_result([], only, self.backend, source_text=normalized, join_strategy=joined.strategy)
+                return _boundary_result([only], "", self.backend, boundary_count=1, source_text=normalized)
+            return _boundary_result([], only, self.backend, source_text=normalized)
         completed = segments[:-1]
         pending = segments[-1]
         if sentence_end_count(pending) > 0:
             completed.append(pending)
             pending = ""
-        return _boundary_result(completed, pending, self.backend, source_text=normalized, join_strategy=joined.strategy)
+        return _boundary_result(completed, pending, self.backend, source_text=normalized)
 
 
 def split_punctuated_text(text: str, backend: str) -> SentenceBoundaryResult:
@@ -465,8 +395,7 @@ class LegacyRegexSentenceBoundaryDetector:
         *,
         boundary_confidence: float | None = None,
     ) -> SentenceBoundaryResult:
-        joined = pending_new_text_joined(pending_text, new_text)
-        combined = joined.text
+        combined = pending_new_text_combined(pending_text, new_text)
         if not combined:
             return _boundary_result([], "", self.backend)
         completed: list[str] = []
@@ -477,7 +406,7 @@ class LegacyRegexSentenceBoundaryDetector:
                 completed.append(sentence)
             consumed_end = match.end(1)
         if consumed_end > 0:
-            return _boundary_result(completed, combined[consumed_end:].strip(), self.backend, source_text=combined, join_strategy=joined.strategy)
+            return _boundary_result(completed, combined[consumed_end:].strip(), self.backend, source_text=combined)
         soft_completed, soft_pending = self._split_soft_boundary(
             combined, language, boundary_confidence=boundary_confidence
         )
@@ -488,9 +417,8 @@ class LegacyRegexSentenceBoundaryDetector:
                 self.backend,
                 soft_boundary_count=len(soft_completed),
                 source_text=combined,
-                join_strategy=joined.strategy,
             )
-        return _boundary_result([], combined, self.backend, source_text=combined, join_strategy=joined.strategy)
+        return _boundary_result([], combined, self.backend, source_text=combined)
 
     def _split_soft_boundary(
         self,
@@ -542,8 +470,8 @@ class MockSentenceBoundaryDetector:
     ) -> SentenceBoundaryResult:
         del language
         del boundary_confidence
-        joined = pending_new_text_joined(pending_text, new_text)
-        return _boundary_result([], joined.text, self.backend, source_text=joined.text, join_strategy=joined.strategy)
+        combined = pending_new_text_combined(pending_text, new_text)
+        return _boundary_result([], combined, self.backend, source_text=combined)
 
 
 def create_sentence_boundary_detector(

@@ -817,22 +817,6 @@ def _sentence_required_confirmations(forced: bool) -> int:
     return FORCED_SENTENCE_CONFIRM_CHUNKS if forced else SENTENCE_CONFIRM_CHUNKS
 
 
-def _effective_sentence_required_confirmations(
-    forced: bool,
-    stable_stage_support_score: float = 0.0,
-    boundary_signal_score: float = 0.0,
-    boundary_end_probability: float = 0.0,
-) -> int:
-    required = _sentence_required_confirmations(forced)
-    if (
-        stable_stage_support_score >= 0.75
-        and boundary_signal_score >= 0.65
-        and boundary_end_probability >= 0.85
-    ):
-        return max(3 if forced else 2, required - 1)
-    return required
-
-
 def _sentence_max_age_chunks(forced: bool, base_age: int | None = None) -> int:
     if base_age is None:
         return FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS if forced else SENTENCE_CONFIRM_MAX_AGE_CHUNKS
@@ -951,9 +935,6 @@ def _should_confirm_staged_sentence(
     staged_sentence: str,
     staged_confirmations: int,
     staged_forced: bool,
-    stable_stage_support_score: float = 0.0,
-    boundary_signal_score: float = 0.0,
-    boundary_end_probability: float = 0.0,
 ) -> bool:
     if _is_open_korean_clause(staged_sentence):
         return False
@@ -961,12 +942,7 @@ def _should_confirm_staged_sentence(
         flags = set(_final_sentence_diagnostic_flags(staged_sentence, "zh"))
         if flags.intersection({"empty", "spaced_cjk", "cjk_repeated_ngram", "latin_only_for_zh"}):
             return False
-    return staged_confirmations >= _effective_sentence_required_confirmations(
-        staged_forced,
-        stable_stage_support_score,
-        boundary_signal_score,
-        boundary_end_probability,
-    )
+    return staged_confirmations >= _sentence_required_confirmations(staged_forced)
 
 
 def _should_preserve_partial_replacement(staged_sentence: str, candidate: str) -> bool:
@@ -993,9 +969,6 @@ def _replacement_decision_reason(
     staged_forced: bool,
     staged_age: int,
     sentence_finalize_age: int | None = None,
-    stable_stage_support_score: float = 0.0,
-    boundary_signal_score: float = 0.0,
-    boundary_end_probability: float = 0.0,
 ) -> str:
     staged_words = _word_units(staged_sentence)
     if not staged_words:
@@ -1004,12 +977,7 @@ def _replacement_decision_reason(
         return "open_korean_clause"
     if _looks_like_open_latin_clause(staged_sentence, staged_words):
         return "open_latin_clause"
-    if staged_confirmations >= _effective_sentence_required_confirmations(
-        staged_forced,
-        stable_stage_support_score,
-        boundary_signal_score,
-        boundary_end_probability,
-    ):
+    if staged_confirmations >= _sentence_required_confirmations(staged_forced):
         return "confirmed"
     if staged_age >= _sentence_max_age_chunks(staged_forced, sentence_finalize_age):
         return "aged"
@@ -1033,9 +1001,6 @@ def _should_finalize_replaced_sentence(
     staged_forced: bool,
     staged_age: int,
     sentence_finalize_age: int | None = None,
-    stable_stage_support_score: float = 0.0,
-    boundary_signal_score: float = 0.0,
-    boundary_end_probability: float = 0.0,
 ) -> bool:
     reason = _replacement_decision_reason(
         staged_sentence,
@@ -1044,19 +1009,9 @@ def _should_finalize_replaced_sentence(
         staged_forced,
         staged_age,
         sentence_finalize_age,
-        stable_stage_support_score,
-        boundary_signal_score,
-        boundary_end_probability,
     )
     if reason == "confirmed":
-        return _should_confirm_staged_sentence(
-            staged_sentence,
-            staged_confirmations,
-            staged_forced,
-            stable_stage_support_score,
-            boundary_signal_score,
-            boundary_end_probability,
-        )
+        return _should_confirm_staged_sentence(staged_sentence, staged_confirmations, staged_forced)
     return reason in {"aged", "duplicate_or_suffix", "partial_preserve"}
 
 
@@ -1090,16 +1045,8 @@ def _should_finalize_boundary_candidate(
     language: str,
     staged_confirmations: int | None = None,
     staged_forced: bool = False,
-    stable_stage_support_score: float = 0.0,
-    boundary_signal_score: float = 0.0,
-    boundary_end_probability: float = 0.0,
 ) -> bool:
-    if staged_confirmations is not None and staged_confirmations < _effective_sentence_required_confirmations(
-        staged_forced,
-        stable_stage_support_score,
-        boundary_signal_score,
-        boundary_end_probability,
-    ):
+    if staged_confirmations is not None and staged_confirmations < _sentence_required_confirmations(staged_forced):
         return False
     return _should_stage_boundary_candidate(sentence, language)
 
@@ -1111,9 +1058,6 @@ def _should_finalize_before_replacement(
     staged_age: int = 0,
     sentence_finalize_age: int | None = None,
     staged_forced: bool = False,
-    stable_stage_support_score: float = 0.0,
-    boundary_signal_score: float = 0.0,
-    boundary_end_probability: float = 0.0,
 ) -> bool:
     if not _should_finalize_replaced_sentence(
         sentence,
@@ -1122,9 +1066,6 @@ def _should_finalize_before_replacement(
         staged_forced,
         staged_age,
         sentence_finalize_age,
-        stable_stage_support_score,
-        boundary_signal_score,
-        boundary_end_probability,
     ):
         return False
     flags = set(_final_sentence_diagnostic_flags(sentence, language))
@@ -1164,23 +1105,11 @@ def _is_short_staged_suffix_repeat(staged_sentence: str, pending_text: str) -> b
     return staged_words[-len(pending_words) :] == pending_words
 
 
-def _should_age_staged_sentence(
-    staged_sentence: str,
-    pending_text: str,
-    stable_stage_support_score: float = 0.0,
-    boundary_end_probability: float = 0.0,
-) -> bool:
+def _should_age_staged_sentence(staged_sentence: str, pending_text: str) -> bool:
     if not staged_sentence:
         return False
     if pending_text and _is_short_staged_suffix_repeat(staged_sentence, pending_text):
         return True
-    if (
-        pending_text
-        and (_is_cjk_text(staged_sentence) or _is_cjk_text(pending_text))
-        and stable_stage_support_score < 0.55
-        and boundary_end_probability < 0.85
-    ):
-        return False
     if pending_text and _sentences_are_revisions(staged_sentence, pending_text):
         return False
     return True

@@ -30,8 +30,8 @@ TRACKING_TARGETS = {
     "translation_quality": {"target_cases": 8, "target_rate": 0.80},
     "coalesce": {"target_cases": 10, "target_rate": 1.00},
     "duplicate_suppression": {"target_cases": 4, "target_rate": 1.00},
-    "runtime_metrics": {"target_cases": 16, "target_rate": 1.00},
-    "stable_metrics": {"target_cases": 5, "target_rate": 1.00},
+    "runtime_metrics": {"target_cases": 15, "target_rate": 1.00},
+    "stable_metrics": {"target_cases": 4, "target_rate": 1.00},
 }
 
 REVISION_TRACKING_CASES = [
@@ -1013,27 +1013,12 @@ RUNTIME_METRIC_TRACKING_CASES = [
         "metrics": {
             "boundary_end_marks": 2,
             "boundary_right_context_starts": 1,
-            "boundary_signal_score_per_1000": 900,
-            "boundary_end_probability_per_1000": 950,
         },
         "expected": {
             "boundary_end_marks": 2,
             "boundary_right_context_starts": 1,
-            "boundary_signal_score_per_1000": 900,
-            "boundary_end_probability_per_1000": 950,
         },
         "source": "semantic boundary punctuation/right-context runtime diagnostic",
-    },
-    {
-        "metrics": {
-            "boundary_end_probability_per_1000": 650,
-            "boundary_signal_score_per_1000": 600,
-        },
-        "expected": {
-            "boundary_end_probability_per_1000": 650,
-            "boundary_signal_score_per_1000": 600,
-        },
-        "source": "semantic boundary soft end probability runtime diagnostic",
     },
     {
         "metrics": {
@@ -1134,43 +1119,6 @@ STABLE_METRIC_TRACKING_CASES = [
             "stage_candidate_quality_no_end_marker": 1,
         },
         "source": "2026-06-16 5m monitor spaced CJK candidate blocked before staging",
-    },
-    {
-        "metrics": {
-            "stable_stage_support_score_per_1000": 850,
-            "stable_stage_support_high": 1,
-            "stable_overlap_source_none": 1,
-        },
-        "expected": {
-            "stable_stage_support_score_per_1000": 850,
-            "stable_stage_support_high": 1,
-            "stable_overlap_none": 1,
-        },
-        "source": "semantic stable stage support metric for internal overlap",
-    },
-    {
-        "metrics": {
-            "boundary_confidence_boosted_stable_support": 1,
-            "stage_policy_fast_confirm_candidate": 1,
-            "stage_policy_pending_hold_low_stability": 1,
-        },
-        "expected": {
-            "boundary_confidence_boosted_stable_support": 1,
-            "stage_policy_fast_confirm_candidate": 1,
-            "stage_policy_pending_hold_low_stability": 1,
-        },
-        "source": "stable and boundary policy runtime diagnostic",
-    },
-    {
-        "metrics": {
-            "pending_join_overlap": 3,
-            "pending_join_append": 1,
-        },
-        "expected": {
-            "pending_join_overlap": 3,
-            "pending_join_append": 1,
-        },
-        "source": "normalization join strategy runtime diagnostic",
     },
 ]
 
@@ -1276,25 +1224,11 @@ def _runtime_metric_summary(metrics: dict[str, int]) -> dict[str, int]:
         "stable_internal_chars": int(metrics.get("stable_internal_chars", 0)),
         "stable_internal_ratio_per_1000": int(metrics.get("stable_internal_ratio_per_1000", 0)),
         "stable_token_ratio_per_1000": int(metrics.get("stable_token_ratio_per_1000", 0)),
-        "stable_stage_support_score_per_1000": int(metrics.get("stable_stage_support_score_per_1000", 0)),
-        "stable_stage_support_high": int(metrics.get("stable_stage_support_high", 0)),
-        "stable_stage_support_mid": int(metrics.get("stable_stage_support_mid", 0)),
-        "stable_stage_support_low": int(metrics.get("stable_stage_support_low", 0)),
-        "stable_stage_support_none": int(metrics.get("stable_stage_support_none", 0)),
         "stable_overlap_common_prefix": int(metrics.get("stable_overlap_source_common_prefix", 0)),
         "stable_overlap_suffix_prefix": int(metrics.get("stable_overlap_source_suffix_prefix", 0)),
         "stable_overlap_none": int(metrics.get("stable_overlap_source_none", 0)),
         "boundary_end_marks": int(metrics.get("boundary_end_marks", 0)),
         "boundary_right_context_starts": int(metrics.get("boundary_right_context_starts", 0)),
-        "boundary_signal_score_per_1000": int(metrics.get("boundary_signal_score_per_1000", 0)),
-        "boundary_end_probability_per_1000": int(metrics.get("boundary_end_probability_per_1000", 0)),
-        "boundary_confidence_boosted_stable_support": int(
-            metrics.get("boundary_confidence_boosted_stable_support", 0)
-        ),
-        "stage_policy_fast_confirm_candidate": int(metrics.get("stage_policy_fast_confirm_candidate", 0)),
-        "stage_policy_pending_hold_low_stability": int(metrics.get("stage_policy_pending_hold_low_stability", 0)),
-        "pending_join_overlap": int(metrics.get("pending_join_overlap", 0)),
-        "pending_join_append": int(metrics.get("pending_join_append", 0)),
         "segment_state_pending": int(metrics.get("segment_state_pending", 0)),
         "segment_state_staged": int(metrics.get("segment_state_staged", 0)),
         "segment_state_final": int(metrics.get("segment_state_final", 0)),
