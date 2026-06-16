@@ -166,7 +166,7 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
             mock.patch.object(self.module.ConfigGui, "_build_video_defaults", return_value=defaults),
             mock.patch.object(self.module.tk, "StringVar", side_effect=lambda value="": _DummyVar(value)),
         ):
-            self.module.ConfigGui._register_hidden_whisper_vars(gui)
+            self.module.ConfigGui._register_hidden_dictation_ai_vars(gui)
 
         self.assertIn("dictation_ai_translation_backend_en", gui.vars)
         self.assertIn("dictation_ai_translation_backend_ko", gui.vars)
@@ -253,6 +253,120 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
             self.assertFalse(gui.vars[key].get(), key)
             self.assertIn("!disabled", gui._widgets[key].states)
 
+    def test_load_existing_config_defaults_missing_camera_feature_enabled_flags(self) -> None:
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        calls = {}
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "setting.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "cameraServer": {},
+                        "segmentation": {"backend": "mock", "selfie": {}},
+                        "background": {"mode": "chroma"},
+                        "crop": {},
+                        "audio": {},
+                        "dictationAi": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            gui.output_path = str(config_path)
+            gui._language_var = _DummyVar("ko")
+            gui._read_geometry_meta = mock.Mock(return_value={})
+            gui._restore_window_geometry = mock.Mock()
+            gui._build_video_defaults = mock.Mock(
+                return_value={
+                    "camera_server_enabled": True,
+                    "seg_enabled": True,
+                    "bg_enabled": True,
+                    "crop_enabled": True,
+                }
+            )
+            gui._set_var = mock.Mock(side_effect=lambda key, value: calls.setdefault(key, value))
+            gui._apply_seg_engine_options_to_form = mock.Mock()
+            gui._apply_camera_server_feature_policy = mock.Mock()
+            gui._load_dictation_ai_settings_from_config = mock.Mock()
+            gui._apply_dictation_ai_platform_policy = mock.Mock()
+            gui._load_audio_settings_from_config = mock.Mock()
+            gui._on_input_device_changed = mock.Mock()
+            gui._on_input_width_changed = mock.Mock()
+            gui._on_output_device_changed = mock.Mock()
+            gui._on_output_height_changed = mock.Mock()
+
+            self.module.ConfigGui._load_existing_config(gui)
+
+        self.assertTrue(calls["camera_server_enabled"])
+        self.assertTrue(calls["seg_enabled"])
+        self.assertTrue(calls["bg_enabled"])
+        self.assertTrue(calls["crop_enabled"])
+
+    def test_reset_settings_json_cancels_without_writing_config(self) -> None:
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        gui.output_path = "/tmp/setting.json"
+        gui._tr = lambda key, default: default
+        gui._reset_all_form_settings = mock.Mock()
+        gui._build_config = mock.Mock()
+        gui._apply_persistent_meta = mock.Mock()
+        gui._reset_window_geometry_file = mock.Mock()
+        gui._show_error = mock.Mock()
+
+        with (
+            mock.patch.object(self.module.messagebox, "askyesno", return_value=False),
+            mock.patch.object(self.module, "write_config") as write_config_mock,
+        ):
+            self.module.ConfigGui._reset_settings_json(gui)
+
+        gui._reset_all_form_settings.assert_not_called()
+        gui._build_config.assert_not_called()
+        gui._apply_persistent_meta.assert_not_called()
+        gui._reset_window_geometry_file.assert_not_called()
+        write_config_mock.assert_not_called()
+        gui._show_error.assert_not_called()
+
+    def test_reset_settings_json_restores_defaults_and_writes_config(self) -> None:
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        gui.output_path = "/tmp/setting.json"
+        gui._tr = lambda key, default: default
+        gui._reset_all_form_settings = mock.Mock()
+        gui._build_config = mock.Mock(return_value={"cameraServer": {"enabled": True}})
+        gui._apply_persistent_meta = mock.Mock()
+        gui._reset_window_geometry_file = mock.Mock()
+        gui._show_error = mock.Mock()
+
+        with (
+            mock.patch.object(self.module.messagebox, "askyesno", return_value=True),
+            mock.patch.object(self.module.messagebox, "showinfo") as showinfo,
+            mock.patch.object(self.module, "write_config") as write_config_mock,
+        ):
+            self.module.ConfigGui._reset_settings_json(gui)
+
+        gui._reset_all_form_settings.assert_called_once_with()
+        gui._build_config.assert_called_once_with(validate_audio=False)
+        gui._apply_persistent_meta.assert_called_once_with({"cameraServer": {"enabled": True}})
+        write_config_mock.assert_called_once_with("/tmp/setting.json", {"cameraServer": {"enabled": True}})
+        gui._reset_window_geometry_file.assert_called_once_with()
+        showinfo.assert_called_once()
+        gui._show_error.assert_not_called()
+
+    def test_reset_window_geometry_file_writes_default_geometry_contract(self) -> None:
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        root = types.SimpleNamespace(after_cancel=mock.Mock())
+        gui.root = root
+        gui._window_geometry_save_after_id = "after-1"
+        gui._window_geometry_meta_cache = {"windowGeometry": "999x999+1+1"}
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gui.output_path = str(Path(tmpdir) / "setting.json")
+            self.module.ConfigGui._reset_window_geometry_file(gui)
+            geometry = json.loads((Path(tmpdir) / self.module.WINDOW_GEOMETRY_FILE_NAME).read_text(encoding="utf-8"))
+
+        root.after_cancel.assert_called_once_with("after-1")
+        self.assertIsNone(gui._window_geometry_save_after_id)
+        self.assertEqual(geometry, self.module.DEFAULT_WINDOW_GEOMETRY_META)
+        self.assertEqual(gui._window_geometry_meta_cache, self.module.DEFAULT_WINDOW_GEOMETRY_META)
+
     def test_dictation_ai_stt_gui_shows_only_selected_language_options(self) -> None:
         gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
         gui.vars = {
@@ -267,14 +381,14 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
             "dictation_ai_sentence_boundary_model": _DummyVar("sat-3l-sm"),
         }
         gui._widgets = {key: _DummyWidget() for key in gui.vars if key != "dictation_ai_language"}
-        gui._whisper_tab = object()
+        gui._dictation_ai_tab = object()
         gui._dictation_ai_stt_frame = _DummyFrame()
-        gui._whisper_global_stt_rows = [10, 11]
+        gui._dictation_ai_global_stt_rows = [10, 11]
         gui._dictation_ai_stt_language_rows = {"en": [1, 2], "ko": [3, 4], "zh": [5, 6]}
         gui._dictation_ai_stt_boundary_rows = [20, 21, 22]
-        gui._whisper_selected_stt_language = None
+        gui._dictation_ai_selected_stt_language = None
         gui._dictation_ai_stt_language_runtime_state = {}
-        gui._whisper_runtime_by_language = {}
+        gui._dictation_ai_runtime_by_language = {}
         gui._dictation_ai_backend_option_rows = {
             "compute_type": 30,
             "beam_size": 31,
@@ -286,7 +400,7 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         grid_calls = []
         gui._grid_rows = lambda parent, rows, visible: grid_calls.append((parent, tuple(rows), visible))
 
-        self.module.ConfigGui._sync_whisper_runtime_options(gui)
+        self.module.ConfigGui._sync_dictation_ai_runtime_options(gui)
 
         stt_visibility = {
             rows: visible for parent, rows, visible in grid_calls if parent is gui._dictation_ai_stt_frame
@@ -296,14 +410,14 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         self.assertFalse(stt_visibility[(5, 6)])
         self.assertEqual(gui._widgets["dictation_ai_stt_backend_ko"].values, ("faster-whisper", "mock"))
         backend_option_visibility = {
-            rows: visible for parent, rows, visible in grid_calls if parent is gui._whisper_tab
+            rows: visible for parent, rows, visible in grid_calls if parent is gui._dictation_ai_tab
         }
         self.assertTrue(backend_option_visibility[(32,)])
         self.assertTrue(backend_option_visibility[(33,)])
 
         grid_calls.clear()
         gui.vars["dictation_ai_language"].set("中文 (zh)")
-        self.module.ConfigGui._sync_whisper_runtime_options(gui)
+        self.module.ConfigGui._sync_dictation_ai_runtime_options(gui)
 
         stt_visibility = {
             rows: visible for parent, rows, visible in grid_calls if parent is gui._dictation_ai_stt_frame
@@ -317,16 +431,16 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         )
         self.assertEqual(gui._widgets["dictation_ai_stt_model_zh"].values, ("qwen3-asr-0.6b", "qwen3-asr-1.7b"))
         backend_option_visibility = {
-            rows: visible for parent, rows, visible in grid_calls if parent is gui._whisper_tab
+            rows: visible for parent, rows, visible in grid_calls if parent is gui._dictation_ai_tab
         }
         self.assertTrue(backend_option_visibility[(32,)])
         self.assertFalse(backend_option_visibility[(33,)])
 
         grid_calls.clear()
         gui.vars["dictation_ai_stt_backend_zh"].set("faster-whisper")
-        self.module.ConfigGui._sync_whisper_runtime_options(gui)
+        self.module.ConfigGui._sync_dictation_ai_runtime_options(gui)
         backend_option_visibility = {
-            rows: visible for parent, rows, visible in grid_calls if parent is gui._whisper_tab
+            rows: visible for parent, rows, visible in grid_calls if parent is gui._dictation_ai_tab
         }
         self.assertTrue(backend_option_visibility[(32,)])
         self.assertTrue(backend_option_visibility[(33,)])
@@ -860,7 +974,7 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         gui._show_error = mock.Mock()
         gui._run_input_meter = mock.Mock()
 
-        self.module.ConfigGui._run_whisper_input_meter(gui)
+        self.module.ConfigGui._run_dictation_ai_input_meter(gui)
 
         gui._run_input_meter.assert_called_once()
         kwargs = gui._run_input_meter.call_args.kwargs

@@ -92,7 +92,8 @@ from scripts.config.crop_tab import build_crop_tab
 from scripts.config.face_tab import build_face_tab
 from scripts.config.io_tab import build_io_tab
 from scripts.config.segmentation_tab import build_segmentation_tab
-from scripts.config.dictation_ai_tab import build_whisper_tab
+from scripts.config.settings_tab import build_settings_tab
+from scripts.config.dictation_ai_tab import build_dictation_ai_tab
 from scripts.config.dictation_ai_options import (
     dictation_ai_language_display_from_raw as _dictation_ai_language_display_from_raw,
     dictation_ai_language_raw_from_display as _dictation_ai_language_raw_from_display,
@@ -490,11 +491,11 @@ class ConfigGui:
         self._window_geometry_meta_cache: dict[str, str] = {}
         self._managed_window_geometry: dict[object, str] = {}
         self._dictation_ai_supported = platform.system() == "Linux"
-        self._whisper_selected_stt_language: str | None = None
-        self._whisper_runtime_by_language = {
-            "en": self._default_whisper_runtime_for_language("en"),
-            "ko": self._default_whisper_runtime_for_language("ko"),
-            "zh": self._default_whisper_runtime_for_language("zh"),
+        self._dictation_ai_selected_stt_language: str | None = None
+        self._dictation_ai_runtime_by_language = {
+            "en": self._default_dictation_ai_runtime_for_language("en"),
+            "ko": self._default_dictation_ai_runtime_for_language("ko"),
+            "zh": self._default_dictation_ai_runtime_for_language("zh"),
         }
         self._tab_meta: list[tuple[ttk.Frame, str, str]] = []
         self._grid_row_cache = {}
@@ -514,14 +515,14 @@ class ConfigGui:
         self._build_form()
         if "camera_server_enabled" in self.vars:
             self.vars["camera_server_enabled"].trace_add("write", lambda *_args: self._apply_camera_server_feature_policy())
-        self._register_hidden_whisper_vars()
+        self._register_hidden_dictation_ai_vars()
         self._load_existing_config()
         self._apply_camera_server_feature_policy()
         self._apply_dictation_ai_platform_policy()
         self.root.bind("<Configure>", self._on_root_configure)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
-    def _register_hidden_whisper_vars(self) -> None:
+    def _register_hidden_dictation_ai_vars(self) -> None:
         defaults = self._build_video_defaults()
         hidden_keys = [
             "dictation_ai_sentence_boundary_device",
@@ -601,7 +602,7 @@ class ConfigGui:
                 except Exception:
                     pass
 
-    def _default_whisper_runtime_for_language(self, language: str) -> dict[str, float]:
+    def _default_dictation_ai_runtime_for_language(self, language: str) -> dict[str, float]:
         suffix = {"en": "En", "ko": "Ko", "zh": "Zh"}[language]
         return {
             "stepSeconds": float(dictation_ai_default(f"stepSeconds{suffix}")),
@@ -612,7 +613,7 @@ class ConfigGui:
             "temperature": float(dictation_ai_default(f"temperature{suffix}")),
         }
 
-    def _current_whisper_runtime_values(self) -> dict[str, float]:
+    def _current_dictation_ai_runtime_values(self) -> dict[str, float]:
         return {
             "stepSeconds": float(self.vars["dictation_ai_step_seconds"].get()),
             "windowSeconds": float(self.vars["dictation_ai_window_seconds"].get()),
@@ -622,7 +623,7 @@ class ConfigGui:
             "temperature": float(self.vars["dictation_ai_temperature"].get()),
         }
 
-    def _set_whisper_runtime_values(self, values: dict[str, float]) -> None:
+    def _set_dictation_ai_runtime_values(self, values: dict[str, float]) -> None:
         self._set_var("dictation_ai_chunk_seconds", values["windowSeconds"])
         self._set_var("dictation_ai_step_seconds", values["stepSeconds"])
         self._set_var("dictation_ai_window_seconds", values["windowSeconds"])
@@ -631,22 +632,22 @@ class ConfigGui:
         self._set_var("dictation_ai_max_new_tokens", values["maxNewTokens"])
         self._set_var("dictation_ai_temperature", values["temperature"])
 
-    def _store_visible_whisper_runtime_for_language(self, language: str | None = None) -> None:
+    def _store_visible_dictation_ai_runtime_for_language(self, language: str | None = None) -> None:
         if not self.vars or "dictation_ai_window_seconds" not in self.vars:
             return
-        lang = language or self._whisper_selected_stt_language
+        lang = language or self._dictation_ai_selected_stt_language
         if lang not in {"en", "ko", "zh"}:
             return
         try:
-            self._whisper_runtime_by_language[lang] = self._current_whisper_runtime_values()
+            self._dictation_ai_runtime_by_language[lang] = self._current_dictation_ai_runtime_values()
         except (KeyError, ValueError, tk.TclError):
             return
 
-    def _load_visible_whisper_runtime_for_language(self, language: str) -> None:
+    def _load_visible_dictation_ai_runtime_for_language(self, language: str) -> None:
         if language not in {"en", "ko", "zh"}:
             language = "en"
-        values = self._whisper_runtime_by_language.get(language) or self._default_whisper_runtime_for_language(language)
-        self._set_whisper_runtime_values(values)
+        values = self._dictation_ai_runtime_by_language.get(language) or self._default_dictation_ai_runtime_for_language(language)
+        self._set_dictation_ai_runtime_values(values)
 
     def _is_serve_running(self) -> bool:
         process = self._serve_process
@@ -1226,7 +1227,7 @@ class ConfigGui:
             )
             return
         self._dictation_ai_model_download_cancelled = False
-        self._sync_whisper_runtime_options()
+        self._sync_dictation_ai_runtime_options()
         self._sync_dictation_ai_translation_backend_options()
         try:
             cmd = self._build_dictation_ai_model_download_command(config)
@@ -1610,6 +1611,20 @@ class ConfigGui:
         except Exception as exc:
             _log(f"ERROR [Window geometry save] {exc}")
 
+    def _reset_window_geometry_file(self) -> None:
+        output_path = getattr(self, "output_path", None)
+        if not output_path:
+            return
+        if self._window_geometry_save_after_id is not None:
+            try:
+                self.root.after_cancel(self._window_geometry_save_after_id)
+            except Exception:
+                pass
+            self._window_geometry_save_after_id = None
+        self._window_geometry_meta_cache = dict(DEFAULT_WINDOW_GEOMETRY_META)
+        path = _write_window_geometry_file(Path(output_path), dict(DEFAULT_WINDOW_GEOMETRY_META))
+        _log(f"Window geometry reset: path={path}")
+
     def _apply_window_geometry_meta(self, config: dict) -> None:
         self._capture_all_window_geometry_meta()
         meta = config.setdefault("meta", {})
@@ -1698,7 +1713,8 @@ class ConfigGui:
         tab_crop = ttk.Frame(notebook, padding=8)
         tab_audio = ttk.Frame(notebook, padding=8)
         tab_face = ttk.Frame(notebook, padding=8)
-        tab_whisper = ttk.Frame(notebook, padding=8)
+        tab_dictation_ai = ttk.Frame(notebook, padding=8)
+        tab_settings = ttk.Frame(notebook, padding=8)
         self._tab_meta = [
             (tab_io, "title.tab.io", "Camera Input"),
             (tab_seg, "title.tab.seg", "Segmentation"),
@@ -1706,11 +1722,12 @@ class ConfigGui:
             (tab_crop, "title.tab.crop", "Framing"),
             (tab_face, "title.tab.face", "Face"),
             (tab_audio, "title.tab.audio", "Audio"),
-            (tab_whisper, "title.tab.dictation_ai", "받아쓰기 AI"),
+            (tab_dictation_ai, "title.tab.dictation_ai", "받아쓰기 AI"),
+            (tab_settings, "title.tab.settings", "Settings"),
         ]
         for tab, key, default in self._tab_meta:
             notebook.add(tab, text=self._tr(key, default))
-        for tab in (tab_io, tab_seg, tab_bg, tab_crop, tab_audio, tab_face, tab_whisper):
+        for tab in (tab_io, tab_seg, tab_bg, tab_crop, tab_audio, tab_face, tab_dictation_ai, tab_settings):
             for col in range(4):
                 tab.columnconfigure(col, weight=1 if col in (1, 3) else 0)
 
@@ -1746,14 +1763,16 @@ class ConfigGui:
 
         build_face_tab(self, tab_face, ttk)
 
-        build_whisper_tab(
+        build_dictation_ai_tab(
             self,
-            tab_whisper,
+            tab_dictation_ai,
             ttk,
             _audio_input_device_candidates,
             _audio_default_input_device,
             _audio_device_display_values,
         )
+
+        build_settings_tab(self, tab_settings, ttk)
 
         action_frame = ttk.Frame(frame)
         action_frame.grid(row=2, column=0, sticky="ew", pady=(10, 0))
@@ -1824,9 +1843,9 @@ class ConfigGui:
         ):
             widget = self._widgets.get(key)
             if widget is not None:
-                widget.bind("<<ComboboxSelected>>", self._on_whisper_runtime_selection_changed)
+                widget.bind("<<ComboboxSelected>>", self._on_dictation_ai_runtime_selection_changed)
         self._on_seg_backend_changed()
-        self._sync_whisper_runtime_options()
+        self._sync_dictation_ai_runtime_options()
         self._sync_dictation_ai_translation_backend_options()
         self._refresh_localized_texts()
         self._schedule_update_scrollbar_state()
@@ -2633,12 +2652,12 @@ class ConfigGui:
         for key, value in defaults.items():
             self._set_var(key, value)
 
-    def _reset_whisper_settings(self) -> None:
+    def _reset_dictation_ai_settings(self) -> None:
         defaults = self._build_video_defaults()
-        self._whisper_runtime_by_language = {
-            "en": self._default_whisper_runtime_for_language("en"),
-            "ko": self._default_whisper_runtime_for_language("ko"),
-            "zh": self._default_whisper_runtime_for_language("zh"),
+        self._dictation_ai_runtime_by_language = {
+            "en": self._default_dictation_ai_runtime_for_language("en"),
+            "ko": self._default_dictation_ai_runtime_for_language("ko"),
+            "zh": self._default_dictation_ai_runtime_for_language("zh"),
         }
         for key in (
             "dictation_ai_enabled",
@@ -2673,9 +2692,20 @@ class ConfigGui:
         self._force_dictation_ai_off_for_unsupported_host()
         self._apply_dictation_ai_platform_policy()
         selected_language = _dictation_ai_language_raw_from_display(self.vars["dictation_ai_language"].get())
-        self._whisper_selected_stt_language = selected_language
-        self._load_visible_whisper_runtime_for_language(selected_language)
+        self._dictation_ai_selected_stt_language = selected_language
+        self._load_visible_dictation_ai_runtime_for_language(selected_language)
         self._sync_dictation_ai_translation_backend_options()
+
+    def _reset_all_form_settings(self) -> None:
+        self._reset_io_settings()
+        self._reset_seg_settings()
+        self._reset_bg_settings()
+        self._reset_crop_settings()
+        self._reset_face_settings()
+        self._reset_audio_settings()
+        self._reset_dictation_ai_settings()
+        self._apply_camera_server_feature_policy()
+        self._apply_dictation_ai_platform_policy()
 
     def _load_existing_config(self):
         config_path = Path(self.output_path).expanduser()
@@ -2710,8 +2740,9 @@ class ConfigGui:
         audio_cfg = raw.get("audio") or {}
         face_cfg = raw.get("faceEnhance") or {}
         dictation_ai_cfg = raw.get("dictationAi") or {}
+        defaults = self._build_video_defaults()
 
-        self._set_var("camera_server_enabled", camera_server_cfg.get("enabled", True))
+        self._set_var("camera_server_enabled", camera_server_cfg.get("enabled", defaults["camera_server_enabled"]))
         self._set_var("input_device", input_cfg.get("devicePath"))
         self._set_var("input_width", input_cfg.get("width"))
         self._set_var("input_height", input_cfg.get("height"))
@@ -2775,7 +2806,7 @@ class ConfigGui:
         self._set_var("face_enhance_edge_dither", face_cfg.get("edgeNoise"))
         self._set_var("face_deidentify_enabled", (face_cfg.get("deidentify") or {}).get("enabled"))
         self._apply_camera_server_feature_policy()
-        self._load_whisper_settings_from_config(dictation_ai_cfg)
+        self._load_dictation_ai_settings_from_config(dictation_ai_cfg)
         self._apply_dictation_ai_platform_policy()
         self._load_audio_settings_from_config(audio_cfg)
         self._on_input_device_changed()
@@ -2845,154 +2876,154 @@ class ConfigGui:
         self._set_var("audio_gate_open_gain", gate_cfg.get("openGain", defaults["audio_gate_open_gain"]))
         self._set_var("audio_gate_closed_gain", gate_cfg.get("closedGain", defaults["audio_gate_closed_gain"]))
 
-    def _load_whisper_settings_from_config(self, whisper_cfg: dict) -> None:
+    def _load_dictation_ai_settings_from_config(self, dictation_ai_cfg: dict) -> None:
         defaults = self._build_video_defaults()
         self._set_var(
             "dictation_ai_enabled",
             False
             if not self._is_dictation_ai_supported_host()
-            else whisper_cfg.get("enabled", defaults["dictation_ai_enabled"]),
+            else dictation_ai_cfg.get("enabled", defaults["dictation_ai_enabled"]),
         )
-        raw_input_device = str(whisper_cfg.get("inputDevice", "")).strip() if isinstance(whisper_cfg.get("inputDevice"), str) else ""
+        raw_input_device = str(dictation_ai_cfg.get("inputDevice", "")).strip() if isinstance(dictation_ai_cfg.get("inputDevice"), str) else ""
         resolved_input_device = defaults["dictation_ai_input_device"] if not raw_input_device else raw_input_device
         self._set_var("dictation_ai_input_device", resolved_input_device)
         input_widget = self._widgets.get("dictation_ai_input_device")
         if isinstance(input_widget, ttk.Combobox):
             input_values = list(input_widget["values"])
             input_display = next(
-                (k for k, v in getattr(self, "_whisper_input_display_to_raw", {}).items() if v == resolved_input_device),
+                (k for k, v in getattr(self, "_dictation_ai_input_display_to_raw", {}).items() if v == resolved_input_device),
                 resolved_input_device,
             )
             if input_display not in input_values:
                 input_widget["values"] = tuple(input_values + [input_display])
-                getattr(self, "_whisper_input_display_to_raw", {})[input_display] = resolved_input_device
+                getattr(self, "_dictation_ai_input_display_to_raw", {})[input_display] = resolved_input_device
             self.vars["dictation_ai_input_device"].set(input_display)
-        self._set_var("dictation_ai_backend", whisper_cfg.get("backend", defaults["dictation_ai_backend"]))
-        self._set_var("dictation_ai_model", whisper_cfg.get("model", defaults["dictation_ai_model"]))
-        self._set_var("dictation_ai_stt_backend_en", whisper_cfg.get("sttBackendEn", defaults["dictation_ai_stt_backend_en"]))
-        self._set_var("dictation_ai_stt_model_en", whisper_cfg.get("sttModelEn", defaults["dictation_ai_stt_model_en"]))
-        self._set_var("dictation_ai_stt_backend_ko", whisper_cfg.get("sttBackendKo", defaults["dictation_ai_stt_backend_ko"]))
-        self._set_var("dictation_ai_stt_model_ko", whisper_cfg.get("sttModelKo", defaults["dictation_ai_stt_model_ko"]))
-        self._set_var("dictation_ai_stt_backend_zh", whisper_cfg.get("sttBackendZh", defaults["dictation_ai_stt_backend_zh"]))
-        self._set_var("dictation_ai_stt_model_zh", whisper_cfg.get("sttModelZh", defaults["dictation_ai_stt_model_zh"]))
+        self._set_var("dictation_ai_backend", dictation_ai_cfg.get("backend", defaults["dictation_ai_backend"]))
+        self._set_var("dictation_ai_model", dictation_ai_cfg.get("model", defaults["dictation_ai_model"]))
+        self._set_var("dictation_ai_stt_backend_en", dictation_ai_cfg.get("sttBackendEn", defaults["dictation_ai_stt_backend_en"]))
+        self._set_var("dictation_ai_stt_model_en", dictation_ai_cfg.get("sttModelEn", defaults["dictation_ai_stt_model_en"]))
+        self._set_var("dictation_ai_stt_backend_ko", dictation_ai_cfg.get("sttBackendKo", defaults["dictation_ai_stt_backend_ko"]))
+        self._set_var("dictation_ai_stt_model_ko", dictation_ai_cfg.get("sttModelKo", defaults["dictation_ai_stt_model_ko"]))
+        self._set_var("dictation_ai_stt_backend_zh", dictation_ai_cfg.get("sttBackendZh", defaults["dictation_ai_stt_backend_zh"]))
+        self._set_var("dictation_ai_stt_model_zh", dictation_ai_cfg.get("sttModelZh", defaults["dictation_ai_stt_model_zh"]))
         self._set_var(
             "dictation_ai_language",
-            _dictation_ai_language_display_from_raw(whisper_cfg.get("language", _dictation_ai_language_raw_from_display(defaults["dictation_ai_language"]))),
+            _dictation_ai_language_display_from_raw(dictation_ai_cfg.get("language", _dictation_ai_language_raw_from_display(defaults["dictation_ai_language"]))),
         )
-        legacy_translation_enabled = whisper_cfg.get("task") == "translate"
+        legacy_translation_enabled = dictation_ai_cfg.get("task") == "translate"
         self._set_var(
             "dictation_ai_translation_enabled",
             False
             if not self._is_dictation_ai_supported_host()
-            else whisper_cfg.get("translationEnabled", legacy_translation_enabled or defaults["dictation_ai_translation_enabled"]),
+            else dictation_ai_cfg.get("translationEnabled", legacy_translation_enabled or defaults["dictation_ai_translation_enabled"]),
         )
         self._set_var(
             "dictation_ai_show_stt_status_window",
             False
             if not self._is_dictation_ai_supported_host()
-            else whisper_cfg.get("showSttStatusWindow", defaults["dictation_ai_show_stt_status_window"]),
+            else dictation_ai_cfg.get("showSttStatusWindow", defaults["dictation_ai_show_stt_status_window"]),
         )
-        self._set_var("dictation_ai_translation_backend", whisper_cfg.get("translationBackend", defaults["dictation_ai_translation_backend"]))
+        self._set_var("dictation_ai_translation_backend", dictation_ai_cfg.get("translationBackend", defaults["dictation_ai_translation_backend"]))
         self._set_var(
             "dictation_ai_translation_target_language",
             _dictation_ai_translation_target_display_from_raw(
-                whisper_cfg.get(
+                dictation_ai_cfg.get(
                     "translationTargetLanguage",
                     _dictation_ai_translation_target_raw_from_display(defaults["dictation_ai_translation_target_language"]),
                 )
             ),
         )
-        self._set_var("dictation_ai_translation_model", whisper_cfg.get("translationModel", defaults["dictation_ai_translation_model"]))
-        self._set_var("dictation_ai_translation_device", whisper_cfg.get("translationDevice", defaults["dictation_ai_translation_device"]))
-        self._set_var("dictation_ai_translation_compute_type", whisper_cfg.get("translationComputeType", defaults["dictation_ai_translation_compute_type"]))
-        self._set_var("dictation_ai_translation_beam_size", whisper_cfg.get("translationBeamSize", defaults["dictation_ai_translation_beam_size"]))
-        self._set_var("dictation_ai_translation_max_new_tokens", whisper_cfg.get("translationMaxNewTokens", defaults["dictation_ai_translation_max_new_tokens"]))
+        self._set_var("dictation_ai_translation_model", dictation_ai_cfg.get("translationModel", defaults["dictation_ai_translation_model"]))
+        self._set_var("dictation_ai_translation_device", dictation_ai_cfg.get("translationDevice", defaults["dictation_ai_translation_device"]))
+        self._set_var("dictation_ai_translation_compute_type", dictation_ai_cfg.get("translationComputeType", defaults["dictation_ai_translation_compute_type"]))
+        self._set_var("dictation_ai_translation_beam_size", dictation_ai_cfg.get("translationBeamSize", defaults["dictation_ai_translation_beam_size"]))
+        self._set_var("dictation_ai_translation_max_new_tokens", dictation_ai_cfg.get("translationMaxNewTokens", defaults["dictation_ai_translation_max_new_tokens"]))
         for lang in ("en", "ko", "zh"):
             suffix = lang.title()
             self._set_var(
                 f"dictation_ai_translation_backend_{lang}",
-                whisper_cfg.get(f"translationBackend{suffix}", defaults[f"dictation_ai_translation_backend_{lang}"]),
+                dictation_ai_cfg.get(f"translationBackend{suffix}", defaults[f"dictation_ai_translation_backend_{lang}"]),
             )
             self._set_var(
                 f"dictation_ai_translation_model_{lang}",
-                whisper_cfg.get(f"translationModel{suffix}", defaults[f"dictation_ai_translation_model_{lang}"]),
+                dictation_ai_cfg.get(f"translationModel{suffix}", defaults[f"dictation_ai_translation_model_{lang}"]),
             )
             self._set_var(
                 f"dictation_ai_translation_device_{lang}",
-                whisper_cfg.get(f"translationDevice{suffix}", defaults[f"dictation_ai_translation_device_{lang}"]),
+                dictation_ai_cfg.get(f"translationDevice{suffix}", defaults[f"dictation_ai_translation_device_{lang}"]),
             )
             self._set_var(
                 f"dictation_ai_translation_compute_type_{lang}",
-                whisper_cfg.get(f"translationComputeType{suffix}", defaults[f"dictation_ai_translation_compute_type_{lang}"]),
+                dictation_ai_cfg.get(f"translationComputeType{suffix}", defaults[f"dictation_ai_translation_compute_type_{lang}"]),
             )
             self._set_var(
                 f"dictation_ai_translation_beam_size_{lang}",
-                whisper_cfg.get(f"translationBeamSize{suffix}", defaults[f"dictation_ai_translation_beam_size_{lang}"]),
+                dictation_ai_cfg.get(f"translationBeamSize{suffix}", defaults[f"dictation_ai_translation_beam_size_{lang}"]),
             )
             self._set_var(
                 f"dictation_ai_translation_max_new_tokens_{lang}",
-                whisper_cfg.get(f"translationMaxNewTokens{suffix}", defaults[f"dictation_ai_translation_max_new_tokens_{lang}"]),
+                dictation_ai_cfg.get(f"translationMaxNewTokens{suffix}", defaults[f"dictation_ai_translation_max_new_tokens_{lang}"]),
             )
-        self._set_var("dictation_ai_device", whisper_cfg.get("device", defaults["dictation_ai_device"]))
-        self._set_var("dictation_ai_compute_type", whisper_cfg.get("computeType", defaults["dictation_ai_compute_type"]))
-        window_seconds = whisper_cfg.get("windowSeconds", whisper_cfg.get("chunkSeconds", defaults["dictation_ai_window_seconds"]))
+        self._set_var("dictation_ai_device", dictation_ai_cfg.get("device", defaults["dictation_ai_device"]))
+        self._set_var("dictation_ai_compute_type", dictation_ai_cfg.get("computeType", defaults["dictation_ai_compute_type"]))
+        window_seconds = dictation_ai_cfg.get("windowSeconds", dictation_ai_cfg.get("chunkSeconds", defaults["dictation_ai_window_seconds"]))
         self._set_var("dictation_ai_chunk_seconds", window_seconds)
-        self._set_var("dictation_ai_step_seconds", whisper_cfg.get("stepSeconds", defaults["dictation_ai_step_seconds"]))
+        self._set_var("dictation_ai_step_seconds", dictation_ai_cfg.get("stepSeconds", defaults["dictation_ai_step_seconds"]))
         self._set_var("dictation_ai_window_seconds", window_seconds)
         self._set_var(
             "dictation_ai_sentence_finalize_age",
-            whisper_cfg.get("sentenceFinalizeAge", defaults["dictation_ai_sentence_finalize_age"]),
+            dictation_ai_cfg.get("sentenceFinalizeAge", defaults["dictation_ai_sentence_finalize_age"]),
         )
-        self._set_var("dictation_ai_beam_size", whisper_cfg.get("beamSize", defaults["dictation_ai_beam_size"]))
-        self._set_var("dictation_ai_max_new_tokens", whisper_cfg.get("maxNewTokens", defaults["dictation_ai_max_new_tokens"]))
-        self._set_var("dictation_ai_temperature", whisper_cfg.get("temperature", defaults["dictation_ai_temperature"]))
+        self._set_var("dictation_ai_beam_size", dictation_ai_cfg.get("beamSize", defaults["dictation_ai_beam_size"]))
+        self._set_var("dictation_ai_max_new_tokens", dictation_ai_cfg.get("maxNewTokens", defaults["dictation_ai_max_new_tokens"]))
+        self._set_var("dictation_ai_temperature", dictation_ai_cfg.get("temperature", defaults["dictation_ai_temperature"]))
         selected_language = _dictation_ai_language_raw_from_display(self.vars["dictation_ai_language"].get())
         for lang, suffix in (("en", "En"), ("ko", "Ko"), ("zh", "Zh")):
-            lang_defaults = self._default_whisper_runtime_for_language(lang)
+            lang_defaults = self._default_dictation_ai_runtime_for_language(lang)
             use_legacy = selected_language == lang
-            self._whisper_runtime_by_language[lang] = {
+            self._dictation_ai_runtime_by_language[lang] = {
                 "stepSeconds": float(
-                    whisper_cfg.get(f"stepSeconds{suffix}", whisper_cfg.get("stepSeconds", lang_defaults["stepSeconds"]) if use_legacy else lang_defaults["stepSeconds"])
+                    dictation_ai_cfg.get(f"stepSeconds{suffix}", dictation_ai_cfg.get("stepSeconds", lang_defaults["stepSeconds"]) if use_legacy else lang_defaults["stepSeconds"])
                 ),
                 "windowSeconds": float(
-                    whisper_cfg.get(
+                    dictation_ai_cfg.get(
                         f"windowSeconds{suffix}",
-                        whisper_cfg.get("windowSeconds", whisper_cfg.get("chunkSeconds", lang_defaults["windowSeconds"]))
+                        dictation_ai_cfg.get("windowSeconds", dictation_ai_cfg.get("chunkSeconds", lang_defaults["windowSeconds"]))
                         if use_legacy
                         else lang_defaults["windowSeconds"],
                     )
                 ),
                 "sentenceFinalizeAge": float(
-                    whisper_cfg.get(
+                    dictation_ai_cfg.get(
                         f"sentenceFinalizeAge{suffix}",
-                        whisper_cfg.get("sentenceFinalizeAge", lang_defaults["sentenceFinalizeAge"])
+                        dictation_ai_cfg.get("sentenceFinalizeAge", lang_defaults["sentenceFinalizeAge"])
                         if use_legacy
                         else lang_defaults["sentenceFinalizeAge"],
                     )
                 ),
                 "beamSize": float(
-                    whisper_cfg.get(f"beamSize{suffix}", whisper_cfg.get("beamSize", lang_defaults["beamSize"]) if use_legacy else lang_defaults["beamSize"])
+                    dictation_ai_cfg.get(f"beamSize{suffix}", dictation_ai_cfg.get("beamSize", lang_defaults["beamSize"]) if use_legacy else lang_defaults["beamSize"])
                 ),
                 "maxNewTokens": float(
-                    whisper_cfg.get(
+                    dictation_ai_cfg.get(
                         f"maxNewTokens{suffix}",
-                        whisper_cfg.get("maxNewTokens", lang_defaults["maxNewTokens"]) if use_legacy else lang_defaults["maxNewTokens"],
+                        dictation_ai_cfg.get("maxNewTokens", lang_defaults["maxNewTokens"]) if use_legacy else lang_defaults["maxNewTokens"],
                     )
                 ),
                 "temperature": float(
-                    whisper_cfg.get(
+                    dictation_ai_cfg.get(
                         f"temperature{suffix}",
-                        whisper_cfg.get("temperature", lang_defaults["temperature"]) if use_legacy else lang_defaults["temperature"],
+                        dictation_ai_cfg.get("temperature", lang_defaults["temperature"]) if use_legacy else lang_defaults["temperature"],
                     )
                 ),
             }
-        self._whisper_selected_stt_language = selected_language
-        self._load_visible_whisper_runtime_for_language(selected_language)
-        self._set_var("dictation_ai_sentence_boundary_backend", whisper_cfg.get("sentenceBoundaryBackend", defaults["dictation_ai_sentence_boundary_backend"]))
-        self._set_var("dictation_ai_sentence_boundary_model", whisper_cfg.get("sentenceBoundaryModel", defaults["dictation_ai_sentence_boundary_model"]))
-        self._set_var("dictation_ai_sentence_boundary_device", whisper_cfg.get("sentenceBoundaryDevice", defaults["dictation_ai_sentence_boundary_device"]))
-        self._set_var("dictation_ai_sentence_boundary_compute_type", whisper_cfg.get("sentenceBoundaryComputeType", defaults["dictation_ai_sentence_boundary_compute_type"]))
-        self._sync_whisper_runtime_options()
+        self._dictation_ai_selected_stt_language = selected_language
+        self._load_visible_dictation_ai_runtime_for_language(selected_language)
+        self._set_var("dictation_ai_sentence_boundary_backend", dictation_ai_cfg.get("sentenceBoundaryBackend", defaults["dictation_ai_sentence_boundary_backend"]))
+        self._set_var("dictation_ai_sentence_boundary_model", dictation_ai_cfg.get("sentenceBoundaryModel", defaults["dictation_ai_sentence_boundary_model"]))
+        self._set_var("dictation_ai_sentence_boundary_device", dictation_ai_cfg.get("sentenceBoundaryDevice", defaults["dictation_ai_sentence_boundary_device"]))
+        self._set_var("dictation_ai_sentence_boundary_compute_type", dictation_ai_cfg.get("sentenceBoundaryComputeType", defaults["dictation_ai_sentence_boundary_compute_type"]))
+        self._sync_dictation_ai_runtime_options()
         self._sync_dictation_ai_translation_backend_options()
 
     def _set_var(self, key: str, value):
@@ -3058,12 +3089,42 @@ class ConfigGui:
             config = self._build_config()
             self._apply_persistent_meta(config)
             write_config(self.output_path, config)
+            _log(f"Settings JSON saved: path={self.output_path}")
             messagebox.showinfo(
                 self._tr("msg.saved.title", "Saved"),
                 self._tr("msg.saved.body", "Config saved to {path}").format(path=self.output_path),
             )
         except Exception as exc:
             _log(f"Validation error: {exc}")
+            self._show_error(self._tr("msg.validation_error.title", "Validation error"), str(exc))
+
+    def _reset_settings_json(self) -> None:
+        confirmed = messagebox.askyesno(
+            self._tr("msg.reset_settings_json.title", "Reset settings JSON"),
+            self._tr(
+                "msg.reset_settings_json.body",
+                "Reset settings JSON to defaults?",
+            ).format(path=self.output_path),
+        )
+        if not confirmed:
+            _log(f"Settings JSON reset cancelled: path={self.output_path}")
+            return
+        try:
+            _log(f"Settings JSON reset requested: path={self.output_path}")
+            self._reset_all_form_settings()
+            config = self._build_config(validate_audio=False)
+            self._apply_persistent_meta(config)
+            write_config(self.output_path, config)
+            self._reset_window_geometry_file()
+            _log(f"Settings JSON reset completed: path={self.output_path}")
+            messagebox.showinfo(
+                self._tr("msg.reset_settings_json_done.title", "Reset complete"),
+                self._tr("msg.reset_settings_json_done.body", "Settings JSON reset: {path}").format(
+                    path=self.output_path
+                ),
+            )
+        except Exception as exc:
+            _log(f"Settings JSON reset failed: {exc}")
             self._show_error(self._tr("msg.validation_error.title", "Validation error"), str(exc))
 
     def _auto_tune_audio_gate(self):
@@ -3770,7 +3831,7 @@ class ConfigGui:
             geometry_key="inputMeterWindowGeometry",
         )
 
-    def _run_whisper_input_meter(self):
+    def _run_dictation_ai_input_meter(self):
         try:
             config = self._build_config(validate_audio=False)
         except Exception as exc:
@@ -4510,8 +4571,8 @@ class ConfigGui:
             else:
                 widget.state(["disabled"])
 
-    def _on_whisper_runtime_selection_changed(self, _event=None) -> None:
-        self._sync_whisper_runtime_options()
+    def _on_dictation_ai_runtime_selection_changed(self, _event=None) -> None:
+        self._sync_dictation_ai_runtime_options()
         self._sync_dictation_ai_translation_backend_options()
 
     def _grid_rows(self, parent, rows: list[int], visible: bool) -> None:
@@ -4552,20 +4613,20 @@ class ConfigGui:
         if var is not None and values and var.get().strip() not in values:
             var.set(values[0])
 
-    def _sync_whisper_runtime_options(self) -> None:
+    def _sync_dictation_ai_runtime_options(self) -> None:
         language_var = self.vars.get("dictation_ai_language")
         selected_language = _dictation_ai_language_raw_from_display(language_var.get()) if language_var is not None else "en"
         if selected_language not in {"en", "ko", "zh"}:
             selected_language = "en"
-        if self._whisper_selected_stt_language is None:
-            self._whisper_selected_stt_language = selected_language
-            self._load_visible_whisper_runtime_for_language(selected_language)
-        elif selected_language != self._whisper_selected_stt_language:
-            self._store_visible_whisper_runtime_for_language(self._whisper_selected_stt_language)
-            self._whisper_selected_stt_language = selected_language
-            self._load_visible_whisper_runtime_for_language(selected_language)
-        global_stt_parent = getattr(self, "_whisper_global_stt_parent", getattr(self, "_whisper_tab", None))
-        for row in getattr(self, "_whisper_global_stt_rows", []):
+        if self._dictation_ai_selected_stt_language is None:
+            self._dictation_ai_selected_stt_language = selected_language
+            self._load_visible_dictation_ai_runtime_for_language(selected_language)
+        elif selected_language != self._dictation_ai_selected_stt_language:
+            self._store_visible_dictation_ai_runtime_for_language(self._dictation_ai_selected_stt_language)
+            self._dictation_ai_selected_stt_language = selected_language
+            self._load_visible_dictation_ai_runtime_for_language(selected_language)
+        global_stt_parent = getattr(self, "_dictation_ai_global_stt_parent", getattr(self, "_dictation_ai_tab", None))
+        for row in getattr(self, "_dictation_ai_global_stt_rows", []):
             self._grid_rows(global_stt_parent, [row], False)
 
         stt_frame = getattr(self, "_dictation_ai_stt_frame", None)
@@ -4577,12 +4638,12 @@ class ConfigGui:
         stt_boundary_parent = getattr(
             self,
             "_dictation_ai_stt_boundary_parent",
-            getattr(self, "_whisper_manual_boundary_parent", getattr(self, "_whisper_tab", None)),
+            getattr(self, "_dictation_ai_manual_boundary_parent", getattr(self, "_dictation_ai_tab", None)),
         )
         stt_boundary_rows = getattr(
             self,
             "_dictation_ai_stt_boundary_rows",
-            getattr(self, "_whisper_manual_boundary_rows", []),
+            getattr(self, "_dictation_ai_manual_boundary_rows", []),
         )
         for row in stt_boundary_rows:
             self._grid_rows(stt_boundary_parent, [row], True)
@@ -4616,7 +4677,7 @@ class ConfigGui:
         )
 
         active_stt_option_keys = set(_dictation_ai_stt_backend_runtime_option_keys(active_stt_backend))
-        backend_option_parent = getattr(self, "_dictation_ai_backend_option_parent", getattr(self, "_whisper_tab", None))
+        backend_option_parent = getattr(self, "_dictation_ai_backend_option_parent", getattr(self, "_dictation_ai_tab", None))
         for option_key, row in getattr(self, "_dictation_ai_backend_option_rows", {}).items():
             self._grid_rows(backend_option_parent, [row], option_key in active_stt_option_keys)
 
@@ -4670,12 +4731,12 @@ class ConfigGui:
         target_language = _dictation_ai_translation_target_raw_from_display(target_display) if target_display else "ko"
         if target_language not in {"en", "ko", "zh"}:
             target_language = "ko"
-        if not hasattr(self, "_whisper_selected_translation_target"):
-            self._whisper_selected_translation_target = target_language
+        if not hasattr(self, "_dictation_ai_selected_translation_target"):
+            self._dictation_ai_selected_translation_target = target_language
             self._load_visible_dictation_ai_translation_for_target(target_language)
-        elif target_changed and target_language != self._whisper_selected_translation_target:
-            self._store_visible_dictation_ai_translation_for_target(self._whisper_selected_translation_target)
-            self._whisper_selected_translation_target = target_language
+        elif target_changed and target_language != self._dictation_ai_selected_translation_target:
+            self._store_visible_dictation_ai_translation_for_target(self._dictation_ai_selected_translation_target)
+            self._dictation_ai_selected_translation_target = target_language
             self._load_visible_dictation_ai_translation_for_target(target_language)
         backend_var = self.vars.get("dictation_ai_translation_backend")
         backend = backend_var.get().strip() if backend_var is not None else "whisper"
@@ -4707,22 +4768,22 @@ class ConfigGui:
         target_var = self.vars.get("dictation_ai_translation_target_language")
         target_display = target_var.get().strip() if target_var is not None else ""
         if target_options and target_display not in target_options:
-            previous_target = getattr(self, "_whisper_selected_translation_target", target_language)
+            previous_target = getattr(self, "_dictation_ai_selected_translation_target", target_language)
             self._store_visible_dictation_ai_translation_for_target(previous_target)
             self._set_var("dictation_ai_translation_target_language", target_options[0])
             target_language = _dictation_ai_translation_target_raw_from_display(target_options[0])
-            self._whisper_selected_translation_target = target_language
+            self._dictation_ai_selected_translation_target = target_language
             self._load_visible_dictation_ai_translation_for_target(target_language)
 
         model_options = _dictation_ai_translation_model_options(backend)
         self._set_combobox_values_for_backend("dictation_ai_translation_model", model_options)
 
         if backend == "whisper":
-            previous_target = getattr(self, "_whisper_selected_translation_target", target_language)
+            previous_target = getattr(self, "_dictation_ai_selected_translation_target", target_language)
             self._store_visible_dictation_ai_translation_for_target(previous_target)
             self._set_var("dictation_ai_translation_target_language", _dictation_ai_translation_target_display_from_raw("en"))
             target_language = "en"
-            self._whisper_selected_translation_target = target_language
+            self._dictation_ai_selected_translation_target = target_language
             self._load_visible_dictation_ai_translation_for_target(target_language)
         elif backend in {"nllb-transformers", "m2m100-transformers"}:
             self._set_var("dictation_ai_translation_device", "cuda")
@@ -4811,17 +4872,17 @@ class ConfigGui:
             )
         seg_engine_options = self._collect_seg_engine_options_from_form()
         selected_dictation_ai_language = _dictation_ai_language_raw_from_display(iv["dictation_ai_language"].get())
-        self._store_visible_whisper_runtime_for_language(selected_dictation_ai_language)
+        self._store_visible_dictation_ai_runtime_for_language(selected_dictation_ai_language)
         selected_translation_target = _dictation_ai_translation_target_raw_from_display(
             iv["dictation_ai_translation_target_language"].get()
         )
         self._store_visible_dictation_ai_translation_for_target(selected_translation_target)
-        runtime_en = self._whisper_runtime_by_language.get("en", self._default_whisper_runtime_for_language("en"))
-        runtime_ko = self._whisper_runtime_by_language.get("ko", self._default_whisper_runtime_for_language("ko"))
-        runtime_zh = self._whisper_runtime_by_language.get("zh", self._default_whisper_runtime_for_language("zh"))
-        runtime_selected = self._whisper_runtime_by_language.get(
+        runtime_en = self._dictation_ai_runtime_by_language.get("en", self._default_dictation_ai_runtime_for_language("en"))
+        runtime_ko = self._dictation_ai_runtime_by_language.get("ko", self._default_dictation_ai_runtime_for_language("ko"))
+        runtime_zh = self._dictation_ai_runtime_by_language.get("zh", self._default_dictation_ai_runtime_for_language("zh"))
+        runtime_selected = self._dictation_ai_runtime_by_language.get(
             selected_dictation_ai_language,
-            self._default_whisper_runtime_for_language(selected_dictation_ai_language if selected_dictation_ai_language in {"en", "ko", "zh"} else "en"),
+            self._default_dictation_ai_runtime_for_language(selected_dictation_ai_language if selected_dictation_ai_language in {"en", "ko", "zh"} else "en"),
         )
         dictation_ai_supported = self._is_dictation_ai_supported_host()
         if not dictation_ai_supported:
@@ -4896,7 +4957,7 @@ class ConfigGui:
             dictation_ai_enabled=dictation_ai_supported and self._parse_bool(iv["dictation_ai_enabled"].get()),
             dictation_ai_input_device=_audio_device_raw_from_display(
                 iv["dictation_ai_input_device"].get().strip(),
-                getattr(self, "_whisper_input_display_to_raw", {}),
+                getattr(self, "_dictation_ai_input_display_to_raw", {}),
             ),
             dictation_ai_backend=iv["dictation_ai_backend"].get().strip(),
             dictation_ai_model=iv["dictation_ai_model"].get().strip(),

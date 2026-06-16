@@ -82,7 +82,7 @@ class CameraServerConfigTest(unittest.TestCase):
 
 
 class DictationAiConfigTest(unittest.TestCase):
-    def test_build_config_includes_whisper_settings(self) -> None:
+    def test_build_config_includes_dictation_ai_settings(self) -> None:
         config = build_config(
             input_device="0",
             input_width=1280,
@@ -276,7 +276,7 @@ class DictationAiConfigTest(unittest.TestCase):
         self.assertEqual(config["dictationAi"]["stepSecondsZh"], 1.0)
         self.assertEqual(config["dictationAi"]["sentenceFinalizeAgeZh"], 4)
 
-    def test_app_config_loads_whisper_settings(self) -> None:
+    def test_app_config_loads_dictation_ai_settings(self) -> None:
         config = build_config(
             input_device="0",
             input_width=1280,

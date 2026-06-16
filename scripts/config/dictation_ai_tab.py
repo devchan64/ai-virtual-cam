@@ -39,18 +39,18 @@ def _add_group(gui, ttk, parent, row: int, key: str, default: str):
     return frame, row + 1
 
 
-def build_whisper_tab(
+def build_dictation_ai_tab(
     gui,
-    tab_whisper,
+    tab_dictation_ai,
     ttk,
     audio_input_device_candidates,
     audio_default_input_device,
     audio_device_display_values,
 ) -> None:
-    gui._whisper_tab = tab_whisper
+    gui._dictation_ai_tab = tab_dictation_ai
     row = 0
 
-    input_frame, row = _add_group(gui, ttk, tab_whisper, row, "label.dictation_ai_group_input", "입력/실행")
+    input_frame, row = _add_group(gui, ttk, tab_dictation_ai, row, "label.dictation_ai_group_input", "입력/실행")
     input_row = 0
     gui._add_bool_switch(
         input_frame,
@@ -62,36 +62,36 @@ def build_whisper_tab(
     )
     input_row += 1
 
-    whisper_input_candidates = audio_input_device_candidates()
-    whisper_input_default = audio_default_input_device()
-    if whisper_input_default not in whisper_input_candidates:
-        whisper_input_candidates.append(whisper_input_default)
-    whisper_input_display_values, gui._whisper_input_display_to_raw = audio_device_display_values(
-        "input", whisper_input_candidates
+    dictation_ai_input_candidates = audio_input_device_candidates()
+    dictation_ai_input_default = audio_default_input_device()
+    if dictation_ai_input_default not in dictation_ai_input_candidates:
+        dictation_ai_input_candidates.append(dictation_ai_input_default)
+    dictation_ai_input_display_values, gui._dictation_ai_input_display_to_raw = audio_device_display_values(
+        "input", dictation_ai_input_candidates
     )
-    whisper_input_default_display = next(
-        (k for k, v in gui._whisper_input_display_to_raw.items() if v == whisper_input_default),
-        whisper_input_default,
+    dictation_ai_input_default_display = next(
+        (k for k, v in gui._dictation_ai_input_display_to_raw.items() if v == dictation_ai_input_default),
+        dictation_ai_input_default,
     )
     gui._add_combo(
         input_frame,
         input_row,
         "dictation_ai_input_device",
         gui._tr("label.dictation_ai_input_device", "입력 장치"),
-        whisper_input_display_values,
-        whisper_input_default_display,
+        dictation_ai_input_display_values,
+        dictation_ai_input_default_display,
         label_key="label.dictation_ai_input_device",
     )
     input_row += 1
 
-    whisper_input_meter_btn = ttk.Button(
+    dictation_ai_input_meter_btn = ttk.Button(
         input_frame,
         text=gui._tr("button.dictation_ai_input_meter", "오디오 입력 데시벨 측정기"),
-        command=gui._run_whisper_input_meter,
+        command=gui._run_dictation_ai_input_meter,
     )
-    gui._widgets["dictation_ai_input_meter_button"] = whisper_input_meter_btn
-    gui._register_localized_widget(whisper_input_meter_btn, "button.dictation_ai_input_meter", "오디오 입력 데시벨 측정기")
-    whisper_input_meter_btn.grid(row=input_row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0))
+    gui._widgets["dictation_ai_input_meter_button"] = dictation_ai_input_meter_btn
+    gui._register_localized_widget(dictation_ai_input_meter_btn, "button.dictation_ai_input_meter", "오디오 입력 데시벨 측정기")
+    dictation_ai_input_meter_btn.grid(row=input_row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0))
     input_row += 1
     dictation_ai_model_download_btn = ttk.Button(
         input_frame,
@@ -105,7 +105,7 @@ def build_whisper_tab(
     dictation_ai_model_download_btn.grid(row=input_row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0))
     input_row += 1
 
-    stt_frame, row = _add_group(gui, ttk, tab_whisper, row, "label.dictation_ai_group_stt", "STT 언어/모델")
+    stt_frame, row = _add_group(gui, ttk, tab_dictation_ai, row, "label.dictation_ai_group_stt", "STT 언어/모델")
     stt_row = 0
     gui._add_combo(
         stt_frame,
@@ -148,8 +148,8 @@ def build_whisper_tab(
         label_key="label.dictation_ai_model",
     )
     stt_row += 1
-    gui._whisper_global_stt_parent = stt_frame
-    gui._whisper_global_stt_rows = [global_backend_row, global_model_row]
+    gui._dictation_ai_global_stt_parent = stt_frame
+    gui._dictation_ai_global_stt_rows = [global_backend_row, global_model_row]
 
     stt_language_rows = {}
     for lang_code, lang_label in (("en", "영어"), ("ko", "한국어"), ("zh", "중국어")):
@@ -192,7 +192,7 @@ def build_whisper_tab(
         "STT 모델 타입과 모델은 위의 인식 언어에 맞는 항목만 표시합니다. 언어를 바꾸면 해당 언어의 백엔드와 모델 후보로 전환되며, 기본값은 유지됩니다.",
     )
 
-    runtime_frame, row = _add_group(gui, ttk, tab_whisper, row, "label.dictation_ai_group_runtime", "STT 응답/성능")
+    runtime_frame, row = _add_group(gui, ttk, tab_dictation_ai, row, "label.dictation_ai_group_runtime", "STT 응답/성능")
     runtime_row = 0
     gui._add_bool_switch(
         runtime_frame,
@@ -304,7 +304,7 @@ def build_whisper_tab(
     }
     gui._dictation_ai_backend_specific_rows = list(gui._dictation_ai_backend_option_rows.values())
 
-    boundary_frame, row = _add_group(gui, ttk, tab_whisper, row, "label.dictation_ai_group_boundary", "STT 결과 문장 경계 처리")
+    boundary_frame, row = _add_group(gui, ttk, tab_dictation_ai, row, "label.dictation_ai_group_boundary", "STT 결과 문장 경계 처리")
     boundary_row = 0
     stt_boundary_backend_row = boundary_row
     gui._add_combo(
@@ -352,7 +352,7 @@ def build_whisper_tab(
     gui._dictation_ai_stt_boundary_parent = boundary_frame
     gui._dictation_ai_stt_boundary_rows = [stt_boundary_backend_row, stt_boundary_model_row, stt_boundary_hint_row]
 
-    translation_group, row = _add_group(gui, ttk, tab_whisper, row, "label.dictation_ai_group_translation", "번역")
+    translation_group, row = _add_group(gui, ttk, tab_dictation_ai, row, "label.dictation_ai_group_translation", "번역")
     translation_row = 0
     gui._add_bool_switch(
         translation_group,
@@ -472,11 +472,11 @@ def build_whisper_tab(
     }
 
 
-    reset_whisper_btn = ttk.Button(
-        tab_whisper,
+    reset_dictation_ai_btn = ttk.Button(
+        tab_dictation_ai,
         text=gui._tr("button.reset_dictation_ai_settings", "받아쓰기 AI 기본값 복원"),
-        command=gui._reset_whisper_settings,
+        command=gui._reset_dictation_ai_settings,
     )
-    gui._widgets["dictation_ai_reset_button"] = reset_whisper_btn
-    gui._register_localized_widget(reset_whisper_btn, "button.reset_dictation_ai_settings", "받아쓰기 AI 기본값 복원")
-    reset_whisper_btn.grid(row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0))
+    gui._widgets["dictation_ai_reset_button"] = reset_dictation_ai_btn
+    gui._register_localized_widget(reset_dictation_ai_btn, "button.reset_dictation_ai_settings", "받아쓰기 AI 기본값 복원")
+    reset_dictation_ai_btn.grid(row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0))
