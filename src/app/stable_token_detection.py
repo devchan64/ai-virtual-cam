@@ -195,7 +195,12 @@ def analyze_stable_window(previous_text: str, current_text: str, language: str) 
 def combine_boundary_confidence(
     segment_confidence: float | None,
     stability_confidence: float | None,
+    stage_support_score: float | None = None,
 ) -> float | None:
+    if stage_support_score is not None and stage_support_score >= 0.75:
+        stability_confidence = max(stability_confidence or 0.0, 0.70)
+    elif stage_support_score is not None and 0.55 <= stage_support_score < 0.75:
+        stability_confidence = max(stability_confidence or 0.0, 0.55)
     if segment_confidence is None:
         return stability_confidence
     if stability_confidence is None:

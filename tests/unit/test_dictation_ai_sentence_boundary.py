@@ -1,5 +1,5 @@
 import unittest
-from src.app.sentence_boundary import LegacyRegexSentenceBoundaryDetector, split_punctuated_text
+from src.app.sentence_boundary import LegacyRegexSentenceBoundaryDetector, pending_new_text_joined, split_punctuated_text
 from src.app.dictation_window import _collapse_adjacent_repeated_phrase_details, _collapse_adjacent_repeated_phrases, _diagnostic_tail, _forced_sentence_reason, _new_text_delta, _pending_new_text_combined, _sentence_max_age_chunks, _sentence_output_delta, _sentence_required_confirmations, _sentences_are_revisions, _should_age_staged_sentence, _prefer_sentence_revision, _sentence_end_count, _split_completed_sentences, _stable_window_text
 
 
@@ -34,14 +34,32 @@ class WhisperSentenceBoundaryTest(unittest.TestCase):
             "Because if you didn't know,",
         )
 
+    def test_pending_new_text_combines_case_insensitive_word_overlap(self) -> None:
+        joined = pending_new_text_joined("And You", "you can tap on the icon")
+
+        self.assertEqual(joined.text, "And You can tap on the icon")
+        self.assertEqual(joined.strategy, "suffix_prefix_overlap")
+        self.assertEqual(joined.overlap_units, 1)
+
+    def test_pending_new_text_combines_numeric_word_overlap(self) -> None:
+        joined = pending_new_text_joined("It costs 1,000", "1000 dollars per year")
+
+        self.assertEqual(joined.text, "It costs 1,000 dollars per year")
+        self.assertEqual(joined.strategy, "suffix_prefix_overlap")
+        self.assertEqual(joined.overlap_units, 1)
+
     def test_pending_new_text_trims_internal_chinese_restart_from_monitoring(self) -> None:
         pending = "它是先做成一个寿司条，然后把这米再切断了，摆成四个墩儿墩儿，然后就是火山的底座，然后上面这个撒的就更像熔岩一样，然后用喷枪"
         new = "条，然后把这米再切断了，摆成四个墩儿墩儿，然后就是火山的底座，然后上面这个洒的就更像熔岩一样，然后用喷枪"
 
+        joined = pending_new_text_joined(pending, new)
+
         self.assertEqual(
-            _pending_new_text_combined(pending, new),
+            joined.text,
             "它是先做成一个寿司条，然后把这米再切断了，摆成四个墩儿墩儿，然后就是火山的底座，然后上面这个洒的就更像熔岩一样，然后用喷枪",
         )
+        self.assertEqual(joined.strategy, "internal_restart")
+        self.assertGreaterEqual(joined.overlap_units, 12)
 
     def test_pending_new_text_keeps_distinct_chinese_continuation(self) -> None:
         self.assertEqual(

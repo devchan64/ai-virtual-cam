@@ -1148,6 +1148,30 @@ STABLE_METRIC_TRACKING_CASES = [
         },
         "source": "semantic stable stage support metric for internal overlap",
     },
+    {
+        "metrics": {
+            "boundary_confidence_boosted_stable_support": 1,
+            "stage_policy_fast_confirm_candidate": 1,
+            "stage_policy_pending_hold_low_stability": 1,
+        },
+        "expected": {
+            "boundary_confidence_boosted_stable_support": 1,
+            "stage_policy_fast_confirm_candidate": 1,
+            "stage_policy_pending_hold_low_stability": 1,
+        },
+        "source": "stable and boundary policy runtime diagnostic",
+    },
+    {
+        "metrics": {
+            "pending_join_overlap": 3,
+            "pending_join_append": 1,
+        },
+        "expected": {
+            "pending_join_overlap": 3,
+            "pending_join_append": 1,
+        },
+        "source": "normalization join strategy runtime diagnostic",
+    },
 ]
 
 
@@ -1264,6 +1288,13 @@ def _runtime_metric_summary(metrics: dict[str, int]) -> dict[str, int]:
         "boundary_right_context_starts": int(metrics.get("boundary_right_context_starts", 0)),
         "boundary_signal_score_per_1000": int(metrics.get("boundary_signal_score_per_1000", 0)),
         "boundary_end_probability_per_1000": int(metrics.get("boundary_end_probability_per_1000", 0)),
+        "boundary_confidence_boosted_stable_support": int(
+            metrics.get("boundary_confidence_boosted_stable_support", 0)
+        ),
+        "stage_policy_fast_confirm_candidate": int(metrics.get("stage_policy_fast_confirm_candidate", 0)),
+        "stage_policy_pending_hold_low_stability": int(metrics.get("stage_policy_pending_hold_low_stability", 0)),
+        "pending_join_overlap": int(metrics.get("pending_join_overlap", 0)),
+        "pending_join_append": int(metrics.get("pending_join_append", 0)),
         "segment_state_pending": int(metrics.get("segment_state_pending", 0)),
         "segment_state_staged": int(metrics.get("segment_state_staged", 0)),
         "segment_state_final": int(metrics.get("segment_state_final", 0)),

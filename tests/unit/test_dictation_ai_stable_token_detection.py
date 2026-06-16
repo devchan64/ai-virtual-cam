@@ -93,6 +93,11 @@ class StableTokenDetectionTest(unittest.TestCase):
         self.assertEqual(combine_boundary_confidence(0.80, None), 0.80)
         self.assertIsNone(combine_boundary_confidence(None, None))
 
+    def test_boundary_confidence_boosts_stability_from_high_stage_support(self) -> None:
+        self.assertEqual(combine_boundary_confidence(0.90, 0.55, 0.80), 0.70)
+        self.assertEqual(combine_boundary_confidence(None, None, 0.80), 0.70)
+        self.assertEqual(combine_boundary_confidence(0.60, 0.55, 0.80), 0.60)
+
     def test_stage_support_score_uses_internal_overlap_only_when_prefix_is_absent(self) -> None:
         score = stable_stage_support_score(
             stable_token_ratio=0.0,

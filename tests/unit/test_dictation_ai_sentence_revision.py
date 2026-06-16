@@ -21,6 +21,7 @@ from src.app.dictation_window import (
     _prefer_sentence_revision,
     _replacement_decision_reason,
     _sentence_end_count,
+    _effective_sentence_required_confirmations,
     _sentence_max_age_chunks,
     _sentence_output_delta,
     _sentence_required_confirmations,
@@ -247,6 +248,27 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         self.assertTrue(_sentences_are_revisions(staged, pending))
         self.assertFalse(_should_age_staged_sentence(staged, pending))
 
+    def test_low_stability_cjk_pending_policy_holds_staged_aging(self) -> None:
+        staged = "我们现在准备去下一家店。"
+        pending = "然后这个地方其实"
+
+        self.assertFalse(
+            _should_age_staged_sentence(
+                staged,
+                pending,
+                stable_stage_support_score=0.20,
+                boundary_end_probability=0.50,
+            )
+        )
+        self.assertTrue(
+            _should_age_staged_sentence(
+                staged,
+                pending,
+                stable_stage_support_score=0.80,
+                boundary_end_probability=0.90,
+            )
+        )
+
     def test_staged_sentence_waits_when_pending_reuses_outlet_tail_from_log(self) -> None:
         # Regression from avc-whisper.log chunks 34-36.
         staged = "Tesla's charging cable this would be for home charging and public Chargers and tesla destination chargers not for tesla superchargers But maybe you find yourself at a location where you can park here, but the outlet is all the way over there."
@@ -320,6 +342,46 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
     def test_short_cjk_without_end_marker_can_confirm_when_repeated(self) -> None:
         self.assertTrue(_should_confirm_staged_sentence("哇哇它为什么老麻", 3, False))
         self.assertTrue(_should_confirm_staged_sentence("哇哇它为什么老麻。", 3, False))
+
+    def test_high_stability_boundary_policy_reduces_confirmation_requirement(self) -> None:
+        self.assertEqual(
+            _effective_sentence_required_confirmations(
+                False,
+                stable_stage_support_score=0.80,
+                boundary_signal_score=0.70,
+                boundary_end_probability=0.90,
+            ),
+            2,
+        )
+        self.assertEqual(
+            _effective_sentence_required_confirmations(
+                True,
+                stable_stage_support_score=0.80,
+                boundary_signal_score=0.70,
+                boundary_end_probability=0.90,
+            ),
+            3,
+        )
+        self.assertTrue(
+            _should_confirm_staged_sentence(
+                "신규 채용을 안 하고 있습니다.",
+                2,
+                False,
+                stable_stage_support_score=0.80,
+                boundary_signal_score=0.70,
+                boundary_end_probability=0.90,
+            )
+        )
+        self.assertFalse(
+            _should_confirm_staged_sentence(
+                "신규 채용을 안 하고 있습니다.",
+                2,
+                False,
+                stable_stage_support_score=0.80,
+                boundary_signal_score=0.70,
+                boundary_end_probability=0.60,
+            )
+        )
 
     def test_cjk_without_end_marker_can_confirm_by_repetition(self) -> None:
         staged = "好大一棵果然皇上的园子里都是不一般的植物我觉得大家如果来西安的话可以到这个兴庆宫逛一逛"
