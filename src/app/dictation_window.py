@@ -48,6 +48,7 @@ from src.app.dictation_transcript_logic import (
     _should_confirm_staged_sentence,
     _should_age_staged_sentence,
     _should_finalize_before_replacement,
+    _should_stage_boundary_candidate,
     _is_recent_final_echo,
     _should_translate_final_sentence,
     _split_completed_sentences,
@@ -720,6 +721,19 @@ class WhisperTranscriptWorker:
                 count_metric("candidate_duplicate_suppressed")
                 self._emit("status", f"받아쓰기 AI 중복 문장 무시: chunk={chunks} text={sentence!r}", display=False)
                 return []
+            if not _should_stage_boundary_candidate(candidate, detected):
+                count_metric("stage_candidate_quality_blocked")
+                candidate_quality_flags = _final_sentence_diagnostic_flags(candidate, detected)
+                for flag in candidate_quality_flags:
+                    count_metric(f"stage_candidate_quality_{flag}")
+                self._emit(
+                    "status",
+                    "받아쓰기 AI stage 후보 품질 차단: "
+                    f"chunk={chunks} flags={','.join(candidate_quality_flags) or 'none'} "
+                    f"candidate_tail={_diagnostic_tail(candidate)}",
+                    display=False,
+                )
+                return []
             if not staged_sentence:
                 count_metric("stage_start")
                 staged_sentence = candidate
@@ -1198,6 +1212,12 @@ class WhisperTranscriptWorker:
                 stable_prefix_chars = chunk_lifecycle_metrics.get("stable_prefix_chars", 0)
                 unstable_tail_chars = chunk_lifecycle_metrics.get("unstable_tail_chars", 0)
                 stable_token_ratio_per_1000 = chunk_lifecycle_metrics.get("stable_token_ratio_per_1000", 0)
+                stage_candidate_quality_blocked_count = chunk_lifecycle_metrics.get("stage_candidate_quality_blocked", 0)
+                stage_candidate_quality_count = sum(
+                    value
+                    for key, value in chunk_lifecycle_metrics.items()
+                    if key.startswith("stage_candidate_quality_") and key != "stage_candidate_quality_blocked"
+                )
                 final_quality_count = sum(
                     value for key, value in chunk_lifecycle_metrics.items() if key.startswith("final_quality_")
                 )
@@ -1216,6 +1236,8 @@ class WhisperTranscriptWorker:
                     f"delta_trimmed={delta_trimmed_count} "
                     f"stable_prefix_chars={stable_prefix_chars} unstable_tail_chars={unstable_tail_chars} "
                     f"stable_token_ratio={stable_token_ratio_per_1000 / 1000:.3f} "
+                    f"stage_candidate_quality_blocked={stage_candidate_quality_blocked_count} "
+                    f"stage_candidate_quality={stage_candidate_quality_count} "
                     f"final_quality={final_quality_count} translation_skip={translation_skip_count} "
                     f"raw_without_final={raw_without_final_count} "
                     f"replace_unconfirmed_rate={stage_replaced_unconfirmed_count / max(stage_replace_count, 1):.2f} "

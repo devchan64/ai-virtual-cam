@@ -1029,6 +1029,11 @@ def _should_translate_final_sentence(sentence: str, language: str) -> bool:
     )
 
 
+def _should_stage_boundary_candidate(sentence: str, language: str) -> bool:
+    flags = set(_final_sentence_diagnostic_flags(sentence, language))
+    return not flags.intersection({"empty", "spaced_cjk", "cjk_repeated_ngram", "latin_only_for_zh"})
+
+
 def _should_finalize_boundary_candidate(
     sentence: str,
     language: str,
@@ -1037,8 +1042,7 @@ def _should_finalize_boundary_candidate(
 ) -> bool:
     if staged_confirmations is not None and staged_confirmations < _sentence_required_confirmations(staged_forced):
         return False
-    flags = set(_final_sentence_diagnostic_flags(sentence, language))
-    return not flags.intersection({"empty", "spaced_cjk", "cjk_repeated_ngram", "latin_only_for_zh"})
+    return _should_stage_boundary_candidate(sentence, language)
 
 
 def _should_finalize_before_replacement(

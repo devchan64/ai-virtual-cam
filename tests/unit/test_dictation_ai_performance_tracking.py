@@ -31,7 +31,7 @@ TRACKING_TARGETS = {
     "coalesce": {"target_cases": 10, "target_rate": 1.00},
     "duplicate_suppression": {"target_cases": 4, "target_rate": 1.00},
     "runtime_metrics": {"target_cases": 11, "target_rate": 1.00},
-    "stable_metrics": {"target_cases": 2, "target_rate": 1.00},
+    "stable_metrics": {"target_cases": 3, "target_rate": 1.00},
 }
 
 REVISION_TRACKING_CASES = [
@@ -1027,6 +1027,20 @@ STABLE_METRIC_TRACKING_CASES = [
         },
         "source": "stable token detector CJK char metric",
     },
+    {
+        "metrics": {
+            "stage_candidate_quality_blocked": 1,
+            "stage_candidate_quality_spaced_cjk": 1,
+            "stage_candidate_quality_no_end_marker": 1,
+        },
+        "expected": {
+            "stage_candidate_quality_blocked": 1,
+            "stage_candidate_quality": 2,
+            "stage_candidate_quality_spaced_cjk": 1,
+            "stage_candidate_quality_no_end_marker": 1,
+        },
+        "source": "2026-06-16 5m monitor spaced CJK candidate blocked before staging",
+    },
 ]
 
 
@@ -1127,6 +1141,14 @@ def _runtime_metric_summary(metrics: dict[str, int]) -> dict[str, int]:
         "stable_token_ratio_per_1000": int(metrics.get("stable_token_ratio_per_1000", 0)),
         "stable_overlap_common_prefix": int(metrics.get("stable_overlap_source_common_prefix", 0)),
         "stable_overlap_suffix_prefix": int(metrics.get("stable_overlap_source_suffix_prefix", 0)),
+        "stage_candidate_quality_blocked": int(metrics.get("stage_candidate_quality_blocked", 0)),
+        "stage_candidate_quality": sum(
+            value
+            for key, value in metrics.items()
+            if key.startswith("stage_candidate_quality_") and key != "stage_candidate_quality_blocked"
+        ),
+        "stage_candidate_quality_spaced_cjk": int(metrics.get("stage_candidate_quality_spaced_cjk", 0)),
+        "stage_candidate_quality_no_end_marker": int(metrics.get("stage_candidate_quality_no_end_marker", 0)),
     }
 
 

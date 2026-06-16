@@ -28,6 +28,7 @@ from src.app.dictation_window import (
     _should_age_staged_sentence,
     _should_finalize_replaced_sentence,
     _should_confirm_staged_sentence,
+    _should_stage_boundary_candidate,
     _should_translate_final_sentence,
     _split_completed_sentences,
     _stable_window_text,
@@ -154,6 +155,17 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         self.assertTrue(_should_translate_final_sentence("我跟你说，就这一 得脱鞋！哇，它是楼梯好高啊。", "zh"))
         self.assertTrue(_should_translate_final_sentence("第一个呢要登陆的呢就是滴滴，滴滴呢就是来中国，你要搭车的话，你就可以搭滴滴。", "zh"))
         self.assertTrue(_should_translate_final_sentence("面可是快速面就是它会比较q一点，这个呢是比快速。", "zh"))
+
+    def test_stage_boundary_candidate_blocks_spaced_cjk_from_monitoring(self) -> None:
+        self.assertFalse(
+            _should_stage_boundary_candidate(
+                "见 路 是 一 个 二 十 站 的 行 程 好 六 点 二 十 我 想 三 点 多 左 右 有 可 以 等 我 可 以 得 到 放",
+                "zh",
+            )
+        )
+        self.assertFalse(_should_stage_boundary_candidate("Good morning.", "zh"))
+        self.assertTrue(_should_stage_boundary_candidate("目前是四点三十八分，所有人都是回程的，跟我们一样是要去的。", "zh"))
+        self.assertTrue(_should_stage_boundary_candidate("面可是快速面就是它会比较q一点，这个呢是比快速。", "zh"))
 
     def test_staged_sentence_waits_when_pending_extends_it_from_log(self) -> None:
         # Regression from avc-whisper.log chunks 642-648.

@@ -662,6 +662,25 @@ old_result=...喷枪 条，然后把这米再切断了...
 - 추적 테스트에 `finalization_rate_per_1000`, `replace_unconfirmed_rate_per_1000`, `translation_skip_per_final_quality_per_1000`을 추가한다.
 - `window=15.0`은 계산상 가능하지만 기본값으로 승격하지 않는다. `windowSecondsZh=12.0`, `stepSecondsZh=1.0`, `beamSizeZh=3`, `maxNewTokensZh=192`를 유지하고, 확정률/미확정 교체율 개선을 먼저 본다.
 
+### 2026-06-16 stable 지표 적용 후 5분 운영 모니터링
+
+stable token 지표를 추가한 뒤 같은 중국어 실시간 경로를 약 5분 더 관측했다. 처리량은 여전히 충분했다. `stt_step_load`는 대체로 0.3~0.7 구간에 있고 queue drop은 관측되지 않았다. 따라서 이번 단계에서는 `stepSecondsZh`, `windowSecondsZh`, `beamSizeZh`, `maxNewTokensZh`를 조정하지 않는다.
+
+관측된 병목:
+
+- `stable_token_ratio`가 높은 chunk에서도 후보 자체가 글자 단위 공백 CJK로 변환되면 staged 교체와 confirmation reset을 유발했다.
+- `raw_without_final`과 `stage_revision_confirmation_reset`은 계속 누적됐다.
+- `stage_replace_decision_unconfirmed_cjk`와 `stage_replaced_unconfirmed`가 누적되어, 불안정 후보를 stage에 올리기 전에 차단할 필요가 있었다.
+- `stable_overlap_source=suffix_prefix`는 정상 final 직전에도 관측되어 sliding overlap 지표가 유효한 진단 신호임을 확인했다.
+
+반영 판단:
+
+- `spaced_cjk`, `cjk_repeated_ngram`, `latin_only_for_zh`, `empty` 후보는 stage 진입 전에 차단한다.
+- `short_cjk`, `no_end_marker`, `mixed_latin_zh`는 stage 진입 차단 대상에 넣지 않는다. 전사 보존 필요성이 있으므로 final/translation 품질 게이트에서만 다룬다.
+- 안정성 요약 로그에 `stage_candidate_quality_blocked`, `stage_candidate_quality`를 추가해 차단 건수와 flag 수를 분리해서 본다.
+- 추적 테스트에 `stage_candidate_quality_blocked`, `stage_candidate_quality`, `stage_candidate_quality_spaced_cjk`, `stage_candidate_quality_no_end_marker`를 추가한다.
+- 다음 관측에서는 `stage_candidate_quality_blocked` 증가와 함께 `stage_replaced_unconfirmed`, `stage_revision_confirmation_reset`, `raw_without_final`이 줄어드는지 본다.
+
 ## 배포 순서와 실패 대응
 
 점진적 적용 순서:
