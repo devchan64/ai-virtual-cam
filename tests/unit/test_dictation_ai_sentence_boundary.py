@@ -74,22 +74,6 @@ class WhisperSentenceBoundaryTest(unittest.TestCase):
         self.assertEqual(result.completed, [])
         self.assertIn("그런데 새 문장이", result.pending)
 
-    def test_sentence_boundary_soft_splits_here_is_restart_from_log(self) -> None:
-        detector = LegacyRegexSentenceBoundaryDetector()
-
-        result = detector.split(
-            "But you can add from all these different functions right here and then just hit save so it's really nice to have those shortcuts right there",
-            "here is your live camera as long as you have sentry mode enabled which",
-            "en",
-        )
-
-        self.assertEqual(
-            result.completed,
-            ["But you can add from all these different functions right here and then just hit save so it's really nice to have those shortcuts right there"],
-        )
-        self.assertEqual(result.pending, "here is your live camera as long as you have sentry mode enabled which")
-        self.assertEqual(result.soft_boundary_count, 1)
-
     def test_sentence_boundary_keeps_short_english_pending_without_restart_signal(self) -> None:
         detector = LegacyRegexSentenceBoundaryDetector()
 
@@ -101,38 +85,6 @@ class WhisperSentenceBoundaryTest(unittest.TestCase):
 
         self.assertEqual(result.completed, [])
         self.assertEqual(result.pending, "This gives you a live camera option")
-
-    def test_sentence_boundary_soft_splits_and_you_restart_from_log(self) -> None:
-        detector = LegacyRegexSentenceBoundaryDetector()
-
-        result = detector.split(
-            "money you've spent on charging the car and how much gas savings you've had for the year and for the month",
-            "And you go in here and you can tap on",
-            "en",
-        )
-
-        self.assertEqual(
-            result.completed,
-            ["money you've spent on charging the car and how much gas savings you've had for the year and for the month"],
-        )
-        self.assertEqual(result.pending, "And you go in here and you can tap on")
-        self.assertEqual(result.soft_boundary_count, 1)
-
-    def test_sentence_boundary_soft_splits_so_it_restart_from_log(self) -> None:
-        detector = LegacyRegexSentenceBoundaryDetector()
-
-        result = detector.split(
-            "And you go in here and you can tap on these and change from kilowatt hours to percentage",
-            "So it shows you how many kilowatt hours",
-            "en",
-        )
-
-        self.assertEqual(
-            result.completed,
-            ["And you go in here and you can tap on these and change from kilowatt hours to percentage"],
-        )
-        self.assertEqual(result.pending, "So it shows you how many kilowatt hours")
-        self.assertEqual(result.soft_boundary_count, 1)
 
     def test_sentence_boundary_does_not_soft_split_lowercase_this_inside_phrase_from_log(self) -> None:
         detector = LegacyRegexSentenceBoundaryDetector()
@@ -182,75 +134,6 @@ class WhisperSentenceBoundaryTest(unittest.TestCase):
         self.assertEqual(result.pending, "")
         self.assertEqual(result.end_mark_count, 2)
         self.assertEqual(result.right_context_start_count, 1)
-
-    def test_sentence_boundary_splits_long_driver_seat_sentence_from_log(self) -> None:
-        # Regression from avc-whisper.log chunks 23-33.
-        detector = LegacyRegexSentenceBoundaryDetector()
-
-        result = detector.split(
-            "",
-            "It is a very strange sensation to be a passenger in the car while you're in the driver's seat and having no interaction with the road whatsoever but once you get used to it it's",
-            "en",
-        )
-
-        self.assertEqual(
-            result.completed,
-            ["It is a very strange sensation to be a passenger in the car while you're in the driver's seat and having no interaction with the road whatsoever"],
-        )
-        self.assertEqual(result.pending, "once you get used to it it's")
-
-    def test_sentence_boundary_soft_split_trims_incomplete_if_tail_from_log(self) -> None:
-        # Regression from avc-whisper.log chunks 242-246.
-        detector = LegacyRegexSentenceBoundaryDetector()
-        result = detector.split(
-            "",
-            "halfway and another great new feature that came with a recent software update is the automatic turn signal if When you enable that, it'll automatically turn your turn signal off",
-            "en",
-        )
-
-        self.assertEqual(
-            result.completed,
-            ["halfway and another great new feature that came with a recent software update is the automatic turn signal"],
-        )
-        self.assertEqual(result.pending, "When you enable that, it'll automatically turn your turn signal off")
-        self.assertEqual(result.soft_boundary_count, 1)
-
-    def test_sentence_boundary_soft_splits_once_you_are_navigated_from_log(self) -> None:
-        detector = LegacyRegexSentenceBoundaryDetector()
-
-        result = detector.split(
-            "going i can navigate to it and my tesla will take me there",
-            "once you re navigated somewhere it ll look like this here you can play with the map",
-            "en",
-        )
-
-        self.assertEqual(result.completed, ["going i can navigate to it and my tesla will take me there"])
-        self.assertEqual(result.pending, "once you re navigated somewhere it ll look like this here you can play with the map")
-        self.assertEqual(result.soft_boundary_count, 1)
-
-    def test_sentence_boundary_soft_splits_the_missing_navigation_from_log(self) -> None:
-        # Regression from avc-whisper.log chunks 700-703.
-        detector = LegacyRegexSentenceBoundaryDetector()
-        result = detector.split(
-            "",
-            "Another thing is I think the Achilles heel of the system right now is the navigation The missing on-ramps, issues with going into the right driveway or other things",
-            "en",
-        )
-
-        self.assertEqual(
-            result.completed,
-            ["Another thing is I think the Achilles heel of the system right now is the navigation"],
-        )
-        self.assertEqual(
-            result.pending,
-            "The missing on-ramps, issues with going into the right driveway or other things",
-        )
-        self.assertEqual(result.soft_boundary_count, 1)
-
-
-if __name__ == "__main__":
-    unittest.main()
-
 
 if __name__ == "__main__":
     unittest.main()

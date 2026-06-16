@@ -361,6 +361,33 @@ NLLB 번역 기본 테스트값:
 
 받아쓰기 AI 실시간 전사/번역 경로의 품질은 unittest 성공/실패만으로 판단하지 않는다. 테스트는 누적 운영 로그에서 관측한 실패 사례를 실행해 현재 로직의 성능 추이를 출력하는 추적 하네스다. 특히 `test_dictation_ai_performance_tracking.py`는 실패 현상 재현과 튜닝 근거 수집이 목적이며, 개별 tracking case가 모두 성공해야 한다는 품질 게이트가 아니다. unittest 성공은 metric collection이 실행됐다는 의미이고, 출력되는 tracking rate와 gap을 줄이는 것이 개선 목표다.
 
+### 테스트 분류 정책
+
+로그에서 나온 케이스는 기본적으로 성능 추적 케이스로 분류한다. 개별 케이스의 성공/실패는 튜닝 근거이며 품질 게이트가 아니다.
+
+하드 품질 게이트로 둘 수 있는 경우:
+
+- 설정/계약/default 값처럼 입력과 출력이 명확한 public contract
+- 이미 확정한 안전 정책: CPU fallback 금지, 번역 큐는 final-only, 명백한 중복 final 억제
+- 결정적 helper의 단일 책임이 분명하고, 실패 시 즉시 사용자 출력이 오염되는 경우
+- 과거 버그가 재현 가능한 최소 입력으로 축소되어 있고, 모델/로그 분포 변화와 무관한 경우
+
+성능 추적 하네스에 둬야 하는 경우:
+
+- 30분/5분 운영 로그에서 수집한 raw 후보, stage churn, replacement, finalization latency
+- `rate`, `gap`, `per_stage_start`, `translation_quality`처럼 추세로 판단해야 하는 항목
+- STT 모델 출력 흔들림에 의존하는 케이스
+- 파라미터 튜닝 근거용 케이스
+- 현재는 실패하지만 다음 로직 개선으로 matched가 올라가야 하는 관측 케이스
+
+정리 방향:
+
+- 새 로그 수집 케이스는 `test_dictation_ai_performance_tracking.py`에 추가한다.
+- 기존 unit test의 `from_log/from_monitoring` 케이스는 모두 제거하지 않는다. 중복 억제, 명백한 품질 차단, contract 성격의 helper 검증은 hard regression으로 남길 수 있다.
+- 기존 unit test 중 파라미터 튜닝/품질 추세/모델 출력 흔들림에 가까운 케이스는 후속 패치에서 performance tracking으로 이관한다.
+- hard regression으로 남긴 로그 기반 unit test는 주석에 어떤 불변 계약을 지키는지 명시한다.
+- 중요도가 낮은 품질 게이트 형태 테스트는 폐기한다. single-observation replacement, legacy soft boundary 로그 샘플, 특정 로그 문장 기반 collapse 튜닝 샘플은 hard unittest가 아니라 성능 추적 대상으로만 다룬다.
+
 | 도메인 | 의미 | 목표 |
 | --- | --- | ---: |
 | `revision` | 이전 partial/final 문장이 새 STT window에서 올바르게 갱신되는지 | 90% 이상 |
@@ -519,6 +546,8 @@ old_result=...喷枪 条，然后把这米再切断了...
 
 원문창이 staged 후보를 표시하던 시기의 로그 해석은 raw STT 품질 판단 근거로 쓰지 않는다.
 
+중국어 성능 추적에서 순수 비중국어/라틴 단독 입력은 제거한다. 이는 중국어 문장 추출 확정 실패가 아니라 입력 언어 불일치 또는 언어 분류 문제로 분리한다.
+
 ### 2026-06-16 중국어 5분 운영 모니터링
 
 `qwen3-asr-0.6b`, `window=15.0`, `step=1.0`, `beam=3`, `maxNewTokens=192`, 번역 ON 조건으로 약 5분간 `.tmp/logs/avc-whisper.log`를 추적했다. `stt_step_load`와 `total_step_load`는 대부분 1.0 미만이었고 input queue drop은 관측되지 않아 계산 성능은 병목으로 보지 않는다.
@@ -551,7 +580,7 @@ stable token 지표를 추가한 뒤 같은 중국어 실시간 경로를 약 5�
 
 반영 판단:
 
-- `spaced_cjk`, `cjk_repeated_ngram`, `latin_only_for_zh`, `empty` 후보는 stage 진입 전에 차단한다.
+- `spaced_cjk`, `cjk_repeated_ngram`, `latin_only_for_zh`, `empty` 후보는 stage 진입 전에 차단한다. 단, `latin_only_for_zh`는 방어적 차단 지표일 뿐 중국어 문장 추출 성능 테스트 케이스로 누적하지 않는다.
 - `short_cjk`, `no_end_marker`, `mixed_latin_zh`는 stage 진입 차단 대상에 넣지 않는다. 전사 보존 필요성이 있으므로 final/translation 품질 게이트에서만 다룬다.
 - 안정성 요약 로그에 `stage_candidate_quality_blocked`, `stage_candidate_quality`를 추가해 차단 건수와 flag 수를 분리해서 본다.
 - 추적 테스트에 `stage_candidate_quality_blocked`, `stage_candidate_quality`, `stage_candidate_quality_spaced_cjk`, `stage_candidate_quality_no_end_marker`를 추가한다.
@@ -626,11 +655,39 @@ stable token 지표를 추가한 뒤 같은 중국어 실시간 경로를 약 5�
 - revision으로 같은 staged lifecycle이 유지될 때 `staged_age`를 누적한다.
 - CJK 후보는 첫 관측 확정을 계속 막되, 짧은 조각/글자 단위 공백/반복 n-gram/내부 공백 오염이 없는 후보가 2회 이상 관측되거나 age 기준을 채우면 `stable_cjk`/`aged` 사유로 final 승격할 수 있게 한다.
 - `stage_finalize_stable_cjk`, `stage_age_finalize`, `stage_age_quality_blocked` 지표를 추가해 완화된 CJK 확정 경로, age 기준 확정, age 품질 차단을 별도로 추적한다.
-- age 기준 확정도 `short_cjk`, `spaced_cjk`, `cjk_internal_gap`, `cjk_repeated_ngram`, `latin_only_for_zh` 품질 게이트를 통과해야 한다.
+- age 기준 확정도 `short_cjk`, `spaced_cjk`, `cjk_internal_gap`, `cjk_repeated_ngram`, `latin_only_for_zh` 품질 게이트를 통과해야 한다. 다만 순수 비중국어/라틴 단독 입력은 중국어 확정 성능 판단에서 제외한다.
 - 패치 반영 후 새 실행 초반 chunk 431 누적 기준 `finalized=70`, `stage_start=115`, `stage_replaced_unconfirmed=44`, `stage_age_finalize=41`, `stage_finalize_stable_cjk=25`가 관측됐다. 초기 스냅샷이므로 장기 판단은 보류하지만, `finalized_per_stage_start`는 약 0.609로 이전 장기 스냅샷의 약 0.255보다 개선 방향이다.
 - 30분 모니터링 종료 직전 chunk 761 누적 기준 `finalized=120`, `stage_start=195`, `stage_replaced_unconfirmed=72`, `input_queue_drops=0`, `input_queue_size_peak=10`이었다. 확정률은 개선 방향이지만, age 품질 게이트 보완 전 실행 로그가 섞여 있으므로 다음 실행에서 `stage_age_quality_blocked`와 `final_quality_short_cjk/spaced_cjk` 변화를 다시 확인한다.
 - 추적 테스트에 이번 30분 운영 로그 스냅샷을 추가한다.
 - 학술적 근거가 부족한 pending/new 접합 보정은 재도입하지 않는다.
+
+### 2026-06-17 후속 30분 운영 모니터링
+
+로그 회전 보존 개수를 1000개로 늘린 뒤 중국어 실시간 경로를 다시 관측했다. 분석 범위는 `.tmp/logs/avc-whisper.log*`의 `2026-06-17 00:11:59`부터 `00:41:59`까지 약 30분이다. 실행 조건은 로그 기준 `qwen3-asr-0.6b`, `window=15.0`, `step=1.0`, `beam=3`, `maxNewTokens=192`, 번역 OFF 구간 중심이다.
+
+관측값:
+
+- `perf` 로그 1039개 기준 평균 `total_step_load≈0.63`, 최대 `1.39`, `input_queue_drops_total=0`, 최대 `queue_peak=10`이었다.
+- `completed=1 final=0` 진단은 863회, `final=1` 진단은 651회 관측됐다. completed 후보가 있어도 stage/품질/중복 억제 상태로 남는 경우가 여전히 많다.
+- 주요 이벤트는 `stage_candidate_quality_blocked=184`, `stage_replaced_unconfirmed=84`, `stage_revision_reset=379`, `stage_age_finalize=108`, `stage_finalize_stable_cjk=44`, `confirmed_finalize=11`, `translation_skip_final_quality=104`였다.
+- 대표 품질 차단은 글자 단위 공백 CJK였다. 예: `顶 级 的 夏 威 夷 对 品 质 之 上 的 很 好 吃 好 看 这 个 哇 好 吃`.
+- 대표 final 품질 관측은 `no_end_marker` 또는 `short_cjk,no_end_marker`였다. 예: `好乖好棒好棒怎么那么棒你看他还去当指挥交通的`, `拍照那我们就进去耶`.
+- 안정 신호가 높아도 첫 관측 또는 단일 교체 후보인 경우에는 final로 보내지 않는 현재 정책이 유지됐다. 예: chunk 80의 긴 CJK 후보는 `stable_token_ratio=0.924`였지만 `staged_confirmations=1`, `staged_age=0`이라 `unconfirmed_cjk` 교체로 남았다.
+
+튜닝 판단:
+
+- 계산 처리량은 병목이 아니므로 `stepSecondsZh=1.0`, `beamSizeZh=3`, `maxNewTokensZh=192`는 유지한다.
+- `sentenceFinalizeAgeZh=3`도 유지한다. 2로 낮추면 `short_cjk/no_end_marker` final이 더 늘 수 있고, 4 이상으로 올리면 `stage_replaced_unconfirmed`가 늘 가능성이 크다.
+- `windowSecondsZh=15.0`은 현재 STT 안정성과 확정 지연의 균형점으로 유지한다. 이번 구간에서 queue drop이 없으므로 처리량 때문에 줄일 근거는 없다.
+- 로직 변경은 보류한다. 이번 구간의 주된 보강은 성능 추적 케이스 누적이며, `stable_token_ratio`가 높은 단일 관측 후보를 곧바로 final로 올리는 정책은 과확정 위험이 있어 다음 로그 비교 뒤 판단한다.
+
+반영:
+
+- 성능 추적 테스트의 `final_quality`, `finalization`, `runtime_metrics` 케이스를 보강했다.
+- `finalization` tracking에는 stage 품질 차단, short/no-end 관측 후보, age final, 단일 관측 교체 보류 케이스를 추가했다.
+- 순수 비중국어/라틴 단독 후보는 중국어 성능 추적 케이스에서 제거했다. 이후 성능 추적은 중국어 후보가 확정되지 않은 문장 추출 사례에 집중한다.
+- runtime aggregate에는 `finalized_per_stage_start`, `stage_replaced_unconfirmed_per_stage_start`, `finalization_rate_per_1000`, `stage_candidate_quality_*`, `translation_skip`을 비교할 수 있도록 이번 30분 스냅샷을 추가했다.
+- 다음 개선 판단은 `stage_replaced_unconfirmed_per_stage_start`가 낮아지는지와 `final_quality_no_end_marker`가 과도하게 늘지 않는지를 함께 본다.
 
 ## 배포 순서와 실패 대응
 

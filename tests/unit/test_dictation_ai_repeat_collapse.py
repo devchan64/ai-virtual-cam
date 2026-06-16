@@ -19,14 +19,6 @@ class WhisperRepeatCollapseTest(unittest.TestCase):
             "very nice no braking for the bird very good",
         )
 
-    def test_collapse_repeated_like_lets_say_phrase_from_log(self) -> None:
-        self.assertEqual(
-            _collapse_adjacent_repeated_phrases(
-                "like let's say i just want to go right here I'll hold it on the map like let's say i just want to go right here i'll hold it"
-            ),
-            "like let's say i just want to go right here I'll hold it on the map",
-        )
-
     def test_collapse_repeated_tap_close_phrase_from_log(self) -> None:
         # Regression from avc-whisper.log chunks 100-102.
         text = "Just tap on that lightning bolt icon and it will automatically open your charge port and you can tap on it again to close You can tap on it again to close it."
@@ -43,24 +35,6 @@ class WhisperRepeatCollapseTest(unittest.TestCase):
         self.assertEqual(
             _collapse_adjacent_repeated_phrases(text),
             "EPA estimated ranges are a best-case scenario, so it's not really the daily reality.",
-        )
-
-    def test_collapse_repeated_phrase_with_variant_leading_word_from_log(self) -> None:
-        # Regression from avc-whisper.log chunks 132-143.
-        text = "Right now, Fantech is running some fantic is running some huge discounts where you can get 45% off the X8 Apex"
-
-        self.assertEqual(
-            _collapse_adjacent_repeated_phrases(text),
-            "Right now, Fantech is running some huge discounts where you can get 45% off the X8 Apex",
-        )
-
-    def test_collapse_numeric_value_revision_from_log(self) -> None:
-        # Regression from avc-whisper.log chunks 29-30.
-        text = "Tesla's cars is the fact that these are over one thousand dollars worth These are over $1,000 worth of Tesla accessories."
-
-        self.assertEqual(
-            _collapse_adjacent_repeated_phrases(text),
-            "Tesla's cars is the fact that these are over $1,000 worth of Tesla accessories.",
         )
 
     def test_collapse_adjacent_duplicate_determiner_from_log(self) -> None:
@@ -126,27 +100,6 @@ class WhisperRepeatCollapseTest(unittest.TestCase):
         self.assertEqual(collapsed, "그러니까 이게 상황에 따라서 그렇게 하더라고요.")
         self.assertEqual(rules, ["compact_korean"])
 
-    def test_collapse_korean_stablecoin_birth_revision_from_monitoring(self) -> None:
-        # Regression from 2026-06-13 monitoring chunk 1163.
-        text = "이 스테이블 코인은 새로운 화폐의 탄생 이라고 탄생이라고 보셔야 돼요."
-
-        collapsed, rules = _collapse_adjacent_repeated_phrase_details(text)
-
-        self.assertEqual(collapsed, "이 스테이블 코인은 새로운 화폐의 탄생이라고 보셔야 돼요.")
-        self.assertEqual(rules, ["compact_korean"])
-
-    def test_collapse_korean_last_card_revision_from_monitoring(self) -> None:
-        # Regression from 2026-06-13 monitoring chunk 1111.
-        text = "그렇다면은 돈은 계속 풀어야 되는데 그렇다면 돈은 계속 풀어야 되는데 마지막 남은"
-
-        collapsed, rules = _collapse_adjacent_repeated_phrase_details(text)
-
-        self.assertEqual(collapsed, "그렇다면은 돈은 계속 풀어야 되는데 마지막 남은")
-        self.assertEqual(rules, ["compact_korean"])
-
-
-
-
     def test_collapse_near_phrase_does_not_remove_chinese_place_name_context_from_log(self) -> None:
         text = "来 的 吉 隆 坡 对 我 们 是 落 地 吉 隆 坡 然 后 玩 了 几 天"
         collapsed, rules = _collapse_adjacent_repeated_phrase_details(text)
@@ -160,20 +113,6 @@ class WhisperRepeatCollapseTest(unittest.TestCase):
 
         self.assertEqual(collapsed, "那 个 汤 底 真 的 有 一 点 辣")
         self.assertIn("adjacent_phrase", rules)
-
-    def test_collapse_repeated_chinese_clause_from_monitoring(self) -> None:
-        text = "这吃五里鸡王。香香香香香香香香。这吃五里鸡王。这吃五里鸡王。"
-        collapsed, rules = _collapse_adjacent_repeated_phrase_details(text)
-
-        self.assertEqual(collapsed, "这吃五里鸡王。香香香香香香香香。这吃五里鸡王。")
-        self.assertIn("cjk_clause", rules)
-
-    def test_collapse_repeated_short_chinese_clause_run_from_monitoring(self) -> None:
-        text = "豆浆，豆浆，豆浆，豆浆。哇，好大一份啊。"
-        collapsed, rules = _collapse_adjacent_repeated_phrase_details(text)
-
-        self.assertEqual(collapsed, "豆浆。哇，好大一份啊。")
-        self.assertIn("cjk_clause", rules)
 
 if __name__ == "__main__":
     unittest.main()

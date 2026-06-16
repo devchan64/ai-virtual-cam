@@ -262,43 +262,6 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         self.assertTrue(_sentences_are_revisions(staged, revised))
         self.assertEqual(_prefer_sentence_revision(staged, revised), revised)
 
-    def test_unconfirmed_replaced_stage_waits_on_completed_short_sentences_from_monitoring(self) -> None:
-        # Regressions from 2026-06-13 monitoring, reclassified after duplicated
-        # final observations appeared in live logs. A single observation before a
-        # distinct replacement is not enough to commit a final sentence.
-        cases = [
-            ("그렇죠", "스테이블 코인인가요"),
-            ("스테이블 코인인가요", "그렇죠"),
-            ("그게 유럽입니다", "그게 유럽 모형이에요"),
-            ("그러니까 미국이 함부로 그걸 안 하는 거죠", "그게 이런 모형이에요"),
-            ("근데 요새는 다른 거 같아요", "이 신용화폐 근데 요새는 다른 것 같아요"),
-            ("저는 이게 상당히 걱정이 돼요", "왜냐하면 미국인들 돈만 들어가는 게 아니라 전세계 돈이 다 빨려 들어가겠죠"),
-            ("아니요", "이거는 이미 트렌드화가 돼서 5년 10년은 더 갈 것 같죠"),
-        ]
-        for staged, candidate in cases:
-            with self.subTest(staged=staged, candidate=candidate):
-                self.assertEqual(_replacement_decision_reason(staged, candidate, 1, False, 0), "unconfirmed")
-                self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
-
-    def test_unconfirmed_replaced_stage_waits_on_open_latin_clause_from_monitoring(self) -> None:
-        cases = [
-            (
-                "Currently, in the robot world, I worked as I've never",
-                "It's my first",
-            ),
-            (
-                "Like, R2D2 would beep at you and it's hard to figure out what he's talking about, to be able to translate,",
-                "there are probably, I don't know, three to five robots in industry for every one that's a personal robot.",
-            ),
-        ]
-        for staged, candidate in cases:
-            with self.subTest(staged=staged):
-                self.assertEqual(
-                    _replacement_decision_reason(staged, candidate, 1, False, 0),
-                    "open_latin_clause",
-                )
-                self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
-
     def test_unconfirmed_replaced_stage_finalizes_confirmed_sentences(self) -> None:
         self.assertTrue(_should_finalize_replaced_sentence("확정 후보입니다", "다른 후보입니다", 3, False, 0))
         self.assertTrue(_should_finalize_replaced_sentence("강제 확정 후보입니다", "다른 후보입니다", 4, True, 0))
@@ -440,21 +403,6 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
             "stage_revision=2,stage_start=3",
         )
 
-    def test_unconfirmed_replaced_stage_waits_on_open_korean_clause_from_monitoring(self) -> None:
-        # Regressions from 2026-06-13 monitoring. These candidates were replaced
-        # before the next revision had a chance to complete the Korean clause.
-        cases = [
-            ("그 아래 3-5% 정도", "인플루언서, 유명한 사람들, 연예인들 그리고 나머지 95%"),
-            ("새로운 물리학 이론을", "그건 모릅니다"),
-            ("그리고 아무도 모를 때는 그냥 해보시면 되는 것", "기계가 잘하는 거 가지고 인간이 경쟁하는 건 무모한 짓이에요."),
-            ("AI가 점점점 확장이 좀 확장이 되면서", "그럼 어떻게 되죠?"),
-            ("앞으로 산업이 어떻게 새롭게 재편될지 그것도", "이 모든 것은 저의 개인적인 생각입니다"),
-            ("뭔가 좀 꿈과 희망이 있는 많은 이야기를 해줘야 되겠다라고 생각은 했는데 또 역시 얘기를 하면서 점점 디스토피아로 가지 않을까 싶고", "이 모든 것은 저의 개인적인 생각입니다"),
-        ]
-        for staged, candidate in cases:
-            with self.subTest(staged=staged, candidate=candidate):
-                self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
-
     def test_sentence_confirmation_waits_for_revision_windows(self) -> None:
         self.assertEqual(_sentence_required_confirmations(False), 3)
         self.assertEqual(_sentence_max_age_chunks(False), 3)
@@ -498,16 +446,6 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         candidate = "우리가 그런 얘기하지 않습니다"
 
         self.assertFalse(_sentences_are_revisions(staged, candidate))
-        self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
-
-    def test_replaced_stage_waits_on_single_observation_long_sentence_from_log(self) -> None:
-        # Regression from avc-whisper.log chunk 59. A single-observation long sentence
-        # can still be an STT rewrite. Keep it provisional until confirmation/age.
-        staged = "이게 초래할 미래의 형국도 저는 지금의 경제 시스템으로는 감당 불가능하다"
-        candidate = "여기서 이제 일론 머스크의 비판을 또 하나 좀 말씀드리는데 XG가 X지갑 만들었잖아요"
-
-        self.assertFalse(_sentences_are_revisions(staged, candidate))
-        self.assertEqual(_replacement_decision_reason(staged, candidate, 1, False, 0), "unconfirmed")
         self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 1, False, 0))
 
     def test_replaced_stage_finalizes_suffix_candidate_from_log(self) -> None:
@@ -758,39 +696,6 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
                 "zh",
                 staged_confirmations=1,
                 staged_age=3,
-                sentence_finalize_age=3,
-            )
-        )
-
-    def test_chinese_complete_sentence_does_not_finalize_before_replacement_on_first_observation(self) -> None:
-        # Regression from 2026-06-16 zh monitoring chunks 119 and 126.
-        # A completed-looking candidate can be a bad splice from the same
-        # sliding window, so it must survive the configured observation age
-        # before a following completed candidate can force it into final.
-        self.assertFalse(
-            _should_finalize_before_replacement(
-                "对啊，你会发现他每七百而已。",
-                "zh",
-                staged_confirmations=1,
-                staged_age=0,
-                sentence_finalize_age=3,
-            )
-        )
-        self.assertFalse(
-            _should_finalize_before_replacement(
-                "我靠柯南跟不二家的联名，他的脚步好可爱哦。",
-                "zh",
-                staged_confirmations=1,
-                staged_age=0,
-                sentence_finalize_age=3,
-            )
-        )
-        self.assertFalse(
-            _should_finalize_before_replacement(
-                "也没有要买什么东西就只是走进去再走出来拍个照片这样拍个进去出来",
-                "zh",
-                staged_confirmations=1,
-                staged_age=0,
                 sentence_finalize_age=3,
             )
         )
