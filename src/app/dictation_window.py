@@ -934,6 +934,7 @@ class WhisperTranscriptWorker:
                     count_metric("stable_prefix_chars", stable_analysis.stable_prefix_chars)
                     count_metric("unstable_tail_chars", stable_analysis.unstable_tail_chars)
                     count_metric("stable_token_ratio_per_1000", int(round(stable_analysis.stable_token_ratio * 1000)))
+                    count_metric(f"stable_overlap_source_{stable_analysis.stable_overlap_source}")
                 adjusted_boundary_confidence = combine_boundary_confidence(
                     boundary_confidence,
                     stable_analysis.boundary_confidence,
@@ -1078,6 +1079,7 @@ class WhisperTranscriptWorker:
                     f"stable_prefix_chars={stable_analysis.stable_prefix_chars} "
                     f"unstable_tail_chars={stable_analysis.unstable_tail_chars} "
                     f"stable_token_ratio={stable_analysis.stable_token_ratio:.3f} "
+                    f"stable_overlap_source={stable_analysis.stable_overlap_source} "
                     f"repeat_collapse_chars={repeat_collapse_chars} repeat_collapse_rules={','.join(repeat_collapse_rules) or 'none'} "
                     f"delta_chars={len(_normalized_text(text))} "
                     f"end_marks_window={_sentence_end_count(window_text)} end_marks_stable={_sentence_end_count(stable_text)} "

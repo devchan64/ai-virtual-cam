@@ -23,6 +23,7 @@ class StableWindowAnalysis:
     stable_prefix_chars: int
     unstable_tail_chars: int
     stable_token_ratio: float
+    stable_overlap_source: str
     boundary_confidence: float | None
 
 
@@ -59,6 +60,24 @@ def stable_prefix_units(previous_units: list[str], current_units: list[str]) -> 
     return matched
 
 
+def suffix_prefix_overlap_units(previous_units: list[str], current_units: list[str]) -> int:
+    limit = min(len(previous_units), len(current_units))
+    for overlap in range(limit, 0, -1):
+        if previous_units[-overlap:] == current_units[:overlap]:
+            return overlap
+    return 0
+
+
+def stable_overlap_units(previous_units: list[str], current_units: list[str]) -> tuple[int, str]:
+    prefix_units = stable_prefix_units(previous_units, current_units)
+    suffix_units = suffix_prefix_overlap_units(previous_units, current_units)
+    if suffix_units > prefix_units:
+        return suffix_units, "suffix_prefix"
+    if prefix_units > 0:
+        return prefix_units, "common_prefix"
+    return 0, "none"
+
+
 def analyze_stable_window(previous_text: str, current_text: str, language: str) -> StableWindowAnalysis:
     previous = normalized_text(previous_text)
     current = normalized_text(current_text)
@@ -66,7 +85,9 @@ def analyze_stable_window(previous_text: str, current_text: str, language: str) 
     previous_units, previous_separator = text_units(previous, language)
     if separator != previous_separator:
         previous_units, current_units, separator = list(previous), list(current), ""
-    stable_units = stable_prefix_units(previous_units, current_units) if previous_units and current_units else 0
+    stable_units, stable_overlap_source = (
+        stable_overlap_units(previous_units, current_units) if previous_units and current_units else (0, "none")
+    )
     stable_prefix = join_units(current_units[:stable_units], separator)
     unstable_tail = join_units(current_units[stable_units:], separator)
     ratio = stable_units / max(len(current_units), 1)
@@ -91,6 +112,7 @@ def analyze_stable_window(previous_text: str, current_text: str, language: str) 
         stable_prefix_chars=len(stable_prefix),
         unstable_tail_chars=len(unstable_tail),
         stable_token_ratio=ratio,
+        stable_overlap_source=stable_overlap_source,
         boundary_confidence=confidence,
     )
 

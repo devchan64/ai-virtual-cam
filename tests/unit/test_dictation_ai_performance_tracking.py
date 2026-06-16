@@ -997,12 +997,14 @@ STABLE_METRIC_TRACKING_CASES = [
         "metrics": {
             "stable_window_observed": 1,
             "stable_prefix_chars": 18,
+            "stable_overlap_source_common_prefix": 1,
             "unstable_tail_chars": 8,
             "stable_token_ratio_per_1000": 750,
         },
         "expected": {
             "stable_window_observed": 1,
             "stable_prefix_chars": 18,
+            "stable_overlap_common_prefix": 1,
             "unstable_tail_chars": 8,
             "stable_token_ratio_per_1000": 750,
         },
@@ -1012,12 +1014,14 @@ STABLE_METRIC_TRACKING_CASES = [
         "metrics": {
             "stable_window_observed": 1,
             "stable_prefix_chars": 6,
+            "stable_overlap_source_suffix_prefix": 1,
             "unstable_tail_chars": 2,
             "stable_token_ratio_per_1000": 750,
         },
         "expected": {
             "stable_window_observed": 1,
             "stable_prefix_chars": 6,
+            "stable_overlap_suffix_prefix": 1,
             "unstable_tail_chars": 2,
             "stable_token_ratio_per_1000": 750,
         },
@@ -1121,6 +1125,8 @@ def _runtime_metric_summary(metrics: dict[str, int]) -> dict[str, int]:
         "stable_prefix_chars": int(metrics.get("stable_prefix_chars", 0)),
         "unstable_tail_chars": int(metrics.get("unstable_tail_chars", 0)),
         "stable_token_ratio_per_1000": int(metrics.get("stable_token_ratio_per_1000", 0)),
+        "stable_overlap_common_prefix": int(metrics.get("stable_overlap_source_common_prefix", 0)),
+        "stable_overlap_suffix_prefix": int(metrics.get("stable_overlap_source_suffix_prefix", 0)),
     }
 
 
