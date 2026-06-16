@@ -308,7 +308,7 @@ funasr-paraformer, window=15: replace/chunk=0.25 discard/chunk=0.25 finalized/ch
 - Qwen3-ASR를 중국어 품질 우선 후보로 올린다.
 - FunASR STT는 운영 후보에서 제외하고 과거 기준선 기록으로만 남긴다.
 - `qwen3-asr-vllm-streaming`은 vLLM 의존성이 `mediapipe`/`protobuf`와 충돌하므로 공유 `.venv`에서는 차단한다.
-- 모델 다운로드는 setup이 아니라 config GUI 모델 다운로드 모달과 Serve 시작 전 캐시 검사 흐름으로 분리한다.
+- 모델 다운로드는 setup이 아니라 config GUI 모델 다운로드 매니저와 Serve 시작 전 캐시 검사 흐름으로 분리한다.
 - 중한 번역 품질 병목은 STT/staging 병목과 분리해 추적한다.
 
 ### 주요 기본값 변경

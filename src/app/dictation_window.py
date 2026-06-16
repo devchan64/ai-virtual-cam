@@ -69,6 +69,7 @@ DEFAULT_WINDOW_GEOMETRY_META = {
     "dictationAiTranslationWindowGeometry": "780x420+860+119",
     "dictationAiSttStatusWindowGeometry": "780x420+50+560",
 }
+WINDOW_GEOMETRY_FILE_NAME = "window-geometry.json"
 MIN_WINDOW_WIDTH = 520
 MIN_WINDOW_HEIGHT = 280
 FINAL_TEXT_TAG = "final_text"
@@ -138,6 +139,38 @@ def _load_ui_language(config_path: Path) -> str:
 def _window_title(kind: str, language: str) -> str:
     titles = _WINDOW_TITLES.get(language) or _WINDOW_TITLES["en"]
     return titles.get(kind, _WINDOW_TITLES["en"].get(kind, "ai-virtual-cam"))
+
+
+def _require_linux_cuda_runtime(config: DictationAiConfig) -> None:
+    if platform.system() != "Linux":
+        raise RuntimeError(
+            "받아쓰기 AI는 Linux + NVIDIA CUDA 전용입니다. "
+            f"currentOS={platform.system()} 설정값=dictationAi.enabled={config.enabled}"
+        )
+    required_cuda_devices = (
+        ("dictationAi.device", config.device),
+        ("dictationAi.sentenceBoundaryDevice", config.sentenceBoundaryDevice),
+    )
+    if config.translationEnabled:
+        required_cuda_devices = required_cuda_devices + (
+            ("dictationAi.translationDevice", config.translationDevice),
+        )
+    for path, device in required_cuda_devices:
+        if device != "cuda":
+            raise RuntimeError(
+                f"받아쓰기 AI는 CUDA 전용입니다. {path}={device} 설정값을 cuda로 변경하세요."
+            )
+    try:
+        import torch
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "받아쓰기 AI는 CUDA 사용 가능 PyTorch가 필요합니다. torch 설치와 CUDA 런타임을 확인하세요."
+        ) from exc
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            "받아쓰기 AI는 CUDA 전용입니다. torch.cuda.is_available()=false. "
+            "NVIDIA 드라이버, CUDA 런타임, PyTorch CUDA 빌드를 확인하세요."
+        )
 
 
 def _parse_window_geometry(geometry: object) -> dict[str, int] | None:
@@ -216,29 +249,59 @@ def _sanitize_window_geometry(geometry: object, screen_width: int, screen_height
     return _format_window_geometry(parts)
 
 
+def _window_geometry_path(config_path: Path) -> Path:
+    return config_path.expanduser().with_name(WINDOW_GEOMETRY_FILE_NAME)
+
+
+def _read_window_geometry_file(config_path: Path) -> dict[str, str]:
+    geometry_path = _window_geometry_path(config_path)
+    if not geometry_path.exists():
+        return {}
+    raw = json.loads(geometry_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        return {}
+    return {str(key): value for key, value in raw.items() if str(key).endswith("Geometry") and isinstance(value, str)}
+
+
+def _write_window_geometry_file(config_path: Path, geometry: dict[str, str]) -> Path:
+    geometry_path = _window_geometry_path(config_path)
+    geometry_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        key: value
+        for key, value in sorted(geometry.items())
+        if str(key).endswith("Geometry") and isinstance(value, str)
+    }
+    geometry_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return geometry_path
+
+
+def _read_legacy_window_geometry_meta(config_path: Path) -> dict[str, str]:
+    if not config_path.exists():
+        return {}
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        return {}
+    meta = raw.get("meta") or {}
+    if not isinstance(meta, dict):
+        return {}
+    return {str(key): value for key, value in meta.items() if str(key).endswith("Geometry") and isinstance(value, str)}
+
+
 def _load_window_geometry(config_path: Path, key: str, root) -> str | None:
     default_geometry = DEFAULT_WINDOW_GEOMETRY_META.get(key)
     try:
-        raw = json.loads(config_path.read_text(encoding="utf-8"))
-        if not isinstance(raw, dict):
-            _log_line(
-                f"[avc] Dictation AI status: window geometry defaulted: key={key} "
-                f"reason=invalid_config default={default_geometry}"
-            )
-            return default_geometry
-        meta = raw.get("meta") or {}
-        if not isinstance(meta, dict):
-            _log_line(
-                f"[avc] Dictation AI status: window geometry defaulted: key={key} "
-                f"reason=invalid_meta default={default_geometry}"
-            )
-            return default_geometry
         screen_width, screen_height = _window_restore_extent(root)
-        saved = meta.get(key)
+        geometry_file = _read_window_geometry_file(config_path)
+        saved = geometry_file.get(key)
+        source = WINDOW_GEOMETRY_FILE_NAME
+        if saved is None:
+            legacy_meta = _read_legacy_window_geometry_meta(config_path)
+            saved = legacy_meta.get(key)
+            source = "setting.json:meta"
         restored = _sanitize_window_geometry(saved, screen_width, screen_height)
         if restored:
             _log_line(
-                f"[avc] Dictation AI status: window geometry restored: key={key} geometry={restored} "
+                f"[avc] Dictation AI status: window geometry restored: key={key} source={source} geometry={restored} "
                 f"extent={screen_width}x{screen_height}"
             )
             return restored
@@ -265,13 +328,23 @@ def _save_window_geometry(
     screen_width: int = 0,
     screen_height: int = 0,
 ) -> None:
-    del config_path
     try:
         sanitized = _sanitize_window_geometry(geometry, screen_width, screen_height)
         if sanitized is None:
             _log_line(f"[avc] Dictation AI status: window geometry cache skipped: key={key} invalid_geometry={geometry}")
             return
-        _log_line(f"[avc] Dictation AI status: window geometry cached: key={key} geometry={sanitized}")
+        saved = dict(DEFAULT_WINDOW_GEOMETRY_META)
+        try:
+            saved.update(_read_legacy_window_geometry_meta(config_path))
+        except Exception:
+            pass
+        try:
+            saved.update(_read_window_geometry_file(config_path))
+        except Exception:
+            pass
+        saved[key] = sanitized
+        path = _write_window_geometry_file(config_path, saved)
+        _log_line(f"[avc] Dictation AI status: window geometry cached: key={key} geometry={sanitized} path={path}")
     except Exception as exc:
         _log_line(f"[avc] Dictation AI status: window geometry cache failed: key={key} error={exc}")
 
@@ -1288,6 +1361,7 @@ class WhisperTranscriptWindow:
     def __init__(self, app_config: AppConfig, config_path: Path) -> None:
         if not app_config.dictationAi.enabled:
             raise RuntimeError("dictationAi.enabled=false 입니다. config에서 받아쓰기 AI 전사를 켠 뒤 serve를 실행하세요.")
+        _require_linux_cuda_runtime(app_config.dictationAi)
         try:
             import tkinter as tk
             from tkinter import ttk

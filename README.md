@@ -51,7 +51,7 @@ AVC_TENSORRT_ENGINE_URL="https://example.com/person-segmentation.engine" ./bin/a
 - 화질/비식별: 세그멘테이션 경계 기반 화질 보정, `비식별 처리(눈가림)` 옵션
 - 오디오: `audio.enabled`, 입/출력 장치, 게이트/노이즈캔슬
 - 받아쓰기 AI: STT 입력 장치, 언어별 로컬 STT 모델, 문장 추적, 번역, 응답속도 파라미터
-- 선택한 언어는 `setting.json`의 `meta.language`에 저장됩니다.
+- 선택한 UI 언어는 `setting.json`의 `meta.language`에 저장됩니다. 창 위치와 크기는 `setting.json` 옆의 `window-geometry.json`에 분리 저장됩니다.
 
 설정 GUI 샘플:
 
@@ -324,6 +324,7 @@ Linux Docker 정책:
 - `받아쓰기 AI 입력 dB 미터`로 선택한 장치에 실제 신호가 들어오는지 확인합니다.
 - `번역 창`을 켠 뒤 `번역 백엔드`를 선택합니다. `whisper`는 영어 번역만 지원하고, `nllb-transformers`는 `facebook/nllb-200-distilled-600M` 로컬 모델로 한국어/영어/중국어 대상 번역을 지원합니다.
 - Linux PulseAudio/PipeWire 장치는 `alsa_input...`, `*.monitor`, `ai-virtual-cam` 같은 원본 ID를 설정값으로 저장합니다.
+- 받아쓰기 AI 실행은 Linux + NVIDIA CUDA 전용입니다. macOS/Windows 또는 CPU 실행 설정은 `dictationAi.enabled=true` 저장/Serve 시작/전사 창 실행 단계에서 자동 대체 없이 실패합니다.
 - 받아쓰기 AI 탭의 설정값은 `setting.json`의 `dictationAi` 블록에 저장됩니다. 초기에는 사용 모델이 Whisper였기 때문에 `whisper` 블록으로 시작했지만, STT/문장 경계/번역 모델이 확장되면서 도메인명과 모델명을 동일하게 두는 것이 오류가 되어 `dictationAi`로 변경했습니다. 주요 키는 `enabled`, `inputDevice`, `backend`, `model`, `language`, `translationEnabled`, `translationBackend`, `translationTargetLanguage`, `translationModel`, `translationDevice`, `translationComputeType`, `translationBeamSize`, `translationMaxNewTokens`, `device`, `computeType`, `chunkSeconds`, `stepSeconds`, `windowSeconds`, `sentenceFinalizeAge`, `beamSize`, `maxNewTokens`, `temperature`입니다. STT 응답/성능 파라미터와 STT 결과 문장 경계 처리 파라미터는 언어별로도 저장되며, 예를 들어 `windowSecondsEn`, `windowSecondsKo`, `windowSecondsZh`, `stepSecondsZh`, `sentenceFinalizeAgeZh`, `maxNewTokensZh` 같은 키가 선택 언어별 실행값의 기준입니다.
 
 실행 동작:
@@ -335,22 +336,21 @@ Linux Docker 정책:
 - `번역 창`을 켜면 원문 전사 창과 별도로 번역 창이 열립니다. 창 제목은 `meta.language` 설정에 따라 한글/영문으로 표시됩니다.
 - 전사/번역 창에는 복사용 텍스트만 표시합니다. 시간, `[ko]` 같은 언어 태그, `전사 결과 없음` 같은 추적 로그는 표시하지 않습니다.
 - stdout/stderr 로그에는 시간 prefix와 함께 모델 로딩, 입력 장치, chunk 처리, 오류 상태가 출력됩니다.
-- 받아쓰기 AI 실행은 STT 모델, 번역 모델, STT 결과 문장 경계 처리 모델 준비가 모두 끝난 뒤 입력 장치를 열고 전사를 시작합니다. 모델 다운로드는 Serve 시작 전 캐시 검사와 모델 다운로드 안내창에서만 수행하며, Serve 런타임은 로컬 캐시만 사용합니다.
-- 전사 창의 위치와 크기는 `setting.json`의 `meta.dictationAiWindowGeometry`, 번역 창의 위치와 크기는 `meta.dictationAiTranslationWindowGeometry`에 저장되고 다음 실행 때 재사용됩니다.
-- 설정 GUI 자체의 위치와 크기는 `meta.windowGeometry`, 카메라 미리보기 창은 `meta.previewWindowGeometry`, 설정 모달은 `meta.audioTuneWindowGeometry`/`meta.audioGateTestWindowGeometry`/`meta.inputMeterWindowGeometry`로 `JSON 저장` 시 `setting.json`에 저장됩니다.
+- 받아쓰기 AI 실행은 STT 모델, 번역 모델, STT 결과 문장 경계 처리 모델 준비가 모두 끝난 뒤 입력 장치를 열고 전사를 시작합니다. 모델 다운로드는 Serve 시작 전 캐시 검사와 모델 다운로드 매니저 창에서만 수행하며, Serve 런타임은 로컬 캐시만 사용합니다.
+- 전사 창, 번역 창, 설정 GUI, 카메라 미리보기 창, 설정 모달, 모델 다운로드 매니저 창의 위치와 크기는 `setting.json` 옆의 `window-geometry.json`에 자동 저장되고 다음 실행 때 재사용됩니다. 과거 `setting.json`의 `meta.*Geometry` 값은 마이그레이션용 fallback으로만 읽습니다.
 
 모델/언어 설정:
 
 - 기본 모델은 `large-v3`, CUDA 환경 기본 연산은 `float16`입니다.
 - `./bin/avc setup`은 Linux에서 `faster-whisper`, NLLB 번역용 `transformers`/`sentencepiece`, Qwen3-ASR 의존성, CUDA 런타임 의존성을 설치하고, PyTorch는 기본적으로 CUDA 12.8 휠 인덱스에서 설치합니다. Qwen3-ASR는 `qwen-asr==0.0.6`와 `transformers==4.57.6` 조합으로 고정하고, resolver 역추적을 줄이기 위해 qwen-asr UI 의존성인 `gradio==6.17.3`도 함께 고정합니다. SaT 문장 경계용 `wtpsplit`은 `huggingface-hub` 버전 충돌을 피하기 위해 `requirements.txt` resolver 대상에서 제외하고 `--no-deps`로 별도 설치합니다. 대신 `cached_property`, `mosestokenizer`, `skops`, `adapters` 같은 충돌 없는 wtpsplit 런타임 의존성은 `requirements.txt`에 명시합니다.
-- config GUI의 받아쓰기 AI 탭에서 현재 선택한 STT/STT 결과 문장 경계 처리/번역 모델을 다운로드할 수 있습니다. 중국어 STT는 현재 Qwen3-ASR transformers 단발 추론을 우선 후보로 사용합니다. `qwen3-asr-vllm-streaming`은 vLLM 의존성이 `mediapipe`/`protobuf`와 충돌해 공유 `.venv`에서는 지원하지 않으며, 별도 격리 런타임 설계가 필요합니다. setup은 모델 다운로드를 수행하지 않고 런타임 의존성만 설치합니다.
+- config GUI의 받아쓰기 AI 탭에서 모델 다운로드 매니저 창을 열어 현재 선택한 STT/STT 결과 문장 경계 처리/번역 모델을 다운로드할 수 있습니다. 다운로드 프로세스 출력 감시는 GUI 스레드와 분리된 워커에서 처리합니다. 중국어 STT는 현재 Qwen3-ASR transformers 단발 추론을 우선 후보로 사용합니다. `qwen3-asr-vllm-streaming`은 vLLM 의존성이 `mediapipe`/`protobuf`와 충돌해 공유 `.venv`에서는 지원하지 않으며, 별도 격리 런타임 설계가 필요합니다. setup은 모델 다운로드를 수행하지 않고 런타임 의존성만 설치합니다.
 - 인식 언어는 단일 선택이며 자동 감지는 사용하지 않습니다. 현재 입력 언어를 `한국어 (ko)`, `English (en)`, `中文 (zh)` 중 하나로 명시합니다.
 - `whisper` 번역 백엔드는 Whisper의 `translate` 경로를 사용하므로 영어 번역만 지원합니다. 한국어/영어/중국어 대상 번역은 `nllb-transformers` 백엔드를 사용합니다.
 - `nllb-transformers` 번역을 선택하면 Whisper는 STT 전사(`task=transcribe`)만 수행하고, 번역은 외부 NLLB 텍스트 번역 경로에서만 수행합니다. 이때 `task=translate` 설정은 유효하지 않습니다.
 - NLLB 번역은 실시간 성능을 위해 `translationDevice=cuda`, `translationComputeType=float16`, `translationBeamSize=1`, `translationMaxNewTokens=128`을 기본 테스트값으로 사용하며 실행 단계의 자동 CPU fallback은 허용하지 않습니다.
-- 테스트 설정은 STT 장치와 번역 장치를 모두 `cuda`로 두고, 연산 타입을 `float16`으로 맞춥니다. Whisper large-v3와 NLLB 600M은 CPU/float32에서 지연이 커질 수 있으므로, 실시간 회의 자막처럼 짧은 주기로 전사/번역 창을 갱신하려면 GPU 텐서코어를 쓰는 반정밀도 실행이 유리합니다.
+- 테스트 설정은 STT 장치, STT 결과 문장 경계 처리 장치, 번역 장치를 모두 `cuda`로 두고, 연산 타입을 `float16`으로 맞춥니다. Whisper large-v3, Qwen3-ASR, SaT, NLLB/M2M100 경로는 Linux + NVIDIA CUDA 실행을 전제로 검증하며 CPU/float32를 운영 대안으로 사용하지 않습니다.
 - `float16`은 메모리 사용량과 연산량을 줄여 응답성을 높이는 대신, GPU와 PyTorch/CUDA 빌드가 해당 아키텍처를 지원해야 합니다. 지원하지 않으면 자동 CPU fallback 대신 즉시 실패하도록 두고, CUDA 빌드나 설정을 명확히 수정합니다.
-- config GUI의 `Serve 시작`은 저장된 설정에 적용된 모든 받아쓰기 AI/STT/STT 결과 문장 경계 처리/번역 모델의 로컬 캐시를 먼저 검사합니다. 누락되거나 부분 다운로드 상태인 모델이 있으면 Serve를 시작하지 않고 모델 다운로드 안내창을 표시합니다.
+- config GUI의 `Serve 시작`은 저장된 설정에 적용된 모든 받아쓰기 AI/STT/STT 결과 문장 경계 처리/번역 모델의 로컬 캐시를 먼저 검사합니다. 누락되거나 부분 다운로드 상태인 모델이 있으면 Serve를 시작하지 않고 모델 다운로드 매니저 창을 표시합니다.
 
 안정화 확인 범위:
 

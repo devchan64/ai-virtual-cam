@@ -45,6 +45,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from src.tools.config_builder import build_config
+from src.domain.config import DictationAiConfig
 from src.domain.dictation_ai_defaults import dictation_ai_default, dictation_ai_defaults
 from src.tools.config_io import discover_camera_mode_options, discover_cameras, write_config
 from src.audio.gate import AudioGateConfig, NoiseGate
@@ -133,6 +134,7 @@ DEFAULT_WINDOW_GEOMETRY_META = {
     "dictationAiTranslationWindowGeometry": "780x420+860+119",
     "dictationAiModelDownloadWindowGeometry": "720x420+160+160",
 }
+WINDOW_GEOMETRY_FILE_NAME = "window-geometry.json"
 MIN_WINDOW_WIDTH = 640
 MIN_WINDOW_HEIGHT = 480
 _WINDOW_GEOMETRY_RE = re.compile(
@@ -225,20 +227,30 @@ def _sanitize_window_geometry(geometry: object, screen_width: int, screen_height
     return _format_window_geometry(parts)
 
 
-def _merge_window_geometry_meta(config: dict, existing_meta: dict | None, cached_meta: dict[str, str]) -> None:
-    meta = config.setdefault("meta", {})
-    if not isinstance(meta, dict):
-        meta = {}
-        config["meta"] = meta
-    for key, value in DEFAULT_WINDOW_GEOMETRY_META.items():
-        meta.setdefault(key, value)
-    if isinstance(existing_meta, dict):
-        for key, value in existing_meta.items():
-            if str(key).endswith("Geometry") and isinstance(value, str):
-                meta[str(key)] = value
-    for key, value in cached_meta.items():
-        if str(key).endswith("Geometry") and isinstance(value, str):
-            meta[key] = value
+def _window_geometry_path(config_path: Path) -> Path:
+    return config_path.expanduser().with_name(WINDOW_GEOMETRY_FILE_NAME)
+
+
+def _read_window_geometry_file(config_path: Path) -> dict[str, str]:
+    geometry_path = _window_geometry_path(config_path)
+    if not geometry_path.exists():
+        return {}
+    raw = json.loads(geometry_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        return {}
+    return {str(key): value for key, value in raw.items() if str(key).endswith("Geometry") and isinstance(value, str)}
+
+
+def _write_window_geometry_file(config_path: Path, geometry: dict[str, str]) -> Path:
+    geometry_path = _window_geometry_path(config_path)
+    geometry_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        key: value
+        for key, value in sorted(geometry.items())
+        if str(key).endswith("Geometry") and isinstance(value, str)
+    }
+    geometry_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return geometry_path
 
 
 def _parse_window_geometry_cache_log(line: str) -> tuple[str, str] | None:
@@ -560,6 +572,7 @@ class ConfigGui:
         self._dictation_ai_model_download_btn: ttk.Button | None = None
         self._dictation_ai_model_download_progress: ttk.Progressbar | None = None
         self._dictation_ai_model_download_window: tk.Toplevel | None = None
+        self._dictation_ai_model_download_asset_tree: ttk.Treeview | None = None
         self._dictation_ai_model_download_log_text: tk.Text | None = None
         self._dictation_ai_model_download_on_success: Callable[[], None] | None = None
         self._dictation_ai_model_download_cancelled = False
@@ -900,10 +913,10 @@ class ConfigGui:
             return
         window = tk.Toplevel(self.root)
         self._dictation_ai_model_download_window = window
-        window.title(self._tr("title.dictation_ai_model_download", "받아쓰기 AI 모델 다운로드"))
-        window.transient(self.root)
+        window.title(self._tr("title.dictation_ai_model_download", "받아쓰기 AI 모델 다운로드 매니저"))
         window.columnconfigure(0, weight=1)
-        window.rowconfigure(2, weight=1)
+        window.rowconfigure(2, weight=0)
+        window.rowconfigure(3, weight=1)
         self._restore_named_window_geometry(window, "dictationAiModelDownloadWindowGeometry")
         window.bind("<Configure>", self._on_dictation_ai_model_download_configure)
         window.protocol("WM_DELETE_WINDOW", lambda: self._close_dictation_ai_model_download_dialog(False))
@@ -912,9 +925,9 @@ class ConfigGui:
             window,
             text=self._tr(
                 "msg.dictation_ai_model_download_required" if serve_cmd is not None else "msg.dictation_ai_model_download_selected",
-                "설정에 적용된 받아쓰기 AI/STT/STT 결과 문장 경계 처리/번역 모델 중 로컬 캐시에 없는 모델이 있습니다. 다운로드가 완료될 때까지 Serve는 시작되지 않습니다."
+                "설정에 적용된 받아쓰기 AI/STT/STT 결과 문장 경계 처리/번역 모델 중 로컬 캐시에 없는 모델이 있습니다. 다운로드 매니저에서 완료될 때까지 Serve는 시작되지 않습니다."
                 if serve_cmd is not None
-                else "현재 받아쓰기 AI 설정에서 선택한 STT/STT 결과 문장 경계 처리/번역 모델을 다운로드합니다.",
+                else "현재 받아쓰기 AI 설정에서 선택한 STT/STT 결과 문장 경계 처리/번역 모델을 다운로드 매니저에서 관리합니다.",
             ),
             wraplength=680,
         ).grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 6))
@@ -922,28 +935,52 @@ class ConfigGui:
         self._dictation_ai_model_download_progress = ttk.Progressbar(window, mode="determinate", maximum=100)
         self._dictation_ai_model_download_progress.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 6))
 
-        log_text = tk.Text(window, height=12, wrap="word")
-        log_text.grid(row=2, column=0, sticky="nsew", padx=12, pady=(0, 6))
+        asset_frame = ttk.LabelFrame(
+            window,
+            text=self._tr("label.dictation_ai_model_download_assets", "다운로드 대상"),
+        )
+        asset_frame.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 6))
+        asset_frame.columnconfigure(0, weight=1)
+        asset_tree = ttk.Treeview(
+            asset_frame,
+            columns=("kind", "backend", "model", "status"),
+            show="headings",
+            height=5,
+        )
+        for column, title, width in (
+            ("kind", self._tr("label.dictation_ai_model_download_kind", "구분"), 90),
+            ("backend", self._tr("label.dictation_ai_model_download_backend", "백엔드"), 180),
+            ("model", self._tr("label.dictation_ai_model_download_model", "모델"), 260),
+            ("status", self._tr("label.dictation_ai_model_download_status", "상태"), 100),
+        ):
+            asset_tree.heading(column, text=title)
+            asset_tree.column(column, width=width, anchor="w", stretch=column == "model")
+        asset_tree.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
+        self._dictation_ai_model_download_asset_tree = asset_tree
+        self._populate_dictation_ai_model_download_assets(config)
+
+        log_text = tk.Text(window, height=10, wrap="word")
+        log_text.grid(row=3, column=0, sticky="nsew", padx=12, pady=(0, 6))
         if check_output.strip():
             log_text.insert("end", check_output.strip() + "\n")
         log_text.configure(state="disabled")
         self._dictation_ai_model_download_log_text = log_text
 
         self._dictation_ai_model_download_status_var.set(
-            self._tr("status.dictation_ai_model_download_required", "모델 다운로드가 필요합니다.")
+            self._tr("status.dictation_ai_model_download_required", "모델 다운로드 매니저 대기 중입니다.")
         )
         ttk.Label(window, textvariable=self._dictation_ai_model_download_status_var, foreground="#666", wraplength=680).grid(
-            row=3, column=0, sticky="ew", padx=12, pady=(0, 6)
+            row=4, column=0, sticky="ew", padx=12, pady=(0, 6)
         )
 
         button_frame = ttk.Frame(window)
-        button_frame.grid(row=4, column=0, sticky="ew", padx=12, pady=(0, 12))
+        button_frame.grid(row=5, column=0, sticky="ew", padx=12, pady=(0, 12))
         button_frame.columnconfigure(0, weight=1)
         button_frame.columnconfigure(1, weight=0)
         button_frame.columnconfigure(2, weight=0)
         self._dictation_ai_model_download_btn = ttk.Button(
             button_frame,
-            text=self._tr("button.dictation_ai_model_download", "모델 다운로드"),
+            text=self._tr("button.dictation_ai_model_download", "다운로드 시작"),
             command=lambda: self._start_dictation_ai_model_download(
                 config=config,
                 on_success=(lambda: self._launch_serve_command(serve_cmd)) if serve_cmd is not None else None,
@@ -952,7 +989,7 @@ class ConfigGui:
         self._dictation_ai_model_download_btn.grid(row=0, column=1, sticky="e", padx=(4, 4))
         ttk.Button(
             button_frame,
-            text=self._tr("button.cancel", "취소"),
+            text=self._tr("button.close", "닫기"),
             command=lambda: self._close_dictation_ai_model_download_dialog(False),
         ).grid(row=0, column=2, sticky="e")
 
@@ -978,6 +1015,7 @@ class ConfigGui:
         self._dictation_ai_model_download_window = None
         self._dictation_ai_model_download_btn = None
         self._dictation_ai_model_download_progress = None
+        self._dictation_ai_model_download_asset_tree = None
         self._dictation_ai_model_download_log_text = None
         self._dictation_ai_model_download_on_success = None
         if window is not None:
@@ -1045,6 +1083,78 @@ class ConfigGui:
     def _set_dictation_ai_model_download_status(self, message: str) -> None:
         self._dictation_ai_model_download_status_var.set(message)
 
+    def _dictation_ai_download_config(self, config: dict) -> dict:
+        dictation_ai_cfg = config.get("dictationAi") if isinstance(config.get("dictationAi"), dict) else None
+        if dictation_ai_cfg is not None:
+            return dictation_ai_cfg
+        legacy_cfg = config.get("whisper") if isinstance(config.get("whisper"), dict) else None
+        return legacy_cfg or {}
+
+    def _dictation_ai_model_download_assets(self, config: dict) -> list[tuple[str, str, str]]:
+        dictation_ai_cfg = self._dictation_ai_download_config(config)
+        assets: list[tuple[str, str, str]] = []
+        seen: set[tuple[str, str, str]] = set()
+
+        def add(kind: str, backend: object, model: object) -> None:
+            backend_name = str(backend or "").strip()
+            model_name = str(model or "").strip()
+            if not backend_name or not model_name:
+                return
+            key = (kind, backend_name, model_name)
+            if key in seen:
+                return
+            seen.add(key)
+            assets.append(key)
+
+        for backend_key, model_key in (
+            ("backend", "model"),
+            ("sttBackendEn", "sttModelEn"),
+            ("sttBackendKo", "sttModelKo"),
+            ("sttBackendZh", "sttModelZh"),
+        ):
+            add("stt", dictation_ai_cfg.get(backend_key), dictation_ai_cfg.get(model_key))
+
+        for backend_key, model_key in (
+            ("sentenceBoundaryBackend", "sentenceBoundaryModel"),
+            ("sentenceBoundaryBackendEn", "sentenceBoundaryModelEn"),
+            ("sentenceBoundaryBackendKo", "sentenceBoundaryModelKo"),
+            ("sentenceBoundaryBackendZh", "sentenceBoundaryModelZh"),
+        ):
+            add("boundary", dictation_ai_cfg.get(backend_key), dictation_ai_cfg.get(model_key))
+
+        if bool(dictation_ai_cfg.get("translationEnabled")):
+            for backend_key, model_key in (
+                ("translationBackend", "translationModel"),
+                ("translationBackendEn", "translationModelEn"),
+                ("translationBackendKo", "translationModelKo"),
+                ("translationBackendZh", "translationModelZh"),
+            ):
+                backend = str(dictation_ai_cfg.get(backend_key) or "").strip()
+                if not backend or backend in {"whisper", "mock"}:
+                    continue
+                add("translation", backend, dictation_ai_cfg.get(model_key))
+        return assets
+
+    def _populate_dictation_ai_model_download_assets(self, config: dict) -> None:
+        tree = getattr(self, "_dictation_ai_model_download_asset_tree", None)
+        if tree is None:
+            return
+        for item in tree.get_children():
+            tree.delete(item)
+        pending = self._tr("status.dictation_ai_model_download_asset_pending", "대기")
+        for kind, backend, model in self._dictation_ai_model_download_assets(config):
+            tree.insert("", "end", values=(kind, backend, model, pending))
+
+    def _set_dictation_ai_model_download_asset_status(self, status: str) -> None:
+        tree = getattr(self, "_dictation_ai_model_download_asset_tree", None)
+        if tree is None:
+            return
+        for item in tree.get_children():
+            values = list(tree.item(item, "values"))
+            if len(values) >= 4:
+                values[3] = status
+                tree.item(item, values=tuple(values))
+
     def _on_dictation_ai_model_download_line(self, message: str) -> None:
         self._set_dictation_ai_model_download_status(message)
         log_text = self._dictation_ai_model_download_log_text
@@ -1088,7 +1198,7 @@ class ConfigGui:
     def _build_dictation_ai_model_download_command(self, config: dict | None = None, *, check_only: bool = False) -> list[str]:
         if config is None:
             config = self._build_config(validate_audio=False)
-        whisper_cfg = config.get("whisper") if isinstance(config.get("whisper"), dict) else {}
+        dictation_ai_cfg = self._dictation_ai_download_config(config)
         venv_python = ROOT_DIR / ".venv" / "bin" / "python"
         python_cmd = str(venv_python if venv_python.exists() else Path(sys.executable))
         cmd = [
@@ -1106,8 +1216,8 @@ class ConfigGui:
             ("sttBackendZh", "sttModelZh"),
         )
         for backend_key, model_key in stt_pairs:
-            backend = str(whisper_cfg.get(backend_key) or "").strip()
-            model = str(whisper_cfg.get(model_key) or "").strip()
+            backend = str(dictation_ai_cfg.get(backend_key) or "").strip()
+            model = str(dictation_ai_cfg.get(model_key) or "").strip()
             if backend and model:
                 cmd.extend(["--stt-backend", backend, "--stt-model", model])
 
@@ -1118,12 +1228,12 @@ class ConfigGui:
             ("sentenceBoundaryBackendZh", "sentenceBoundaryModelZh"),
         )
         for backend_key, model_key in boundary_pairs:
-            backend = str(whisper_cfg.get(backend_key) or "").strip()
-            model = str(whisper_cfg.get(model_key) or "").strip()
+            backend = str(dictation_ai_cfg.get(backend_key) or "").strip()
+            model = str(dictation_ai_cfg.get(model_key) or "").strip()
             if backend and model:
                 cmd.extend(["--boundary-backend", backend, "--boundary-model", model])
 
-        if bool(whisper_cfg.get("translationEnabled")):
+        if bool(dictation_ai_cfg.get("translationEnabled")):
             translation_pairs = (
                 ("translationBackend", "translationModel"),
                 ("translationBackendEn", "translationModelEn"),
@@ -1132,8 +1242,8 @@ class ConfigGui:
             )
             seen_translation_assets: set[tuple[str, str]] = set()
             for backend_key, model_key in translation_pairs:
-                translation_backend = str(whisper_cfg.get(backend_key) or "").strip()
-                translation_model = str(whisper_cfg.get(model_key) or "").strip()
+                translation_backend = str(dictation_ai_cfg.get(backend_key) or "").strip()
+                translation_model = str(dictation_ai_cfg.get(model_key) or "").strip()
                 if not translation_backend or translation_backend in {"whisper", "mock"}:
                     continue
                 if not translation_model:
@@ -1169,6 +1279,9 @@ class ConfigGui:
         print(f"[avc] Dictation AI model download starting: {' '.join(cmd)}", flush=True)
         self._set_dictation_ai_model_download_status(
             self._tr("status.dictation_ai_model_download_starting", "모델 다운로드를 시작합니다.")
+        )
+        self._set_dictation_ai_model_download_asset_status(
+            self._tr("status.dictation_ai_model_download_asset_running", "진행 중")
         )
         if self._dictation_ai_model_download_btn is not None:
             self._dictation_ai_model_download_btn.state(["disabled"])
@@ -1236,11 +1349,17 @@ class ConfigGui:
             self._dictation_ai_model_download_btn.state(["!disabled"])
         if self._dictation_ai_model_download_cancelled:
             self._dictation_ai_model_download_cancelled = False
+            self._set_dictation_ai_model_download_asset_status(
+                self._tr("status.dictation_ai_model_download_asset_cancelled", "취소")
+            )
             self._set_dictation_ai_model_download_status(
                 self._tr("status.dictation_ai_model_download_cancelled", "모델 다운로드가 취소되었습니다.")
             )
             return
         if return_code == 0:
+            self._set_dictation_ai_model_download_asset_status(
+                self._tr("status.dictation_ai_model_download_asset_done", "완료")
+            )
             message = self._tr("status.dictation_ai_model_download_done", "모델 다운로드가 완료되었습니다.")
             print(f"[avc] Dictation AI model download finished", flush=True)
             on_success = self._dictation_ai_model_download_on_success
@@ -1249,6 +1368,9 @@ class ConfigGui:
                 on_success()
             return
         else:
+            self._set_dictation_ai_model_download_asset_status(
+                self._tr("status.dictation_ai_model_download_asset_failed", "실패")
+            )
             message = self._tr("status.dictation_ai_model_download_failed", "모델 다운로드 실패(code={code})").format(code=return_code)
             if last_line:
                 message = f"{message}: {last_line}"
@@ -1368,7 +1490,11 @@ class ConfigGui:
         self._window_geometry_save_after_id = self.root.after(600, self._capture_all_window_geometry_meta)
 
     def _restore_window_geometry(self, meta_cfg: dict) -> None:
-        saved = meta_cfg.get("windowGeometry")
+        saved = self._read_geometry_meta().get("windowGeometry")
+        source = WINDOW_GEOMETRY_FILE_NAME
+        if saved is None:
+            saved = meta_cfg.get("windowGeometry")
+            source = "setting.json:meta"
         geometry = _sanitize_window_geometry(
             saved,
             *_window_restore_extent(self.root),
@@ -1376,13 +1502,13 @@ class ConfigGui:
         if geometry is None:
             _log(
                 "WARN [Window geometry restore] "
-                f"setting.json has no valid meta.windowGeometry. saved={saved!r}; "
+                f"no valid windowGeometry in {source}. saved={saved!r}; "
                 "keeping startup geometry until JSON save captures it"
             )
             return
         self.root.geometry(geometry)
         self._geometry_meta_cache()["windowGeometry"] = geometry
-        _log(f"Window geometry restored: key=windowGeometry geometry={geometry}")
+        _log(f"Window geometry restored: key=windowGeometry source={source} geometry={geometry}")
 
     def _restore_preview_window_geometry(self, window: tk.Toplevel, meta_cfg: dict) -> None:
         self._restore_named_window_geometry(window, "previewWindowGeometry", meta_cfg)
@@ -1409,7 +1535,17 @@ class ConfigGui:
         _log(f"Window geometry restored: key={key} geometry={geometry}")
 
     def _read_geometry_meta(self) -> dict:
-        config_path = Path(self.output_path).expanduser()
+        output_path = getattr(self, "output_path", None)
+        if not output_path:
+            return {}
+        config_path = Path(output_path).expanduser()
+        geometry: dict[str, str] = {}
+        try:
+            geometry.update(_read_window_geometry_file(config_path))
+        except Exception as exc:
+            _log(f"Window geometry file load failed: {exc}")
+        if geometry:
+            return geometry
         if not config_path.exists():
             return {}
         try:
@@ -1417,7 +1553,9 @@ class ConfigGui:
             if not isinstance(raw, dict):
                 return {}
             meta = raw.get("meta") or {}
-            return meta if isinstance(meta, dict) else {}
+            if not isinstance(meta, dict):
+                return {}
+            return {str(key): value for key, value in meta.items() if str(key).endswith("Geometry") and isinstance(value, str)}
         except Exception as exc:
             _log(f"Window geometry meta load failed: {exc}")
             return {}
@@ -1475,18 +1613,40 @@ class ConfigGui:
             self._remember_named_window_geometry("audioGateTestWindowGeometry", getattr(self, "_audio_gate_test_window", None))
             self._remember_named_window_geometry("inputMeterWindowGeometry", getattr(self, "_audio_input_meter_window", None))
             self._remember_named_window_geometry("dictationAiModelDownloadWindowGeometry", getattr(self, "_dictation_ai_model_download_window", None))
+            self._save_window_geometry_file()
         except Exception as exc:
             _log(f"ERROR [Window geometry capture] {exc}")
 
+    def _save_window_geometry_file(self) -> None:
+        output_path = getattr(self, "output_path", None)
+        if not output_path:
+            return
+        merged = dict(DEFAULT_WINDOW_GEOMETRY_META)
+        merged.update(self._read_geometry_meta())
+        merged.update(self._geometry_meta_cache())
+        try:
+            path = _write_window_geometry_file(Path(output_path), merged)
+            keys = ",".join(sorted(merged))
+            _log(f"Window geometry saved: path={path} keys={keys}")
+        except Exception as exc:
+            _log(f"ERROR [Window geometry save] {exc}")
+
     def _apply_window_geometry_meta(self, config: dict) -> None:
         self._capture_all_window_geometry_meta()
-        _merge_window_geometry_meta(config, self._read_geometry_meta(), self._geometry_meta_cache())
-        meta = config.get("meta") if isinstance(config.get("meta"), dict) else {}
-        keys = sorted(key for key in meta if str(key).endswith("Geometry"))
-        missing = sorted(key for key in DEFAULT_WINDOW_GEOMETRY_META if key not in meta)
+        meta = config.setdefault("meta", {})
+        if not isinstance(meta, dict):
+            meta = {}
+            config["meta"] = meta
+        for key in list(meta):
+            if str(key).endswith("Geometry"):
+                meta.pop(key, None)
+        geometry = dict(DEFAULT_WINDOW_GEOMETRY_META)
+        geometry.update(self._read_geometry_meta())
+        geometry.update(self._geometry_meta_cache())
+        missing = sorted(key for key in DEFAULT_WINDOW_GEOMETRY_META if key not in geometry)
         if missing:
             raise ValueError(f"Window geometry save failed: missing geometry keys={','.join(missing)}")
-        _log(f"Window geometry saved to setting.json on JSON save: keys={','.join(keys)}")
+        _log("Window geometry kept out of setting.json; saved to window-geometry.json")
 
     def _apply_persistent_meta(self, config: dict) -> None:
         config.setdefault("meta", {})["language"] = self._language_var.get().strip().lower() or self._lang
@@ -2548,11 +2708,7 @@ class ConfigGui:
             return
         meta_cfg = raw.get("meta") or {}
         if isinstance(meta_cfg, dict):
-            self._window_geometry_meta_cache = {
-                str(key): str(value)
-                for key, value in meta_cfg.items()
-                if str(key).endswith("Geometry") and isinstance(value, str)
-            }
+            self._window_geometry_meta_cache = self._read_geometry_meta()
         lang = str(meta_cfg.get("language", "")).strip().lower()
         if lang in {"ko", "en"}:
             self._language_var.set(lang)
@@ -4656,7 +4812,7 @@ class ConfigGui:
             self._default_whisper_runtime_for_language(selected_dictation_ai_language if selected_dictation_ai_language in {"en", "ko", "zh"} else "en"),
         )
 
-        return build_config(
+        config = build_config(
             input_device=iv["input_device"].get(),
             input_width=input_w,
             input_height=input_h,
@@ -4799,6 +4955,8 @@ class ConfigGui:
             dictation_ai_sentence_boundary_device=iv["dictation_ai_sentence_boundary_device"].get().strip(),
             dictation_ai_sentence_boundary_compute_type=iv["dictation_ai_sentence_boundary_compute_type"].get().strip(),
         )
+        DictationAiConfig.from_dict(config.get("dictationAi") or {})
+        return config
 
 
 def parse_args():

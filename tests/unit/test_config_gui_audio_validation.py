@@ -2,7 +2,9 @@ import contextlib
 import importlib
 import io
 import importlib.util
+import json
 import sys
+import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -78,6 +80,27 @@ class _GridParent:
 
     def winfo_children(self):
         return list(self._children)
+
+
+class _DummyTree:
+    def __init__(self):
+        self.rows = []
+
+    def get_children(self):
+        return list(range(len(self.rows)))
+
+    def delete(self, item):
+        self.rows.pop(item)
+
+    def insert(self, parent, index, values):
+        self.rows.append(tuple(values))
+
+    def item(self, item, option=None, **kwargs):
+        if "values" in kwargs:
+            self.rows[item] = tuple(kwargs["values"])
+        if option == "values":
+            return self.rows[item]
+        return {"values": self.rows[item]}
 
 
 
@@ -353,7 +376,7 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
 
 
 
-    def test_start_serve_write_path_preserves_window_geometry_meta(self) -> None:
+    def test_start_serve_write_path_saves_window_geometry_file(self) -> None:
         root = types.SimpleNamespace(
             update_idletasks=lambda: None,
             geometry=lambda: "900x700+120+80",
@@ -365,26 +388,28 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         )
         gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
         gui.root = root
-        gui.output_path = "~/.avc/setting.json"
-        gui._preview_active = False
-        gui._lang = "ko"
-        gui._language_var = types.SimpleNamespace(get=lambda: "ko")
-        gui._window_geometry_meta_cache = {}
-        gui._read_geometry_meta = lambda: {}
-        gui._is_serve_running = lambda: False
-        gui._set_serve_status = lambda *args, **kwargs: None
-        gui._show_error = lambda *args, **kwargs: None
-        gui._tr = lambda key, default: default
-        gui._build_config = lambda: {}
-        gui._build_serve_command = lambda config_path: (_ for _ in ()).throw(RuntimeError("stop after write"))
-        written = {}
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gui.output_path = str(Path(tmpdir) / "setting.json")
+            gui._preview_active = False
+            gui._lang = "ko"
+            gui._language_var = types.SimpleNamespace(get=lambda: "ko")
+            gui._window_geometry_meta_cache = {}
+            gui._is_serve_running = lambda: False
+            gui._set_serve_status = lambda *args, **kwargs: None
+            gui._show_error = lambda *args, **kwargs: None
+            gui._tr = lambda key, default: default
+            gui._build_config = lambda: {}
+            gui._build_serve_command = lambda config_path: (_ for _ in ()).throw(RuntimeError("stop after write"))
+            written = {}
 
-        with mock.patch.object(self.module, "write_config", side_effect=lambda path, config: written.update(config)):
-            self.module.ConfigGui._start_serve(gui)
+            with mock.patch.object(self.module, "write_config", side_effect=lambda path, config: written.update(config)):
+                self.module.ConfigGui._start_serve(gui)
 
-        self.assertEqual(written["meta"]["language"], "ko")
-        self.assertEqual(written["meta"]["windowGeometry"], "900x700+120+80")
-        self.assertIn("dictationAiWindowGeometry", written["meta"])
+            geometry = json.loads((Path(tmpdir) / self.module.WINDOW_GEOMETRY_FILE_NAME).read_text(encoding="utf-8"))
+
+        self.assertEqual(written["meta"], {"language": "ko"})
+        self.assertEqual(geometry["windowGeometry"], "900x700+120+80")
+        self.assertIn("dictationAiWindowGeometry", geometry)
 
     def test_apply_persistent_meta_adds_language_and_geometry_for_all_write_paths(self) -> None:
         root = types.SimpleNamespace(
@@ -400,36 +425,46 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         gui.root = root
         gui._lang = "ko"
         gui._language_var = types.SimpleNamespace(get=lambda: "ko")
-        gui._window_geometry_meta_cache = {}
-        gui._read_geometry_meta = lambda: {}
-        config = {}
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gui.output_path = str(Path(tmpdir) / "setting.json")
+            gui._window_geometry_meta_cache = {}
+            config = {}
 
-        self.module.ConfigGui._apply_persistent_meta(gui, config)
+            self.module.ConfigGui._apply_persistent_meta(gui, config)
+            geometry = json.loads((Path(tmpdir) / self.module.WINDOW_GEOMETRY_FILE_NAME).read_text(encoding="utf-8"))
 
         self.assertEqual(config["meta"]["language"], "ko")
-        self.assertEqual(config["meta"]["windowGeometry"], "900x700+120+80")
+        self.assertNotIn("windowGeometry", config["meta"])
+        self.assertEqual(geometry["windowGeometry"], "900x700+120+80")
         for key in self.module.DEFAULT_WINDOW_GEOMETRY_META:
-            self.assertIn(key, config["meta"])
+            self.assertIn(key, geometry)
 
-    def test_apply_window_geometry_meta_preserves_existing_meta(self) -> None:
+    def test_apply_window_geometry_meta_preserves_existing_geometry_file(self) -> None:
         root = types.SimpleNamespace(
             update_idletasks=lambda: None,
             winfo_geometry=lambda: "900x700+120+80",
         )
         gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
         gui.root = root
-        gui._window_geometry_meta_cache = {"dictationAiWindowGeometry": "780x420+50+119"}
-        gui._read_geometry_meta = lambda: {"dictationAiTranslationWindowGeometry": "780x420+2479+1078"}
-        config = {"meta": {"language": "ko"}}
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gui.output_path = str(Path(tmpdir) / "setting.json")
+            (Path(tmpdir) / self.module.WINDOW_GEOMETRY_FILE_NAME).write_text(
+                json.dumps({"dictationAiTranslationWindowGeometry": "780x420+2479+1078"}),
+                encoding="utf-8",
+            )
+            gui._window_geometry_meta_cache = {"dictationAiWindowGeometry": "780x420+50+119"}
+            config = {"meta": {"language": "ko", "windowGeometry": "legacy"}}
 
-        self.module.ConfigGui._apply_window_geometry_meta(gui, config)
+            self.module.ConfigGui._apply_window_geometry_meta(gui, config)
+            geometry = json.loads((Path(tmpdir) / self.module.WINDOW_GEOMETRY_FILE_NAME).read_text(encoding="utf-8"))
 
         self.assertEqual(config["meta"]["language"], "ko")
-        self.assertEqual(config["meta"]["windowGeometry"], "900x700+120+80")
-        self.assertEqual(config["meta"]["dictationAiWindowGeometry"], "780x420+50+119")
-        self.assertEqual(config["meta"]["dictationAiTranslationWindowGeometry"], "780x420+2479+1078")
+        self.assertNotIn("windowGeometry", config["meta"])
+        self.assertEqual(geometry["windowGeometry"], "900x700+120+80")
+        self.assertEqual(geometry["dictationAiWindowGeometry"], "780x420+50+119")
+        self.assertEqual(geometry["dictationAiTranslationWindowGeometry"], "780x420+2479+1078")
         for key in self.module.DEFAULT_WINDOW_GEOMETRY_META:
-            self.assertIn(key, config["meta"])
+            self.assertIn(key, geometry)
 
 
     def test_restore_window_geometry_keeps_startup_position_when_saved_value_missing(self) -> None:
@@ -464,14 +499,17 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         )
         gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
         gui.root = root
-        gui._window_geometry_meta_cache = {}
-        gui._read_geometry_meta = lambda: {}
-        config = {"meta": {"language": "ko"}}
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gui.output_path = str(Path(tmpdir) / "setting.json")
+            gui._window_geometry_meta_cache = {}
+            config = {"meta": {"language": "ko"}}
 
-        self.module.ConfigGui._apply_window_geometry_meta(gui, config)
+            self.module.ConfigGui._apply_window_geometry_meta(gui, config)
+            geometry = json.loads((Path(tmpdir) / self.module.WINDOW_GEOMETRY_FILE_NAME).read_text(encoding="utf-8"))
 
+        self.assertEqual(config["meta"], {"language": "ko"})
         for key, value in self.module.DEFAULT_WINDOW_GEOMETRY_META.items():
-            self.assertEqual(config["meta"][key], value)
+            self.assertEqual(geometry[key], value)
 
     def test_external_window_geometry_log_updates_memory_cache(self) -> None:
         gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
@@ -579,6 +617,66 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         self.module.ConfigGui._on_dictation_ai_model_download_configure(gui, event)
 
         gui._schedule_save_window_geometry_meta.assert_not_called()
+
+    def test_dictation_ai_model_download_command_uses_dictation_ai_block(self) -> None:
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        config = {
+            "dictationAi": {
+                "backend": "faster-whisper",
+                "model": "large-v3",
+                "sttBackendZh": "qwen3-asr-transformers",
+                "sttModelZh": "qwen3-asr-0.6b",
+                "sentenceBoundaryBackend": "sat",
+                "sentenceBoundaryModel": "sat-3l-sm",
+                "translationEnabled": True,
+                "translationBackend": "nllb-transformers",
+                "translationModel": "facebook/nllb-200-distilled-600M",
+            },
+            "whisper": {
+                "backend": "mock",
+                "model": "mock",
+            },
+        }
+
+        cmd = self.module.ConfigGui._build_dictation_ai_model_download_command(gui, config)
+
+        self.assertIn("--stt-backend", cmd)
+        self.assertIn("faster-whisper", cmd)
+        self.assertIn("qwen3-asr-transformers", cmd)
+        self.assertIn("--boundary-backend", cmd)
+        self.assertIn("sat", cmd)
+        self.assertIn("--translation-backend", cmd)
+        self.assertIn("nllb-transformers", cmd)
+        self.assertNotIn("mock", cmd)
+
+    def test_dictation_ai_model_download_manager_populates_assets(self) -> None:
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        gui._dictation_ai_model_download_asset_tree = _DummyTree()
+        gui._tr = lambda key, default: default
+        config = {
+            "dictationAi": {
+                "backend": "faster-whisper",
+                "model": "large-v3",
+                "sttBackendZh": "qwen3-asr-transformers",
+                "sttModelZh": "qwen3-asr-0.6b",
+                "sentenceBoundaryBackend": "sat",
+                "sentenceBoundaryModel": "sat-3l-sm",
+                "translationEnabled": True,
+                "translationBackend": "nllb-transformers",
+                "translationModel": "facebook/nllb-200-distilled-600M",
+            },
+        }
+
+        self.module.ConfigGui._populate_dictation_ai_model_download_assets(gui, config)
+        rows = gui._dictation_ai_model_download_asset_tree.rows
+
+        self.assertIn(("stt", "faster-whisper", "large-v3", "대기"), rows)
+        self.assertIn(("stt", "qwen3-asr-transformers", "qwen3-asr-0.6b", "대기"), rows)
+        self.assertIn(("boundary", "sat", "sat-3l-sm", "대기"), rows)
+        self.assertIn(("translation", "nllb-transformers", "facebook/nllb-200-distilled-600M", "대기"), rows)
+
+        self.module.ConfigGui._set_dictation_ai_model_download_asset_status(gui, "완료")
+        self.assertTrue(all(row[3] == "완료" for row in gui._dictation_ai_model_download_asset_tree.rows))
 
     def test_close_dictation_ai_model_download_dialog_cancels_running_process(self) -> None:
         process = mock.Mock()

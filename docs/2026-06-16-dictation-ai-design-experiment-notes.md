@@ -21,7 +21,7 @@
 - config GUI의 `Serve 시작`으로 실행할 때만 받아쓰기 AI 전사/번역 창을 연다.
 - CLI `./bin/avc serve`는 기본적으로 받아쓰기 AI 창을 열지 않는다.
 - 받아쓰기 AI 실행은 STT 모델, 번역 모델, STT 결과 문장 경계 처리 모델 준비가 끝난 뒤 입력 장치를 열고 전사를 시작한다.
-- 모델 다운로드는 Serve 시작 전 캐시 검사와 모델 다운로드 안내창에서만 수행한다. Serve 런타임은 로컬 캐시만 사용한다.
+- 모델 다운로드는 Serve 시작 전 캐시 검사와 모델 다운로드 매니저 창에서만 수행한다. 다운로드 프로세스 출력 감시는 GUI 스레드와 분리된 워커에서 처리하며, Serve 런타임은 로컬 캐시만 사용한다.
 - 설정값이 유효하지 않거나 모델/장치 초기화가 실패하면 자동 폴백하지 않고 즉시 실패한다.
 - CUDA/float16이 요구되는 실시간 경로는 CPU fallback으로 계속 실행하지 않는다.
 - config 오류는 모달만으로 표시하지 않고 stdout에도 출력한다.
@@ -50,6 +50,13 @@
 ## 설정 저장 구조
 
 받아쓰기 AI 설정은 `setting.json`의 `dictationAi` 블록에 저장된다. 초기에는 사용 모델이 Whisper였기 때문에 `whisper` 블록으로 시작했지만, 기능이 STT, STT 결과 문장 경계 처리, 번역, 모델 준비 흐름으로 확장되면서 도메인명과 특정 모델명을 동일하게 가져가는 것이 오류가 되었다. 따라서 현재 저장 기준은 기능 도메인명인 `dictationAi`이고, `whisper`는 과거 기술명/일부 내부 구현 맥락에 남은 호환 명칭으로만 취급한다.
+
+실행 전제:
+
+- 받아쓰기 AI는 Linux + NVIDIA CUDA 전용 기능이다.
+- `dictationAi.enabled=true`인 설정은 macOS/Windows 또는 CPU 실행으로 저장/Serve 시작/전사 창 실행할 수 없다.
+- STT, STT 결과 문장 경계 처리, 번역 실행 장치는 모두 `cuda`를 기준으로 검증한다.
+- 과거 설정 파일에 남은 `cpu` 값은 비활성 설정 호환 로딩용으로만 취급하며 운영 대안으로 사용하지 않는다.
 
 주요 active 키:
 
@@ -80,11 +87,11 @@
 
 번역 backend/model/device/compute/beam/token 설정은 번역 대상 언어를 기준으로 묶는다. 기존 active 키는 현재 선택 대상 언어의 projection으로 유지한다.
 
-받아쓰기 AI 창 위치와 UI 언어는 `setting.json`의 `meta`에 저장한다.
+받아쓰기 AI UI 언어는 `setting.json`의 `meta.language`에 저장한다. 창 위치와 크기는 `setting.json`과 분리된 `window-geometry.json`에 자동 저장한다. 과거 `setting.json`의 `meta.*Geometry` 값은 마이그레이션용 fallback으로만 읽는다.
 
-- `meta.dictationAiWindowGeometry`
-- `meta.dictationAiTranslationWindowGeometry`
-- `meta.uiLanguage`
+- `dictationAiWindowGeometry`
+- `dictationAiTranslationWindowGeometry`
+- `dictationAiModelDownloadWindowGeometry`
 
 ## 핵심 문제 정의
 
@@ -394,7 +401,7 @@ Qwen3-ASR vLLM streaming, Dolphin-CN-Dialect, WeNet의 세부 판단은 [받아�
 | 항목 | 현재 판단 |
 | --- | --- |
 | `faster-whisper`, SaT, NLLB/M2M100 | Serve 런타임에서 로컬 캐시만 사용한다. 캐시가 없거나 부분 다운로드 상태면 다운로드하지 않고 실패한다. |
-| 모델 다운로드 | `scripts/setup/download-dictation-ai-models.py`와 config GUI 모델 다운로드 모달 경로로 제한한다. `serve`는 다운로드를 수행하지 않는다. |
+| 모델 다운로드 | `scripts/setup/download-dictation-ai-models.py`와 config GUI 모델 다운로드 매니저 경로로 제한한다. `serve`는 다운로드를 수행하지 않는다. |
 | `qwen-asr` | `qwen-asr==0.0.6`은 `transformers==4.57.6` 요구와 함께 고정한다. |
 | `gradio` | qwen-asr 의존성 범위가 넓어 resolver 역추적을 만들 수 있으므로 dry-run에서 확인한 호환 버전을 고정한다. |
 | `wtpsplit` | Hugging Face Hub 메타데이터 제약이 Qwen3-ASR/transformers와 충돌할 수 있어 setup/env sync에서 `--no-deps` 설치를 전제로 한다. 필요한 런타임 의존성은 별도 명시한다. |

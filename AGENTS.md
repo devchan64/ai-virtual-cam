@@ -44,7 +44,7 @@
 - 설정 GUI는 탭/위젯/동작 단위로 계속 분리한다. 큰 변경은 기존 `scripts/config/*_tab.py` 패턴을 따른다.
 - 사용자 기능 도메인은 큰 축 기준으로 `카메라`와 `오디오`로 구분한다. STT, 문장 추적, 번역, 모델 준비는 오디오의 하위 도메인인 `받아쓰기 AI`로 부른다. Whisper는 받아쓰기 AI의 백엔드/기술명일 뿐 사용자 기능명으로 확대하지 않는다.
 - 받아쓰기 AI 전사/번역 창은 config GUI의 `Serve 시작`에서만 열며, 창에는 복사용 STT/번역 결과만 표시한다. 추적 로그는 stdout/stderr에 남긴다.
-- 받아쓰기 AI 실시간 경로는 CUDA/float16 중심의 Fail-Fast 정책을 따른다. NLLB 선택 시 Whisper 백엔드는 `task=transcribe`만 수행하고 번역은 NLLB 경로만 사용한다.
+- 받아쓰기 AI 실시간 경로는 Linux + NVIDIA CUDA 전용이며 CUDA/float16 중심의 Fail-Fast 정책을 따른다. macOS/Windows/CPU 실행은 운영 대안으로 두지 않는다. NLLB 선택 시 Whisper 백엔드는 `task=transcribe`만 수행하고 번역은 NLLB 경로만 사용한다.
 - 받아쓰기 AI/설정 GUI 창 위치와 UI 언어는 `setting.json`의 `meta`에 저장한다. README 받아쓰기 AI 문서는 `docs/images/whisper-config-runtime-sample.png` 기준으로 유지한다.
 
 ## 문서 배치 정책

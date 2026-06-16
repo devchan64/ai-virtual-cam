@@ -21,6 +21,7 @@ from src.app.dictation_window import (
     _is_modal_output_event,
     _load_ui_language,
     _load_window_geometry,
+    _require_linux_cuda_runtime,
     _window_manager_geometry,
     _sanitize_window_geometry,
     _save_window_geometry,
@@ -30,6 +31,25 @@ from src.app.dictation_window import (
 
 
 class WhisperWindowGeometryTest(unittest.TestCase):
+
+    def test_dictation_ai_runtime_requires_linux_cuda(self) -> None:
+        config = DictationAiConfig.from_dict({"enabled": False})
+        with mock.patch("src.app.dictation_window.platform.system", return_value="Darwin"):
+            with self.assertRaisesRegex(RuntimeError, "Linux \\+ NVIDIA CUDA"):
+                _require_linux_cuda_runtime(config)
+
+        config = DictationAiConfig.from_dict({"enabled": False, "device": "cpu"})
+        with mock.patch("src.app.dictation_window.platform.system", return_value="Linux"):
+            with self.assertRaisesRegex(RuntimeError, "dictationAi.device"):
+                _require_linux_cuda_runtime(config)
+
+    def test_dictation_ai_runtime_requires_torch_cuda_available(self) -> None:
+        config = DictationAiConfig.from_dict({"enabled": False})
+        torch = SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False))
+        with mock.patch("src.app.dictation_window.platform.system", return_value="Linux"):
+            with mock.patch.dict("sys.modules", {"torch": torch}):
+                with self.assertRaisesRegex(RuntimeError, "torch.cuda.is_available\\(\\)=false"):
+                    _require_linux_cuda_runtime(config)
 
     def test_window_manager_geometry_prefers_wm_geometry_over_widget_geometry(self) -> None:
         window = SimpleNamespace(
@@ -50,7 +70,7 @@ class WhisperWindowGeometryTest(unittest.TestCase):
 
         self.assertEqual(window._current_geometry(), "886x608+2538+510")
 
-    def test_caches_geometry_by_log_without_writing_config_meta(self) -> None:
+    def test_saves_geometry_to_window_geometry_file_without_writing_config_meta(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "setting.json"
             path.write_text(json.dumps({"dictationAi": {"enabled": True}, "meta": {"language": "ko"}}), encoding="utf-8")
@@ -60,11 +80,13 @@ class WhisperWindowGeometryTest(unittest.TestCase):
                 _save_window_geometry(path, "dictationAiWindowGeometry", "820x460+120+80")
 
             raw = json.loads(path.read_text(encoding="utf-8"))
+            geometry = json.loads((Path(tmpdir) / "window-geometry.json").read_text(encoding="utf-8"))
 
         self.assertEqual(raw["meta"], {"language": "ko"})
+        self.assertEqual(geometry["dictationAiWindowGeometry"], "820x460+120+80")
         self.assertIn("window geometry cached: key=dictationAiWindowGeometry geometry=820x460+120+80", stdout.getvalue())
 
-    def test_caches_translation_geometry_by_log_without_writing_config_meta(self) -> None:
+    def test_saves_translation_geometry_to_window_geometry_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "setting.json"
             path.write_text(json.dumps({"dictationAi": {"enabled": True}, "meta": {"dictationAiWindowGeometry": "820x460+120+80"}}), encoding="utf-8")
@@ -74,8 +96,11 @@ class WhisperWindowGeometryTest(unittest.TestCase):
                 _save_window_geometry(path, "dictationAiTranslationWindowGeometry", "780x420+300+140")
 
             raw = json.loads(path.read_text(encoding="utf-8"))
+            geometry = json.loads((Path(tmpdir) / "window-geometry.json").read_text(encoding="utf-8"))
 
         self.assertEqual(raw["meta"], {"dictationAiWindowGeometry": "820x460+120+80"})
+        self.assertEqual(geometry["dictationAiWindowGeometry"], "820x460+120+80")
+        self.assertEqual(geometry["dictationAiTranslationWindowGeometry"], "780x420+300+140")
         self.assertIn("window geometry cached: key=dictationAiTranslationWindowGeometry geometry=780x420+300+140", stdout.getvalue())
 
     def test_loads_localized_window_titles_from_config_meta_language(self) -> None:
@@ -279,7 +304,33 @@ class WhisperWindowGeometryTest(unittest.TestCase):
         self.assertEqual(geometry, DEFAULT_WINDOW_GEOMETRY_META["dictationAiSttStatusWindowGeometry"])
         self.assertIn("window geometry defaulted: key=dictationAiSttStatusWindowGeometry", stdout.getvalue())
 
-    def test_load_window_geometry_uses_saved_value_before_default(self) -> None:
+    def test_load_window_geometry_uses_window_geometry_file_before_default(self) -> None:
+        class Root:
+            def winfo_vrootwidth(self) -> int:
+                return 1920
+
+            def winfo_vrootheight(self) -> int:
+                return 1080
+
+            def winfo_screenwidth(self) -> int:
+                return 1920
+
+            def winfo_screenheight(self) -> int:
+                return 1080
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "setting.json"
+            path.write_text(json.dumps({"meta": {"dictationAiWindowGeometry": "legacy"}}), encoding="utf-8")
+            (Path(tmpdir) / "window-geometry.json").write_text(
+                json.dumps({"dictationAiWindowGeometry": "820x460+120+80"}),
+                encoding="utf-8",
+            )
+
+            geometry = _load_window_geometry(path, "dictationAiWindowGeometry", Root())
+
+        self.assertEqual(geometry, "820x460+120+80")
+
+    def test_load_window_geometry_falls_back_to_legacy_setting_meta(self) -> None:
         class Root:
             def winfo_vrootwidth(self) -> int:
                 return 1920

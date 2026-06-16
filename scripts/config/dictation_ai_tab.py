@@ -94,11 +94,11 @@ def build_whisper_tab(
     input_row += 1
     dictation_ai_model_download_btn = ttk.Button(
         input_frame,
-        text=gui._tr("button.dictation_ai_model_download_selected", "선택 모델 다운로드"),
+        text=gui._tr("button.dictation_ai_model_download_selected", "모델 다운로드 매니저"),
         command=gui._show_dictation_ai_model_download_dialog_for_current_config,
     )
     gui._register_localized_widget(
-        dictation_ai_model_download_btn, "button.dictation_ai_model_download_selected", "선택 모델 다운로드"
+        dictation_ai_model_download_btn, "button.dictation_ai_model_download_selected", "모델 다운로드 매니저"
     )
     dictation_ai_model_download_btn.grid(row=input_row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0))
     input_row += 1

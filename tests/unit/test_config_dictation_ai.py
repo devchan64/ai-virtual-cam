@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from src.domain.config import AppConfig, DictationAiConfig
 from src.domain.contracts.dictation_ai import (
@@ -287,7 +288,8 @@ class DictationAiConfigTest(unittest.TestCase):
             path = Path(tmpdir) / "setting.json"
             path.write_text(json.dumps(config), encoding="utf-8")
 
-            loaded = AppConfig.load(path)
+            with mock.patch("src.domain.config.platform.system", return_value="Linux"):
+                loaded = AppConfig.load(path)
 
         self.assertTrue(loaded.dictationAi.enabled)
         self.assertEqual(loaded.dictationAi.inputDevice, "pulse")
@@ -319,7 +321,30 @@ class DictationAiConfigTest(unittest.TestCase):
         self.assertEqual(loaded.dictationAi.sentenceBoundaryDevice, dictation_ai_default("sentenceBoundaryDevice"))
         self.assertEqual(loaded.dictationAi.sentenceBoundaryComputeType, dictation_ai_default("sentenceBoundaryComputeType"))
 
+    def test_dictation_ai_enabled_requires_linux(self) -> None:
+        with mock.patch("src.domain.config.platform.system", return_value="Darwin"):
+            with self.assertRaisesRegex(ValueError, "Linux with NVIDIA CUDA"):
+                DictationAiConfig.from_dict({"enabled": True})
 
+        with mock.patch("src.domain.config.platform.system", return_value="Darwin"):
+            loaded = DictationAiConfig.from_dict({"enabled": False, "device": "cpu"})
+
+        self.assertFalse(loaded.enabled)
+        self.assertEqual(loaded.device, "cpu")
+
+    def test_dictation_ai_enabled_requires_cuda_devices(self) -> None:
+        with mock.patch("src.domain.config.platform.system", return_value="Linux"):
+            with self.assertRaisesRegex(ValueError, "dictationAi.device"):
+                DictationAiConfig.from_dict({"enabled": True, "device": "cpu"})
+            with self.assertRaisesRegex(ValueError, "dictationAi.sentenceBoundaryDevice"):
+                DictationAiConfig.from_dict({"enabled": True, "sentenceBoundaryDevice": "cpu"})
+            with self.assertRaisesRegex(ValueError, "dictationAi.translationDeviceKo"):
+                DictationAiConfig.from_dict({
+                    "enabled": True,
+                    "translationEnabled": True,
+                    "translationTargetLanguage": "ko",
+                    "translationDeviceKo": "cpu",
+                })
 
     def test_dictation_ai_rejects_removed_chinese_funasr_stt_backend(self) -> None:
         with self.assertRaisesRegex(ValueError, "dictationAi.sttBackendZh"):

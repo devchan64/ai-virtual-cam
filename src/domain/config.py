@@ -1220,6 +1220,29 @@ class DictationAiConfig:
         dictation_ai_spec("sentenceBoundaryComputeType").validate_allowed(
             config.sentenceBoundaryComputeType, path="dictationAi.sentenceBoundaryComputeType"
         )
+        if config.enabled:
+            if platform.system() != "Linux":
+                raise ValueError(
+                    "받아쓰기 AI는 Linux + NVIDIA CUDA 전용입니다. "
+                    "dictationAi.enabled=true requires Linux with NVIDIA CUDA. "
+                    f"currentOS={platform.system()}"
+                )
+            for path, device in (
+                ("dictationAi.device", config.device),
+                ("dictationAi.sentenceBoundaryDevice", config.sentenceBoundaryDevice),
+            ):
+                if device != "cuda":
+                    raise ValueError(f"{path} must be cuda when dictationAi.enabled=true")
+            if config.translationEnabled:
+                translation_device_fields = (
+                    ("dictationAi.translationDevice", config.translationDevice),
+                    ("dictationAi.translationDeviceEn", config.translationDeviceEn),
+                    ("dictationAi.translationDeviceKo", config.translationDeviceKo),
+                    ("dictationAi.translationDeviceZh", config.translationDeviceZh),
+                )
+                for path, device in translation_device_fields:
+                    if device != "cuda":
+                        raise ValueError(f"{path} must be cuda when dictationAi.enabled=true")
         return config
 
 

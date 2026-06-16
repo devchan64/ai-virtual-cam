@@ -102,6 +102,18 @@ legacy/global 기본값:
 - 언어별 `stepSeconds{Lang}`도 `windowSeconds{Lang}`보다 크면 안 된다.
 - 중국어는 `windowSecondsZh=12.0`을 시작점으로 사용한다. 16, 20, 24, 30초는 실험값이다.
 
+## 실행 플랫폼/디바이스 계약
+
+받아쓰기 AI는 Linux + NVIDIA CUDA 전용 기능이다. `dictationAi.enabled=false`인 과거 설정 파일은 호환 로딩을 위해 일부 `cpu` 값을 읽을 수 있지만, `dictationAi.enabled=true`인 실제 실행 설정은 다음 조건을 만족해야 한다.
+
+- OS는 Linux여야 한다.
+- `dictationAi.device`는 `cuda`여야 한다.
+- `dictationAi.sentenceBoundaryDevice`는 `cuda`여야 한다.
+- 번역을 켠 경우 active `translationDevice`와 대상 언어별 `translationDeviceEn/Ko/Zh`는 모두 `cuda`여야 한다.
+- 전사 창 실행 시 `torch.cuda.is_available()`이 `false`면 자동 CPU fallback 없이 실패한다.
+
+macOS/Windows, CPU 실행, `auto`에서 CPU로 암묵 전환되는 경로는 운영 계약에 포함하지 않는다.
+
 ## STT 결과 문장 경계 처리 계약
 
 | 키 | 기본값 | 허용값/범위 | 의미 |
@@ -114,7 +126,7 @@ legacy/global 기본값:
 | `sentenceBoundaryModelKo` | `sat-3l-sm` | non-empty string | 한국어 경계 모델 |
 | `sentenceBoundaryBackendZh` | `sat` | `sat`, `mock` | 중국어 경계 backend |
 | `sentenceBoundaryModelZh` | `sat-3l-sm` | non-empty string | 중국어 경계 모델 |
-| `sentenceBoundaryDevice` | `cuda` | `cuda`, `cpu` | 경계 모델 실행 장치 |
+| `sentenceBoundaryDevice` | `cuda` | `cuda`, `cpu` | 경계 모델 실행 장치. enabled 실행 시 `cuda` 필수 |
 | `sentenceBoundaryComputeType` | `float16` | `float16`, `float32` | 경계 모델 연산 타입 |
 
 운영 계약:
@@ -133,7 +145,7 @@ legacy/global 기본값:
 | `translationTargetLanguage` | `ko` | `en`, `ko`, `zh` | 번역 대상 언어 |
 | `translationBackend` | `nllb-transformers` | `whisper`, `nllb-transformers`, `m2m100-transformers`, `mock` | active 번역 backend |
 | `translationModel` | `facebook/nllb-200-distilled-600M` | backend별 모델 목록 | active 번역 모델 |
-| `translationDevice` | `cuda` | `cuda`, `cpu` | active 번역 장치 |
+| `translationDevice` | `cuda` | `cuda`, `cpu` | active 번역 장치. enabled 실행 시 `cuda` 필수 |
 | `translationComputeType` | `float16` | `float16`, `float32` | active 번역 연산 타입 |
 | `translationBeamSize` | `1` | `1` - `8` | 번역 beam |
 | `translationMaxNewTokens` | `128` | `16` - `512` | 번역 최대 토큰 |
@@ -191,6 +203,8 @@ Serve 시작 전 모델 캐시 검사 대상:
 다음 조건은 자동 대체 없이 실패해야 한다.
 
 - `dictationAi.inputDevice`가 비어 있다.
+- `dictationAi.enabled=true`인데 OS가 Linux가 아니다.
+- `dictationAi.enabled=true`인데 STT/STT 결과 문장 경계 처리/번역 실행 장치가 `cuda`가 아니다.
 - `language`가 `ko`, `en`, `zh` 중 하나가 아니다.
 - 언어별 STT backend가 해당 언어의 허용 목록에 없다.
 - 언어별 STT model이 비어 있다.
