@@ -800,13 +800,15 @@ class WhisperTranscriptWorker:
                     stable_analysis.stable_internal_chars,
                     stable_analysis.stable_overlap_source,
                 )
-                staged_age = 0
+                staged_age += 1
+                count_metric("stage_age_tick")
                 staged_forced = staged_forced or forced
                 required_confirmations = _sentence_required_confirmations(staged_forced)
                 self._emit(
                     "status",
                     "받아쓰기 AI stage 리비전: "
                     f"chunk={chunks} confirmations={staged_confirmations}/{required_confirmations} "
+                    f"staged_age={staged_age} "
                     f"forced={staged_forced} preferred_changed={preferred_changed} "
                     f"staged_before={_diagnostic_tail(staged_before)} candidate={_diagnostic_tail(candidate)} "
                     f"preferred={_diagnostic_tail(preferred)}",
@@ -818,6 +820,22 @@ class WhisperTranscriptWorker:
                     staged_forced,
                 ):
                     return finalize_staged_sentence(detected, "confirmed_forced" if staged_forced else "confirmed")
+                if _should_finalize_before_replacement(
+                    staged_sentence,
+                    detected,
+                    staged_confirmations,
+                    staged_age,
+                    sentence_finalize_age,
+                    staged_forced,
+                ):
+                    max_age = _sentence_max_age_chunks(staged_forced, sentence_finalize_age)
+                    if staged_age >= max_age:
+                        count_metric("stage_age_finalize")
+                        reason = "aged_forced" if staged_forced else "aged"
+                    else:
+                        count_metric("stage_finalize_stable_cjk")
+                        reason = "stable_cjk"
+                    return finalize_staged_sentence(detected, reason)
                 self._emit("transcript", staged_sentence, log_text=f"[{detected}] {staged_sentence}", final=False)
                 return []
             count_metric("stage_replace")
@@ -904,7 +922,7 @@ class WhisperTranscriptWorker:
             )
 
         def age_staged_sentence(detected: str, pending_text: str = "") -> list[str]:
-            nonlocal staged_age
+            nonlocal staged_sentence, staged_confirmations, staged_age, staged_forced
             if not staged_sentence:
                 return []
             if not _should_age_staged_sentence(staged_sentence, pending_text):
@@ -921,6 +939,29 @@ class WhisperTranscriptWorker:
             count_metric("stage_age_tick")
             max_age = _sentence_max_age_chunks(staged_forced, sentence_finalize_age)
             if staged_age >= max_age:
+                if not _should_finalize_before_replacement(
+                    staged_sentence,
+                    detected,
+                    staged_confirmations,
+                    staged_age,
+                    sentence_finalize_age,
+                    staged_forced,
+                ):
+                    count_metric("stage_age_quality_blocked")
+                    count_segment_state("suppressed")
+                    flags = _final_sentence_diagnostic_flags(staged_sentence, detected)
+                    self._emit(
+                        "status",
+                        "받아쓰기 AI staged age 확정 차단: "
+                        f"chunk={chunks} flags={','.join(flags) or 'none'} "
+                        f"staged_tail={_diagnostic_tail(staged_sentence)}",
+                        display=False,
+                    )
+                    staged_sentence = ""
+                    staged_confirmations = 0
+                    staged_age = 0
+                    staged_forced = False
+                    return []
                 count_metric("stage_age_finalize")
                 return finalize_staged_sentence(detected, "aged_forced" if staged_forced else "aged")
             return []
@@ -1250,6 +1291,17 @@ class WhisperTranscriptWorker:
                 current_audio_queue_drops = self._audio_queue_drop_count()
                 chunk_audio_queue_drops = current_audio_queue_drops - last_audio_queue_drops
                 last_audio_queue_drops = current_audio_queue_drops
+                current_queue_size = self._audio_queue.qsize()
+                chunk_lifecycle_metrics["input_queue_size_peak"] = max(
+                    chunk_lifecycle_metrics.get("input_queue_size_peak", 0),
+                    current_queue_size,
+                )
+                lifecycle_metrics["input_queue_size_peak"] = max(
+                    lifecycle_metrics.get("input_queue_size_peak", 0),
+                    current_queue_size,
+                )
+                if current_queue_size >= max(5, int(round(window_seconds / max(step_seconds, 0.001)))):
+                    count_metric("input_queue_backlog_chunk")
                 if chunk_audio_queue_drops:
                     chunk_lifecycle_metrics["input_queue_drops"] = chunk_audio_queue_drops
                     lifecycle_metrics["input_queue_drops"] = lifecycle_metrics.get("input_queue_drops", 0) + chunk_audio_queue_drops
@@ -1278,6 +1330,10 @@ class WhisperTranscriptWorker:
                     0,
                 )
                 stage_finalize_before_replace_count = chunk_lifecycle_metrics.get("stage_finalize_before_replace", 0)
+                stage_finalize_stable_cjk_count = chunk_lifecycle_metrics.get("stage_finalize_stable_cjk", 0)
+                stage_age_finalize_count = chunk_lifecycle_metrics.get("stage_age_finalize", 0)
+                stage_age_quality_blocked_count = chunk_lifecycle_metrics.get("stage_age_quality_blocked", 0)
+                stage_start_count = chunk_lifecycle_metrics.get("stage_start", 0)
                 finalize_count = chunk_lifecycle_metrics.get("finalized", 0)
                 duplicate_suppressed_count = chunk_lifecycle_metrics.get("candidate_duplicate_suppressed", 0)
                 recent_echo_suppressed_count = chunk_lifecycle_metrics.get("finalize_recent_echo_suppressed", 0)
@@ -1309,6 +1365,11 @@ class WhisperTranscriptWorker:
                 final_quality_count = sum(
                     value for key, value in chunk_lifecycle_metrics.items() if key.startswith("final_quality_")
                 )
+                revision_confirmation_observed_count = (
+                    stage_revision_reset_count + stage_revision_preserved_internal_count
+                )
+                input_queue_size_peak = chunk_lifecycle_metrics.get("input_queue_size_peak", 0)
+                input_queue_backlog_count = chunk_lifecycle_metrics.get("input_queue_backlog_chunk", 0)
                 raw_without_final_count = 1 if raw_window_text and not final_sentences else 0
                 if raw_without_final_count:
                     count_metric("raw_without_final")
@@ -1324,6 +1385,10 @@ class WhisperTranscriptWorker:
                     f"revision_internal_mid={stage_revision_internal_mid_count} "
                     f"revision_internal_low={stage_revision_internal_low_count} "
                     f"finalize_before_replace={stage_finalize_before_replace_count} "
+                    f"finalize_stable_cjk={stage_finalize_stable_cjk_count} "
+                    f"age_finalize={stage_age_finalize_count} "
+                    f"age_quality_blocked={stage_age_quality_blocked_count} "
+                    f"stage_start={stage_start_count} "
                     f"duplicate_suppressed={duplicate_suppressed_count} recent_echo_suppressed={recent_echo_suppressed_count} "
                     f"delta_trimmed={delta_trimmed_count} "
                     f"stable_prefix_chars={stable_prefix_chars} unstable_tail_chars={unstable_tail_chars} "
@@ -1341,7 +1406,11 @@ class WhisperTranscriptWorker:
                     f"segment_state_revised={segment_state_revised_count} "
                     f"final_quality={final_quality_count} translation_skip={translation_skip_count} "
                     f"raw_without_final={raw_without_final_count} "
+                    f"finalized_per_stage_start={finalize_count / max(stage_start_count, 1):.2f} "
+                    f"revision_preserve_rate={stage_revision_preserved_internal_count / max(revision_confirmation_observed_count, 1):.2f} "
                     f"replace_unconfirmed_rate={stage_replaced_unconfirmed_count / max(stage_replace_count, 1):.2f} "
+                    f"input_queue_size_peak={input_queue_size_peak} "
+                    f"input_queue_backlog={input_queue_backlog_count} "
                     f"decision_count={stage_decision_count} "
                     f"completed_coalesced={chunk_lifecycle_metrics.get('completed_coalesced', 0)}",
                     display=False,
@@ -1358,7 +1427,7 @@ class WhisperTranscriptWorker:
                     f"total_step_load={total_elapsed / max(step_seconds, 0.001):.2f} "
                     f"effective_latency_estimate={window_seconds + total_elapsed:.2f}s "
                     f"input_queue_drops={chunk_audio_queue_drops} input_queue_drops_total={current_audio_queue_drops} "
-                    f"queue_size={self._audio_queue.qsize()} "
+                    f"queue_size={current_queue_size} queue_peak={input_queue_size_peak} "
                     f"beam={self._cfg.beamSize} max_tokens={self._cfg.maxNewTokens} text_chars={len(text)}",
                     display=False,
                 )

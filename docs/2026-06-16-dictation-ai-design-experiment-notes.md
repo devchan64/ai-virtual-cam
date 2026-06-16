@@ -173,7 +173,7 @@ final-only 번역
 | `boundary_detector_language` | detector가 현재 맞춰진 언어 | 언어 변경 시 detector 재생성 필요 여부를 판단한다. |
 | `staged_sentence` | final 전 재확인 중인 완료 후보 | 다음 window에서 revision/교체/확정될 수 있다. |
 | `staged_confirmations` | 같은 후보가 재관측된 횟수 | `sentenceFinalizeAge` 기준과 함께 final 승격에 사용한다. |
-| `staged_age` | 후보가 staged 상태로 남은 chunk 수 | 장기 보류 진단 신호다. 단독 확정/폐기 기준으로 쓰지 않는다. |
+| `staged_age` | 후보가 staged 상태로 남은 chunk 수 | 품질 게이트를 통과한 후보의 장기 보류를 막는 보조 확정 기준이다. revision lifecycle이 유지되면 누적한다. |
 | `staged_forced` | forced 후보 여부 | forced 후보도 별도 재확인과 품질 게이트를 통과해야 한다. |
 | `replacement_decision` | staged 교체 판단 사유 | `unconfirmed`, `open_korean_clause`, `partial_revision`, `partial_preserve`, `duplicate_or_suffix`, `aged` 같은 이유를 로그로 남긴다. |
 | `lifecycle_metrics` | 세션 누적 생명주기 카운터 | 장기 품질 추세와 회귀 판단에 사용한다. |
@@ -373,7 +373,7 @@ NLLB 번역 기본 테스트값:
 | `final_quality` | final 후보의 품질 위험을 추적하는지 | 90% 이상 |
 | `coalesce` | 중국어 multi-completed 후보를 하나의 관찰 단위로 병합하는지 | 100% |
 | `duplicate_suppression` | 이미 확정/관측된 후보가 중복 출력되지 않도록 억제되는지 | 100% |
-| `runtime_metrics` | 런타임 누적 지표가 안정성 요약으로 올바르게 집계되는지 | 100% |
+| `runtime_metrics` | 런타임 누적 지표와 queue/backlog 지표가 안정성 요약으로 올바르게 집계되는지 | 100% |
 | `translation_quality` | 번역 출력의 고유명사/도메인 용어/환각 회귀를 추적하는지 | 80% 이상 |
 
 향후 정답 전사 코퍼스가 준비되면 `WER`, 한국어/중국어 `CER`, deletion rate, duplicate insertion rate, finalization latency, revokes per second를 추가한다.
@@ -384,9 +384,9 @@ NLLB 번역 기본 테스트값:
 
 3개 축:
 
-1. 안정성 축: 리비전 빈도와 규모 감소 (`UPWR`, `UPSR`, `replaced ratio`, `rollback_rate`)
+1. 안정성 축: 리비전 빈도와 규모 감소 (`UPWR`, `UPSR`, `replaced ratio`, `rollback_rate`, `finalized_per_stage_start`, `revision_preserve_rate`)
 2. 경계 축: 문장 경계 추정 품질 (`pending_chars`, `forced_by`, `boundary_latency`, `end_marks_stable`, `boundary_right_context`)
-3. 지연/번역 축: 실시간성 (`stt_rtf`, `total_rtf`), 번역 부하 (`confirmed_only_delta`, `translation_redundant_ratio`)
+3. 지연/번역 축: 실시간성 (`stt_rtf`, `total_rtf`, `input_queue_size_peak`, `input_queue_backlog`), 번역 부하 (`confirmed_only_delta`, `translation_redundant_ratio`)
 
 권장 실험 절차:
 
@@ -429,7 +429,7 @@ NLLB 번역 기본 테스트값:
 | 이벤트 | 권장 필드 |
 | --- | --- |
 | split event | `chunk`, `completed`, `final`, `pending_text`, `forced_by`, `pending_overrun`, `boundary_backend`, `boundary_end_marks`, `boundary_right_context`, `segment_state_pending`, `segment_state_staged`, `segment_state_final`, `segment_state_suppressed`, `segment_state_revised`, `pending_chars`, `pending_chunks`, `pending_chars_per_chunk` |
-| commit event | `step`, `window`, `stt_elapsed`, `stt_rtf`, `translation_elapsed`, `total_elapsed`, `total_rtf`, `beam`, `max_tokens`, `text_chars` |
+| commit event | `step`, `window`, `stt_elapsed`, `stt_rtf`, `translation_elapsed`, `total_elapsed`, `total_rtf`, `input_queue_drops`, `queue_size`, `queue_peak`, `beam`, `max_tokens`, `text_chars` |
 | transcript fragment | `delta_text`, `state`, `revision_id` |
 
 판정 규칙:
@@ -602,6 +602,34 @@ stable token 지표를 추가한 뒤 같은 중국어 실시간 경로를 약 5�
 - final 확정 기준은 그대로 유지한다. 이 튜닝은 reset 완화만 수행하며 확정/번역 큐 진입을 직접 앞당기지 않는다.
 - 안정성 요약 로그에 `revision_internal_high`, `revision_internal_mid`, `revision_internal_low`를 추가한다.
 - 추적 테스트에 high bucket 보존 케이스와 mid bucket reset 케이스를 추가한다.
+
+### 2026-06-17 중국어 30분 운영 모니터링
+
+중국어 실시간 경로를 약 30분 모니터링했다. 실행 조건은 운영 로그 기준 `qwen3-asr-0.6b`, `window=15.0`, `step=1.0`, `beam=3`, `maxNewTokens=192`다.
+
+관측값:
+
+- `stt_step_load`와 `total_step_load`는 대부분 1.0 미만이고 `input_queue_drops=0`으로 유지되어 계산 성능은 주 병목으로 보지 않는다.
+- 일부 구간에서 queue가 순간적으로 50까지 쌓였다. drop은 없었지만 queue peak/backlog는 별도 추적 지표가 필요하다.
+- chunk 656 누적 스냅샷 기준 `finalized=36`, `stage_start=141`, `stage_replaced_unconfirmed=104`, `stage_revision_confirmation_preserved_internal=121`, `stage_revision_confirmation_reset=192`였다.
+- 위 스냅샷의 `finalized_per_stage_start`는 약 0.255, `stage_replaced_unconfirmed_per_stage_start`는 약 0.738, `revision_preserve_rate`는 약 0.387이다.
+- `stage_candidate_quality_blocked`, `raw_without_final`, `segment_state_revised/suppressed`가 계속 누적되어 품질 병목은 처리량보다 staged 생명주기 churn에 가깝다.
+- 문장형 후보가 보이더라도 `staged_confirmations=1/3` 또는 `2/3` 상태에서 다음 window 재표현으로 reset/교체되어 final까지 도달하지 않는 사례가 반복됐다.
+- 기존 구현은 revision 처리 때 `staged_age`를 0으로 되돌려, completed 후보가 매 chunk 나오는 중국어 경로에서 age 기반 확정이 사실상 누적되기 어려웠다.
+
+반영 판단:
+
+- 기본 런타임 파라미터는 유지한다. 현재 로그만으로 `windowSecondsZh`, `stepSecondsZh`, `beamSizeZh`, `maxNewTokensZh`를 변경할 근거는 부족하다.
+- `input_queue_size_peak`, `input_queue_backlog_chunk`를 런타임 지표에 추가해 순간 backlog와 drop 없는 지연 누적을 구분한다.
+- `finalized_per_stage_start`, `stage_replaced_unconfirmed_per_stage_start`, `revision_preserve_rate`를 tracking metric으로 추가한다.
+- revision으로 같은 staged lifecycle이 유지될 때 `staged_age`를 누적한다.
+- CJK 후보는 첫 관측 확정을 계속 막되, 짧은 조각/글자 단위 공백/반복 n-gram/내부 공백 오염이 없는 후보가 2회 이상 관측되거나 age 기준을 채우면 `stable_cjk`/`aged` 사유로 final 승격할 수 있게 한다.
+- `stage_finalize_stable_cjk`, `stage_age_finalize`, `stage_age_quality_blocked` 지표를 추가해 완화된 CJK 확정 경로, age 기준 확정, age 품질 차단을 별도로 추적한다.
+- age 기준 확정도 `short_cjk`, `spaced_cjk`, `cjk_internal_gap`, `cjk_repeated_ngram`, `latin_only_for_zh` 품질 게이트를 통과해야 한다.
+- 패치 반영 후 새 실행 초반 chunk 431 누적 기준 `finalized=70`, `stage_start=115`, `stage_replaced_unconfirmed=44`, `stage_age_finalize=41`, `stage_finalize_stable_cjk=25`가 관측됐다. 초기 스냅샷이므로 장기 판단은 보류하지만, `finalized_per_stage_start`는 약 0.609로 이전 장기 스냅샷의 약 0.255보다 개선 방향이다.
+- 30분 모니터링 종료 직전 chunk 761 누적 기준 `finalized=120`, `stage_start=195`, `stage_replaced_unconfirmed=72`, `input_queue_drops=0`, `input_queue_size_peak=10`이었다. 확정률은 개선 방향이지만, age 품질 게이트 보완 전 실행 로그가 섞여 있으므로 다음 실행에서 `stage_age_quality_blocked`와 `final_quality_short_cjk/spaced_cjk` 변화를 다시 확인한다.
+- 추적 테스트에 이번 30분 운영 로그 스냅샷을 추가한다.
+- 학술적 근거가 부족한 pending/new 접합 보정은 재도입하지 않는다.
 
 ## 배포 순서와 실패 대응
 

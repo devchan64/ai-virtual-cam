@@ -30,7 +30,7 @@ TRACKING_TARGETS = {
     "translation_quality": {"target_cases": 8, "target_rate": 0.80},
     "coalesce": {"target_cases": 10, "target_rate": 1.00},
     "duplicate_suppression": {"target_cases": 4, "target_rate": 1.00},
-    "runtime_metrics": {"target_cases": 15, "target_rate": 1.00},
+    "runtime_metrics": {"target_cases": 20, "target_rate": 1.00},
     "stable_metrics": {"target_cases": 4, "target_rate": 1.00},
 }
 
@@ -970,6 +970,21 @@ RUNTIME_METRIC_TRACKING_CASES = [
         "source": "2026-06-16 Chinese monitor completed candidate replaced stable staged before final",
     },
     {
+        "metrics": {"stage_finalize_stable_cjk": 1},
+        "expected": {"finalize_stable_cjk": 1},
+        "source": "2026-06-17 CJK stable staged candidate finalized before full confirmation count",
+    },
+    {
+        "metrics": {"stage_age_finalize": 1},
+        "expected": {"age_finalize": 1},
+        "source": "2026-06-17 CJK staged age accumulates across revisions before final",
+    },
+    {
+        "metrics": {"stage_age_quality_blocked": 1},
+        "expected": {"age_quality_blocked": 1},
+        "source": "2026-06-17 CJK aged staged candidate blocked by final quality gate",
+    },
+    {
         "metrics": {"finalize_recent_echo_suppressed": 1},
         "expected": {"recent_echo_suppressed": 1},
         "source": "2026-06-16 Chinese monitor similar final alternative suppressed after committed final",
@@ -1008,6 +1023,46 @@ RUNTIME_METRIC_TRACKING_CASES = [
             "translation_skip_per_final_quality_per_1000": 636,
         },
         "source": "2026-06-16 5m monitor chunk 386 lifecycle snapshot",
+    },
+    {
+        "metrics": {
+            "finalized": 36,
+            "stage_start": 141,
+            "stage_replaced_unconfirmed": 104,
+            "stage_revision_confirmation_preserved_internal": 121,
+            "stage_revision_confirmation_reset": 192,
+            "input_queue_size_peak": 50,
+            "input_queue_backlog_chunk": 1,
+        },
+        "expected": {
+            "finalized_per_stage_start_per_1000": 255,
+            "stage_replaced_unconfirmed_per_stage_start_per_1000": 738,
+            "revision_preserve_rate_per_1000": 387,
+            "input_queue_size_peak": 50,
+            "input_queue_backlog_chunk": 1,
+        },
+        "source": "2026-06-17 30m monitor stage churn and queue peak snapshot",
+    },
+    {
+        "metrics": {
+            "finalized": 70,
+            "stage_start": 115,
+            "stage_replaced_unconfirmed": 44,
+            "stage_revision_confirmation_preserved_internal": 38,
+            "stage_revision_confirmation_reset": 110,
+            "stage_age_finalize": 41,
+            "stage_finalize_stable_cjk": 25,
+            "input_queue_size_peak": 10,
+        },
+        "expected": {
+            "finalized_per_stage_start_per_1000": 609,
+            "stage_replaced_unconfirmed_per_stage_start_per_1000": 383,
+            "revision_preserve_rate_per_1000": 257,
+            "age_finalize": 41,
+            "finalize_stable_cjk": 25,
+            "input_queue_size_peak": 10,
+        },
+        "source": "2026-06-17 post age-reset fix monitor chunk 431 lifecycle snapshot",
     },
     {
         "metrics": {
@@ -1191,6 +1246,9 @@ def _runtime_metric_summary(metrics: dict[str, int]) -> dict[str, int]:
     translation_skip = int(metrics.get("translation_skip_final_quality", 0))
     stage_replace = int(metrics.get("stage_replace", 0))
     stage_replaced_unconfirmed = int(metrics.get("stage_replaced_unconfirmed", 0))
+    stage_start = int(metrics.get("stage_start", 0))
+    revision_preserved = int(metrics.get("stage_revision_confirmation_preserved_internal", 0))
+    revision_reset = int(metrics.get("stage_revision_confirmation_reset", 0))
 
     def rate_per_1000(numerator: int, denominator: int) -> int:
         if denominator <= 0:
@@ -1216,8 +1274,19 @@ def _runtime_metric_summary(metrics: dict[str, int]) -> dict[str, int]:
         "revision_candidate_quality_blocked": int(metrics.get("stage_revision_candidate_quality_blocked", 0)),
         "raw_without_final": int(metrics.get("raw_without_final", 0)),
         "finalize_before_replace": int(metrics.get("stage_finalize_before_replace", 0)),
+        "finalize_stable_cjk": int(metrics.get("stage_finalize_stable_cjk", 0)),
+        "age_finalize": int(metrics.get("stage_age_finalize", 0)),
+        "age_quality_blocked": int(metrics.get("stage_age_quality_blocked", 0)),
         "recent_echo_suppressed": int(metrics.get("finalize_recent_echo_suppressed", 0)),
         "replace_unconfirmed_rate_per_1000": rate_per_1000(stage_replaced_unconfirmed, stage_replace),
+        "finalized_per_stage_start_per_1000": rate_per_1000(finalized, stage_start),
+        "stage_replaced_unconfirmed_per_stage_start_per_1000": rate_per_1000(
+            stage_replaced_unconfirmed,
+            stage_start,
+        ),
+        "revision_preserve_rate_per_1000": rate_per_1000(revision_preserved, revision_preserved + revision_reset),
+        "input_queue_size_peak": int(metrics.get("input_queue_size_peak", 0)),
+        "input_queue_backlog_chunk": int(metrics.get("input_queue_backlog_chunk", 0)),
         "stable_window_observed": int(metrics.get("stable_window_observed", 0)),
         "stable_prefix_chars": int(metrics.get("stable_prefix_chars", 0)),
         "unstable_tail_chars": int(metrics.get("unstable_tail_chars", 0)),

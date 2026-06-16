@@ -1011,6 +1011,10 @@ def _should_finalize_replaced_sentence(
     )
     if reason == "confirmed":
         return _should_confirm_staged_sentence(staged_sentence, staged_confirmations, staged_forced)
+    if reason == "aged" and _is_cjk_text(staged_sentence):
+        flags = set(_final_sentence_diagnostic_flags(staged_sentence, "zh"))
+        if flags.intersection({"empty", "short_cjk", "spaced_cjk", "cjk_internal_gap", "cjk_repeated_ngram", "latin_only_for_zh"}):
+            return False
     return reason in {"aged", "duplicate_or_suffix", "partial_preserve"}
 
 
@@ -1058,6 +1062,17 @@ def _should_finalize_before_replacement(
     sentence_finalize_age: int | None = None,
     staged_forced: bool = False,
 ) -> bool:
+    flags = set(_final_sentence_diagnostic_flags(sentence, language))
+    if flags.intersection({"empty", "spaced_cjk", "cjk_repeated_ngram", "latin_only_for_zh"}):
+        return False
+    if _is_cjk_text(sentence):
+        if flags.intersection({"short_cjk", "cjk_internal_gap"}):
+            return False
+        cjk_replacement_confirmations = max(2, _sentence_required_confirmations(staged_forced) - 1)
+        return (
+            staged_confirmations >= cjk_replacement_confirmations
+            or staged_age >= _sentence_max_age_chunks(staged_forced, sentence_finalize_age)
+        )
     if not _should_finalize_replaced_sentence(
         sentence,
         "",
@@ -1066,11 +1081,6 @@ def _should_finalize_before_replacement(
         staged_age,
         sentence_finalize_age,
     ):
-        return False
-    flags = set(_final_sentence_diagnostic_flags(sentence, language))
-    if flags.intersection({"empty", "spaced_cjk", "cjk_repeated_ngram", "latin_only_for_zh"}):
-        return False
-    if _is_cjk_text(sentence) and flags.intersection({"short_cjk", "cjk_internal_gap", "no_end_marker"}):
         return False
     return True
 

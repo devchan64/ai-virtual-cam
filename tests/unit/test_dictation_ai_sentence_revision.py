@@ -708,13 +708,22 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
                         2,
                     )
                 )
-                self.assertTrue(
+                self.assertFalse(
                     _should_finalize_replaced_sentence(
                         fragment,
                         "那个枕头有点太硬了，就是是不是以后都要自己带自己的枕头？",
                         1,
                         False,
                         3,
+                    )
+                )
+                self.assertFalse(
+                    _should_finalize_before_replacement(
+                        fragment,
+                        "zh",
+                        staged_confirmations=1,
+                        staged_age=3,
+                        sentence_finalize_age=3,
                     )
                 )
 
@@ -730,6 +739,15 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
                 "那个枕头有点太硬了，就是是不是以后都要自己带自己的枕头？",
                 "zh",
                 staged_confirmations=3,
+                staged_age=0,
+                sentence_finalize_age=3,
+            )
+        )
+        self.assertTrue(
+            _should_finalize_before_replacement(
+                "也没有要买什么东西就只是走进去再走出来拍个照片这样拍个进去出来",
+                "zh",
+                staged_confirmations=2,
                 staged_age=0,
                 sentence_finalize_age=3,
             )
@@ -761,6 +779,15 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         self.assertFalse(
             _should_finalize_before_replacement(
                 "我靠柯南跟不二家的联名，他的脚步好可爱哦。",
+                "zh",
+                staged_confirmations=1,
+                staged_age=0,
+                sentence_finalize_age=3,
+            )
+        )
+        self.assertFalse(
+            _should_finalize_before_replacement(
+                "也没有要买什么东西就只是走进去再走出来拍个照片这样拍个进去出来",
                 "zh",
                 staged_confirmations=1,
                 staged_age=0,
