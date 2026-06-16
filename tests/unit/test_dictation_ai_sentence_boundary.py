@@ -85,6 +85,10 @@ class WhisperSentenceBoundaryTest(unittest.TestCase):
         self.assertEqual(result.completed, ["And Tesla does use the camera so it does know if a person is using their turn signal and they are trying to merge in"])
         self.assertEqual(result.pending, "But now let's dive into some of the settings you have to know")
         self.assertEqual(result.soft_boundary_count, 1)
+        self.assertEqual(result.end_mark_count, 0)
+        self.assertEqual(result.right_context_start_count, 1)
+        self.assertGreaterEqual(result.boundary_signal_score, 0.5)
+        self.assertGreaterEqual(result.end_probability, 0.6)
 
     def test_sentence_boundary_soft_splits_are_disabled_under_low_model_confidence(self) -> None:
         detector = LegacyRegexSentenceBoundaryDetector()
@@ -253,6 +257,16 @@ class WhisperSentenceBoundaryTest(unittest.TestCase):
         self.assertEqual(completed, ["It costs $9.99 per month."])
         self.assertEqual(pending, "Next")
         self.assertEqual(_sentence_end_count("It costs $9.99 per month."), 1)
+
+    def test_sentence_boundary_result_tracks_punctuation_and_right_context_signals(self) -> None:
+        result = split_punctuated_text("Hello. Next sentence.", "test")
+
+        self.assertEqual(result.completed, ["Hello.", "Next sentence."])
+        self.assertEqual(result.pending, "")
+        self.assertEqual(result.end_mark_count, 2)
+        self.assertEqual(result.right_context_start_count, 1)
+        self.assertGreaterEqual(result.boundary_signal_score, 0.6)
+        self.assertGreaterEqual(result.end_probability, 0.9)
 
     def test_sentence_boundary_splits_long_driver_seat_sentence_from_log(self) -> None:
         # Regression from avc-whisper.log chunks 23-33.

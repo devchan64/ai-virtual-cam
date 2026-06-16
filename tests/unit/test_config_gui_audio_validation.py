@@ -513,6 +513,14 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         self.assertEqual(gui.vars["dictation_ai_translation_backend"].get(), "whisper")
         self.assertEqual(gui.vars["dictation_ai_translation_target_language"].get(), "English (en)")
 
+        gui.vars["dictation_ai_translation_target_language"].set("한국어 (ko)")
+        self.module.ConfigGui._on_dictation_ai_translation_target_changed(gui)
+
+        self.assertNotIn("whisper", gui._widgets["dictation_ai_translation_backend"].values)
+        self.assertEqual(gui.vars["dictation_ai_translation_target_language"].get(), "한국어 (ko)")
+        self.assertEqual(gui.vars["dictation_ai_translation_backend"].get(), "nllb-transformers")
+        self.assertEqual(gui.vars["dictation_ai_translation_model"].get(), "facebook/nllb-200-1.3B")
+
     def test_resolve_and_validate_audio_runtime_devices_maps_display_values(self) -> None:
         with mock.patch.object(self.audio_devices.platform, "system", return_value="Linux"), mock.patch.object(
             self.audio_devices,

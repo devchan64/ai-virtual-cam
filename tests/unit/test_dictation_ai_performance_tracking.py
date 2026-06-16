@@ -30,8 +30,8 @@ TRACKING_TARGETS = {
     "translation_quality": {"target_cases": 8, "target_rate": 0.80},
     "coalesce": {"target_cases": 10, "target_rate": 1.00},
     "duplicate_suppression": {"target_cases": 4, "target_rate": 1.00},
-    "runtime_metrics": {"target_cases": 13, "target_rate": 1.00},
-    "stable_metrics": {"target_cases": 4, "target_rate": 1.00},
+    "runtime_metrics": {"target_cases": 16, "target_rate": 1.00},
+    "stable_metrics": {"target_cases": 5, "target_rate": 1.00},
 }
 
 REVISION_TRACKING_CASES = [
@@ -1009,6 +1009,49 @@ RUNTIME_METRIC_TRACKING_CASES = [
         },
         "source": "2026-06-16 5m monitor chunk 386 lifecycle snapshot",
     },
+    {
+        "metrics": {
+            "boundary_end_marks": 2,
+            "boundary_right_context_starts": 1,
+            "boundary_signal_score_per_1000": 900,
+            "boundary_end_probability_per_1000": 950,
+        },
+        "expected": {
+            "boundary_end_marks": 2,
+            "boundary_right_context_starts": 1,
+            "boundary_signal_score_per_1000": 900,
+            "boundary_end_probability_per_1000": 950,
+        },
+        "source": "semantic boundary punctuation/right-context runtime diagnostic",
+    },
+    {
+        "metrics": {
+            "boundary_end_probability_per_1000": 650,
+            "boundary_signal_score_per_1000": 600,
+        },
+        "expected": {
+            "boundary_end_probability_per_1000": 650,
+            "boundary_signal_score_per_1000": 600,
+        },
+        "source": "semantic boundary soft end probability runtime diagnostic",
+    },
+    {
+        "metrics": {
+            "segment_state_pending": 2,
+            "segment_state_staged": 3,
+            "segment_state_final": 1,
+            "segment_state_suppressed": 4,
+            "segment_state_revised": 5,
+        },
+        "expected": {
+            "segment_state_pending": 2,
+            "segment_state_staged": 3,
+            "segment_state_final": 1,
+            "segment_state_suppressed": 4,
+            "segment_state_revised": 5,
+        },
+        "source": "segment lifecycle state metric summary",
+    },
 ]
 
 
@@ -1091,6 +1134,19 @@ STABLE_METRIC_TRACKING_CASES = [
             "stage_candidate_quality_no_end_marker": 1,
         },
         "source": "2026-06-16 5m monitor spaced CJK candidate blocked before staging",
+    },
+    {
+        "metrics": {
+            "stable_stage_support_score_per_1000": 850,
+            "stable_stage_support_high": 1,
+            "stable_overlap_source_none": 1,
+        },
+        "expected": {
+            "stable_stage_support_score_per_1000": 850,
+            "stable_stage_support_high": 1,
+            "stable_overlap_none": 1,
+        },
+        "source": "semantic stable stage support metric for internal overlap",
     },
 ]
 
@@ -1196,9 +1252,23 @@ def _runtime_metric_summary(metrics: dict[str, int]) -> dict[str, int]:
         "stable_internal_chars": int(metrics.get("stable_internal_chars", 0)),
         "stable_internal_ratio_per_1000": int(metrics.get("stable_internal_ratio_per_1000", 0)),
         "stable_token_ratio_per_1000": int(metrics.get("stable_token_ratio_per_1000", 0)),
+        "stable_stage_support_score_per_1000": int(metrics.get("stable_stage_support_score_per_1000", 0)),
+        "stable_stage_support_high": int(metrics.get("stable_stage_support_high", 0)),
+        "stable_stage_support_mid": int(metrics.get("stable_stage_support_mid", 0)),
+        "stable_stage_support_low": int(metrics.get("stable_stage_support_low", 0)),
+        "stable_stage_support_none": int(metrics.get("stable_stage_support_none", 0)),
         "stable_overlap_common_prefix": int(metrics.get("stable_overlap_source_common_prefix", 0)),
         "stable_overlap_suffix_prefix": int(metrics.get("stable_overlap_source_suffix_prefix", 0)),
         "stable_overlap_none": int(metrics.get("stable_overlap_source_none", 0)),
+        "boundary_end_marks": int(metrics.get("boundary_end_marks", 0)),
+        "boundary_right_context_starts": int(metrics.get("boundary_right_context_starts", 0)),
+        "boundary_signal_score_per_1000": int(metrics.get("boundary_signal_score_per_1000", 0)),
+        "boundary_end_probability_per_1000": int(metrics.get("boundary_end_probability_per_1000", 0)),
+        "segment_state_pending": int(metrics.get("segment_state_pending", 0)),
+        "segment_state_staged": int(metrics.get("segment_state_staged", 0)),
+        "segment_state_final": int(metrics.get("segment_state_final", 0)),
+        "segment_state_suppressed": int(metrics.get("segment_state_suppressed", 0)),
+        "segment_state_revised": int(metrics.get("segment_state_revised", 0)),
         "stage_candidate_quality_blocked": int(metrics.get("stage_candidate_quality_blocked", 0)),
         "stage_candidate_quality": sum(
             value

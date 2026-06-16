@@ -108,7 +108,7 @@
 
 ## 실시간 처리 파이프라인
 
-이 섹션의 흐름을 받아쓰기 AI 신규 기준 파이프라인으로 둔다. 단, 모든 단계가 현재 코드에 같은 수준으로 final 결정에 반영되어 있다는 뜻은 아니다. 현재 운영 코드는 sliding window, 언어별 STT, pending/new 접합, stable token 지표, SaT/SBD 후보, staged/final 생명주기, final-only 번역을 갖고 있고, Semantic Boundary Detection의 일부 feature는 후속 구현으로 남긴다.
+이 섹션의 흐름을 받아쓰기 AI 신규 기준 파이프라인으로 둔다. 단, 모든 단계가 현재 코드에 같은 수준으로 final 결정에 반영되어 있다는 뜻은 아니다. 현재 운영 코드는 sliding window, 언어별 STT, pending/new 접합, stable token 지표, SaT/SBD 후보, punctuation/right-context 경계 신호 지표, staged/final 생명주기, final-only 번역을 갖고 있다.
 
 ```text
 오디오 입력
@@ -131,7 +131,7 @@ Stable Token Detection
   ↓
 Semantic Boundary Detection
   - SaT/SBD 기반 문장 경계 후보
-  - streaming punctuation/end probability
+  - streaming punctuation/end probability 지표
   - right context에서 새 문장 시작 징후 확인
   ↓
 세그먼트 상태관리
@@ -151,17 +151,17 @@ Semantic Boundary Detection
 | 언어별 STT backend | 구현됨 | 영어/한국어는 `faster-whisper`, 중국어는 `qwen3-asr-transformers`를 운영 기본값으로 둔다. |
 | raw STT window 결과 | 구현됨 | 원문창은 문장 경계/확정 전 raw STT window만 표시한다. |
 | 정규화 및 접합 | 구현 중 | pending tail과 새 raw의 overlap, CJK no-space 내부 prefix overlap, 최근 final echo 억제를 적용한다. |
-| Stable Token Detection | 지표 구현됨 | 이전/현재 raw window의 공통 prefix와 sliding suffix-prefix overlap을 비교해 안정 prefix, 불안정 tail, 안정 token ratio를 별도 계층에서 계산한다. final 승격 정책 반영은 후속 튜닝으로 둔다. |
-| Semantic Boundary Detection | 부분 구현 | SaT/SBD 후보 생성과 pending 보수 처리, stable confidence 보정은 구현되어 있다. streaming punctuation/end probability와 right-context score는 후속 단계다. VAD/silence는 구현 목표에서 제외한다. |
-| 세그먼트 상태관리 | 구현됨 | `pending`, `staged`, `final`, `suppressed`, `revised` 의미를 분리하고 final은 append-only로 유지한다. |
+| Stable Token Detection | 지표 구현됨 | 이전/현재 raw window의 공통 prefix, sliding suffix-prefix overlap, 내부 공통 구간을 비교해 안정 prefix, 불안정 tail, 안정 token ratio, stage support score/bucket을 계산한다. final 직접 승격은 하지 않고 staged 생명주기 튜닝 입력으로 둔다. |
+| Semantic Boundary Detection | 지표 구현됨 | SaT/SBD 후보 생성, pending 보수 처리, stable confidence 보정, punctuation/end-mark count, right-context count, boundary signal score, boundary end probability를 기록한다. 이 지표는 final 직접 트리거가 아니라 staged 생명주기와 회귀 분석 입력이다. VAD/silence는 구현 목표에서 제외한다. |
+| 세그먼트 상태관리 | 구현됨 | `pending`, `staged`, `final`, `suppressed`, `revised` 의미를 분리하고 final은 append-only로 유지한다. 상태별 전환은 `segment_state_*` metric으로 집계한다. |
 | 실시간 번역 | 구현됨 | 번역 큐에는 품질 게이트를 통과한 final transcript만 넣는다. staged/partial 번역은 운영 경로에서 제거한다. |
 
 ### 구현 우선순위
 
-1. Stable Token Detection 지표를 운영 로그에서 1~2일 누적해 `finalization_rate_per_1000`, `raw_without_final`, `stage_replaced_unconfirmed`와 상관관계를 본다.
+1. Stable Token Detection 지표를 운영 로그에서 1~2일 누적해 `finalization_rate_per_1000`, `raw_without_final`, `stage_replaced_unconfirmed`, `stable_stage_support_score`와 상관관계를 본다.
 2. 안정 prefix가 높고 불안정 tail이 짧은 후보만 boundary confidence를 높이는 방향으로 튜닝한다.
 3. CJK는 공백 기반 token보다 문자 n-gram, prefix/suffix overlap, 내부 prefix overlap을 우선한다. 현재 1차 구현은 문자 단위 suffix-prefix overlap까지 반영한다.
-4. Semantic Boundary Detection은 SaT 결과에 right-context와 punctuation/end score를 더하는 방식으로 확장한다.
+4. Semantic Boundary Detection의 punctuation/right-context/end probability 지표를 운영 로그에서 누적해 `pending_chars`, `forced_by`, `stage_replaced_unconfirmed`와 상관관계를 본다.
 5. VAD/silence 기반 확정은 구현하지 않는다. 운영 판단은 텍스트 안정성, SBD, punctuation/right-context, staged confirmation을 우선한다.
 6. 각 단계의 출력과 지표를 로그에 분리해 STT 품질, stable detection 품질, boundary 품질, lifecycle 품질, 번역 품질을 따로 비교한다.
 
@@ -328,6 +328,7 @@ VAD와 silence 길이는 받아쓰기 AI 실시간 처리 파이프라인의 구
 - `finalize_recent_echo_suppressed`: 최근 final과 유사한 대체 후보를 중복 억제한다.
 - `finalized`: 후보가 final transcript로 확정된다.
 - `candidate_duplicate_suppressed`: 이미 committed된 내용과 중복되어 출력하지 않는다.
+- `segment_state_pending/staged/final/suppressed/revised`: 상태 전환을 공통 축으로 집계한다. 기존 lifecycle metric은 원인 분석용이고, 이 metric은 상태 비율 관측용이다.
 
 일반 후보는 `sentenceFinalizeAge`만큼 여러 window에서 재확인된 뒤 확정한다. 기본 추천값은 3회다.
 
@@ -354,6 +355,9 @@ class SentenceBoundaryResult:
     backend: str
     boundary_count: int
     soft_boundary_count: int = 0
+    end_mark_count: int = 0
+    right_context_start_count: int = 0
+    boundary_signal_score: float = 0.0
 
 
 class SentenceBoundaryDetector:
@@ -383,6 +387,7 @@ STT 결과 문장 경계 처리 계약:
 - STT backend/model과 sentence boundary backend/model은 분리한다.
 - SBD는 completed/pending 후보를 제안하지만 final을 직접 결정하지 않는다.
 - final 승격은 staged confirmation, `sentenceFinalizeAge`, revision lifecycle이 담당한다.
+- punctuation/end-mark, right-context 시작 징후, soft boundary, end probability는 `SentenceBoundaryResult`의 관측 지표로 기록한다. 이 값은 final 직접 트리거가 아니라 staged 생명주기 튜닝과 회귀 분석 입력이다.
 - 중국어에서 SBD가 한 window 안에 여러 completed 후보를 반환하면 같은 STT window의 하나의 관찰 단위로 병합한다.
 - 영어/한국어는 경계 모델 출력 단위를 보존한다.
 - boundary backend/model은 명시 설정값만 사용한다. 실행 중 언어에 따라 backend/model을 암묵 변경하지 않는다.
@@ -509,7 +514,7 @@ NLLB 번역 기본 테스트값:
 3개 축:
 
 1. 안정성 축: 리비전 빈도와 규모 감소 (`UPWR`, `UPSR`, `replaced ratio`, `rollback_rate`)
-2. 경계 축: 문장 경계 추정 품질 (`pending_chars`, `forced_by`, `boundary_latency`, `end_marks_stable`)
+2. 경계 축: 문장 경계 추정 품질 (`pending_chars`, `forced_by`, `boundary_latency`, `end_marks_stable`, `boundary_signal_score`, `boundary_right_context`)
 3. 지연/번역 축: 실시간성 (`stt_rtf`, `total_rtf`), 번역 부하 (`confirmed_only_delta`, `translation_redundant_ratio`)
 
 권장 실험 절차:
@@ -552,7 +557,7 @@ NLLB 번역 기본 테스트값:
 
 | 이벤트 | 필수 필드 |
 | --- | --- |
-| split event | `chunk`, `completed`, `final`, `pending_text`, `forced_by`, `pending_overrun`, `boundary_backend`, `pending_chars`, `pending_chunks`, `pending_chars_per_chunk` |
+| split event | `chunk`, `completed`, `final`, `pending_text`, `forced_by`, `pending_overrun`, `boundary_backend`, `boundary_end_marks`, `boundary_right_context`, `boundary_signal_score`, `boundary_end_probability`, `segment_state_pending`, `segment_state_staged`, `segment_state_final`, `segment_state_suppressed`, `segment_state_revised`, `pending_chars`, `pending_chunks`, `pending_chars_per_chunk` |
 | commit event | `step`, `window`, `stt_elapsed`, `stt_rtf`, `translation_elapsed`, `total_elapsed`, `total_rtf`, `beam`, `max_tokens`, `text_chars` |
 | transcript fragment | `delta_text`, `state`, `revision_id` |
 
@@ -689,7 +694,7 @@ stable token 지표를 추가한 뒤 같은 중국어 실시간 경로를 약 5�
 
 추가 반영 판단:
 
-- `stable_internal_chars`, `stable_internal_ratio`를 진단 지표로 추가한다. 이 값은 이전/현재 window의 최장 내부 공통 구간을 측정하지만, 아직 `stable_prefix_text`, boundary confidence, final 확정 판단에는 사용하지 않는다.
+- `stable_internal_chars`, `stable_internal_ratio`를 진단 지표로 추가한다. 이 값은 이전/현재 window의 최장 내부 공통 구간을 측정한다. 이후 내부 overlap은 CJK revision confirmation 보존의 보조 feature로 승격했고, 이번 패치에서는 stage support score/bucket 관측 지표에도 반영한다.
 - `stable_overlap_source=none`이면서 `stable_internal_ratio`가 높은 케이스를 추적 테스트에 추가한다. 이후 같은 패턴이 반복되면 내부 공통 구간을 revision lifecycle의 보조 feature로 승격할지 별도 검증한다.
 - 안정성 요약 로그에 `stage_candidate_quality_cjk_internal_gap`, `stage_candidate_quality_mixed_latin_zh`를 추가한다. `mixed_latin_zh` 단독 stage 차단은 하지 않지만, 오염 후보가 다른 차단 flag와 함께 얼마나 나타나는지 관측한다.
 - 추적 테스트의 stable metric 케이스를 4개로 늘려 prefix, suffix-prefix, 내부 overlap, stage 후보 품질 차단을 모두 유지한다.
@@ -700,6 +705,18 @@ stable token 지표를 추가한 뒤 같은 중국어 실시간 경로를 약 5�
 - 이 조건에서는 final 확정 기준을 완화하지 않는다. 대신 `stage_revision_confirmation_reset`을 올리지 않고 기존 confirmation count를 유지한다.
 - 안정성 요약 로그에 `revision_preserved_internal`을 추가해 reset 감소와 보존 증가를 함께 본다.
 - 추적 테스트에 `stage_revision_confirmation_preserved_internal`을 추가한다. 다음 운영 관측에서는 `revision_preserved_internal` 증가가 오확정 증가로 이어지는지 `final_quality`, `translation_skip_final_quality`, recent echo 억제 지표와 함께 검증한다.
+
+stage support 관측 지표 추가:
+
+- `stable_stage_support_score_per_1000`과 `stable_stage_support_high/mid/low/none`을 runtime metric에 추가한다.
+- 점수는 stable prefix/suffix-prefix ratio를 기본으로 하고, CJK window 시작점이 흔들려 prefix가 0인 경우에는 충분히 긴 내부 공통 구간을 보조 신호로 사용한다.
+- 이 값은 아직 final 직접 트리거가 아니다. 다음 관측에서는 support bucket별 `stage_replaced_unconfirmed`, `raw_without_final`, `final_quality`, `translation_skip_final_quality`를 비교해 confirmation 튜닝 여부를 판단한다.
+
+상태 전환 metric 추가:
+
+- `segment_state_pending/staged/final/suppressed/revised`를 안정성 요약 로그와 runtime tracking에 추가한다.
+- `pending`은 tail 보류, `staged`는 후보 stage 진입, `final`은 append-only 확정, `suppressed`는 중복/echo/품질 차단, `revised`는 stage revision 관측을 의미한다.
+- 다음 관측에서는 `segment_state_suppressed`와 `segment_state_revised`가 높을 때 원인 metric인 `stage_candidate_quality_*`, `stage_revision_confirmation_reset`, `candidate_duplicate_suppressed`, `finalize_recent_echo_suppressed` 중 어느 쪽이 주도하는지 분리한다.
 
 ### 2026-06-16 내부 overlap 적용 후 5분 운영 모니터링
 

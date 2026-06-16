@@ -57,6 +57,10 @@ class SentenceBoundaryResult:
     backend: str
     boundary_count: int
     soft_boundary_count: int = 0
+    end_mark_count: int = 0
+    right_context_start_count: int = 0
+    boundary_signal_score: float = 0.0
+    end_probability: float = 0.0
 
 
 class SentenceBoundaryDetector(Protocol):
@@ -187,6 +191,92 @@ def sentence_end_count(text: str) -> int:
     return len(SENTENCE_END_MARK_RE.findall(text or ""))
 
 
+def _right_context_start_count(completed: list[str], pending: str, soft_boundary_count: int) -> int:
+    hard_contexts = max(0, len(completed) - 1)
+    if completed and normalized_text(pending):
+        hard_contexts += 1
+    return max(hard_contexts, soft_boundary_count)
+
+
+def _boundary_signal_score(
+    completed: list[str],
+    pending: str,
+    end_mark_count: int,
+    right_context_start_count: int,
+    soft_boundary_count: int,
+) -> float:
+    if not completed:
+        return 0.0
+    score = 0.10
+    if end_mark_count > 0:
+        score += 0.55
+    if right_context_start_count > 0:
+        score += 0.25
+    if soft_boundary_count > 0:
+        score += 0.25
+    if not normalized_text(pending):
+        score += 0.05
+    return min(1.0, score)
+
+
+def _boundary_end_probability(
+    completed: list[str],
+    pending: str,
+    end_mark_count: int,
+    soft_boundary_count: int,
+) -> float:
+    if not completed:
+        return 0.0
+    normalized_pending = normalized_text(pending)
+    if end_mark_count > 0 and not normalized_pending:
+        return 0.95
+    if end_mark_count > 0:
+        return 0.85
+    if soft_boundary_count > 0:
+        return 0.65
+    return 0.50
+
+
+def _boundary_result(
+    completed: list[str],
+    pending: str,
+    backend: str,
+    *,
+    boundary_count: int | None = None,
+    soft_boundary_count: int = 0,
+    source_text: str = "",
+) -> SentenceBoundaryResult:
+    normalized_pending = normalized_text(pending)
+    normalized_completed = [normalized_text(sentence) for sentence in completed if normalized_text(sentence)]
+    count = len(normalized_completed) if boundary_count is None else int(boundary_count)
+    signal_text = source_text or " ".join([*normalized_completed, normalized_pending]).strip()
+    end_marks = sentence_end_count(signal_text)
+    right_contexts = _right_context_start_count(normalized_completed, normalized_pending, soft_boundary_count)
+    signal_score = _boundary_signal_score(
+        normalized_completed,
+        normalized_pending,
+        end_marks,
+        right_contexts,
+        soft_boundary_count,
+    )
+    return SentenceBoundaryResult(
+        normalized_completed,
+        normalized_pending,
+        backend,
+        count,
+        soft_boundary_count,
+        end_marks,
+        right_contexts,
+        signal_score,
+        _boundary_end_probability(
+            normalized_completed,
+            normalized_pending,
+            end_marks,
+            soft_boundary_count,
+        ),
+    )
+
+
 class SatSentenceBoundaryDetector:
     backend = "sat"
 
@@ -233,7 +323,7 @@ class SatSentenceBoundaryDetector:
         del boundary_confidence
         combined = pending_new_text_combined(pending_text, new_text)
         if not combined:
-            return SentenceBoundaryResult([], "", self.backend, 0, 0)
+            return _boundary_result([], "", self.backend)
         normalized = normalized_text(combined)
         try:
             raw_segments = list(self._segmenter.split(normalized))
@@ -245,24 +335,24 @@ class SatSentenceBoundaryDetector:
             ) from exc
         segments = [normalized_text(segment) for segment in raw_segments if normalized_text(segment)]
         if not segments:
-            return SentenceBoundaryResult([], normalized, self.backend, 0, 0)
+            return _boundary_result([], normalized, self.backend, source_text=normalized)
         if len(segments) == 1:
             only = segments[0]
             if sentence_end_count(only) > 0:
-                return SentenceBoundaryResult([only], "", self.backend, 1, 0)
-            return SentenceBoundaryResult([], only, self.backend, 0, 0)
+                return _boundary_result([only], "", self.backend, boundary_count=1, source_text=normalized)
+            return _boundary_result([], only, self.backend, source_text=normalized)
         completed = segments[:-1]
         pending = segments[-1]
         if sentence_end_count(pending) > 0:
             completed.append(pending)
             pending = ""
-        return SentenceBoundaryResult(completed, pending, self.backend, len(completed), 0)
+        return _boundary_result(completed, pending, self.backend, source_text=normalized)
 
 
 def split_punctuated_text(text: str, backend: str) -> SentenceBoundaryResult:
     normalized = normalized_text(text)
     if not normalized:
-        return SentenceBoundaryResult([], "", backend, 0, 0)
+        return _boundary_result([], "", backend)
     completed: list[str] = []
     start = 0
     for match in SENTENCE_END_MARK_RE.finditer(normalized):
@@ -272,8 +362,8 @@ def split_punctuated_text(text: str, backend: str) -> SentenceBoundaryResult:
             completed.append(sentence)
         start = end
     if completed:
-        return SentenceBoundaryResult(completed, normalized[start:].strip(), backend, len(completed), 0)
-    return SentenceBoundaryResult([], normalized, backend, 0, 0)
+        return _boundary_result(completed, normalized[start:].strip(), backend, source_text=normalized)
+    return _boundary_result([], normalized, backend, source_text=normalized)
 
 
 class LegacyRegexSentenceBoundaryDetector:
@@ -289,7 +379,7 @@ class LegacyRegexSentenceBoundaryDetector:
     ) -> SentenceBoundaryResult:
         combined = pending_new_text_combined(pending_text, new_text)
         if not combined:
-            return SentenceBoundaryResult([], "", self.backend, 0, 0)
+            return _boundary_result([], "", self.backend)
         completed: list[str] = []
         consumed_end = 0
         for match in SENTENCE_END_RE.finditer(combined):
@@ -298,13 +388,19 @@ class LegacyRegexSentenceBoundaryDetector:
                 completed.append(sentence)
             consumed_end = match.end(1)
         if consumed_end > 0:
-            return SentenceBoundaryResult(completed, combined[consumed_end:].strip(), self.backend, len(completed), 0)
+            return _boundary_result(completed, combined[consumed_end:].strip(), self.backend, source_text=combined)
         soft_completed, soft_pending = self._split_soft_boundary(
             combined, language, boundary_confidence=boundary_confidence
         )
         if soft_completed:
-            return SentenceBoundaryResult(soft_completed, soft_pending, self.backend, len(soft_completed), len(soft_completed))
-        return SentenceBoundaryResult([], combined, self.backend, 0, 0)
+            return _boundary_result(
+                soft_completed,
+                soft_pending,
+                self.backend,
+                soft_boundary_count=len(soft_completed),
+                source_text=combined,
+            )
+        return _boundary_result([], combined, self.backend, source_text=combined)
 
     def _split_soft_boundary(
         self,
@@ -357,7 +453,7 @@ class MockSentenceBoundaryDetector:
         del language
         del boundary_confidence
         combined = pending_new_text_combined(pending_text, new_text)
-        return SentenceBoundaryResult([], combined, self.backend, 0, 0)
+        return _boundary_result([], combined, self.backend, source_text=combined)
 
 
 def create_sentence_boundary_detector(

@@ -4,6 +4,10 @@ import platform
 import subprocess
 
 from src.domain.contracts.camera import camera_default
+from src.domain.contracts.dictation_ai import (
+    dictation_ai_translation_backends_for_target_language,
+    dictation_ai_translation_models_for_backend,
+)
 from src.domain.dictation_ai_defaults import dictation_ai_default
 
 
@@ -588,6 +592,19 @@ def build_config(
             return selected_value
         return dictation_ai_default(default_key)
 
+    def normalize_translation_backend_for_target(value, target: str, default_key: str):
+        backend = str(value or "").strip()
+        if backend in dictation_ai_translation_backends_for_target_language(target):
+            return backend
+        return dictation_ai_default(default_key)
+
+    def normalize_translation_model_for_backend(value, backend: str, default_key: str):
+        model = str(value or "").strip()
+        allowed_models = dictation_ai_translation_models_for_backend(backend)
+        if not allowed_models or model in allowed_models:
+            return model
+        return dictation_ai_default(default_key)
+
     dictation_ai_translation_backend_en = translation_value(
         dictation_ai_translation_backend_en, "en", "translationBackendEn", dictation_ai_translation_backend
     )
@@ -609,8 +626,18 @@ def build_config(
     dictation_ai_translation_backend_ko = translation_value(
         dictation_ai_translation_backend_ko, "ko", "translationBackendKo", dictation_ai_translation_backend
     )
+    dictation_ai_translation_backend_ko = normalize_translation_backend_for_target(
+        dictation_ai_translation_backend_ko,
+        "ko",
+        "translationBackendKo",
+    )
     dictation_ai_translation_model_ko = translation_value(
         dictation_ai_translation_model_ko, "ko", "translationModelKo", dictation_ai_translation_model
+    )
+    dictation_ai_translation_model_ko = normalize_translation_model_for_backend(
+        dictation_ai_translation_model_ko,
+        dictation_ai_translation_backend_ko,
+        "translationModelKo",
     )
     dictation_ai_translation_device_ko = translation_value(
         dictation_ai_translation_device_ko, "ko", "translationDeviceKo", dictation_ai_translation_device
@@ -627,8 +654,18 @@ def build_config(
     dictation_ai_translation_backend_zh = translation_value(
         dictation_ai_translation_backend_zh, "zh", "translationBackendZh", dictation_ai_translation_backend
     )
+    dictation_ai_translation_backend_zh = normalize_translation_backend_for_target(
+        dictation_ai_translation_backend_zh,
+        "zh",
+        "translationBackendZh",
+    )
     dictation_ai_translation_model_zh = translation_value(
         dictation_ai_translation_model_zh, "zh", "translationModelZh", dictation_ai_translation_model
+    )
+    dictation_ai_translation_model_zh = normalize_translation_model_for_backend(
+        dictation_ai_translation_model_zh,
+        dictation_ai_translation_backend_zh,
+        "translationModelZh",
     )
     dictation_ai_translation_device_zh = translation_value(
         dictation_ai_translation_device_zh, "zh", "translationDeviceZh", dictation_ai_translation_device

@@ -627,6 +627,9 @@ class WhisperTranscriptWorker:
             lifecycle_metrics[name] = lifecycle_metrics.get(name, 0) + amount
             chunk_lifecycle_metrics[name] = chunk_lifecycle_metrics.get(name, 0) + amount
 
+        def count_segment_state(state: str, amount: int = 1) -> None:
+            count_metric(f"segment_state_{state}", amount)
+
         self._emit(
             "status",
             f"받아쓰기 AI 전사 루프 시작: step_seconds={step_seconds} window_seconds={window_seconds} "
@@ -670,6 +673,7 @@ class WhisperTranscriptWorker:
             staged_forced = False
             if not output_sentence:
                 count_metric("finalize_duplicate_suppressed")
+                count_segment_state("suppressed")
                 self._emit(
                     "status",
                     f"받아쓰기 AI 확정 후보 중복 무시: chunk={chunks} reason={reason} text={staged_before!r}",
@@ -686,6 +690,7 @@ class WhisperTranscriptWorker:
             )
             if echo_source is not None:
                 count_metric("finalize_recent_echo_suppressed")
+                count_segment_state("suppressed")
                 self._emit(
                     "status",
                     "받아쓰기 AI 확정 후보 유사 대안 무시: "
@@ -694,6 +699,7 @@ class WhisperTranscriptWorker:
                 )
                 return []
             count_metric("finalized")
+            count_segment_state("final")
             final_quality_flags = _final_sentence_diagnostic_flags(output_sentence, detected)
             for flag in final_quality_flags:
                 count_metric(f"final_quality_{flag}")
@@ -721,10 +727,12 @@ class WhisperTranscriptWorker:
                     count_metric("candidate_delta_trimmed_cjk")
             if not candidate:
                 count_metric("candidate_duplicate_suppressed")
+                count_segment_state("suppressed")
                 self._emit("status", f"받아쓰기 AI 중복 문장 무시: chunk={chunks} text={sentence!r}", display=False)
                 return []
             if not _should_stage_boundary_candidate(candidate, detected):
                 count_metric("stage_candidate_quality_blocked")
+                count_segment_state("suppressed")
                 candidate_quality_flags = _final_sentence_diagnostic_flags(candidate, detected)
                 for flag in candidate_quality_flags:
                     count_metric(f"stage_candidate_quality_{flag}")
@@ -738,6 +746,7 @@ class WhisperTranscriptWorker:
                 return []
             if not staged_sentence:
                 count_metric("stage_start")
+                count_segment_state("staged")
                 staged_sentence = candidate
                 staged_confirmations = 1
                 staged_age = 0
@@ -746,6 +755,7 @@ class WhisperTranscriptWorker:
                     "status",
                     "받아쓰기 AI stage 시작: "
                     f"chunk={chunks} forced={forced} candidate_chars={len(_normalized_text(candidate))} "
+                    f"stable_support={stable_analysis.stage_support_bucket}:{stable_analysis.stage_support_score:.3f} "
                     f"candidate_tail={_diagnostic_tail(candidate)} committed_chars={len(_normalized_text(committed_text))}",
                     display=False,
                 )
@@ -754,6 +764,7 @@ class WhisperTranscriptWorker:
             is_revision = _sentences_are_revisions(staged_sentence, candidate)
             if is_revision:
                 count_metric("stage_revision")
+                count_segment_state("revised")
                 staged_before = staged_sentence
                 preferred = _prefer_sentence_revision(staged_sentence, candidate)
                 preferred_changed = preferred != staged_before
@@ -799,6 +810,7 @@ class WhisperTranscriptWorker:
                     "받아쓰기 AI stage 리비전: "
                     f"chunk={chunks} confirmations={staged_confirmations}/{required_confirmations} "
                     f"forced={staged_forced} preferred_changed={preferred_changed} "
+                    f"stable_support={stable_analysis.stage_support_bucket}:{stable_analysis.stage_support_score:.3f} "
                     f"staged_before={_diagnostic_tail(staged_before)} candidate={_diagnostic_tail(candidate)} "
                     f"preferred={_diagnostic_tail(preferred)}",
                     display=False,
@@ -846,6 +858,7 @@ class WhisperTranscriptWorker:
                 finalized = finalize_staged_sentence(detected, "next_completed")
             else:
                 count_metric("stage_replaced_unconfirmed")
+                count_segment_state("suppressed")
                 self._emit(
                     "status",
                     "받아쓰기 AI stage 미확정 교체: "
@@ -861,6 +874,7 @@ class WhisperTranscriptWorker:
                 staged_age = 0
                 staged_forced = False
             count_metric("stage_start")
+            count_segment_state("staged")
             staged_sentence = candidate
             staged_confirmations = 1
             staged_age = 0
@@ -868,10 +882,11 @@ class WhisperTranscriptWorker:
             self._emit(
                 "status",
                 "받아쓰기 AI stage 시작: "
-                f"chunk={chunks} forced={forced} candidate_chars={len(_normalized_text(candidate))} "
-                f"candidate_tail={_diagnostic_tail(candidate)} committed_chars={len(_normalized_text(committed_text))}",
-                display=False,
-            )
+                    f"chunk={chunks} forced={forced} candidate_chars={len(_normalized_text(candidate))} "
+                    f"stable_support={stable_analysis.stage_support_bucket}:{stable_analysis.stage_support_score:.3f} "
+                    f"candidate_tail={_diagnostic_tail(candidate)} committed_chars={len(_normalized_text(committed_text))}",
+                    display=False,
+                )
             self._emit("transcript", staged_sentence, log_text=f"[{detected}] {staged_sentence}", final=False)
             return finalized
 
@@ -974,6 +989,8 @@ class WhisperTranscriptWorker:
                         int(round(stable_analysis.stable_internal_ratio * 1000)),
                     )
                     count_metric("stable_token_ratio_per_1000", int(round(stable_analysis.stable_token_ratio * 1000)))
+                    count_metric("stable_stage_support_score_per_1000", int(round(stable_analysis.stage_support_score * 1000)))
+                    count_metric(f"stable_stage_support_{stable_analysis.stage_support_bucket}")
                     count_metric(f"stable_overlap_source_{stable_analysis.stable_overlap_source}")
                 adjusted_boundary_confidence = combine_boundary_confidence(
                     boundary_confidence,
@@ -996,10 +1013,15 @@ class WhisperTranscriptWorker:
                 forced_candidate_pending = False
                 boundary_complete = 0
                 boundary_soft = 0
+                boundary_end_marks = 0
+                boundary_right_context_starts = 0
+                boundary_signal_score = 0.0
+                boundary_end_probability = 0.0
                 boundary_confidence_display = (
                     f"{adjusted_boundary_confidence:.2f}" if adjusted_boundary_confidence is not None else "n/a"
                 )
                 if text and self._is_repeated_hallucination(text):
+                    count_segment_state("suppressed")
                     self._emit("status", f"받아쓰기 AI 반복 전사 무시: chunk={chunks} text={text!r}", display=False)
                     text = ""
                 if text:
@@ -1023,6 +1045,18 @@ class WhisperTranscriptWorker:
                         repeat_collapse_rules.extend(f"pending_{rule}" for rule in pending_collapse_rules)
                     boundary_complete = boundary_result.boundary_count
                     boundary_soft = boundary_result.soft_boundary_count
+                    boundary_end_marks = boundary_result.end_mark_count
+                    boundary_right_context_starts = boundary_result.right_context_start_count
+                    boundary_signal_score = boundary_result.boundary_signal_score
+                    boundary_end_probability = boundary_result.end_probability
+                    if boundary_end_marks:
+                        count_metric("boundary_end_marks", boundary_end_marks)
+                    if boundary_right_context_starts:
+                        count_metric("boundary_right_context_starts", boundary_right_context_starts)
+                    if boundary_signal_score > 0.0:
+                        count_metric("boundary_signal_score_per_1000", int(round(boundary_signal_score * 1000)))
+                    if boundary_end_probability > 0.0:
+                        count_metric("boundary_end_probability_per_1000", int(round(boundary_end_probability * 1000)))
                     if completed_sentences:
                         coalesced_completed_sentences = _coalesce_completed_sentences_for_staging(completed_sentences, str(detected))
                         if len(coalesced_completed_sentences) != len(completed_sentences):
@@ -1058,6 +1092,7 @@ class WhisperTranscriptWorker:
                             if not pending_transcript_text:
                                 pending_chunks = 0
                     if pending_transcript_text and not forced_candidate_pending:
+                        count_segment_state("pending")
                         self._emit(
                             "status",
                             "받아쓰기 AI pending tail: "
@@ -1074,6 +1109,7 @@ class WhisperTranscriptWorker:
                         display=False,
                     )
                     if pending_transcript_text:
+                        count_segment_state("pending")
                         pending_chunks += 1
                         forced_by = _forced_sentence_reason(pending_transcript_text, pending_chunks)
                         if forced_by:
@@ -1111,6 +1147,8 @@ class WhisperTranscriptWorker:
                     f"pending_quality={','.join(pending_quality_flags) or 'none'} "
                     f"boundary_backend={self._sentence_boundary_detector.backend} "
                     f"boundary_complete={boundary_complete} boundary_soft={boundary_soft} boundary_conf={boundary_confidence_display} "
+                    f"boundary_end_marks={boundary_end_marks} boundary_right_context={boundary_right_context_starts} "
+                    f"boundary_signal_score={boundary_signal_score:.3f} boundary_end_probability={boundary_end_probability:.3f} "
                     f"boundary_conf_segment={boundary_confidence if boundary_confidence is not None else 'n/a'} "
                     f"boundary_conf_stable={stable_analysis.boundary_confidence if stable_analysis.boundary_confidence is not None else 'n/a'} "
                     f"pending_chars={len(pending_transcript_text)} pending_chunks={pending_chunks} "
@@ -1121,6 +1159,7 @@ class WhisperTranscriptWorker:
                     f"stable_internal_chars={stable_analysis.stable_internal_chars} "
                     f"stable_internal_ratio={stable_analysis.stable_internal_ratio:.3f} "
                     f"stable_token_ratio={stable_analysis.stable_token_ratio:.3f} "
+                    f"stable_stage_support={stable_analysis.stage_support_bucket}:{stable_analysis.stage_support_score:.3f} "
                     f"stable_overlap_source={stable_analysis.stable_overlap_source} "
                     f"repeat_collapse_chars={repeat_collapse_chars} repeat_collapse_rules={','.join(repeat_collapse_rules) or 'none'} "
                     f"delta_chars={len(_normalized_text(text))} "
@@ -1258,6 +1297,14 @@ class WhisperTranscriptWorker:
                 stable_internal_chars = chunk_lifecycle_metrics.get("stable_internal_chars", 0)
                 stable_internal_ratio_per_1000 = chunk_lifecycle_metrics.get("stable_internal_ratio_per_1000", 0)
                 stable_token_ratio_per_1000 = chunk_lifecycle_metrics.get("stable_token_ratio_per_1000", 0)
+                stable_stage_support_score_per_1000 = chunk_lifecycle_metrics.get(
+                    "stable_stage_support_score_per_1000",
+                    0,
+                )
+                stable_stage_support_high_count = chunk_lifecycle_metrics.get("stable_stage_support_high", 0)
+                stable_stage_support_mid_count = chunk_lifecycle_metrics.get("stable_stage_support_mid", 0)
+                stable_stage_support_low_count = chunk_lifecycle_metrics.get("stable_stage_support_low", 0)
+                stable_stage_support_none_count = chunk_lifecycle_metrics.get("stable_stage_support_none", 0)
                 stage_candidate_quality_blocked_count = chunk_lifecycle_metrics.get("stage_candidate_quality_blocked", 0)
                 stage_candidate_quality_count = sum(
                     value
@@ -1272,6 +1319,11 @@ class WhisperTranscriptWorker:
                     "stage_candidate_quality_mixed_latin_zh",
                     0,
                 )
+                segment_state_pending_count = chunk_lifecycle_metrics.get("segment_state_pending", 0)
+                segment_state_staged_count = chunk_lifecycle_metrics.get("segment_state_staged", 0)
+                segment_state_final_count = chunk_lifecycle_metrics.get("segment_state_final", 0)
+                segment_state_suppressed_count = chunk_lifecycle_metrics.get("segment_state_suppressed", 0)
+                segment_state_revised_count = chunk_lifecycle_metrics.get("segment_state_revised", 0)
                 final_quality_count = sum(
                     value for key, value in chunk_lifecycle_metrics.items() if key.startswith("final_quality_")
                 )
@@ -1296,10 +1348,20 @@ class WhisperTranscriptWorker:
                     f"stable_internal_chars={stable_internal_chars} "
                     f"stable_internal_ratio={stable_internal_ratio_per_1000 / 1000:.3f} "
                     f"stable_token_ratio={stable_token_ratio_per_1000 / 1000:.3f} "
+                    f"stable_stage_support_score={stable_stage_support_score_per_1000 / 1000:.3f} "
+                    f"stable_stage_support_high={stable_stage_support_high_count} "
+                    f"stable_stage_support_mid={stable_stage_support_mid_count} "
+                    f"stable_stage_support_low={stable_stage_support_low_count} "
+                    f"stable_stage_support_none={stable_stage_support_none_count} "
                     f"stage_candidate_quality_blocked={stage_candidate_quality_blocked_count} "
                     f"stage_candidate_quality={stage_candidate_quality_count} "
                     f"stage_candidate_quality_cjk_internal_gap={stage_candidate_quality_cjk_internal_gap_count} "
                     f"stage_candidate_quality_mixed_latin_zh={stage_candidate_quality_mixed_latin_count} "
+                    f"segment_state_pending={segment_state_pending_count} "
+                    f"segment_state_staged={segment_state_staged_count} "
+                    f"segment_state_final={segment_state_final_count} "
+                    f"segment_state_suppressed={segment_state_suppressed_count} "
+                    f"segment_state_revised={segment_state_revised_count} "
                     f"final_quality={final_quality_count} translation_skip={translation_skip_count} "
                     f"raw_without_final={raw_without_final_count} "
                     f"replace_unconfirmed_rate={stage_replaced_unconfirmed_count / max(stage_replace_count, 1):.2f} "

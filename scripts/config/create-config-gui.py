@@ -104,7 +104,7 @@ from scripts.config.dictation_ai_options import (
     dictation_ai_translation_backend_options_for_target as _dictation_ai_translation_backend_options_for_target,
     dictation_ai_translation_model_options as _dictation_ai_translation_model_options,
     dictation_ai_translation_target_display_from_raw as _dictation_ai_translation_target_display_from_raw,
-    dictation_ai_translation_target_options_for_backend as _dictation_ai_translation_target_options_for_backend,
+    dictation_ai_translation_target_options as _dictation_ai_translation_target_options,
     dictation_ai_translation_target_raw_from_display as _dictation_ai_translation_target_raw_from_display,
 )
 
@@ -4723,9 +4723,6 @@ class ConfigGui:
                 self._set_var(visible_key, hidden_var.get())
 
     def _sync_dictation_ai_translation_backend_options(self, *, target_changed: bool = False) -> None:
-        language_var = self.vars.get("dictation_ai_language")
-        language_display = language_var.get().strip() if language_var is not None else "en"
-        language = _dictation_ai_language_raw_from_display(language_display)
         target_var = self.vars.get("dictation_ai_translation_target_language")
         target_display = target_var.get().strip() if target_var is not None else ""
         target_language = _dictation_ai_translation_target_raw_from_display(target_display) if target_display else "ko"
@@ -4761,31 +4758,26 @@ class ConfigGui:
             else:
                 frame.grid_remove()
 
-        target_options = _dictation_ai_translation_target_options_for_backend(language, backend)
         target_widget = self._widgets.get("dictation_ai_translation_target_language")
         if target_widget is not None:
-            target_widget["values"] = tuple(target_options)
+            target_widget["values"] = tuple(_dictation_ai_translation_target_options())
         target_var = self.vars.get("dictation_ai_translation_target_language")
         target_display = target_var.get().strip() if target_var is not None else ""
+        target_options = _dictation_ai_translation_target_options()
         if target_options and target_display not in target_options:
             previous_target = getattr(self, "_dictation_ai_selected_translation_target", target_language)
             self._store_visible_dictation_ai_translation_for_target(previous_target)
-            self._set_var("dictation_ai_translation_target_language", target_options[0])
-            target_language = _dictation_ai_translation_target_raw_from_display(target_options[0])
+            self._set_var(
+                "dictation_ai_translation_target_language",
+                _dictation_ai_translation_target_display_from_raw(target_language),
+            )
             self._dictation_ai_selected_translation_target = target_language
             self._load_visible_dictation_ai_translation_for_target(target_language)
 
         model_options = _dictation_ai_translation_model_options(backend)
         self._set_combobox_values_for_backend("dictation_ai_translation_model", model_options)
 
-        if backend == "whisper":
-            previous_target = getattr(self, "_dictation_ai_selected_translation_target", target_language)
-            self._store_visible_dictation_ai_translation_for_target(previous_target)
-            self._set_var("dictation_ai_translation_target_language", _dictation_ai_translation_target_display_from_raw("en"))
-            target_language = "en"
-            self._dictation_ai_selected_translation_target = target_language
-            self._load_visible_dictation_ai_translation_for_target(target_language)
-        elif backend in {"nllb-transformers", "m2m100-transformers"}:
+        if backend in {"nllb-transformers", "m2m100-transformers"}:
             self._set_var("dictation_ai_translation_device", "cuda")
             compute_var = self.vars.get("dictation_ai_translation_compute_type")
             compute_type = compute_var.get().strip() if compute_var is not None else ""

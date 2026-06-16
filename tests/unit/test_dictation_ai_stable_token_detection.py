@@ -3,6 +3,8 @@ import unittest
 from src.app.stable_token_detection import (
     analyze_stable_window,
     combine_boundary_confidence,
+    stable_stage_support_bucket,
+    stable_stage_support_score,
 )
 
 
@@ -20,6 +22,8 @@ class StableTokenDetectionTest(unittest.TestCase):
         self.assertEqual(analysis.current_units, 8)
         self.assertGreaterEqual(analysis.stable_token_ratio, 0.70)
         self.assertEqual(analysis.stable_overlap_source, "common_prefix")
+        self.assertEqual(analysis.stage_support_bucket, "high")
+        self.assertGreaterEqual(analysis.stage_support_score, 0.75)
 
     def test_english_sliding_window_uses_suffix_prefix_overlap(self) -> None:
         analysis = analyze_stable_window(
@@ -72,6 +76,7 @@ class StableTokenDetectionTest(unittest.TestCase):
         self.assertGreaterEqual(analysis.stable_internal_units, 18)
         self.assertGreaterEqual(analysis.stable_internal_ratio, 0.75)
         self.assertGreaterEqual(analysis.stable_internal_chars, 18)
+        self.assertEqual(analysis.stage_support_bucket, "mid")
 
     def test_first_window_has_no_stability_confidence(self) -> None:
         analysis = analyze_stable_window("", "first raw window", "en")
@@ -87,6 +92,30 @@ class StableTokenDetectionTest(unittest.TestCase):
         self.assertEqual(combine_boundary_confidence(None, 0.70), 0.70)
         self.assertEqual(combine_boundary_confidence(0.80, None), 0.80)
         self.assertIsNone(combine_boundary_confidence(None, None))
+
+    def test_stage_support_score_uses_internal_overlap_only_when_prefix_is_absent(self) -> None:
+        score = stable_stage_support_score(
+            stable_token_ratio=0.0,
+            stable_internal_ratio=0.80,
+            stable_prefix_chars=0,
+            unstable_tail_chars=12,
+            stable_internal_chars=36,
+            stable_overlap_source="none",
+        )
+
+        self.assertEqual(stable_stage_support_bucket(score), "high")
+
+    def test_stage_support_score_penalizes_large_unstable_tail(self) -> None:
+        score = stable_stage_support_score(
+            stable_token_ratio=0.60,
+            stable_internal_ratio=0.60,
+            stable_prefix_chars=10,
+            unstable_tail_chars=40,
+            stable_internal_chars=10,
+            stable_overlap_source="common_prefix",
+        )
+
+        self.assertEqual(stable_stage_support_bucket(score), "low")
 
 
 if __name__ == "__main__":

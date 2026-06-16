@@ -213,6 +213,22 @@ class DictationAiConfigTest(unittest.TestCase):
             },
         )
 
+    def test_build_config_normalizes_invalid_hidden_translation_backend_for_target(self) -> None:
+        config = CameraServerConfigTest._build_base_config(
+            dictation_ai_translation_enabled=True,
+            dictation_ai_translation_target_language="ko",
+            dictation_ai_translation_backend="nllb-transformers",
+            dictation_ai_translation_backend_ko="whisper",
+            dictation_ai_translation_model_ko="facebook/m2m100_1.2B",
+            dictation_ai_translation_backend_zh="whisper",
+            dictation_ai_translation_model_zh="facebook/nllb-200-distilled-600M",
+        )
+
+        self.assertEqual(config["dictationAi"]["translationBackend"], "nllb-transformers")
+        self.assertEqual(config["dictationAi"]["translationBackendKo"], "nllb-transformers")
+        self.assertEqual(config["dictationAi"]["translationModelKo"], "facebook/nllb-200-distilled-600M")
+        self.assertEqual(config["dictationAi"]["translationBackendZh"], "m2m100-transformers")
+        self.assertEqual(config["dictationAi"]["translationModelZh"], "facebook/m2m100_1.2B")
 
     def test_build_config_uses_chunk_seconds_as_legacy_window_seconds(self) -> None:
         config = build_config(
