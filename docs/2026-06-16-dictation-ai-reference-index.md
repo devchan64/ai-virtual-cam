@@ -7,6 +7,7 @@
 상세 설계 판단과 운영 실험 기록은 다음 문서를 함께 본다.
 
 - [받아쓰기 AI 설계 및 실험 노트](2026-06-16-dictation-ai-design-experiment-notes.md)
+- [받아쓰기 AI 실험일지](2026-06-16-dictation-ai-experiment-log.md)
 - [받아쓰기 AI 계약과 기본값](2026-06-16-dictation-ai-contract-defaults.md)
 - [다국어 실시간 음성 전사 리비전 인지 확정 계층 초안](paper/ko-revision-aware-realtime-stt.md)
 

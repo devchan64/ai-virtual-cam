@@ -4,7 +4,7 @@
 
 이 문서는 기존 [받아쓰기 AI 기능 설계](2026-06-13-dictation-ai-feature-design.md)와 [프레젠테이션 실시간 전사/번역 세그먼트 설계 참고](2026-06-15-presentation-dictation-segmentation-references.md)를 통합한 기준 설계/실험 노트다.
 
-기존 두 문서는 원본 기록으로 남겨두되, 새 변경과 운영 판단은 이 문서에 먼저 반영한다. 설정 계약과 기본값은 [받아쓰기 AI 계약과 기본값](2026-06-16-dictation-ai-contract-defaults.md)에 두고, 외부 논문, 모델 카드, 구현 링크는 [받아쓰기 AI 참조 레퍼런스 모음](2026-06-16-dictation-ai-reference-index.md)에 둔다.
+기존 두 문서는 원본 기록으로 남겨두되, 새 변경과 운영 판단은 이 문서에 먼저 반영한다. 커밋 기록 기반 실험 흐름은 [받아쓰기 AI 실험일지](2026-06-16-dictation-ai-experiment-log.md)에 두고, 설정 계약과 기본값은 [받아쓰기 AI 계약과 기본값](2026-06-16-dictation-ai-contract-defaults.md)에 둔다. 외부 논문, 모델 카드, 구현 링크는 [받아쓰기 AI 참조 레퍼런스 모음](2026-06-16-dictation-ai-reference-index.md)에 둔다.
 
 ## 기능 도메인
 
