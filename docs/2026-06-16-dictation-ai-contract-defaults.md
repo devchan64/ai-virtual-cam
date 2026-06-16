@@ -182,6 +182,7 @@ macOS/Windows, CPU 실행, `auto`에서 CPU로 암묵 전환되는 경로는 운
 - `nllb-transformers`, `m2m100-transformers` 사용 시 `translationModel`은 비어 있으면 안 된다.
 - `nllb-transformers`, `m2m100-transformers` 사용 시 번역 장치는 `cuda`여야 한다.
 - 번역은 final transcript만 입력으로 받는다. staged/partial 후보는 번역하지 않는다.
+- final transcript가 `latin_only_for_zh`, `mixed_latin_zh`, `short_cjk`, `no_end_marker`, `spaced_cjk`, `cjk_repeated_ngram` 품질 플래그를 가지면 번역 큐에 넣지 않는다. 전사 출력은 보존하되 번역 오염을 막기 위한 계약이다.
 
 ## 모델 준비와 실행 순서
 

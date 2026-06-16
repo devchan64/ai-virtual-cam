@@ -108,6 +108,8 @@
 
 ## 실시간 처리 파이프라인
 
+이 섹션의 흐름을 받아쓰기 AI 신규 기준 파이프라인으로 둔다. 단, 모든 단계가 현재 코드에 같은 수준으로 final 결정에 반영되어 있다는 뜻은 아니다. 현재 운영 코드는 sliding window, 언어별 STT, pending/new 접합, stable token 지표, SaT/SBD 후보, staged/final 생명주기, final-only 번역을 갖고 있고, Semantic Boundary Detection의 일부 feature는 후속 구현으로 남긴다.
+
 ```text
 오디오 입력
   ↓
@@ -141,6 +143,28 @@ Semantic Boundary Detection
 ```
 
 이 흐름에서는 "음성이 멈췄는가"보다 "토큰이 안정되었는가"와 "의미 경계가 확인되었는가"가 우선이다.
+
+### 적용 상태
+
+| 단계 | 현재 상태 | 적용 판단 |
+| --- | --- | --- |
+| 오디오 입력/슬라이딩 윈도우 | 구현됨 | `windowSeconds`, `stepSeconds` 기준으로 최근 오디오 window를 STT 입력으로 사용한다. |
+| 언어별 STT backend | 구현됨 | 영어/한국어는 `faster-whisper`, 중국어는 `qwen3-asr-transformers`를 운영 기본값으로 둔다. |
+| raw STT window 결과 | 구현됨 | 원문창은 문장 경계/확정 전 raw STT window만 표시한다. |
+| 정규화 및 접합 | 구현 중 | pending tail과 새 raw의 overlap, CJK no-space 내부 prefix overlap, 최근 final echo 억제를 적용한다. |
+| Stable Token Detection | 지표 구현됨 | 이전/현재 raw window의 안정 prefix, 불안정 tail, 안정 token ratio를 별도 계층에서 계산한다. final 승격 정책 반영은 후속 튜닝으로 둔다. |
+| Semantic Boundary Detection | 부분 구현 | SaT/SBD 후보 생성과 pending 보수 처리, stable confidence 보정은 구현되어 있다. streaming punctuation/end probability, right-context score, VAD 보조 feature는 후속 단계다. |
+| 세그먼트 상태관리 | 구현됨 | `pending`, `staged`, `final`, `suppressed`, `revised` 의미를 분리하고 final은 append-only로 유지한다. |
+| 실시간 번역 | 구현됨 | 번역 큐에는 품질 게이트를 통과한 final transcript만 넣는다. staged/partial 번역은 운영 경로에서 제거한다. |
+
+### 구현 우선순위
+
+1. Stable Token Detection 지표를 운영 로그에서 1~2일 누적해 `finalization_rate_per_1000`, `raw_without_final`, `stage_replaced_unconfirmed`와 상관관계를 본다.
+2. 안정 prefix가 높고 불안정 tail이 짧은 후보만 boundary confidence를 높이는 방향으로 튜닝한다.
+3. CJK는 공백 기반 token보다 문자 n-gram, prefix/suffix overlap, 내부 prefix overlap을 우선한다.
+4. Semantic Boundary Detection은 SaT 결과에 right-context와 punctuation/end score를 더하는 방식으로 확장한다.
+5. VAD/silence는 final trigger가 아니라 boundary confidence 보조 feature로만 넣는다.
+6. 각 단계의 출력과 지표를 로그에 분리해 STT 품질, stable detection 품질, boundary 품질, lifecycle 품질, 번역 품질을 따로 비교한다.
 
 ## 문헌 구현 정렬
 
@@ -618,6 +642,25 @@ old_result=...喷枪 条，然后把这米再切断了...
 - stdout 진단 로그: `stable_tail`, `delta_tail`, `pending_tail`, `staged_tail` 같은 내부 상태
 
 원문창이 staged 후보를 표시하던 시기의 로그 해석은 raw STT 품질 판단 근거로 쓰지 않는다.
+
+### 2026-06-16 중국어 5분 운영 모니터링
+
+`qwen3-asr-0.6b`, `window=15.0`, `step=1.0`, `beam=3`, `maxNewTokens=192`, 번역 ON 조건으로 약 5분간 `.tmp/logs/avc-whisper.log`를 추적했다. `stt_step_load`와 `total_step_load`는 대부분 1.0 미만이었고 input queue drop은 관측되지 않아 계산 성능은 병목으로 보지 않는다.
+
+관측된 병목은 확정 생명주기와 품질 차단이다.
+
+- `completed_coalesced`는 정상적으로 증가해 중국어 multi-completed 병합은 동작한다.
+- `raw_without_final`이 크게 누적되어 raw STT 관측 대비 final 확정률이 낮다.
+- `stage_revision_confirmation_reset`이 높아 후보가 자주 바뀌며 재확인 카운트가 리셋된다.
+- `stage_replace`와 `stage_replaced_unconfirmed`이 같은 수준으로 증가해 미확정 staged 교체가 많다.
+- CJK delta trim 뒤에도 `很 赞 哎...`처럼 글자 단위 공백 후보가 staged 경로에 남는다.
+- `no_end_marker` final은 번역 차단되고 있었지만, `mixed_latin_zh` final은 번역되어 `G配Y T` 같은 오염이 번역 결과로 전달됐다.
+
+반영 판단:
+
+- `mixed_latin_zh` final transcript는 전사 출력에는 남길 수 있지만 번역 큐에는 넣지 않는다.
+- 추적 테스트에 `finalization_rate_per_1000`, `replace_unconfirmed_rate_per_1000`, `translation_skip_per_final_quality_per_1000`을 추가한다.
+- `window=15.0`은 계산상 가능하지만 기본값으로 승격하지 않는다. `windowSecondsZh=12.0`, `stepSecondsZh=1.0`, `beamSizeZh=3`, `maxNewTokensZh=192`를 유지하고, 확정률/미확정 교체율 개선을 먼저 본다.
 
 ## 배포 순서와 실패 대응
 

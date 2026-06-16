@@ -18,6 +18,7 @@ from pathlib import Path
 
 from src.app.rotating_log import install_rotating_stdout_log
 from src.app.sentence_boundary import create_sentence_boundary_detector
+from src.app.stable_token_detection import analyze_stable_window, combine_boundary_confidence
 from src.app.stt_model import build_stt_model
 from src.app.translation_model import TranslationRequest, build_text_translator
 from src.app.transcript_revision import append_context as _append_committed_text, consume_committed_prefix as _consume_committed_prefix, revision_lifecycle_context as _revision_lifecycle_context
@@ -48,7 +49,6 @@ from src.app.dictation_transcript_logic import (
     _should_age_staged_sentence,
     _should_finalize_before_replacement,
     _is_recent_final_echo,
-    _should_translate_staged_sentence,
     _should_translate_final_sentence,
     _split_completed_sentences,
     _stable_window_text,
@@ -614,8 +614,8 @@ class WhisperTranscriptWorker:
         staged_sentence = ""
         staged_confirmations = 0
         staged_age = 0
-        staged_translation_pending = False
         staged_forced = False
+        previous_window_text = ""
         lifecycle_metrics: dict[str, int] = {}
         chunk_lifecycle_metrics: dict[str, int] = {}
         last_audio_queue_drops = self._audio_queue_drop_count()
@@ -709,7 +709,7 @@ class WhisperTranscriptWorker:
             return [output_sentence]
 
         def stage_completed_sentence(sentence: str, detected: str, *, forced: bool = False) -> list[str]:
-            nonlocal staged_sentence, staged_confirmations, staged_age, staged_translation_pending, staged_forced
+            nonlocal staged_sentence, staged_confirmations, staged_age, staged_forced
             normalized_sentence = _normalized_text(sentence)
             candidate = _sentence_output_delta(committed_text, sentence)
             if candidate and candidate != normalized_sentence:
@@ -725,7 +725,6 @@ class WhisperTranscriptWorker:
                 staged_sentence = candidate
                 staged_confirmations = 1
                 staged_age = 0
-                staged_translation_pending = True
                 staged_forced = forced
                 self._emit(
                     "status",
@@ -771,7 +770,6 @@ class WhisperTranscriptWorker:
                 )
                 if _should_confirm_staged_sentence(staged_sentence, staged_confirmations, staged_forced):
                     return finalize_staged_sentence(detected, "confirmed_forced" if staged_forced else "confirmed")
-                staged_translation_pending = True
                 self._emit("transcript", staged_sentence, log_text=f"[{detected}] {staged_sentence}", final=False)
                 return []
             count_metric("stage_replace")
@@ -831,7 +829,6 @@ class WhisperTranscriptWorker:
             staged_sentence = candidate
             staged_confirmations = 1
             staged_age = 0
-            staged_translation_pending = True
             staged_forced = forced
             self._emit(
                 "status",
@@ -900,7 +897,6 @@ class WhisperTranscriptWorker:
             translation_attempted = False
             translation_started_at = chunk_started_at
             text = ""
-            staged_translation_pending = False
             try:
                 stt_started_at = time.perf_counter()
                 transcribe_kwargs = {
@@ -931,6 +927,17 @@ class WhisperTranscriptWorker:
                 log_collapse_diagnostic("window", raw_window_text, window_text, repeat_collapse_rules)
                 repeat_collapse_chars = max(0, len(_normalized_text(raw_window_text)) - len(_normalized_text(window_text)))
                 stable_text = _stable_window_text(window_text, 0.0, window_seconds)
+                stable_analysis = analyze_stable_window(previous_window_text, window_text, language)
+                previous_window_text = window_text
+                if stable_analysis.current_units:
+                    count_metric("stable_window_observed")
+                    count_metric("stable_prefix_chars", stable_analysis.stable_prefix_chars)
+                    count_metric("unstable_tail_chars", stable_analysis.unstable_tail_chars)
+                    count_metric("stable_token_ratio_per_1000", int(round(stable_analysis.stable_token_ratio * 1000)))
+                adjusted_boundary_confidence = combine_boundary_confidence(
+                    boundary_confidence,
+                    stable_analysis.boundary_confidence,
+                )
                 delta_base_text = _append_committed_text(committed_text, pending_transcript_text)
                 text = _new_text_delta(delta_base_text, stable_text)
                 stt_elapsed = time.perf_counter() - stt_started_at
@@ -948,7 +955,9 @@ class WhisperTranscriptWorker:
                 forced_candidate_pending = False
                 boundary_complete = 0
                 boundary_soft = 0
-                boundary_confidence_display = f"{boundary_confidence:.2f}" if boundary_confidence is not None else "n/a"
+                boundary_confidence_display = (
+                    f"{adjusted_boundary_confidence:.2f}" if adjusted_boundary_confidence is not None else "n/a"
+                )
                 if text and self._is_repeated_hallucination(text):
                     self._emit("status", f"받아쓰기 AI 반복 전사 무시: chunk={chunks} text={text!r}", display=False)
                     text = ""
@@ -957,7 +966,7 @@ class WhisperTranscriptWorker:
                         pending_transcript_text,
                         text,
                         detected,
-                        boundary_confidence=boundary_confidence,
+                        boundary_confidence=adjusted_boundary_confidence,
                     )
                     completed_sentences = []
                     for sentence in boundary_result.completed:
@@ -1061,9 +1070,14 @@ class WhisperTranscriptWorker:
                     f"pending_quality={','.join(pending_quality_flags) or 'none'} "
                     f"boundary_backend={self._sentence_boundary_detector.backend} "
                     f"boundary_complete={boundary_complete} boundary_soft={boundary_soft} boundary_conf={boundary_confidence_display} "
+                    f"boundary_conf_segment={boundary_confidence if boundary_confidence is not None else 'n/a'} "
+                    f"boundary_conf_stable={stable_analysis.boundary_confidence if stable_analysis.boundary_confidence is not None else 'n/a'} "
                     f"pending_chars={len(pending_transcript_text)} pending_chunks={pending_chunks} "
                     f"pending_chars_per_chunk={len(pending_transcript_text) / max(pending_chunks, 1):.1f} "
                     f"window_chars={len(_normalized_text(window_text))} stable_chars={len(_normalized_text(stable_text))} "
+                    f"stable_prefix_chars={stable_analysis.stable_prefix_chars} "
+                    f"unstable_tail_chars={stable_analysis.unstable_tail_chars} "
+                    f"stable_token_ratio={stable_analysis.stable_token_ratio:.3f} "
                     f"repeat_collapse_chars={repeat_collapse_chars} repeat_collapse_rules={','.join(repeat_collapse_rules) or 'none'} "
                     f"delta_chars={len(_normalized_text(text))} "
                     f"end_marks_window={_sentence_end_count(window_text)} end_marks_stable={_sentence_end_count(stable_text)} "
@@ -1078,17 +1092,10 @@ class WhisperTranscriptWorker:
                     f"staged_tail={_diagnostic_tail(staged_sentence)}",
                     display=False,
                 )
-                translation_jobs: list[tuple[str, bool]] = []
-                if (
-                    text_translator is not None
-                    and staged_translation_pending
-                    and staged_sentence
-                    and _should_translate_staged_sentence(staged_sentence, staged_confirmations)
-                ):
-                    translation_jobs.append((staged_sentence, False))
+                translation_jobs: list[str] = []
                 for sentence in final_sentences:
                     if _should_translate_final_sentence(sentence, detected):
-                        translation_jobs.append((sentence, True))
+                        translation_jobs.append(sentence)
                     else:
                         count_metric("translation_skip_final_quality")
                         self._emit(
@@ -1104,11 +1111,9 @@ class WhisperTranscriptWorker:
                         request_label = "Whisper 백엔드 내장 번역 요청" if text_translator is None else "외부 텍스트 번역 요청"
                         target_language = self._cfg.translationTargetLanguage
                         source_language = detected if detected in {"ko", "en", "zh"} else self._cfg.language
-                        for sentence, is_final_translation in translation_jobs:
-                            if text_translator is None and not is_final_translation:
-                                continue
+                        for sentence in translation_jobs:
                             translation_started_at = time.perf_counter()
-                            self._emit("status", f"{request_label}: chunk={chunks} final={is_final_translation}", display=False)
+                            self._emit("status", f"{request_label}: chunk={chunks} final=True", display=False)
                             translated_text = ""
                             if text_translator is None:
                                 translated_segments, _translated_info = model.transcribe(
@@ -1144,20 +1149,19 @@ class WhisperTranscriptWorker:
                                 self._emit(
                                     "status",
                                     "받아쓰기 AI 번역 진단: "
-                                    f"chunk={chunks} final={is_final_translation} "
+                                    f"chunk={chunks} final=True "
                                     f"source_lang={source_language} target_lang={target_language} "
                                     f"source_chars={len(_normalized_text(sentence))} "
                                     f"target_chars={len(_normalized_text(translated_text))} "
                                     f"backend={self._cfg.translationBackend} model={self._cfg.translationModel}",
                                     display=False,
                                 )
-                                if is_final_translation:
-                                    committed_translation_text = _append_committed_text(committed_translation_text, translated_text)
+                                committed_translation_text = _append_committed_text(committed_translation_text, translated_text)
                                 self._emit(
                                     "translation",
                                     translated_text,
                                     log_text=f"[{detected}->{target_language}] {translated_text}",
-                                    final=is_final_translation,
+                                    final=True,
                                 )
                             else:
                                 self._emit("status", f"받아쓰기 AI 번역 결과 없음: chunk={chunks}", display=False)
@@ -1189,6 +1193,9 @@ class WhisperTranscriptWorker:
                 duplicate_suppressed_count = chunk_lifecycle_metrics.get("candidate_duplicate_suppressed", 0)
                 recent_echo_suppressed_count = chunk_lifecycle_metrics.get("finalize_recent_echo_suppressed", 0)
                 delta_trimmed_count = chunk_lifecycle_metrics.get("candidate_delta_trimmed", 0)
+                stable_prefix_chars = chunk_lifecycle_metrics.get("stable_prefix_chars", 0)
+                unstable_tail_chars = chunk_lifecycle_metrics.get("unstable_tail_chars", 0)
+                stable_token_ratio_per_1000 = chunk_lifecycle_metrics.get("stable_token_ratio_per_1000", 0)
                 final_quality_count = sum(
                     value for key, value in chunk_lifecycle_metrics.items() if key.startswith("final_quality_")
                 )
@@ -1205,6 +1212,8 @@ class WhisperTranscriptWorker:
                     f"finalize_before_replace={stage_finalize_before_replace_count} "
                     f"duplicate_suppressed={duplicate_suppressed_count} recent_echo_suppressed={recent_echo_suppressed_count} "
                     f"delta_trimmed={delta_trimmed_count} "
+                    f"stable_prefix_chars={stable_prefix_chars} unstable_tail_chars={unstable_tail_chars} "
+                    f"stable_token_ratio={stable_token_ratio_per_1000 / 1000:.3f} "
                     f"final_quality={final_quality_count} translation_skip={translation_skip_count} "
                     f"raw_without_final={raw_without_final_count} "
                     f"replace_unconfirmed_rate={stage_replaced_unconfirmed_count / max(stage_replace_count, 1):.2f} "

@@ -26,11 +26,12 @@ TRACKING_TARGETS = {
     "replacement": {"target_cases": 11, "target_rate": 0.90},
     "pending": {"target_cases": 10, "target_rate": 0.90},
     "pending_quality": {"target_cases": 1, "target_rate": 1.00},
-    "final_quality": {"target_cases": 8, "target_rate": 0.90},
+    "final_quality": {"target_cases": 11, "target_rate": 0.90},
     "translation_quality": {"target_cases": 8, "target_rate": 0.80},
     "coalesce": {"target_cases": 10, "target_rate": 1.00},
     "duplicate_suppression": {"target_cases": 4, "target_rate": 1.00},
-    "runtime_metrics": {"target_cases": 9, "target_rate": 1.00},
+    "runtime_metrics": {"target_cases": 11, "target_rate": 1.00},
+    "stable_metrics": {"target_cases": 2, "target_rate": 1.00},
 }
 
 REVISION_TRACKING_CASES = [
@@ -886,9 +887,12 @@ FINAL_QUALITY_TRACKING_CASES = [
     {"text": "matcha ice cream很好吃。", "language": "zh", "expected_flags": {"mixed_latin_zh"}, "source": "synthetic zh mixed latin"},
     {"text": "Oh, my god,我真的很开心。", "language": "zh", "expected_flags": {"mixed_latin_zh"}, "source": "2026-06-14 avc-whisper.log.4 mixed latin zh"},
     {"text": "I love felelceline baby, baby, you oonly you, oh,你you can.", "language": "zh", "expected_flags": {"mixed_latin_zh"}, "source": "2026-06-14 avc-whisper.log.4 mixed latin zh"},
+    {"text": "它这边厉害，因为肉在这边，所以它就会变得有点难剥。对，章鱼饼超适合配G配Y T的时候吃，因为它很刷脆。超级好吃。", "language": "zh", "expected_flags": {"mixed_latin_zh"}, "source": "2026-06-16 5m monitor chunk 288 mixed latin zh"},
     {"text": "要 去 找", "language": "zh", "expected_flags": {"short_cjk", "no_end_marker"}, "source": "2026-06-14 monitor chunk 354"},
     {"text": "见 什 么 都 想 吃 这 可 怎 么 办 呀 我 看 见 大 闸 丸 了 人 刚 才 来 的 啊 肉 丸", "language": "zh", "expected_flags": {"no_end_marker", "spaced_cjk"}, "source": "2026-06-14 monitor chunk 723 spaced CJK output"},
     {"text": "一 看 到 这 东 西 直 抢 趁 着 我 这 几 天 还 能 吃 冰 了 我 赶 紧 吃", "language": "zh", "expected_flags": {"no_end_marker", "spaced_cjk"}, "source": "2026-06-15 Chinese monitor 20s chunk 113"},
+    {"text": "很 赞 哎 就 是 怎 样 你 如 果 没 有 买 票 你 是 怎 样 用 没 有 钱 但 这 钱 就 多 一 百 块 变 三 百 块", "language": "zh", "expected_flags": {"no_end_marker", "spaced_cjk"}, "source": "2026-06-16 5m monitor spaced CJK delta trim"},
+    {"text": "这你买但这种就是会比较不好夹我觉得看自己啊", "language": "zh", "expected_flags": {"no_end_marker"}, "source": "2026-06-16 5m monitor chunk 200 no end marker final"},
     {"text": "我跟你说，就这一 得脱鞋！哇，它是楼梯好高啊。Hello，活动们，大家下午好。", "language": "zh", "expected_flags": {"mixed_latin_zh", "cjk_internal_gap"}, "source": "2026-06-14 monitor chunk 890 internal CJK gap"},
     {"text": "对，他的 了，中国人主打一来了，所以叫我进去走。", "language": "zh", "expected_flags": {"cjk_internal_gap"}, "source": "2026-06-14 monitor chunk 801 internal CJK gap"},
     {"text": "真的，吃这个干热午茶必须得是这半肥瘦，就是宽肉带皮的还 汤的，有油饭吗？", "language": "zh", "expected_flags": {"cjk_internal_gap"}, "source": "2026-06-14 avc-whisper.log.1 chunk 1817 internal gap"},
@@ -949,6 +953,75 @@ RUNTIME_METRIC_TRACKING_CASES = [
         "metrics": {"finalize_recent_echo_suppressed": 1},
         "expected": {"recent_echo_suppressed": 1},
         "source": "2026-06-16 Chinese monitor similar final alternative suppressed after committed final",
+    },
+    {
+        "metrics": {"final_quality_mixed_latin_zh": 1, "finalized": 1, "translation_skip_final_quality": 1},
+        "expected": {
+            "final_quality": 1,
+            "finalized": 1,
+            "translation_skip": 1,
+            "translation_skip_per_final_quality_per_1000": 1000,
+        },
+        "source": "2026-06-16 5m monitor chunk 288 mixed latin final should skip translation",
+    },
+    {
+        "metrics": {
+            "completed_coalesced": 365,
+            "final_quality_cjk_repeated_ngram": 1,
+            "final_quality_mixed_latin_zh": 1,
+            "final_quality_no_end_marker": 6,
+            "final_quality_short_cjk": 3,
+            "finalized": 28,
+            "raw_without_final": 357,
+            "stage_replace": 47,
+            "stage_replaced_unconfirmed": 47,
+            "stage_revision_confirmation_reset": 196,
+            "translation_skip_final_quality": 7,
+        },
+        "expected": {
+            "completed_coalesced": 365,
+            "final_quality": 11,
+            "finalization_rate_per_1000": 73,
+            "raw_without_final": 357,
+            "replace_unconfirmed_rate_per_1000": 1000,
+            "revision_reset": 196,
+            "translation_skip_per_final_quality_per_1000": 636,
+        },
+        "source": "2026-06-16 5m monitor chunk 386 lifecycle snapshot",
+    },
+]
+
+
+STABLE_METRIC_TRACKING_CASES = [
+    {
+        "metrics": {
+            "stable_window_observed": 1,
+            "stable_prefix_chars": 18,
+            "unstable_tail_chars": 8,
+            "stable_token_ratio_per_1000": 750,
+        },
+        "expected": {
+            "stable_window_observed": 1,
+            "stable_prefix_chars": 18,
+            "unstable_tail_chars": 8,
+            "stable_token_ratio_per_1000": 750,
+        },
+        "source": "stable token detector English token similarity metric",
+    },
+    {
+        "metrics": {
+            "stable_window_observed": 1,
+            "stable_prefix_chars": 6,
+            "unstable_tail_chars": 2,
+            "stable_token_ratio_per_1000": 750,
+        },
+        "expected": {
+            "stable_window_observed": 1,
+            "stable_prefix_chars": 6,
+            "unstable_tail_chars": 2,
+            "stable_token_ratio_per_1000": 750,
+        },
+        "source": "stable token detector CJK char metric",
     },
 ]
 
@@ -1015,11 +1088,26 @@ def _make_final_quality_tracking_test(index: int, case: dict[str, object]):
     return test
 
 def _runtime_metric_summary(metrics: dict[str, int]) -> dict[str, int]:
+    finalized = int(metrics.get("finalized", 0))
+    final_opportunities = finalized + int(metrics.get("raw_without_final", 0))
+    final_quality = sum(value for key, value in metrics.items() if key.startswith("final_quality_"))
+    translation_skip = int(metrics.get("translation_skip_final_quality", 0))
+    stage_replace = int(metrics.get("stage_replace", 0))
+    stage_replaced_unconfirmed = int(metrics.get("stage_replaced_unconfirmed", 0))
+
+    def rate_per_1000(numerator: int, denominator: int) -> int:
+        if denominator <= 0:
+            return 0
+        return (numerator * 1000 + denominator // 2) // denominator
+
     return {
         "duplicate_suppressed": int(metrics.get("candidate_duplicate_suppressed", 0)),
         "delta_trimmed": int(metrics.get("candidate_delta_trimmed", 0)),
-        "final_quality": sum(value for key, value in metrics.items() if key.startswith("final_quality_")),
-        "translation_skip": int(metrics.get("translation_skip_final_quality", 0)),
+        "final_quality": final_quality,
+        "finalized": finalized,
+        "finalization_rate_per_1000": rate_per_1000(finalized, final_opportunities),
+        "translation_skip": translation_skip,
+        "translation_skip_per_final_quality_per_1000": rate_per_1000(translation_skip, final_quality),
         "completed_coalesced": int(metrics.get("completed_coalesced", 0)),
         "revision_changed": int(metrics.get("stage_revision_changed", 0)),
         "revision_reset": int(metrics.get("stage_revision_confirmation_reset", 0)),
@@ -1028,6 +1116,11 @@ def _runtime_metric_summary(metrics: dict[str, int]) -> dict[str, int]:
         "raw_without_final": int(metrics.get("raw_without_final", 0)),
         "finalize_before_replace": int(metrics.get("stage_finalize_before_replace", 0)),
         "recent_echo_suppressed": int(metrics.get("finalize_recent_echo_suppressed", 0)),
+        "replace_unconfirmed_rate_per_1000": rate_per_1000(stage_replaced_unconfirmed, stage_replace),
+        "stable_window_observed": int(metrics.get("stable_window_observed", 0)),
+        "stable_prefix_chars": int(metrics.get("stable_prefix_chars", 0)),
+        "unstable_tail_chars": int(metrics.get("unstable_tail_chars", 0)),
+        "stable_token_ratio_per_1000": int(metrics.get("stable_token_ratio_per_1000", 0)),
     }
 
 
@@ -1037,6 +1130,15 @@ def _make_runtime_metric_tracking_test(index: int, case: dict[str, object]):
         expected = {str(key): int(value) for key, value in dict(case["expected"]).items()}
         matched = all(actual.get(key) == value for key, value in expected.items())
         self._record("runtime_metrics", f"runtime_metrics_{index:03d}", matched)
+    return test
+
+
+def _make_stable_metric_tracking_test(index: int, case: dict[str, object]):
+    def test(self: WhisperPerformanceTrackingTest) -> None:
+        actual = _runtime_metric_summary({str(key): int(value) for key, value in dict(case["metrics"]).items()})
+        expected = {str(key): int(value) for key, value in dict(case["expected"]).items()}
+        matched = all(actual.get(key) == value for key, value in expected.items())
+        self._record("stable_metrics", f"stable_metrics_{index:03d}", matched)
     return test
 
 
@@ -1270,6 +1372,13 @@ for _index, _case in enumerate(RUNTIME_METRIC_TRACKING_CASES, 1):
         WhisperPerformanceTrackingTest,
         f"test_tracking_runtime_metrics_{_index:03d}",
         _make_runtime_metric_tracking_test(_index, _case),
+    )
+
+for _index, _case in enumerate(STABLE_METRIC_TRACKING_CASES, 1):
+    setattr(
+        WhisperPerformanceTrackingTest,
+        f"test_tracking_stable_metrics_{_index:03d}",
+        _make_stable_metric_tracking_test(_index, _case),
     )
 
 for _index, _case in enumerate(PENDING_QUALITY_TRACKING_CASES, 1):

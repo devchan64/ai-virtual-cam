@@ -28,7 +28,6 @@ from src.app.dictation_window import (
     _should_age_staged_sentence,
     _should_finalize_replaced_sentence,
     _should_confirm_staged_sentence,
-    _should_translate_staged_sentence,
     _should_translate_final_sentence,
     _split_completed_sentences,
     _stable_window_text,
@@ -146,14 +145,15 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         self.assertFalse(_should_translate_final_sentence("Not a.", "zh"))
         self.assertFalse(_should_translate_final_sentence("蒸牛。", "zh"))
         self.assertFalse(_should_translate_final_sentence("要 去 找", "zh"))
+        self.assertFalse(
+            _should_translate_final_sentence(
+                "它这边厉害，因为肉在这边，所以它就会变得有点难剥。对，章鱼饼超适合配G配Y T的时候吃，因为它很刷脆。",
+                "zh",
+            )
+        )
         self.assertTrue(_should_translate_final_sentence("我跟你说，就这一 得脱鞋！哇，它是楼梯好高啊。", "zh"))
         self.assertTrue(_should_translate_final_sentence("第一个呢要登陆的呢就是滴滴，滴滴呢就是来中国，你要搭车的话，你就可以搭滴滴。", "zh"))
         self.assertTrue(_should_translate_final_sentence("面可是快速面就是它会比较q一点，这个呢是比快速。", "zh"))
-
-    def test_staged_sentence_is_not_translated_before_final_by_default(self) -> None:
-        self.assertFalse(_should_translate_staged_sentence("Again awesome.", 1))
-        self.assertFalse(_should_translate_staged_sentence("Again awesome the location tab shows", 1))
-        self.assertFalse(_should_translate_staged_sentence("Again awesome.", 2))
 
     def test_staged_sentence_waits_when_pending_extends_it_from_log(self) -> None:
         # Regression from avc-whisper.log chunks 642-648.

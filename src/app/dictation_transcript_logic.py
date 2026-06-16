@@ -21,8 +21,6 @@ SENTENCE_CONFIRM_CHUNKS = 3
 FORCED_SENTENCE_CONFIRM_CHUNKS = 4
 SENTENCE_CONFIRM_MAX_AGE_CHUNKS = 3
 FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS = 4
-MIN_PROVISIONAL_TRANSLATION_WORDS = 6
-PROVISIONAL_TRANSLATION_ENABLED = False
 SHORT_CJK_FINAL_UNITS = 10
 
 
@@ -831,6 +829,11 @@ def _has_latin_words(words: list[str]) -> bool:
     return any(any("a" <= ch <= "z" for ch in word.lower()) for word in words)
 
 
+def _has_unstable_mixed_latin_for_zh(words: list[str]) -> bool:
+    latin_words = [word for word in words if any("a" <= ch <= "z" for ch in word.lower())]
+    return len(latin_words) >= 2 or any(len(word) >= 4 for word in latin_words)
+
+
 def _looks_like_open_korean_clause(text: str, words: list[str]) -> bool:
     if _boundary_sentence_end_count(text) > 0:
         return False
@@ -919,7 +922,7 @@ def _final_sentence_diagnostic_flags(sentence: str, language: str) -> tuple[str,
             flags.append("cjk_repeated_ngram")
     if normalized_language == "zh" and has_latin and not has_cjk:
         flags.append("latin_only_for_zh")
-    elif normalized_language == "zh" and has_latin and has_cjk:
+    elif normalized_language == "zh" and has_latin and has_cjk and _has_unstable_mixed_latin_for_zh(words):
         flags.append("mixed_latin_zh")
     if _boundary_sentence_end_count(normalized) == 0:
         flags.append("no_end_marker")
@@ -1011,18 +1014,18 @@ def _format_transcript_metrics(metrics: dict[str, int]) -> str:
     return ",".join(parts) if parts else "none"
 
 
-def _should_translate_staged_sentence(staged_sentence: str, staged_confirmations: int) -> bool:
-    if not PROVISIONAL_TRANSLATION_ENABLED:
-        return False
-    if staged_confirmations >= SENTENCE_CONFIRM_CHUNKS:
-        return True
-    return len(_word_units(staged_sentence)) >= MIN_PROVISIONAL_TRANSLATION_WORDS
-
-
 def _should_translate_final_sentence(sentence: str, language: str) -> bool:
     flags = set(_final_sentence_diagnostic_flags(sentence, language))
     return not flags.intersection(
-        {"latin_only_for_zh", "short_cjk", "no_end_marker", "empty", "spaced_cjk", "cjk_repeated_ngram"}
+        {
+            "latin_only_for_zh",
+            "mixed_latin_zh",
+            "short_cjk",
+            "no_end_marker",
+            "empty",
+            "spaced_cjk",
+            "cjk_repeated_ngram",
+        }
     )
 
 
