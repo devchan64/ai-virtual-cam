@@ -77,7 +77,7 @@ Qwen3-ASR vLLM streaming, Dolphin-CN-Dialect, WeNet의 프로젝트 내 세부�
 
 ## Speech Translation 세그먼테이션 / VAD 비교군
 
-이 묶음은 프레젠테이션 긴 발화에서 VAD나 pause만으로 번역 세그먼트를 확정하지 않는 근거다. 무음 구간은 후보 score의 보조 feature로만 쓰고, final 결정은 텍스트 안정성, SBD, punctuation, right context, 중복 억제를 결합한다.
+이 묶음은 프레젠테이션 긴 발화에서 VAD나 pause 기반 segmentation을 운영 구현 목표에서 제외하는 근거다. final 결정은 텍스트 안정성, SBD, punctuation/right context, 중복 억제, revision lifecycle을 결합한다.
 
 - [Speech Segmentation Optimization using Segmented Bilingual Speech Corpus for End-to-end Speech Translation](https://www.isca-archive.org/interspeech_2022/fukuda22b_interspeech.pdf): speech translation에서 segmentation 품질이 번역에 미치는 영향을 보는 기준 자료다.
 - [Dynamic Boundary Detection for Speech Translation](https://www.apsipa.org/proceedings/2017/CONTENTS/papers2017/13DecWednesday/Poster%202/WP-P2.20.pdf): pause 기반 경계의 한계와 dynamic boundary 판단을 검토할 때 사용한다.
@@ -91,7 +91,7 @@ Qwen3-ASR vLLM streaming, Dolphin-CN-Dialect, WeNet의 프로젝트 내 세부�
 
 ## Turn-taking / 발화 종료 보조 신호
 
-이 묶음은 대화형 turn end 예측을 프레젠테이션 받아쓰기의 주 확정 기준이 아니라 보조 feature 후보로만 두는 근거다. 발표형 긴 발화는 대화 turn-taking과 다르므로, VAP/TurnGPT 계열은 pause confidence를 보강하는 비교군으로 분류한다.
+이 묶음은 대화형 turn end 예측을 프레젠테이션 받아쓰기 운영 경로에서 제외하는 근거다. 발표형 긴 발화는 대화 turn-taking과 다르므로, VAP/TurnGPT 계열은 구현 후보가 아니라 비교군으로만 분류한다.
 
 - [Real-time and Continuous Turn-taking Prediction Using Voice Activity Projection](https://arxiv.org/abs/2401.04868): VAP 기반 실시간 turn-taking prediction의 대표 자료다.
 - [Multilingual Turn-taking Prediction Using Voice Activity Projection](https://aclanthology.org/2024.lrec-main.1036/): 다국어 turn-taking prediction 적용성을 볼 때 참고한다.

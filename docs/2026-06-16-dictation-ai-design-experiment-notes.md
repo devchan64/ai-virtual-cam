@@ -133,7 +133,6 @@ Semantic Boundary Detection
   - SaT/SBD 기반 문장 경계 후보
   - streaming punctuation/end probability
   - right context에서 새 문장 시작 징후 확인
-  - VAD/silence는 보조 feature
   ↓
 세그먼트 상태관리
   - pending / staged / final / suppressed / revised
@@ -153,7 +152,7 @@ Semantic Boundary Detection
 | raw STT window 결과 | 구현됨 | 원문창은 문장 경계/확정 전 raw STT window만 표시한다. |
 | 정규화 및 접합 | 구현 중 | pending tail과 새 raw의 overlap, CJK no-space 내부 prefix overlap, 최근 final echo 억제를 적용한다. |
 | Stable Token Detection | 지표 구현됨 | 이전/현재 raw window의 공통 prefix와 sliding suffix-prefix overlap을 비교해 안정 prefix, 불안정 tail, 안정 token ratio를 별도 계층에서 계산한다. final 승격 정책 반영은 후속 튜닝으로 둔다. |
-| Semantic Boundary Detection | 부분 구현 | SaT/SBD 후보 생성과 pending 보수 처리, stable confidence 보정은 구현되어 있다. streaming punctuation/end probability, right-context score, VAD 보조 feature는 후속 단계다. |
+| Semantic Boundary Detection | 부분 구현 | SaT/SBD 후보 생성과 pending 보수 처리, stable confidence 보정은 구현되어 있다. streaming punctuation/end probability와 right-context score는 후속 단계다. VAD/silence는 구현 목표에서 제외한다. |
 | 세그먼트 상태관리 | 구현됨 | `pending`, `staged`, `final`, `suppressed`, `revised` 의미를 분리하고 final은 append-only로 유지한다. |
 | 실시간 번역 | 구현됨 | 번역 큐에는 품질 게이트를 통과한 final transcript만 넣는다. staged/partial 번역은 운영 경로에서 제거한다. |
 
@@ -163,7 +162,7 @@ Semantic Boundary Detection
 2. 안정 prefix가 높고 불안정 tail이 짧은 후보만 boundary confidence를 높이는 방향으로 튜닝한다.
 3. CJK는 공백 기반 token보다 문자 n-gram, prefix/suffix overlap, 내부 prefix overlap을 우선한다. 현재 1차 구현은 문자 단위 suffix-prefix overlap까지 반영한다.
 4. Semantic Boundary Detection은 SaT 결과에 right-context와 punctuation/end score를 더하는 방식으로 확장한다.
-5. VAD/silence는 final trigger가 아니라 boundary confidence 보조 feature로만 넣는다.
+5. VAD/silence 기반 확정은 구현하지 않는다. 운영 판단은 텍스트 안정성, SBD, punctuation/right-context, staged confirmation을 우선한다.
 6. 각 단계의 출력과 지표를 로그에 분리해 STT 품질, stable detection 품질, boundary 품질, lifecycle 품질, 번역 품질을 따로 비교한다.
 
 ## 문헌 구현 정렬
@@ -177,7 +176,7 @@ Semantic Boundary Detection
 | Simul-Whisper / latency-stability tradeoff | `stt_rtf`, `total_rtf`, finalization latency, pending overrun을 함께 본다. |
 | SaT/wtpsplit | 다국어 SBD 후보 생성기로 사용하되 final 결정자는 아니라고 명시한다. |
 | Streaming punctuation | boundary score 보조 신호로만 본다. free-form rewrite는 alignment 위험 때문에 기본 경로에서 제외한다. |
-| Speech translation segmentation | VAD/pause threshold는 translation trigger의 주 신호가 아니라 SBD confidence 보조 feature로 둔다. |
+| Speech translation segmentation | VAD/pause threshold는 운영 구현 후보에서 제외한다. 자료는 pause 기반 경계의 한계를 설명하는 비교군으로만 둔다. |
 | Chinese ASR/domain candidates | Qwen3-ASR, Dolphin-CN-Dialect, WeNet은 STT backend 후보로 추적하고, FunASR는 과거 기준선으로 남긴다. |
 
 ## 흐름별 적합 AI 모델
@@ -195,7 +194,7 @@ Semantic Boundary Detection
 | 세그먼트 final 결정 | revision lifecycle | local agreement, echo suppression, staged confirmation | final 여부는 단일 모델 출력이 아니라 재관측 횟수, 중복 억제, right context, SBD 후보를 결합해 결정한다. |
 | 번역 | `nllb-transformers` + `facebook/nllb-200-distilled-600M` | NLLB 1.3B/3.3B, M2M100, SeamlessM4T, TowerInstruct, X-ALMA | 기본값은 실시간성을 우선한다. 중한 품질 개선은 모델/백엔드 비교와 회귀 샘플 확장으로 진행한다. |
 | 중국어 ASR 오류 보정 | 기본 경로 없음 | pinyin-aware LLM 보정, ASR-EC 계열 | 운영 기본 경로에는 넣지 않는다. raw STT 오류와 후처리 오류를 먼저 분리 계측한 뒤 후보로 검토한다. |
-| 발화 종료 보조 신호 | 기본 경로 없음 | VAP, TurnGPT | 프레젠테이션 긴 발화에서는 주 결정 기준으로 쓰지 않는다. 무음/turn score는 boundary confidence 보조 feature로만 둔다. |
+| 발화 종료 보조 신호 | 기본 경로 없음 | VAP, TurnGPT | 프레젠테이션 긴 발화에서는 주 결정 기준으로 쓰지 않으며 운영 구현 계획도 두지 않는다. 텍스트 기반 경계와 revision lifecycle을 우선한다. |
 
 ### STT 모델
 
@@ -236,7 +235,7 @@ NLLB 1.3B/3.3B는 같은 계열에서 품질을 올리는 가장 낮은 위험�
 
 VAP, TurnGPT 같은 turn-taking 모델은 회의 대화의 turn end 예측에는 유용할 수 있다. 하지만 프레젠테이션 긴 발화에서는 발화자가 문장을 멈추지 않고 이어가거나, 짧은 pause가 의미 경계와 맞지 않을 수 있다.
 
-따라서 발화 종료 모델은 translation trigger의 직접 결정자가 아니라 Semantic Boundary Detection의 confidence를 보정하는 보조 feature 후보로 둔다. 운영 기본 경로는 텍스트 안정성, SBD, punctuation, right context, staged confirmation을 우선한다.
+따라서 발화 종료 모델은 translation trigger, Semantic Boundary Detection confidence 보정, final 확정 조건에 넣지 않는다. 운영 기본 경로는 텍스트 안정성, SBD, punctuation/right context, staged confirmation을 우선한다.
 
 ## 출력 상태와 정합성 규칙
 
@@ -304,9 +303,9 @@ Segment Any Text(SaT)는 문장부호가 없거나 noisy한 텍스트에서도 r
 
 Streaming punctuation은 raw STT의 readability와 boundary score를 개선하는 보조 신호다. 긴 받아쓰기에서는 미래 문맥을 너무 적게 보면 마침표를 늦게 또는 잘못 찍고, 너무 오래 기다리면 final latency가 커진다. 따라서 bounded lookahead와 token boundary scoring 방식을 우선한다. LLM free-form rewrite는 원문 rewrite와 alignment 붕괴 위험이 있으므로 기본 경로로 쓰지 않는다.
 
-### VAD와 무음 구간의 역할
+### VAD와 무음 구간의 비목표
 
-VAD는 음성/비음성 구간을 찾는 데 유용하지만 프레젠테이션 긴 발화에서 번역 단위나 문장 경계를 직접 결정하는 주 신호로 쓰지 않는다.
+VAD와 silence 길이는 받아쓰기 AI 실시간 처리 파이프라인의 구현 목표에서 제외한다. 음성/비음성 구간 탐지는 일반적으로 유용할 수 있지만, 이 프로젝트의 문장 확정과 번역 큐 투입 기준은 텍스트 안정성, SBD, punctuation/right-context, staged confirmation이다.
 
 근거:
 
@@ -315,7 +314,7 @@ VAD는 음성/비음성 구간을 찾는 데 유용하지만 프레젠테이션 
 - 짧은 pause로 연결된 문장은 VAD가 안정적으로 탐지하기 어렵다.
 - sentence end detection은 domain, punctuation, lexical cue, right context를 함께 봐야 한다.
 
-따라서 VAD/무음 길이/발화 종료 예측은 Semantic Boundary Detection confidence를 보정하는 보조 feature로만 사용한다.
+따라서 VAD/무음 길이/발화 종료 예측은 final trigger, boundary confidence 보정, 번역 큐 투입 조건 어디에도 넣지 않는다. 관련 레퍼런스는 제외 근거와 비교군으로만 유지한다.
 
 ## 확정 생명주기
 
@@ -701,6 +700,26 @@ stable token 지표를 추가한 뒤 같은 중국어 실시간 경로를 약 5�
 - 이 조건에서는 final 확정 기준을 완화하지 않는다. 대신 `stage_revision_confirmation_reset`을 올리지 않고 기존 confirmation count를 유지한다.
 - 안정성 요약 로그에 `revision_preserved_internal`을 추가해 reset 감소와 보존 증가를 함께 본다.
 - 추적 테스트에 `stage_revision_confirmation_preserved_internal`을 추가한다. 다음 운영 관측에서는 `revision_preserved_internal` 증가가 오확정 증가로 이어지는지 `final_quality`, `translation_skip_final_quality`, recent echo 억제 지표와 함께 검증한다.
+
+### 2026-06-16 내부 overlap 적용 후 5분 운영 모니터링
+
+내부 overlap 보조 신호를 적용한 뒤 중국어 실시간 경로를 약 5분 더 관측했다.
+
+관측값:
+
+- chunk 320 누적 기준 `finalized=19`, `raw_without_final=300`, `stage_replaced_unconfirmed=63`, `stage_revision_confirmation_preserved_internal=30`, `stage_revision_confirmation_reset=109`였다.
+- `stable_internal_ratio>=0.75` 케이스는 `revision_preserved_internal`로 분리되어 reset을 줄였지만, 0.60대 내부 overlap을 가진 같은 문맥 확장 리비전은 여전히 reset됐다.
+- 예: `stable_internal_chars=65`, `stable_internal_ratio=0.619`, `stable_overlap_source=none`인 chunk는 같은 문맥 확장인데 reset됐다.
+- `stable_internal_chars=39`, `stable_internal_ratio=0.867`처럼 ratio는 높지만 내부 공통 구간이 짧은 케이스도 있어 ratio 단독 완화는 위험하다.
+- `stage_candidate_quality_blocked`는 32까지 누적되어 `spaced_cjk`, `cjk_internal_gap`, `cjk_repeated_ngram` 차단이 계속 동작했다.
+- 후반 일부 구간에서 `stt_step_load`가 2.9 내외로 올라가고 queue가 30대까지 쌓였지만 drop은 없었다. 반복/혼합언어 구간의 STT 출력 흔들림이 원인으로 보이며, 기본 런타임 파라미터는 유지한다.
+
+튜닝 반영:
+
+- CJK revision confirmation 보존 기준을 `stable_internal_ratio>=0.60`과 `stable_internal_chars>=40`의 동시 조건으로 조정한다.
+- final 확정 기준은 그대로 유지한다. 이 튜닝은 reset 완화만 수행하며 확정/번역 큐 진입을 직접 앞당기지 않는다.
+- 안정성 요약 로그에 `revision_internal_high`, `revision_internal_mid`, `revision_internal_low`를 추가한다.
+- 추적 테스트에 high bucket 보존 케이스와 mid bucket reset 케이스를 추가한다.
 
 ## 배포 순서와 실패 대응
 

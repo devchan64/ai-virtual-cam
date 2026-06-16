@@ -30,6 +30,7 @@ from src.app.dictation_window import (
     _should_confirm_staged_sentence,
     _should_stage_boundary_candidate,
     _should_preserve_revision_confirmation_from_internal_stability,
+    _revision_internal_stability_bucket,
     _should_translate_final_sentence,
     _split_completed_sentences,
     _stable_window_text,
@@ -67,11 +68,29 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
             _should_preserve_revision_confirmation_from_internal_stability(
                 previous,
                 preferred,
-                0.80,
+                0.62,
+                65,
                 "none",
             )
         )
-        self.assertEqual(_next_revision_confirmation_count(previous, preferred, 2, 0.80, "none"), 2)
+        self.assertEqual(_next_revision_confirmation_count(previous, preferred, 2, 0.62, 65, "none"), 2)
+        self.assertEqual(_revision_internal_stability_bucket(0.62, 65), "high")
+
+    def test_cjk_revision_confirmation_still_resets_for_short_internal_stability(self) -> None:
+        previous = "嘛那我们就各购"
+        preferred = "可以啦，阿正背影呢。隔壁就是志孝去吃的那个月岛文字烧，然后那感觉也蛮赞的嘛。那我们就各购。"
+
+        self.assertFalse(
+            _should_preserve_revision_confirmation_from_internal_stability(
+                previous,
+                preferred,
+                0.87,
+                39,
+                "none",
+            )
+        )
+        self.assertEqual(_next_revision_confirmation_count(previous, preferred, 2, 0.87, 39, "none"), 1)
+        self.assertEqual(_revision_internal_stability_bucket(0.87, 39), "low")
 
     def test_cjk_revision_confirmation_still_resets_without_internal_stability(self) -> None:
         previous = "喜欢按赞点点，可以呃分享可以。欢迎大家继续坚持，很累了，坚持到几万步，两万二。"
@@ -82,10 +101,12 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
                 previous,
                 preferred,
                 0.40,
+                65,
                 "none",
             )
         )
-        self.assertEqual(_next_revision_confirmation_count(previous, preferred, 2, 0.40, "none"), 1)
+        self.assertEqual(_next_revision_confirmation_count(previous, preferred, 2, 0.40, 65, "none"), 1)
+        self.assertEqual(_revision_internal_stability_bucket(0.40, 65), "mid")
 
     def test_cjk_revision_trims_repeated_pending_prefix_from_monitoring(self) -> None:
         # Regression from 2026-06-15 20s Chinese monitoring chunks 1-2.

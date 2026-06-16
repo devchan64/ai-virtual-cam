@@ -50,6 +50,7 @@ from src.app.dictation_transcript_logic import (
     _should_finalize_before_replacement,
     _should_stage_boundary_candidate,
     _should_preserve_revision_confirmation_from_internal_stability,
+    _revision_internal_stability_bucket,
     _is_recent_final_echo,
     _should_translate_final_sentence,
     _split_completed_sentences,
@@ -759,10 +760,18 @@ class WhisperTranscriptWorker:
                 if preferred_changed:
                     count_metric("stage_revision_changed")
                     if _is_cjk_text(staged_before) or _is_cjk_text(preferred):
+                        count_metric(
+                            "stage_revision_internal_stability_"
+                            + _revision_internal_stability_bucket(
+                                stable_analysis.stable_internal_ratio,
+                                stable_analysis.stable_internal_chars,
+                            )
+                        )
                         if _should_preserve_revision_confirmation_from_internal_stability(
                             staged_before,
                             preferred,
                             stable_analysis.stable_internal_ratio,
+                            stable_analysis.stable_internal_chars,
                             stable_analysis.stable_overlap_source,
                         ):
                             count_metric("stage_revision_confirmation_preserved_internal")
@@ -779,6 +788,7 @@ class WhisperTranscriptWorker:
                     preferred,
                     staged_confirmations,
                     stable_analysis.stable_internal_ratio,
+                    stable_analysis.stable_internal_chars,
                     stable_analysis.stable_overlap_source,
                 )
                 staged_age = 0
@@ -1226,6 +1236,18 @@ class WhisperTranscriptWorker:
                     "stage_revision_confirmation_preserved_internal",
                     0,
                 )
+                stage_revision_internal_high_count = chunk_lifecycle_metrics.get(
+                    "stage_revision_internal_stability_high",
+                    0,
+                )
+                stage_revision_internal_mid_count = chunk_lifecycle_metrics.get(
+                    "stage_revision_internal_stability_mid",
+                    0,
+                )
+                stage_revision_internal_low_count = chunk_lifecycle_metrics.get(
+                    "stage_revision_internal_stability_low",
+                    0,
+                )
                 stage_finalize_before_replace_count = chunk_lifecycle_metrics.get("stage_finalize_before_replace", 0)
                 finalize_count = chunk_lifecycle_metrics.get("finalized", 0)
                 duplicate_suppressed_count = chunk_lifecycle_metrics.get("candidate_duplicate_suppressed", 0)
@@ -1264,6 +1286,9 @@ class WhisperTranscriptWorker:
                     f"revision={stage_revision_count} revision_changed={stage_revision_changed_count} "
                     f"revision_reset={stage_revision_reset_count} "
                     f"revision_preserved_internal={stage_revision_preserved_internal_count} finalized={finalize_count} "
+                    f"revision_internal_high={stage_revision_internal_high_count} "
+                    f"revision_internal_mid={stage_revision_internal_mid_count} "
+                    f"revision_internal_low={stage_revision_internal_low_count} "
                     f"finalize_before_replace={stage_finalize_before_replace_count} "
                     f"duplicate_suppressed={duplicate_suppressed_count} recent_echo_suppressed={recent_echo_suppressed_count} "
                     f"delta_trimmed={delta_trimmed_count} "

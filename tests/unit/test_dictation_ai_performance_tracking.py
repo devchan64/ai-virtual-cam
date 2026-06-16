@@ -30,7 +30,7 @@ TRACKING_TARGETS = {
     "translation_quality": {"target_cases": 8, "target_rate": 0.80},
     "coalesce": {"target_cases": 10, "target_rate": 1.00},
     "duplicate_suppression": {"target_cases": 4, "target_rate": 1.00},
-    "runtime_metrics": {"target_cases": 12, "target_rate": 1.00},
+    "runtime_metrics": {"target_cases": 13, "target_rate": 1.00},
     "stable_metrics": {"target_cases": 4, "target_rate": 1.00},
 }
 
@@ -934,9 +934,20 @@ RUNTIME_METRIC_TRACKING_CASES = [
             "stage_revision": 1,
             "stage_revision_changed": 1,
             "stage_revision_confirmation_preserved_internal": 1,
+            "stage_revision_internal_stability_high": 1,
         },
-        "expected": {"revision_changed": 1, "revision_preserved_internal": 1},
+        "expected": {"revision_changed": 1, "revision_preserved_internal": 1, "revision_internal_high": 1},
         "source": "2026-06-16 CJK internal overlap revision confirmation preserved",
+    },
+    {
+        "metrics": {
+            "stage_revision": 1,
+            "stage_revision_changed": 1,
+            "stage_revision_confirmation_reset": 1,
+            "stage_revision_internal_stability_mid": 1,
+        },
+        "expected": {"revision_changed": 1, "revision_reset": 1, "revision_internal_mid": 1},
+        "source": "2026-06-16 CJK internal overlap revision reset mid bucket",
     },
     {
         "metrics": {"input_queue_drops": 5},
@@ -1170,6 +1181,9 @@ def _runtime_metric_summary(metrics: dict[str, int]) -> dict[str, int]:
         "revision_changed": int(metrics.get("stage_revision_changed", 0)),
         "revision_reset": int(metrics.get("stage_revision_confirmation_reset", 0)),
         "revision_preserved_internal": int(metrics.get("stage_revision_confirmation_preserved_internal", 0)),
+        "revision_internal_high": int(metrics.get("stage_revision_internal_stability_high", 0)),
+        "revision_internal_mid": int(metrics.get("stage_revision_internal_stability_mid", 0)),
+        "revision_internal_low": int(metrics.get("stage_revision_internal_stability_low", 0)),
         "input_queue_drops": int(metrics.get("input_queue_drops", 0)),
         "revision_candidate_quality_blocked": int(metrics.get("stage_revision_candidate_quality_blocked", 0)),
         "raw_without_final": int(metrics.get("raw_without_final", 0)),

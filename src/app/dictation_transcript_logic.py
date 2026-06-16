@@ -22,6 +22,8 @@ FORCED_SENTENCE_CONFIRM_CHUNKS = 4
 SENTENCE_CONFIRM_MAX_AGE_CHUNKS = 3
 FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS = 4
 SHORT_CJK_FINAL_UNITS = 10
+CJK_REVISION_INTERNAL_STABILITY_MIN_RATIO = 0.60
+CJK_REVISION_INTERNAL_STABILITY_MIN_CHARS = 40
 
 
 def _coalesce_completed_sentences_for_staging(sentences: list[str], language: str) -> list[str]:
@@ -1198,13 +1200,26 @@ def _should_preserve_revision_confirmation_from_internal_stability(
     previous: str,
     preferred: str,
     stable_internal_ratio: float = 0.0,
+    stable_internal_chars: int = 0,
     stable_overlap_source: str = "",
 ) -> bool:
     if preferred == _normalized_text(previous):
         return False
     if not (_is_cjk_text(previous) or _is_cjk_text(preferred)):
         return False
-    return stable_overlap_source == "none" and stable_internal_ratio >= 0.75
+    return (
+        stable_overlap_source == "none"
+        and stable_internal_ratio >= CJK_REVISION_INTERNAL_STABILITY_MIN_RATIO
+        and stable_internal_chars >= CJK_REVISION_INTERNAL_STABILITY_MIN_CHARS
+    )
+
+
+def _revision_internal_stability_bucket(stable_internal_ratio: float = 0.0, stable_internal_chars: int = 0) -> str:
+    if stable_internal_chars >= CJK_REVISION_INTERNAL_STABILITY_MIN_CHARS and stable_internal_ratio >= 0.60:
+        return "high"
+    if stable_internal_chars >= CJK_REVISION_INTERNAL_STABILITY_MIN_CHARS and stable_internal_ratio >= 0.40:
+        return "mid"
+    return "low"
 
 
 def _next_revision_confirmation_count(
@@ -1212,6 +1227,7 @@ def _next_revision_confirmation_count(
     preferred: str,
     current_confirmations: int,
     stable_internal_ratio: float = 0.0,
+    stable_internal_chars: int = 0,
     stable_overlap_source: str = "",
 ) -> int:
     if preferred != _normalized_text(previous) and (_is_cjk_text(previous) or _is_cjk_text(preferred)):
@@ -1219,6 +1235,7 @@ def _next_revision_confirmation_count(
             previous,
             preferred,
             stable_internal_ratio,
+            stable_internal_chars,
             stable_overlap_source,
         ):
             return max(current_confirmations, 1)
