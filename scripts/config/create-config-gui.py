@@ -46,6 +46,19 @@ if str(ROOT_DIR) not in sys.path:
 
 from src.tools.config_builder import build_config
 from src.domain.config import DictationAiConfig
+from src.domain.contracts.camera import camera_default, camera_feature_toggle_keys
+from src.domain.contracts.window_geometry import (
+    CONFIG_DEFAULT_WINDOW_GEOMETRY as DEFAULT_WINDOW_GEOMETRY,
+    DEFAULT_WINDOW_GEOMETRY_META,
+    WINDOW_GEOMETRY_FILE_NAME,
+    format_window_geometry as _format_window_geometry,
+    parse_window_geometry as _parse_window_geometry,
+    read_window_geometry_file as _read_window_geometry_file,
+    sanitize_window_geometry as _sanitize_window_geometry,
+    window_manager_geometry as _window_manager_geometry,
+    window_restore_extent as _window_restore_extent,
+    write_window_geometry_file as _write_window_geometry_file,
+)
 from src.domain.dictation_ai_defaults import dictation_ai_default, dictation_ai_defaults
 from src.tools.config_io import discover_camera_mode_options, discover_cameras, write_config
 from src.audio.gate import AudioGateConfig, NoiseGate
@@ -123,23 +136,6 @@ def _audio_denoise_backend_options():
 
 
 VIRTUAL_CAMERA_LABEL = "ai-virtual-cam"
-DEFAULT_WINDOW_GEOMETRY = "780x900"
-DEFAULT_WINDOW_GEOMETRY_META = {
-    "windowGeometry": "780x900+0+0",
-    "previewWindowGeometry": "640x480+80+80",
-    "audioTuneWindowGeometry": "640x480+100+100",
-    "audioGateTestWindowGeometry": "640x480+120+120",
-    "inputMeterWindowGeometry": "640x480+140+140",
-    "dictationAiWindowGeometry": "780x420+50+119",
-    "dictationAiTranslationWindowGeometry": "780x420+860+119",
-    "dictationAiModelDownloadWindowGeometry": "720x420+160+160",
-}
-WINDOW_GEOMETRY_FILE_NAME = "window-geometry.json"
-MIN_WINDOW_WIDTH = 640
-MIN_WINDOW_HEIGHT = 480
-_WINDOW_GEOMETRY_RE = re.compile(
-    r"^(?P<width>\d+)x(?P<height>\d+)(?P<x_sign>[+-])(?P<x>\d+)(?P<y_sign>[+-])(?P<y>\d+)$"
-)
 _WINDOW_GEOMETRY_CACHE_LOG_RE = re.compile(
     r"window geometry cached: key=(?P<key>[A-Za-z0-9_]+Geometry) geometry=(?P<geometry>\S+)"
 )
@@ -151,106 +147,6 @@ def _default_tensorrt_engine_path() -> str:
 
 def _log(msg: str) -> None:
     print(f"[avc] {msg}", flush=True)
-
-
-def _parse_window_geometry(geometry: object) -> dict[str, int] | None:
-    if not isinstance(geometry, str):
-        return None
-    match = _WINDOW_GEOMETRY_RE.match(geometry.strip())
-    if match is None:
-        return None
-    x = int(match.group("x"))
-    y = int(match.group("y"))
-    if match.group("x_sign") == "-":
-        x = -x
-    if match.group("y_sign") == "-":
-        y = -y
-    return {
-        "width": int(match.group("width")),
-        "height": int(match.group("height")),
-        "x": x,
-        "y": y,
-    }
-
-
-def _format_window_geometry(parts: dict[str, int]) -> str:
-    x = int(parts["x"])
-    y = int(parts["y"])
-    return f'{int(parts["width"])}x{int(parts["height"])}{x:+d}{y:+d}'
-
-
-def _window_restore_extent(root) -> tuple[int, int]:
-    width = 0
-    height = 0
-    for width_name, height_name in (("winfo_vrootwidth", "winfo_vrootheight"), ("winfo_screenwidth", "winfo_screenheight")):
-        try:
-            width = max(width, int(getattr(root, width_name)()))
-            height = max(height, int(getattr(root, height_name)()))
-        except Exception:
-            pass
-    if width > 0:
-        width *= 2
-    if height > 0:
-        height *= 2
-    return width, height
-
-
-def _window_manager_geometry(window) -> str:
-    try:
-        geometry = window.geometry()
-        if isinstance(geometry, str) and geometry.strip():
-            return geometry
-    except TypeError:
-        pass
-    except Exception:
-        pass
-    return window.winfo_geometry()
-
-
-def _sanitize_window_geometry(geometry: object, screen_width: int, screen_height: int) -> str | None:
-    parts = _parse_window_geometry(geometry)
-    if parts is None:
-        return None
-    width = parts["width"]
-    height = parts["height"]
-    x = parts["x"]
-    y = parts["y"]
-    if width < MIN_WINDOW_WIDTH or height < MIN_WINDOW_HEIGHT:
-        return None
-    if screen_width <= 0 or screen_height <= 0:
-        return _format_window_geometry(parts)
-    visible_margin = 80
-    if x >= screen_width - visible_margin or y >= screen_height - visible_margin:
-        return None
-    if x + width <= visible_margin or y + height <= visible_margin:
-        return None
-    return _format_window_geometry(parts)
-
-
-def _window_geometry_path(config_path: Path) -> Path:
-    return config_path.expanduser().with_name(WINDOW_GEOMETRY_FILE_NAME)
-
-
-def _read_window_geometry_file(config_path: Path) -> dict[str, str]:
-    geometry_path = _window_geometry_path(config_path)
-    if not geometry_path.exists():
-        return {}
-    raw = json.loads(geometry_path.read_text(encoding="utf-8"))
-    if not isinstance(raw, dict):
-        return {}
-    return {str(key): value for key, value in raw.items() if str(key).endswith("Geometry") and isinstance(value, str)}
-
-
-def _write_window_geometry_file(config_path: Path, geometry: dict[str, str]) -> Path:
-    geometry_path = _window_geometry_path(config_path)
-    geometry_path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        key: value
-        for key, value in sorted(geometry.items())
-        if str(key).endswith("Geometry") and isinstance(value, str)
-    }
-    geometry_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return geometry_path
 
 
 def _parse_window_geometry_cache_log(line: str) -> tuple[str, str] | None:
@@ -538,6 +434,7 @@ class ConfigGui:
         self._audio_input_meter_queue: deque[float] = deque(maxlen=120)
         self._audio_input_meter_lock: Lock = Lock()
         self._audio_input_meter_window: tk.Toplevel | None = None
+        self._audio_input_meter_window_geometry_key = "inputMeterWindowGeometry"
         self._audio_input_meter_error: str | None = None
         self._audio_input_meter_started_at = 0.0
         self._audio_tune_window: tk.Toplevel | None = None
@@ -591,6 +488,8 @@ class ConfigGui:
         self._scrollbar_update_after_id = None
         self._window_geometry_save_after_id: str | None = None
         self._window_geometry_meta_cache: dict[str, str] = {}
+        self._managed_window_geometry: dict[object, str] = {}
+        self._dictation_ai_supported = platform.system() == "Linux"
         self._whisper_selected_stt_language: str | None = None
         self._whisper_runtime_by_language = {
             "en": self._default_whisper_runtime_for_language("en"),
@@ -613,8 +512,12 @@ class ConfigGui:
             "seg_opt_mask_gamma",
         )
         self._build_form()
+        if "camera_server_enabled" in self.vars:
+            self.vars["camera_server_enabled"].trace_add("write", lambda *_args: self._apply_camera_server_feature_policy())
         self._register_hidden_whisper_vars()
         self._load_existing_config()
+        self._apply_camera_server_feature_policy()
+        self._apply_dictation_ai_platform_policy()
         self.root.bind("<Configure>", self._on_root_configure)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -638,6 +541,65 @@ class ConfigGui:
         for key in hidden_keys:
             if key not in self.vars:
                 self.vars[key] = tk.StringVar(value=str(defaults[key]))
+
+    def _is_dictation_ai_supported_host(self) -> bool:
+        return bool(getattr(self, "_dictation_ai_supported", platform.system() == "Linux"))
+
+    def _force_dictation_ai_off_for_unsupported_host(self) -> None:
+        if self._is_dictation_ai_supported_host():
+            return
+        for key in (
+            "dictation_ai_enabled",
+            "dictation_ai_translation_enabled",
+            "dictation_ai_show_stt_status_window",
+        ):
+            if key in self.vars:
+                self._set_var(key, False)
+
+    def _apply_dictation_ai_platform_policy(self) -> None:
+        if self._is_dictation_ai_supported_host():
+            return
+        self._force_dictation_ai_off_for_unsupported_host()
+        for key in (
+            "dictation_ai_enabled",
+            "dictation_ai_translation_enabled",
+            "dictation_ai_show_stt_status_window",
+        ):
+            widget = getattr(self, "_widgets", {}).get(key)
+            if widget is None:
+                continue
+            try:
+                widget.state(["disabled"])
+            except Exception:
+                try:
+                    widget.configure(state="disabled")
+                except Exception:
+                    pass
+
+    def _camera_feature_toggle_keys(self) -> tuple[str, ...]:
+        return camera_feature_toggle_keys()
+
+    def _is_camera_server_enabled_in_form(self) -> bool:
+        var = self.vars.get("camera_server_enabled")
+        if var is None:
+            return True
+        return self._parse_bool(var.get())
+
+    def _apply_camera_server_feature_policy(self) -> None:
+        camera_enabled = self._is_camera_server_enabled_in_form()
+        for key in self._camera_feature_toggle_keys():
+            if key in self.vars and not camera_enabled:
+                self._set_var(key, False)
+            widget = getattr(self, "_widgets", {}).get(key)
+            if widget is None:
+                continue
+            try:
+                widget.state(["!disabled"] if camera_enabled else ["disabled"])
+            except Exception:
+                try:
+                    widget.configure(state="normal" if camera_enabled else "disabled")
+                except Exception:
+                    pass
 
     def _default_whisper_runtime_for_language(self, language: str) -> dict[str, float]:
         suffix = {"en": "En", "ko": "Ko", "zh": "Zh"}[language]
@@ -917,8 +879,7 @@ class ConfigGui:
         window.columnconfigure(0, weight=1)
         window.rowconfigure(2, weight=0)
         window.rowconfigure(3, weight=1)
-        self._restore_named_window_geometry(window, "dictationAiModelDownloadWindowGeometry")
-        window.bind("<Configure>", self._on_dictation_ai_model_download_configure)
+        self._register_managed_window_geometry(window, "dictationAiModelDownloadWindowGeometry")
         window.protocol("WM_DELETE_WINDOW", lambda: self._close_dictation_ai_model_download_dialog(False))
 
         ttk.Label(
@@ -1010,8 +971,6 @@ class ConfigGui:
                 except Exception:
                     pass
         window = self._dictation_ai_model_download_window
-        if window is not None:
-            self._remember_named_window_geometry("dictationAiModelDownloadWindowGeometry", window)
         self._dictation_ai_model_download_window = None
         self._dictation_ai_model_download_btn = None
         self._dictation_ai_model_download_progress = None
@@ -1019,6 +978,8 @@ class ConfigGui:
         self._dictation_ai_model_download_log_text = None
         self._dictation_ai_model_download_on_success = None
         if window is not None:
+            self._flush_managed_window_geometry(window)
+            self._forget_managed_window_geometry(window)
             try:
                 window.destroy()
             except Exception:
@@ -1453,33 +1414,55 @@ class ConfigGui:
             pass
         return _window_manager_geometry(self.root)
 
-    def _current_preview_window_geometry(self) -> str | None:
-        window = getattr(self, "_preview_window", None)
-        if window is None:
-            return None
-        try:
-            if not window.winfo_exists():
-                return None
-            window.update_idletasks()
-            return _window_manager_geometry(window)
-        except Exception:
-            return None
-
     def _on_root_configure(self, event) -> None:
         if event.widget != self.root:
             return
         self._schedule_save_window_geometry_meta()
 
     def _on_preview_configure(self, event) -> None:
-        if self._preview_window is None or event.widget != self._preview_window:
-            return
-        self._schedule_save_window_geometry_meta()
+        self._on_managed_window_configure(event)
 
     def _on_dictation_ai_model_download_configure(self, event) -> None:
-        window = getattr(self, "_dictation_ai_model_download_window", None)
-        if window is None or event.widget != window:
+        self._on_managed_window_configure(event)
+
+    def _register_managed_window_geometry(self, window: tk.Toplevel, key: str, meta_cfg: dict | None = None) -> None:
+        self._restore_named_window_geometry(window, key, meta_cfg)
+        managed = getattr(self, "_managed_window_geometry", None)
+        if not isinstance(managed, dict):
+            managed = {}
+            self._managed_window_geometry = managed
+        managed[window] = key
+        try:
+            window.bind("<Configure>", self._on_managed_window_configure, add="+")
+        except TypeError:
+            window.bind("<Configure>", self._on_managed_window_configure)
+        except Exception as exc:
+            _log(f"Window geometry configure bind failed: key={key} error={exc}")
+
+    def _on_managed_window_configure(self, event) -> None:
+        window = getattr(event, "widget", None)
+        managed = getattr(self, "_managed_window_geometry", {})
+        if window not in managed:
             return
+        self._remember_named_window_geometry(managed[window], window)
         self._schedule_save_window_geometry_meta()
+
+    def _flush_managed_window_geometry(self, window: tk.Toplevel | None) -> None:
+        if window is None:
+            return
+        managed = getattr(self, "_managed_window_geometry", {})
+        key = managed.get(window) if isinstance(managed, dict) else None
+        if key is None:
+            return
+        self._remember_named_window_geometry(key, window)
+        self._save_window_geometry_file()
+
+    def _forget_managed_window_geometry(self, window: tk.Toplevel | None) -> None:
+        if window is None:
+            return
+        managed = getattr(self, "_managed_window_geometry", None)
+        if isinstance(managed, dict):
+            managed.pop(window, None)
 
     def _schedule_save_window_geometry_meta(self) -> None:
         if self._window_geometry_save_after_id is not None:
@@ -1605,14 +1588,10 @@ class ConfigGui:
             else:
                 cache["windowGeometry"] = geometry
                 _log(f"Window geometry cached: key=windowGeometry geometry={geometry}")
-            preview_geometry = self._current_preview_window_geometry()
-            if preview_geometry:
-                cache["previewWindowGeometry"] = preview_geometry
-                _log(f"Window geometry cached: key=previewWindowGeometry geometry={preview_geometry}")
-            self._remember_named_window_geometry("audioTuneWindowGeometry", getattr(self, "_audio_tune_window", None))
-            self._remember_named_window_geometry("audioGateTestWindowGeometry", getattr(self, "_audio_gate_test_window", None))
-            self._remember_named_window_geometry("inputMeterWindowGeometry", getattr(self, "_audio_input_meter_window", None))
-            self._remember_named_window_geometry("dictationAiModelDownloadWindowGeometry", getattr(self, "_dictation_ai_model_download_window", None))
+            managed = getattr(self, "_managed_window_geometry", {})
+            if isinstance(managed, dict):
+                for managed_window, key in list(managed.items()):
+                    self._remember_named_window_geometry(key, managed_window)
             self._save_window_geometry_file()
         except Exception as exc:
             _log(f"ERROR [Window geometry capture] {exc}")
@@ -1721,7 +1700,7 @@ class ConfigGui:
         tab_face = ttk.Frame(notebook, padding=8)
         tab_whisper = ttk.Frame(notebook, padding=8)
         self._tab_meta = [
-            (tab_io, "title.tab.io", "I/O"),
+            (tab_io, "title.tab.io", "Camera Input"),
             (tab_seg, "title.tab.seg", "Segmentation"),
             (tab_bg, "title.tab.bg", "Background"),
             (tab_crop, "title.tab.crop", "Framing"),
@@ -2183,7 +2162,8 @@ class ConfigGui:
         output_fps = int(float(output_modes[0][2]))
 
         return {
-            "camera_server_enabled": True,
+            "camera_server_enabled": camera_default("cameraServerEnabled"),
+            "seg_enabled": camera_default("segmentationEnabled"),
             "input_device": input_device,
             "input_width": input_width,
             "input_height": input_height,
@@ -2207,12 +2187,14 @@ class ConfigGui:
             "seg_opt_morph_close": 5,
             "seg_opt_mask_gamma": 0.90,
             "seg_opt_engine_path": _default_tensorrt_engine_path(),
+            "bg_enabled": camera_default("backgroundEnabled"),
             "bg_mode": "chroma",
             "bg_image": "",
             "bg_r": 0,
             "bg_g": 0,
             "bg_b": 0,
             "bg_blend_alpha": 0.35,
+            "crop_enabled": camera_default("cropEnabled"),
             "crop_margin": 0.25,
             "crop_pan_smoothing": 0.85,
             "crop_tilt_smoothing": 0.85,
@@ -2228,14 +2210,14 @@ class ConfigGui:
             "crop_tilt_pid_kd": 0.12,
             "crop_pan_target_offset_x": 0.00,
             "crop_pan_target_offset_y": 0.00,
-            "face_enhance_enabled": False,
+            "face_enhance_enabled": camera_default("faceEnhanceEnabled"),
             "face_enhance_gamma": 1.0,
             "face_enhance_brightness": 0.0,
             "face_enhance_saturation": 1.0,
             "face_enhance_blend": 0.65,
             "face_enhance_min_size_ratio": 0.12,
             "face_enhance_edge_dither": 0.25,
-            "face_deidentify_enabled": False,
+            "face_deidentify_enabled": camera_default("faceDeidentifyEnabled"),
             "dictation_ai_enabled": whisper["enabled"],
             "dictation_ai_input_device": _audio_default_input_device(),
             "dictation_ai_backend": whisper["backend"],
@@ -2586,6 +2568,7 @@ class ConfigGui:
     def _reset_seg_settings(self) -> None:
         defaults = self._build_video_defaults()
         for key in (
+            "seg_enabled",
             "seg_backend",
             "seg_threshold",
             "seg_edge_smoothness",
@@ -2605,13 +2588,14 @@ class ConfigGui:
 
     def _reset_bg_settings(self) -> None:
         defaults = self._build_video_defaults()
-        for key in ("bg_mode", "bg_image", "bg_r", "bg_g", "bg_b", "bg_blend_alpha"):
+        for key in ("bg_enabled", "bg_mode", "bg_image", "bg_r", "bg_g", "bg_b", "bg_blend_alpha"):
             value = defaults.get(key)
             self._set_var(key, value)
 
     def _reset_crop_settings(self) -> None:
         defaults = self._build_video_defaults()
         for key in (
+            "crop_enabled",
             "crop_margin",
             "crop_pan_smoothing",
             "crop_tilt_smoothing",
@@ -2686,6 +2670,8 @@ class ConfigGui:
             "dictation_ai_sentence_boundary_compute_type",
         ):
             self._set_var(key, defaults.get(key))
+        self._force_dictation_ai_off_for_unsupported_host()
+        self._apply_dictation_ai_platform_policy()
         selected_language = _dictation_ai_language_raw_from_display(self.vars["dictation_ai_language"].get())
         self._whisper_selected_stt_language = selected_language
         self._load_visible_whisper_runtime_for_language(selected_language)
@@ -2738,6 +2724,7 @@ class ConfigGui:
         self._set_var("output_height", output_cfg.get("height"))
         self._set_var("output_fps", output_cfg.get("fps"))
 
+        self._set_var("seg_enabled", seg_cfg.get("enabled", defaults["seg_enabled"]))
         self._set_var("seg_backend", seg_cfg.get("backend"))
         self._set_var("seg_threshold", seg_cfg.get("threshold"))
         self._set_var("seg_edge_smoothness", seg_cfg.get("edgeSmoothness"))
@@ -2753,6 +2740,7 @@ class ConfigGui:
                 seg_engine_options = candidate
         self._apply_seg_engine_options_to_form(seg_engine_options)
 
+        self._set_var("bg_enabled", bg_cfg.get("enabled", defaults["bg_enabled"]))
         self._set_var("bg_mode", bg_cfg.get("mode"))
         chroma = bg_cfg.get("chromaColor") or []
         if len(chroma) == 3:
@@ -2762,6 +2750,7 @@ class ConfigGui:
         self._set_var("bg_image", bg_cfg.get("imagePath"))
         self._set_var("bg_blend_alpha", bg_cfg.get("colorBlendAlpha"))
 
+        self._set_var("crop_enabled", crop_cfg.get("enabled", defaults["crop_enabled"]))
         self._set_var("crop_margin", crop_cfg.get("margin"))
         self._set_var("crop_pan_smoothing", crop_cfg.get("panSmoothing", crop_cfg.get("smoothing")))
         self._set_var("crop_tilt_smoothing", crop_cfg.get("tiltSmoothing", crop_cfg.get("panSmoothing", crop_cfg.get("smoothing"))))
@@ -2785,7 +2774,9 @@ class ConfigGui:
         self._set_var("face_enhance_min_size_ratio", face_cfg.get("minRegionRatio"))
         self._set_var("face_enhance_edge_dither", face_cfg.get("edgeNoise"))
         self._set_var("face_deidentify_enabled", (face_cfg.get("deidentify") or {}).get("enabled"))
+        self._apply_camera_server_feature_policy()
         self._load_whisper_settings_from_config(dictation_ai_cfg)
+        self._apply_dictation_ai_platform_policy()
         self._load_audio_settings_from_config(audio_cfg)
         self._on_input_device_changed()
         self._on_input_width_changed()
@@ -2856,7 +2847,12 @@ class ConfigGui:
 
     def _load_whisper_settings_from_config(self, whisper_cfg: dict) -> None:
         defaults = self._build_video_defaults()
-        self._set_var("dictation_ai_enabled", whisper_cfg.get("enabled", defaults["dictation_ai_enabled"]))
+        self._set_var(
+            "dictation_ai_enabled",
+            False
+            if not self._is_dictation_ai_supported_host()
+            else whisper_cfg.get("enabled", defaults["dictation_ai_enabled"]),
+        )
         raw_input_device = str(whisper_cfg.get("inputDevice", "")).strip() if isinstance(whisper_cfg.get("inputDevice"), str) else ""
         resolved_input_device = defaults["dictation_ai_input_device"] if not raw_input_device else raw_input_device
         self._set_var("dictation_ai_input_device", resolved_input_device)
@@ -2886,11 +2882,15 @@ class ConfigGui:
         legacy_translation_enabled = whisper_cfg.get("task") == "translate"
         self._set_var(
             "dictation_ai_translation_enabled",
-            whisper_cfg.get("translationEnabled", legacy_translation_enabled or defaults["dictation_ai_translation_enabled"]),
+            False
+            if not self._is_dictation_ai_supported_host()
+            else whisper_cfg.get("translationEnabled", legacy_translation_enabled or defaults["dictation_ai_translation_enabled"]),
         )
         self._set_var(
             "dictation_ai_show_stt_status_window",
-            whisper_cfg.get("showSttStatusWindow", defaults["dictation_ai_show_stt_status_window"]),
+            False
+            if not self._is_dictation_ai_supported_host()
+            else whisper_cfg.get("showSttStatusWindow", defaults["dictation_ai_show_stt_status_window"]),
         )
         self._set_var("dictation_ai_translation_backend", whisper_cfg.get("translationBackend", defaults["dictation_ai_translation_backend"]))
         self._set_var(
@@ -3091,7 +3091,7 @@ class ConfigGui:
             self._audio_tune_window = tk.Toplevel(self.root)
             self._audio_tune_window.title(self._tr("title.audio_tune", "Audio gate auto tuning"))
             self._audio_tune_window.geometry("560x260")
-            self._restore_named_window_geometry(self._audio_tune_window, "audioTuneWindowGeometry")
+            self._register_managed_window_geometry(self._audio_tune_window, "audioTuneWindowGeometry")
             self._audio_tune_window.resizable(False, False)
             self._audio_tune_window.grab_set()
 
@@ -3431,7 +3431,8 @@ class ConfigGui:
             self._audio_tune_after_id = None
         self._audio_tune_action_btn = None
         if self._audio_tune_window is not None:
-            self._remember_named_window_geometry("audioTuneWindowGeometry", self._audio_tune_window)
+            self._flush_managed_window_geometry(self._audio_tune_window)
+            self._forget_managed_window_geometry(self._audio_tune_window)
             try:
                 self._audio_tune_window.destroy()
             except Exception:
@@ -3493,7 +3494,7 @@ class ConfigGui:
         window = tk.Toplevel(self.root)
         window.title(self._tr("title.audio_gate_test", "Audio gate test"))
         window.geometry("640x480")
-        self._restore_named_window_geometry(window, "audioGateTestWindowGeometry")
+        self._register_managed_window_geometry(window, "audioGateTestWindowGeometry")
         window.minsize(640, 480)
         window.resizable(True, True)
         window.grab_set()
@@ -3588,7 +3589,8 @@ class ConfigGui:
         self._audio_gate_test_started_at = time.time()
 
         def close_window():
-            self._remember_named_window_geometry("audioGateTestWindowGeometry", window)
+            self._flush_managed_window_geometry(window)
+            self._forget_managed_window_geometry(window)
             self._stop_audio_gate_test()
             if window.winfo_exists():
                 window.destroy()
@@ -3758,13 +3760,14 @@ class ConfigGui:
             input_device_requested = _audio_default_input_device()
         self._run_input_meter(
             title_key="title.audio_input_meter",
-            title_default="Microphone input dB meter",
+            title_default="Audio input decibel meter",
             error_title_key="title.audio_input_meter_error",
-            error_title_default="Input dB meter error",
+            error_title_default="Audio input decibel meter error",
             input_device_requested=input_device_requested,
             sample_rate=int(audio_cfg.get("sampleRate", 48000)),
             frame_ms=int(audio_cfg.get("frameMs", 20)),
             channels=max(1, int(audio_cfg.get("channels", 1))),
+            geometry_key="inputMeterWindowGeometry",
         )
 
     def _run_whisper_input_meter(self):
@@ -3774,21 +3777,22 @@ class ConfigGui:
             self._show_error(self._tr("title.dictation_ai_input_meter_error", "Dictation AI input meter error"), str(exc))
             return
 
-        whisper_cfg = config.get("whisper") or {}
-        input_device_requested = whisper_cfg.get("inputDevice")
+        dictation_ai_cfg = config.get("dictationAi") or {}
+        input_device_requested = dictation_ai_cfg.get("inputDevice")
         if not isinstance(input_device_requested, str) or not input_device_requested.strip():
             input_device_requested = _audio_default_input_device()
         self._run_input_meter(
             title_key="title.dictation_ai_input_meter",
-            title_default="Dictation AI input dB meter",
+            title_default="Audio input decibel meter",
             error_title_key="title.dictation_ai_input_meter_error",
-            error_title_default="Dictation AI input meter error",
+            error_title_default="Audio input decibel meter error",
             input_device_requested=input_device_requested,
             sample_rate=48000,
             frame_ms=20,
             channels=1,
             sample_rate_candidates=(48000, 44100, 16000),
             prefer_exact_pulse_source=True,
+            geometry_key="dictationAiInputMeterWindowGeometry",
         )
 
     def _run_input_meter(
@@ -3804,6 +3808,7 @@ class ConfigGui:
         channels: int,
         sample_rate_candidates: tuple[int, ...] | None = None,
         prefer_exact_pulse_source: bool = False,
+        geometry_key: str = "inputMeterWindowGeometry",
     ):
         input_device = str(input_device_requested).strip()
         use_exact_pulse_source = prefer_exact_pulse_source and _can_capture_exact_pulse_source(input_device)
@@ -3835,7 +3840,7 @@ class ConfigGui:
         window = tk.Toplevel(self.root)
         window.title(self._tr(title_key, title_default))
         window.geometry("640x480")
-        self._restore_named_window_geometry(window, "inputMeterWindowGeometry")
+        self._register_managed_window_geometry(window, geometry_key)
         window.minsize(640, 480)
         window.resizable(True, True)
         window.grab_set()
@@ -3886,10 +3891,12 @@ class ConfigGui:
         self._audio_input_meter_error = None
         self._audio_input_meter_queue = deque(maxlen=120)
         self._audio_input_meter_window = window
+        self._audio_input_meter_window_geometry_key = geometry_key
         self._audio_input_meter_started_at = time.time()
 
         def close_window():
-            self._remember_named_window_geometry("inputMeterWindowGeometry", window)
+            self._flush_managed_window_geometry(window)
+            self._forget_managed_window_geometry(window)
             self._stop_audio_input_meter()
             if window.winfo_exists():
                 window.destroy()
@@ -4108,6 +4115,7 @@ class ConfigGui:
         self._audio_input_meter_process = None
         self._audio_input_meter_reader_thread = None
         self._audio_input_meter_window = None
+        self._audio_input_meter_window_geometry_key = "inputMeterWindowGeometry"
 
     def _build_test_waveform(self, kind: str, sample_rate: int, seconds: float):
         frames = max(1, int(sample_rate * seconds))
@@ -4251,16 +4259,17 @@ class ConfigGui:
         window = tk.Toplevel(self.root)
         window.title(self._preview_window_name)
         window.geometry("640x400")
+        preview_meta = {}
         try:
             config_path = Path(self.output_path).expanduser()
             if config_path.exists():
                 raw = json.loads(config_path.read_text(encoding="utf-8"))
                 if isinstance(raw, dict):
-                    self._restore_preview_window_geometry(window, raw.get("meta") or {})
+                    preview_meta = raw.get("meta") or {}
         except Exception as exc:
             _log(f"Preview window geometry restore failed: {exc}")
+        self._register_managed_window_geometry(window, "previewWindowGeometry", preview_meta)
         window.protocol("WM_DELETE_WINDOW", self._stop_preview)
-        window.bind("<Configure>", self._on_preview_configure)
         canvas = tk.Canvas(window, bg="#111111", highlightthickness=0)
         canvas.pack(fill="both", expand=True)
         self._preview_window = window
@@ -4269,8 +4278,9 @@ class ConfigGui:
         self._preview_tk_image = None
 
     def _destroy_preview_window(self) -> None:
-        self._capture_all_window_geometry_meta()
         window = self._preview_window
+        self._flush_managed_window_geometry(window)
+        self._forget_managed_window_geometry(window)
         self._preview_window = None
         self._preview_canvas = None
         self._preview_canvas_image_id = None
@@ -4770,13 +4780,15 @@ class ConfigGui:
         output_h = int(iv["output_height"].get())
 
         background = {"mode": iv["bg_mode"].get()}
+        background_enabled = self._parse_bool(iv["bg_enabled"].get())
         if background["mode"] in {"chroma", "image_chroma"}:
             background["chromaColor"] = [int(iv["bg_r"].get()), int(iv["bg_g"].get()), int(iv["bg_b"].get())]
         if background["mode"] in {"image", "image_chroma"}:
             image_path = iv["bg_image"].get().strip()
-            if not image_path:
+            if background_enabled and not image_path:
                 raise ValueError("Background mode=image/image_chroma requires image path")
-            background["imagePath"] = image_path
+            if image_path:
+                background["imagePath"] = image_path
             background["crop"] = {"x": 0, "y": 0, "width": output_w, "height": output_h}
         if background["mode"] == "image_chroma":
             background["colorBlendAlpha"] = float(iv["bg_blend_alpha"].get())
@@ -4811,6 +4823,12 @@ class ConfigGui:
             selected_dictation_ai_language,
             self._default_whisper_runtime_for_language(selected_dictation_ai_language if selected_dictation_ai_language in {"en", "ko", "zh"} else "en"),
         )
+        dictation_ai_supported = self._is_dictation_ai_supported_host()
+        if not dictation_ai_supported:
+            self._force_dictation_ai_off_for_unsupported_host()
+        camera_server_enabled = self._parse_bool(iv["camera_server_enabled"].get())
+        if not camera_server_enabled:
+            self._apply_camera_server_feature_policy()
 
         config = build_config(
             input_device=iv["input_device"].get(),
@@ -4822,7 +4840,8 @@ class ConfigGui:
             output_height=output_h,
             output_fps=int(iv["output_fps"].get()),
             output_backend=iv["output_backend"].get(),
-            camera_server_enabled=self._parse_bool(iv["camera_server_enabled"].get()),
+            camera_server_enabled=camera_server_enabled,
+            segmentation_enabled=camera_server_enabled and self._parse_bool(iv["seg_enabled"].get()),
             segmentation_backend=iv["seg_backend"].get(),
             segmentation_threshold=float(iv["seg_threshold"].get()),
             segmentation_edge_smoothness=float(iv["seg_edge_smoothness"].get()),
@@ -4830,7 +4849,9 @@ class ConfigGui:
             segmentation_selfie_model_selection=int(round(float(iv["seg_selfie_model"].get()))),
             segmentation_selfie_temporal_smoothing=float(iv["seg_selfie_smoothing"].get()),
             segmentation_engine_options=seg_engine_options,
+            background_enabled=camera_server_enabled and background_enabled,
             background=background,
+            crop_enabled=camera_server_enabled and self._parse_bool(iv["crop_enabled"].get()),
             crop_margin=float(iv["crop_margin"].get()),
             crop_pan_smoothing=float(iv["crop_pan_smoothing"].get()),
             crop_tilt_smoothing=float(iv["crop_tilt_smoothing"].get()),
@@ -4864,15 +4885,15 @@ class ConfigGui:
             audio_gate_release_ms=int(round(float(iv["audio_gate_release_ms"].get()))),
             audio_gate_open_gain=float(iv["audio_gate_open_gain"].get()),
             audio_gate_closed_gain=float(iv["audio_gate_closed_gain"].get()),
-            face_enhance_enabled=self._parse_bool(iv["face_enhance_enabled"].get()),
+            face_enhance_enabled=camera_server_enabled and self._parse_bool(iv["face_enhance_enabled"].get()),
             face_enhance_gamma=float(iv["face_enhance_gamma"].get()),
             face_enhance_brightness=float(iv["face_enhance_brightness"].get()),
             face_enhance_saturation=float(iv["face_enhance_saturation"].get()),
             face_enhance_blend=float(iv["face_enhance_blend"].get()),
             face_enhance_min_size_ratio=float(iv["face_enhance_min_size_ratio"].get()),
             face_enhance_edge_dither=float(iv["face_enhance_edge_dither"].get()),
-            face_deidentify_enabled=self._parse_bool(iv["face_deidentify_enabled"].get()),
-            dictation_ai_enabled=self._parse_bool(iv["dictation_ai_enabled"].get()),
+            face_deidentify_enabled=camera_server_enabled and self._parse_bool(iv["face_deidentify_enabled"].get()),
+            dictation_ai_enabled=dictation_ai_supported and self._parse_bool(iv["dictation_ai_enabled"].get()),
             dictation_ai_input_device=_audio_device_raw_from_display(
                 iv["dictation_ai_input_device"].get().strip(),
                 getattr(self, "_whisper_input_display_to_raw", {}),
@@ -4887,8 +4908,10 @@ class ConfigGui:
             dictation_ai_stt_model_zh=iv["dictation_ai_stt_model_zh"].get().strip(),
             dictation_ai_language=selected_dictation_ai_language,
             dictation_ai_task="transcribe",
-            dictation_ai_translation_enabled=self._parse_bool(iv["dictation_ai_translation_enabled"].get()),
-            dictation_ai_show_stt_status_window=self._parse_bool(iv["dictation_ai_show_stt_status_window"].get()),
+            dictation_ai_translation_enabled=dictation_ai_supported
+            and self._parse_bool(iv["dictation_ai_translation_enabled"].get()),
+            dictation_ai_show_stt_status_window=dictation_ai_supported
+            and self._parse_bool(iv["dictation_ai_show_stt_status_window"].get()),
             dictation_ai_translation_backend=iv["dictation_ai_translation_backend"].get().strip(),
             dictation_ai_translation_target_language=_dictation_ai_translation_target_raw_from_display(
                 iv["dictation_ai_translation_target_language"].get()

@@ -3,6 +3,15 @@ from __future__ import annotations
 
 def build_background_tab(gui, tab_bg, ttk) -> None:
     row = 0
+    gui._add_bool_switch(
+        tab_bg,
+        row,
+        "bg_enabled",
+        gui._tr("label.bg_enabled", "Background"),
+        True,
+        label_key="label.bg_enabled",
+    )
+    row += 1
     gui._add_combo(
         tab_bg,
         row,

@@ -1,5 +1,10 @@
 import unittest
 
+from src.domain.contracts.camera import (
+    CAMERA_FEATURE_TOGGLE_KEYS,
+    camera_default,
+    camera_feature_toggle_keys,
+)
 from src.domain.contracts.dictation_ai import (
     DICTATION_AI_CONTRACT,
     resolve_qwen_asr_model_name,
@@ -8,6 +13,13 @@ from src.domain.contracts.dictation_ai import (
     dictation_ai_default,
     dictation_ai_defaults,
     dictation_ai_spec,
+)
+from src.domain.contracts.window_geometry import (
+    CONFIG_DEFAULT_WINDOW_GEOMETRY,
+    DEFAULT_WINDOW_GEOMETRY_META,
+    DICTATION_AI_DEFAULT_WINDOW_GEOMETRY,
+    WINDOW_GEOMETRY_FILE_NAME,
+    sanitize_window_geometry,
 )
 
 
@@ -69,6 +81,47 @@ class WhisperContractTest(unittest.TestCase):
         dictation_ai_spec("sentenceFinalizeAge").validate_range(3, path="dictationAi.sentenceFinalizeAge")
         with self.assertRaisesRegex(ValueError, "dictationAi.sentenceFinalizeAge"):
             dictation_ai_spec("sentenceFinalizeAge").validate_range(0, path="dictationAi.sentenceFinalizeAge")
+
+
+class CameraContractTest(unittest.TestCase):
+    def test_camera_feature_contract_exposes_gui_toggle_keys(self) -> None:
+        self.assertEqual(
+            camera_feature_toggle_keys(),
+            (
+                "seg_enabled",
+                "bg_enabled",
+                "crop_enabled",
+                "face_enhance_enabled",
+                "face_deidentify_enabled",
+            ),
+        )
+        self.assertEqual(camera_feature_toggle_keys(), CAMERA_FEATURE_TOGGLE_KEYS)
+
+    def test_camera_feature_contract_defaults(self) -> None:
+        self.assertTrue(camera_default("cameraServerEnabled"))
+        self.assertTrue(camera_default("segmentationEnabled"))
+        self.assertTrue(camera_default("backgroundEnabled"))
+        self.assertTrue(camera_default("cropEnabled"))
+        self.assertFalse(camera_default("faceEnhanceEnabled"))
+        self.assertFalse(camera_default("faceDeidentifyEnabled"))
+
+
+class WindowGeometryContractTest(unittest.TestCase):
+    def test_window_geometry_contract_keeps_all_window_keys_together(self) -> None:
+        self.assertEqual(CONFIG_DEFAULT_WINDOW_GEOMETRY, "780x900")
+        self.assertEqual(DICTATION_AI_DEFAULT_WINDOW_GEOMETRY, "780x420")
+        self.assertEqual(WINDOW_GEOMETRY_FILE_NAME, "window-geometry.json")
+        self.assertIn("windowGeometry", DEFAULT_WINDOW_GEOMETRY_META)
+        self.assertIn("previewWindowGeometry", DEFAULT_WINDOW_GEOMETRY_META)
+        self.assertIn("dictationAiWindowGeometry", DEFAULT_WINDOW_GEOMETRY_META)
+        self.assertIn("dictationAiTranslationWindowGeometry", DEFAULT_WINDOW_GEOMETRY_META)
+        self.assertIn("dictationAiSttStatusWindowGeometry", DEFAULT_WINDOW_GEOMETRY_META)
+        self.assertIn("dictationAiModelDownloadWindowGeometry", DEFAULT_WINDOW_GEOMETRY_META)
+
+    def test_window_geometry_contract_sanitizes_visible_geometry(self) -> None:
+        self.assertEqual(sanitize_window_geometry("780x420+50+119", 1920, 1080), "780x420+50+119")
+        self.assertIsNone(sanitize_window_geometry("200x100+50+119", 1920, 1080))
+        self.assertIsNone(sanitize_window_geometry("780x420+5000+119", 1920, 1080))
 
 
 if __name__ == "__main__":

@@ -321,10 +321,11 @@ Linux Docker 정책:
 ```
 
 - `받아쓰기 AI` 탭에서 `받아쓰기 AI 전사`를 켜고 입력 장치를 선택합니다.
-- `받아쓰기 AI 입력 dB 미터`로 선택한 장치에 실제 신호가 들어오는지 확인합니다.
+- `오디오 입력 데시벨 측정기`로 선택한 장치에 실제 신호가 들어오는지 확인합니다.
 - `번역 창`을 켠 뒤 `번역 백엔드`를 선택합니다. `whisper`는 영어 번역만 지원하고, `nllb-transformers`는 `facebook/nllb-200-distilled-600M` 로컬 모델로 한국어/영어/중국어 대상 번역을 지원합니다.
 - Linux PulseAudio/PipeWire 장치는 `alsa_input...`, `*.monitor`, `ai-virtual-cam` 같은 원본 ID를 설정값으로 저장합니다.
 - 받아쓰기 AI 실행은 Linux + NVIDIA CUDA 전용입니다. macOS/Windows 또는 CPU 실행 설정은 `dictationAi.enabled=true` 저장/Serve 시작/전사 창 실행 단계에서 자동 대체 없이 실패합니다.
+- macOS에서 `./bin/avc config`를 실행하면 받아쓰기 AI 전사, STT 원문창, 번역 창 토글은 모두 OFF로 고정되고 켤 수 없습니다. 그 밖의 입력/모델/다운로드 같은 GUI 조작은 데모용으로 사용할 수 있습니다.
 - 받아쓰기 AI 탭의 설정값은 `setting.json`의 `dictationAi` 블록에 저장됩니다. 초기에는 사용 모델이 Whisper였기 때문에 `whisper` 블록으로 시작했지만, STT/문장 경계/번역 모델이 확장되면서 도메인명과 모델명을 동일하게 두는 것이 오류가 되어 `dictationAi`로 변경했습니다. 주요 키는 `enabled`, `inputDevice`, `backend`, `model`, `language`, `translationEnabled`, `translationBackend`, `translationTargetLanguage`, `translationModel`, `translationDevice`, `translationComputeType`, `translationBeamSize`, `translationMaxNewTokens`, `device`, `computeType`, `chunkSeconds`, `stepSeconds`, `windowSeconds`, `sentenceFinalizeAge`, `beamSize`, `maxNewTokens`, `temperature`입니다. STT 응답/성능 파라미터와 STT 결과 문장 경계 처리 파라미터는 언어별로도 저장되며, 예를 들어 `windowSecondsEn`, `windowSecondsKo`, `windowSecondsZh`, `stepSecondsZh`, `sentenceFinalizeAgeZh`, `maxNewTokensZh` 같은 키가 선택 언어별 실행값의 기준입니다.
 
 실행 동작:
@@ -337,7 +338,7 @@ Linux Docker 정책:
 - 전사/번역 창에는 복사용 텍스트만 표시합니다. 시간, `[ko]` 같은 언어 태그, `전사 결과 없음` 같은 추적 로그는 표시하지 않습니다.
 - stdout/stderr 로그에는 시간 prefix와 함께 모델 로딩, 입력 장치, chunk 처리, 오류 상태가 출력됩니다.
 - 받아쓰기 AI 실행은 STT 모델, 번역 모델, STT 결과 문장 경계 처리 모델 준비가 모두 끝난 뒤 입력 장치를 열고 전사를 시작합니다. 모델 다운로드는 Serve 시작 전 캐시 검사와 모델 다운로드 매니저 창에서만 수행하며, Serve 런타임은 로컬 캐시만 사용합니다.
-- 전사 창, 번역 창, 설정 GUI, 카메라 미리보기 창, 설정 모달, 모델 다운로드 매니저 창의 위치와 크기는 `setting.json` 옆의 `window-geometry.json`에 자동 저장되고 다음 실행 때 재사용됩니다. 과거 `setting.json`의 `meta.*Geometry` 값은 마이그레이션용 fallback으로만 읽습니다.
+- 전사 창, 번역 창, 설정 GUI, 카메라 미리보기 창, 설정 모달, 오디오 입력 데시벨 측정기, 모델 다운로드 매니저 창의 위치와 크기는 `setting.json` 옆의 `window-geometry.json`에 자동 저장되고 다음 실행 때 재사용됩니다. 과거 `setting.json`의 `meta.*Geometry` 값은 마이그레이션용 fallback으로만 읽습니다.
 
 모델/언어 설정:
 
@@ -460,16 +461,17 @@ python3 -m unittest tests.unit.test_dictation_ai_performance_tracking
 
 ## GUI 기능
 
-- 배경 모드 선택: 블러, 크로마, 이미지
 - 크로마 컬러피커
-- 세그멘테이션 실시간 조정: threshold, edge/blend, selfie 옵션, 백엔드별 추가 엔진 옵션(폼 기반)
-- 프레이밍 실시간 조정: margin, zoom/pan/tilt smoothing, PID, X/Y 오프셋
+- 세그멘테이션 ON/OFF와 실시간 조정: threshold, edge/blend, selfie 옵션, 백엔드별 추가 엔진 옵션(폼 기반)
+- 배경 ON/OFF와 배경 모드 선택: 블러, 크로마, 이미지
+- 프레이밍 ON/OFF와 실시간 조정: margin, zoom/pan/tilt smoothing, PID, X/Y 오프셋
+- 화질 ON/OFF: 감마/오프셋/채도/강도 보정(세그멘테이션 경계 기준 적용)
+- 카메라 서버가 OFF이면 세그멘테이션/배경/프레이밍/화질 토글은 모두 OFF로 고정되고 켤 수 없습니다.
 - 프리뷰 창에서 처리 결과 확인
 - 카메라 입력 모드 후보 기반(해상도/FPS 세트)
-- 화질 탭: 감마/오프셋/채도/강도 보정(세그멘테이션 경계 기준 적용)
 - `오디오 게이트 테스트`, 각 탭별 기본값 복원 버튼
-- `받아쓰기 AI` 탭: STT 입력 장치, dB 미터, 모델/언어, 문장 추적, 번역, 응답속도 조정
-- 탭 순서: `입출력 -> 세그멘테이션 -> 배경 -> 프레이밍 -> 화질 -> 오디오 -> 받아쓰기 AI`
+- `받아쓰기 AI` 탭: STT 입력 장치, 오디오 입력 데시벨 측정기, 모델/언어, 문장 추적, 번역, 응답속도 조정
+- 탭 순서: `카메라 입력 -> 세그멘테이션 -> 배경 -> 프레이밍 -> 화질 -> 오디오 -> 받아쓰기 AI`
 - `faceEnhance` 구키(`brightness`, `blend`, `minSizeRatio`, `edgeDither`) 하위호환은 지원하지 않음
 
 ## 설정 예시
@@ -495,6 +497,7 @@ python3 -m unittest tests.unit.test_dictation_ai_performance_tracking
     "fps": 30
   },
   "segmentation": {
+    "enabled": true,
     "backend": "selfie_ensemble",
     "threshold": 0.6,
     "edgeSmoothness": 0.5,
@@ -517,10 +520,12 @@ python3 -m unittest tests.unit.test_dictation_ai_performance_tracking
     }
   },
   "background": {
+    "enabled": true,
     "mode": "chroma",
     "chromaColor": [0, 0, 0]
   },
   "crop": {
+    "enabled": true,
     "margin": 0.25,
     "panSmoothing": 0.85,
     "tiltSmoothing": 0.85,

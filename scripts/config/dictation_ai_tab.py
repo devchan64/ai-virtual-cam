@@ -86,10 +86,11 @@ def build_whisper_tab(
 
     whisper_input_meter_btn = ttk.Button(
         input_frame,
-        text=gui._tr("button.dictation_ai_input_meter", "받아쓰기 AI 입력 dB 미터"),
+        text=gui._tr("button.dictation_ai_input_meter", "오디오 입력 데시벨 측정기"),
         command=gui._run_whisper_input_meter,
     )
-    gui._register_localized_widget(whisper_input_meter_btn, "button.dictation_ai_input_meter", "받아쓰기 AI 입력 dB 미터")
+    gui._widgets["dictation_ai_input_meter_button"] = whisper_input_meter_btn
+    gui._register_localized_widget(whisper_input_meter_btn, "button.dictation_ai_input_meter", "오디오 입력 데시벨 측정기")
     whisper_input_meter_btn.grid(row=input_row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0))
     input_row += 1
     dictation_ai_model_download_btn = ttk.Button(
@@ -100,6 +101,7 @@ def build_whisper_tab(
     gui._register_localized_widget(
         dictation_ai_model_download_btn, "button.dictation_ai_model_download_selected", "모델 다운로드 매니저"
     )
+    gui._widgets["dictation_ai_model_download_button"] = dictation_ai_model_download_btn
     dictation_ai_model_download_btn.grid(row=input_row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0))
     input_row += 1
 
@@ -475,5 +477,6 @@ def build_whisper_tab(
         text=gui._tr("button.reset_dictation_ai_settings", "받아쓰기 AI 기본값 복원"),
         command=gui._reset_whisper_settings,
     )
+    gui._widgets["dictation_ai_reset_button"] = reset_whisper_btn
     gui._register_localized_widget(reset_whisper_btn, "button.reset_dictation_ai_settings", "받아쓰기 AI 기본값 복원")
     reset_whisper_btn.grid(row=row, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0))

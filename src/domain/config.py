@@ -446,6 +446,7 @@ class OutputCameraConfig:
 
 @dataclass(frozen=True)
 class SegmentationConfig:
+    enabled: bool
     backend: str
     threshold: float
     selfieModelSelection: int = 1
@@ -465,6 +466,7 @@ class SegmentationConfig:
             if isinstance(raw_selected, dict):
                 selected_engine_options = dict(raw_selected)
         config = cls(
+            enabled=bool(raw.get("enabled", True)),
             backend=backend,
             threshold=float(raw["threshold"]),
             selfieModelSelection=int(selfie.get("modelSelection", 1)),
@@ -495,6 +497,7 @@ class SegmentationConfig:
 
 @dataclass(frozen=True)
 class BackgroundConfig:
+    enabled: bool
     mode: str
     chromaColor: tuple[int, int, int] | None
     imagePath: str | None
@@ -509,6 +512,7 @@ class BackgroundConfig:
         crop = Rect.from_dict(raw["crop"]) if raw.get("crop") else None
 
         config = cls(
+            enabled=bool(raw.get("enabled", True)),
             mode=mode,
             chromaColor=tuple(int(v) for v in chroma) if chroma else None,
             imagePath=str(image_path) if image_path else None,
@@ -521,6 +525,8 @@ class BackgroundConfig:
     def validate(self) -> None:
         if self.mode not in {"chroma", "image", "image_chroma"}:
             raise ValueError("background.mode must be one of: chroma, image, image_chroma")
+        if not self.enabled:
+            return
         if self.mode in {"chroma", "image_chroma"}:
             if self.chromaColor is None or len(self.chromaColor) != 3:
                 raise ValueError("background.chromaColor must contain 3 values")
@@ -537,6 +543,7 @@ class BackgroundConfig:
 
 @dataclass(frozen=True)
 class PersonCropConfig:
+    enabled: bool
     margin: float
     panSmoothing: float
     tiltSmoothing: float
@@ -558,6 +565,7 @@ class PersonCropConfig:
     def from_dict(cls, raw: dict) -> "PersonCropConfig":
         pan_smoothing = raw.get("panSmoothing", raw.get("smoothing", 0.85))
         config = cls(
+            enabled=bool(raw.get("enabled", True)),
             margin=float(raw["margin"]),
             panSmoothing=float(pan_smoothing),
             tiltSmoothing=float(raw.get("tiltSmoothing", pan_smoothing)),

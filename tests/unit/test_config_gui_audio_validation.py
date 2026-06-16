@@ -39,11 +39,15 @@ class _DummyVar:
 class _DummyWidget:
     def __init__(self):
         self.values = ()
+        self.states = []
 
     def __setitem__(self, key, value):
         if key != "values":
             raise KeyError(key)
         self.values = tuple(value)
+
+    def state(self, states):
+        self.states.extend(states)
 
 
 class _DummyFrame:
@@ -168,6 +172,86 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         self.assertIn("dictation_ai_translation_backend_ko", gui.vars)
         self.assertIn("dictation_ai_translation_backend_zh", gui.vars)
         self.assertEqual(gui.vars["dictation_ai_translation_backend_en"].get(), "mock")
+
+    def test_dictation_ai_platform_policy_forces_off_and_disables_enable_toggles_on_macos(self) -> None:
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        gui._dictation_ai_supported = False
+        gui.vars = {
+            "dictation_ai_enabled": _DummyVar(True),
+            "dictation_ai_translation_enabled": _DummyVar(True),
+            "dictation_ai_show_stt_status_window": _DummyVar(True),
+        }
+        gui._set_var = lambda key, value: gui.vars[key].set(bool(value))
+        gui._widgets = {
+            "dictation_ai_enabled": _DummyWidget(),
+            "dictation_ai_input_device": _DummyWidget(),
+            "dictation_ai_translation_enabled": _DummyWidget(),
+            "dictation_ai_show_stt_status_window": _DummyWidget(),
+            "audio_enabled": _DummyWidget(),
+        }
+        gui._slider_entries = {"dictation_ai_step_seconds": _DummyWidget()}
+
+        self.module.ConfigGui._apply_dictation_ai_platform_policy(gui)
+
+        self.assertFalse(gui.vars["dictation_ai_enabled"].get())
+        self.assertFalse(gui.vars["dictation_ai_translation_enabled"].get())
+        self.assertFalse(gui.vars["dictation_ai_show_stt_status_window"].get())
+        self.assertIn("disabled", gui._widgets["dictation_ai_enabled"].states)
+        self.assertIn("disabled", gui._widgets["dictation_ai_translation_enabled"].states)
+        self.assertIn("disabled", gui._widgets["dictation_ai_show_stt_status_window"].states)
+        self.assertEqual(gui._widgets["dictation_ai_input_device"].states, [])
+        self.assertEqual(gui._slider_entries["dictation_ai_step_seconds"].states, [])
+        self.assertEqual(gui._widgets["audio_enabled"].states, [])
+
+    def test_camera_server_off_forces_camera_feature_toggles_off_and_disabled(self) -> None:
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        gui.vars = {
+            "camera_server_enabled": _DummyVar(False),
+            "seg_enabled": _DummyVar(True),
+            "bg_enabled": _DummyVar(True),
+            "crop_enabled": _DummyVar(True),
+            "face_enhance_enabled": _DummyVar(True),
+            "face_deidentify_enabled": _DummyVar(True),
+        }
+        gui._set_var = lambda key, value: gui.vars[key].set(bool(value))
+        gui._widgets = {key: _DummyWidget() for key in gui.vars}
+
+        self.module.ConfigGui._apply_camera_server_feature_policy(gui)
+
+        for key in (
+            "seg_enabled",
+            "bg_enabled",
+            "crop_enabled",
+            "face_enhance_enabled",
+            "face_deidentify_enabled",
+        ):
+            self.assertFalse(gui.vars[key].get(), key)
+            self.assertIn("disabled", gui._widgets[key].states)
+
+    def test_camera_server_on_enables_camera_feature_toggles_without_forcing_on(self) -> None:
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        gui.vars = {
+            "camera_server_enabled": _DummyVar(True),
+            "seg_enabled": _DummyVar(False),
+            "bg_enabled": _DummyVar(False),
+            "crop_enabled": _DummyVar(False),
+            "face_enhance_enabled": _DummyVar(False),
+            "face_deidentify_enabled": _DummyVar(False),
+        }
+        gui._set_var = lambda key, value: gui.vars[key].set(bool(value))
+        gui._widgets = {key: _DummyWidget() for key in gui.vars}
+
+        self.module.ConfigGui._apply_camera_server_feature_policy(gui)
+
+        for key in (
+            "seg_enabled",
+            "bg_enabled",
+            "crop_enabled",
+            "face_enhance_enabled",
+            "face_deidentify_enabled",
+        ):
+            self.assertFalse(gui.vars[key].get(), key)
+            self.assertIn("!disabled", gui._widgets[key].states)
 
     def test_dictation_ai_stt_gui_shows_only_selected_language_options(self) -> None:
         gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
@@ -575,6 +659,7 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
 
     def test_default_window_geometry_meta_contains_dictation_ai_model_download_window_geometry(self) -> None:
         self.assertIn("dictationAiModelDownloadWindowGeometry", self.module.DEFAULT_WINDOW_GEOMETRY_META)
+        self.assertIn("dictationAiInputMeterWindowGeometry", self.module.DEFAULT_WINDOW_GEOMETRY_META)
 
     def test_capture_all_window_geometry_meta_remembers_dictation_ai_model_download_window(self) -> None:
         root = types.SimpleNamespace(
@@ -588,34 +673,79 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
         gui.root = root
         gui._window_geometry_meta_cache = {}
-        download_window = types.SimpleNamespace()
-        gui._dictation_ai_model_download_window = download_window
+        download_window = object()
+        meter_window = object()
+        gui._managed_window_geometry = {
+            download_window: "dictationAiModelDownloadWindowGeometry",
+            meter_window: "dictationAiInputMeterWindowGeometry",
+        }
 
         with mock.patch.object(self.module.ConfigGui, "_remember_named_window_geometry") as remember:
             self.module.ConfigGui._capture_all_window_geometry_meta(gui)
 
         remember.assert_any_call("dictationAiModelDownloadWindowGeometry", download_window)
+        remember.assert_any_call("dictationAiInputMeterWindowGeometry", meter_window)
 
+    def test_register_managed_window_geometry_restores_and_binds_configure(self) -> None:
+        window = mock.Mock()
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        gui._managed_window_geometry = {}
+        gui._restore_named_window_geometry = mock.Mock()
+
+        self.module.ConfigGui._register_managed_window_geometry(gui, window, "audioTuneWindowGeometry")
+
+        gui._restore_named_window_geometry.assert_called_once_with(window, "audioTuneWindowGeometry", None)
+        self.assertEqual(gui._managed_window_geometry[window], "audioTuneWindowGeometry")
+        window.bind.assert_called_once_with("<Configure>", gui._on_managed_window_configure, add="+")
+
+    def test_managed_window_configure_remembers_and_schedules_geometry_capture(self) -> None:
+        window = object()
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        gui._managed_window_geometry = {window: "audioGateTestWindowGeometry"}
+        gui._remember_named_window_geometry = mock.Mock()
+        gui._schedule_save_window_geometry_meta = mock.Mock()
+
+        event = types.SimpleNamespace(widget=window)
+        self.module.ConfigGui._on_managed_window_configure(gui, event)
+
+        gui._remember_named_window_geometry.assert_called_once_with("audioGateTestWindowGeometry", window)
+        gui._schedule_save_window_geometry_meta.assert_called_once_with()
+
+    def test_flush_managed_window_geometry_remembers_and_saves(self) -> None:
+        window = object()
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        gui._managed_window_geometry = {window: "inputMeterWindowGeometry"}
+        gui._remember_named_window_geometry = mock.Mock()
+        gui._save_window_geometry_file = mock.Mock()
+
+        self.module.ConfigGui._flush_managed_window_geometry(gui, window)
+
+        gui._remember_named_window_geometry.assert_called_once_with("inputMeterWindowGeometry", window)
+        gui._save_window_geometry_file.assert_called_once_with()
 
     def test_dictation_ai_model_download_configure_schedules_geometry_capture(self) -> None:
         download_window = object()
         gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
-        gui._dictation_ai_model_download_window = download_window
+        gui._managed_window_geometry = {download_window: "dictationAiModelDownloadWindowGeometry"}
+        gui._remember_named_window_geometry = mock.Mock()
         gui._schedule_save_window_geometry_meta = mock.Mock()
 
         event = types.SimpleNamespace(widget=download_window)
         self.module.ConfigGui._on_dictation_ai_model_download_configure(gui, event)
 
+        gui._remember_named_window_geometry.assert_called_once_with("dictationAiModelDownloadWindowGeometry", download_window)
         gui._schedule_save_window_geometry_meta.assert_called_once_with()
 
     def test_dictation_ai_model_download_configure_ignores_other_widgets(self) -> None:
         gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
-        gui._dictation_ai_model_download_window = object()
+        gui._managed_window_geometry = {object(): "dictationAiModelDownloadWindowGeometry"}
+        gui._remember_named_window_geometry = mock.Mock()
         gui._schedule_save_window_geometry_meta = mock.Mock()
 
         event = types.SimpleNamespace(widget=object())
         self.module.ConfigGui._on_dictation_ai_model_download_configure(gui, event)
 
+        gui._remember_named_window_geometry.assert_not_called()
         gui._schedule_save_window_geometry_meta.assert_not_called()
 
     def test_dictation_ai_model_download_command_uses_dictation_ai_block(self) -> None:
@@ -695,16 +825,15 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         gui._dictation_ai_model_download_cancelled = False
         gui._set_dictation_ai_model_download_status = mock.Mock()
         gui._set_serve_status = mock.Mock()
-        gui._remember_named_window_geometry = mock.Mock()
+        gui._flush_managed_window_geometry = mock.Mock()
+        gui._forget_managed_window_geometry = mock.Mock()
 
         self.module.ConfigGui._close_dictation_ai_model_download_dialog(gui, False)
 
         self.assertTrue(gui._dictation_ai_model_download_cancelled)
         process.send_signal.assert_called_once_with(self.module.signal.SIGINT)
-        gui._remember_named_window_geometry.assert_called_once_with(
-            "dictationAiModelDownloadWindowGeometry",
-            download_window,
-        )
+        gui._flush_managed_window_geometry.assert_called_once_with(download_window)
+        gui._forget_managed_window_geometry.assert_called_once_with(download_window)
         download_window.destroy.assert_called_once()
         gui._set_serve_status.assert_called_once()
 
@@ -721,6 +850,22 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
 
         gui._set_dictation_ai_model_download_status.assert_called_once_with("모델 다운로드가 취소되었습니다.")
         gui._set_serve_status.assert_not_called()
+
+    def test_dictation_ai_input_meter_uses_dictation_ai_config_and_geometry_key(self) -> None:
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        gui._build_config = lambda validate_audio=False: {
+            "dictationAi": {"inputDevice": "dictation-source"},
+            "whisper": {"inputDevice": "legacy-source"},
+        }
+        gui._show_error = mock.Mock()
+        gui._run_input_meter = mock.Mock()
+
+        self.module.ConfigGui._run_whisper_input_meter(gui)
+
+        gui._run_input_meter.assert_called_once()
+        kwargs = gui._run_input_meter.call_args.kwargs
+        self.assertEqual(kwargs["input_device_requested"], "dictation-source")
+        self.assertEqual(kwargs["geometry_key"], "dictationAiInputMeterWindowGeometry")
 
 
 if __name__ == "__main__":

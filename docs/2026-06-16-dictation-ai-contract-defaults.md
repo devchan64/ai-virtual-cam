@@ -4,7 +4,7 @@
 
 이 문서는 받아쓰기 AI 설정 계약, 허용값, 기본값, 검증 규칙을 정리한다. 설계 배경과 실험 판단은 [받아쓰기 AI 설계 및 실험 노트](2026-06-16-dictation-ai-design-experiment-notes.md)를 따르고, 외부 레퍼런스는 [받아쓰기 AI 참조 레퍼런스 모음](2026-06-16-dictation-ai-reference-index.md)에 둔다.
 
-코드 기준 진실 공급원은 `src/domain/contracts/dictation_ai.py`의 `DICTATION_AI_CONTRACT`다. 이 문서는 그 계약을 운영자가 읽을 수 있는 형태로 풀어쓴다.
+받아쓰기 AI 설정의 코드 기준 진실 공급원은 `src/domain/contracts/dictation_ai.py`의 `DICTATION_AI_CONTRACT`다. 카메라 기능 enabled 계약은 `src/domain/contracts/camera.py`, 윈도우 지오메트리 저장 키와 파일 계약은 `src/domain/contracts/window_geometry.py`에 분리한다. 이 문서는 그 계약을 운영자가 읽을 수 있는 형태로 풀어쓴다.
 
 ## 저장 위치와 호환성
 
@@ -113,6 +113,12 @@ legacy/global 기본값:
 - 전사 창 실행 시 `torch.cuda.is_available()`이 `false`면 자동 CPU fallback 없이 실패한다.
 
 macOS/Windows, CPU 실행, `auto`에서 CPU로 암묵 전환되는 경로는 운영 계약에 포함하지 않는다.
+
+설정 GUI 계약:
+
+- macOS/Windows에서 `./bin/avc config`를 실행하면 받아쓰기 AI 전사, STT 원문창, 번역 창 토글은 모두 OFF로 강제한다.
+- 지원하지 않는 호스트에서는 ON으로 전환되는 토글만 비활성화하고, 입력/모델/다운로드 같은 나머지 GUI 조작은 데모용으로 허용한다.
+- 저장되는 `dictationAi.enabled`, `translationEnabled`, `showSttStatusWindow`는 `false`로 유지한다.
 
 ## STT 결과 문장 경계 처리 계약
 
@@ -226,6 +232,8 @@ Serve 시작 전 모델 캐시 검사 대상:
 ## 관련 코드
 
 - 계약 정의: `src/domain/contracts/dictation_ai.py`
+- 카메라 기능 계약: `src/domain/contracts/camera.py`
+- 윈도우 지오메트리 계약: `src/domain/contracts/window_geometry.py`
 - 설정 파싱/검증: `src/domain/config.py`
 - 기본값 export: `src/domain/dictation_ai_defaults.py`
 - GUI 탭: `scripts/config/dictation_ai_tab.py`

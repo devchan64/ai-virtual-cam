@@ -3,7 +3,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from src.domain.config import BackgroundConfig, FaceEnhanceConfig, PersonCropConfig, SegmentationConfig
+from src.domain.config import BackgroundConfig, FaceEnhanceConfig, PersonCropConfig, Rect, SegmentationConfig
 from src.pipeline.background import BackgroundProvider
 from src.pipeline.bounds import BoundsTracker
 from src.pipeline.composer import Composer
@@ -23,7 +23,9 @@ class FrameProcessor:
         output_height: int,
     ) -> None:
         self._seg_cfg = segmentation
-        self._segmenter = build_segmenter(segmentation)
+        self._background_enabled = background.enabled
+        self._crop_enabled = crop.enabled
+        self._segmenter = build_segmenter(segmentation) if segmentation.enabled else None
         self._background = BackgroundProvider(background, output_width, output_height)
         self._bounds = BoundsTracker(crop, output_width, output_height)
         self._composer = Composer()
@@ -51,7 +53,10 @@ class FrameProcessor:
                 self._face_cascade = None
 
     def process(self, frame: np.ndarray) -> np.ndarray:
-        raw_mask = self._segmenter.segment(frame)
+        if self._segmenter is None:
+            raw_mask = np.full(frame.shape[:2], 255, dtype=np.uint8)
+        else:
+            raw_mask = self._segmenter.segment(frame)
         mask = refine_mask(
             raw_mask,
             self._seg_cfg.threshold,
@@ -68,26 +73,30 @@ class FrameProcessor:
                     flush=True,
                 )
                 self._low_mask_ratio_logged = True
-            bounds = self._bounds.update(mask)
+            bounds = self._bounds.update(mask) if self._crop_enabled else None
+            rect = self._bounds.as_rect(bounds) if bounds is not None else Rect(0, 0, frame.shape[1], frame.shape[0])
             output = crop_and_resize(
                 frame,
-                self._bounds.as_rect(bounds),
+                rect,
                 self._output_width,
                 self._output_height,
             )
             self._last_output_mask = crop_and_resize(
                 mask,
-                self._bounds.as_rect(bounds),
+                rect,
                 self._output_width,
                 self._output_height,
             )
-            self._last_face_enhance_mask = self._crop_face_alpha_to_output(self._bounds.as_rect(bounds))
-            self._last_face_enhance_edge_mask = self._crop_face_edge_to_output(self._bounds.as_rect(bounds))
+            self._last_face_enhance_mask = self._crop_face_alpha_to_output(rect)
+            self._last_face_enhance_edge_mask = self._crop_face_edge_to_output(rect)
             return self._apply_face_deidentify(output)
 
-        bounds = self._bounds.update(mask)
-        background = self._background.frame()
-        composed = self._composer.compose(frame, mask, background)
+        bounds = self._bounds.update(mask) if self._crop_enabled else None
+        if self._background_enabled:
+            background = self._background.frame()
+            composed = self._composer.compose(frame, mask, background)
+        else:
+            composed = frame
         # Guardrail: avoid near-black output when segmentation is unstable.
         if foreground_ratio < 0.20:
             source_mean = float(frame.mean())
@@ -104,25 +113,21 @@ class FrameProcessor:
                     )
                 output = crop_and_resize(
                     frame,
-                    self._bounds.as_rect(bounds),
+                    self._bounds.as_rect(bounds) if bounds is not None else Rect(0, 0, frame.shape[1], frame.shape[0]),
                     self._output_width,
                     self._output_height,
                 )
                 return self._apply_face_deidentify(output)
-        output = crop_and_resize(
-            composed,
-            self._bounds.as_rect(bounds),
-            self._output_width,
-            self._output_height,
-        )
+        rect = self._bounds.as_rect(bounds) if bounds is not None else Rect(0, 0, frame.shape[1], frame.shape[0])
+        output = crop_and_resize(composed, rect, self._output_width, self._output_height)
         self._last_output_mask = crop_and_resize(
             mask,
-            self._bounds.as_rect(bounds),
+            rect,
             self._output_width,
             self._output_height,
         )
-        self._last_face_enhance_mask = self._crop_face_alpha_to_output(self._bounds.as_rect(bounds))
-        self._last_face_enhance_edge_mask = self._crop_face_edge_to_output(self._bounds.as_rect(bounds))
+        self._last_face_enhance_mask = self._crop_face_alpha_to_output(rect)
+        self._last_face_enhance_edge_mask = self._crop_face_edge_to_output(rect)
         return self._apply_face_deidentify(output)
 
     def last_output_mask(self) -> np.ndarray:

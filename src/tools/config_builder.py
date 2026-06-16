@@ -3,6 +3,7 @@ from __future__ import annotations
 import platform
 import subprocess
 
+from src.domain.contracts.camera import camera_default
 from src.domain.dictation_ai_defaults import dictation_ai_default
 
 
@@ -394,7 +395,8 @@ def build_config(
     output_height: int,
     output_fps: int,
     output_backend: str = "opencv",
-    camera_server_enabled: bool = True,
+    camera_server_enabled: bool = camera_default("cameraServerEnabled"),
+    segmentation_enabled: bool = camera_default("segmentationEnabled"),
     segmentation_backend: str,
     segmentation_threshold: float,
     segmentation_selfie_model_selection: int = 1,
@@ -402,7 +404,9 @@ def build_config(
     segmentation_edge_smoothness: float = 0.5,
     segmentation_blend_feather: float = 0.35,
     segmentation_engine_options: dict[str, object] | None = None,
+    background_enabled: bool = camera_default("backgroundEnabled"),
     background: dict,
+    crop_enabled: bool = camera_default("cropEnabled"),
     crop_margin: float,
     crop_pan_smoothing: float,
     crop_tilt_smoothing: float | None = None,
@@ -437,14 +441,14 @@ def build_config(
     audio_gate_open_gain: float = 1.0,
     audio_gate_closed_gain: float = 0.0,
     audio_gate_min_voice_band_ratio: float = 0.50,
-    face_enhance_enabled: bool = False,
+    face_enhance_enabled: bool = camera_default("faceEnhanceEnabled"),
     face_enhance_gamma: float = 1.0,
     face_enhance_brightness: float = 0.0,
     face_enhance_saturation: float = 1.0,
     face_enhance_blend: float = 0.65,
     face_enhance_min_size_ratio: float = 0.12,
     face_enhance_edge_dither: float = 0.25,
-    face_deidentify_enabled: bool = False,
+    face_deidentify_enabled: bool = camera_default("faceDeidentifyEnabled"),
     dictation_ai_enabled: bool = dictation_ai_default("enabled"),
     dictation_ai_input_device: str | None = None,
     dictation_ai_backend: str = dictation_ai_default("backend"),
@@ -662,6 +666,7 @@ def build_config(
             "backend": output_backend,
         },
         "segmentation": {
+            "enabled": bool(segmentation_enabled),
             "backend": segmentation_backend,
             "threshold": segmentation_threshold,
             "edgeSmoothness": float(segmentation_edge_smoothness),
@@ -672,8 +677,9 @@ def build_config(
             },
             "engineOptions": {str(segmentation_backend): seg_engine_options} if seg_engine_options else {},
         },
-        "background": background,
+        "background": dict(background, enabled=bool(background_enabled)),
         "crop": {
+            "enabled": bool(crop_enabled),
             "margin": crop_margin,
             "panSmoothing": crop_pan_smoothing,
             "tiltSmoothing": tilt_smoothing,

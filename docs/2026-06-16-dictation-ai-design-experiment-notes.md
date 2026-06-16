@@ -91,6 +91,7 @@
 
 - `dictationAiWindowGeometry`
 - `dictationAiTranslationWindowGeometry`
+- `dictationAiInputMeterWindowGeometry`
 - `dictationAiModelDownloadWindowGeometry`
 
 ## 핵심 문제 정의

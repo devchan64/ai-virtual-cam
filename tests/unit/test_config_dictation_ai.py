@@ -44,6 +44,21 @@ class CameraServerConfigTest(unittest.TestCase):
 
         self.assertEqual(config["cameraServer"], {"enabled": True})
 
+    def test_build_config_includes_camera_pipeline_feature_enabled_flags(self) -> None:
+        config = self._build_base_config(
+            segmentation_enabled=False,
+            background_enabled=False,
+            crop_enabled=False,
+            face_enhance_enabled=False,
+            face_deidentify_enabled=False,
+        )
+
+        self.assertFalse(config["segmentation"]["enabled"])
+        self.assertFalse(config["background"]["enabled"])
+        self.assertFalse(config["crop"]["enabled"])
+        self.assertFalse(config["faceEnhance"]["enabled"])
+        self.assertFalse(config["faceEnhance"]["deidentify"]["enabled"])
+
     def test_app_config_loads_camera_server_enabled_false(self) -> None:
         config = self._build_base_config(camera_server_enabled=False)
         with tempfile.TemporaryDirectory() as tmpdir:

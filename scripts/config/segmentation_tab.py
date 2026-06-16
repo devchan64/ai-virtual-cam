@@ -3,6 +3,15 @@ from __future__ import annotations
 
 def build_segmentation_tab(gui, tab_seg, ttk, segmentation_backend_options) -> None:
     row = 0
+    gui._add_bool_switch(
+        tab_seg,
+        row,
+        "seg_enabled",
+        gui._tr("label.seg_enabled", "Segmentation"),
+        True,
+        label_key="label.seg_enabled",
+    )
+    row += 1
     gui._add_combo(
         tab_seg,
         row,
