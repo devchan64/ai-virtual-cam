@@ -386,6 +386,22 @@ python3 -m unittest tests.unit.test_dictation_ai_performance_tracking
 - 이 테스트의 unittest 성공/실패는 품질 통과율을 의미하지 않습니다. 테스트가 실행되면 `[whisper-tracking] ... rate=... target>=... rate_gap=...` 지표를 출력하고, 이 지표를 올려가는 것을 개선 목표로 삼습니다.
 - 새 로그에서 중복/누락/잘못된 revision 사례가 보이면 tracking case를 추가하고, 이후 알고리즘 변경으로 rate가 오르고 gap이 줄어드는지 비교합니다. 상세 기준과 근거는 [`docs/2026-06-16-dictation-ai-design-experiment-notes.md`](docs/2026-06-16-dictation-ai-design-experiment-notes.md)를 따릅니다.
 
+문장 경계 처리 텍스트 벤치마크:
+
+```bash
+python3 scripts/eval/dictation-ai-sbd-benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_text_cases.sample.jsonl \
+  --backend sat \
+  --model sat-3l-sm \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/latest.json
+```
+
+- SBD 품질 평가는 wav/STT 품질과 분리해 텍스트 케이스로 수행합니다. 케이스는 JSON Lines 형식이며 `chunks`, `language`, `expected_final`, `expected_pending`, `expected_staged`, `tags`를 기록합니다. 단일 입력만 검증할 때는 `chunks` 대신 `text`를 사용할 수 있습니다.
+- 벤치마크는 실제 문장 경계 백엔드(`sat`)를 직접 호출한 뒤 운영 파이프라인의 핵심 흐름인 `pending -> completed -> staged -> revision/confirmation/age -> final` 생명주기를 시뮬레이션합니다. 리포트에는 케이스별 chunk 상태, final exact score, staged/pending 상태, `stage_start`, `stage_revision`, `stage_replace`, `finalized`, `finalized_per_stage_start` 같은 안정성 지표가 저장됩니다.
+- `--fail-on-regression --min-pass-rate <rate>`는 GPU 벤치 전용 품질 게이트가 필요할 때만 사용합니다. 일반 unit test 대신 누적 텍스트 코퍼스에서 경계 판단이 안정적으로 final까지 이어지는지 추세와 회귀를 확인하는 용도입니다.
+
 ## 오디오 운영 가이드
 
 오디오 활성화:
