@@ -14,7 +14,7 @@ Qwen3-ASR vLLM streaming, Dolphin-CN-Dialect, WeNet은 현재 운영 기본값�
 
 ## 검증 관점
 
-후보를 볼 때 가장 먼저 분리해야 하는 것은 raw STT 품질과 받아쓰기 AI 후처리 품질이다. STT 후보가 좋은 텍스트를 내더라도 sliding window, pending 접합, staged confirmation, final 확정 정책이 불안정하면 사용자 출력은 흔들린다. 반대로 후처리가 좋아도 raw STT가 의미를 잃으면 final 품질은 회복하기 어렵다.
+후보를 볼 때 가장 먼저 분리해야 하는 것은 raw STT 품질과 받아쓰기 AI 후처리 품질이다. STT 후보가 좋은 텍스트를 내더라도 sliding window, staged confirmation, final 확정 정책이 불안정하면 사용자 출력은 흔들린다. 반대로 후처리가 좋아도 raw STT가 의미를 잃으면 final 품질은 회복하기 어렵다. pending 접합 보정은 학술적 근거가 부족하므로 STT 후보 평가 기준으로 사용하지 않는다.
 
 | 관점 | 의미 |
 | --- | --- |

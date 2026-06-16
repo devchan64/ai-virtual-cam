@@ -1,6 +1,6 @@
 import unittest
 from src.app.sentence_boundary import LegacyRegexSentenceBoundaryDetector, split_punctuated_text
-from src.app.dictation_window import _collapse_adjacent_repeated_phrase_details, _collapse_adjacent_repeated_phrases, _diagnostic_tail, _forced_sentence_reason, _new_text_delta, _pending_new_text_combined, _sentence_max_age_chunks, _sentence_output_delta, _sentence_required_confirmations, _sentences_are_revisions, _should_age_staged_sentence, _prefer_sentence_revision, _sentence_end_count, _split_completed_sentences, _stable_window_text
+from src.app.dictation_window import _collapse_adjacent_repeated_phrase_details, _collapse_adjacent_repeated_phrases, _diagnostic_tail, _forced_sentence_reason, _new_text_delta, _sentence_max_age_chunks, _sentence_output_delta, _sentence_required_confirmations, _sentences_are_revisions, _should_age_staged_sentence, _prefer_sentence_revision, _sentence_end_count, _split_completed_sentences, _stable_window_text
 
 
 class WhisperSentenceBoundaryTest(unittest.TestCase):
@@ -15,75 +15,6 @@ class WhisperSentenceBoundaryTest(unittest.TestCase):
 
         self.assertEqual(completed, ["This is done!"])
         self.assertEqual(pending, "Next")
-
-    def test_sentence_split_drops_short_pending_when_new_text_restarts_sentence(self) -> None:
-        completed, pending = _split_completed_sentences(
-            "Because",
-            "But the speed profiles is the most important setting because this is what you're telling Tesla how to drive.",
-        )
-
-        self.assertEqual(
-            completed,
-            ["But the speed profiles is the most important setting because this is what you're telling Tesla how to drive."],
-        )
-        self.assertEqual(pending, "")
-
-    def test_pending_new_text_combines_by_overlap_without_duplicate(self) -> None:
-        self.assertEqual(
-            _pending_new_text_combined("Because if you", "if you didn't know,"),
-            "Because if you didn't know,",
-        )
-
-    def test_pending_new_text_combines_case_insensitive_word_overlap(self) -> None:
-        self.assertEqual(
-            _pending_new_text_combined("And You", "you can tap on the icon"),
-            "And You can tap on the icon",
-        )
-
-    def test_pending_new_text_combines_numeric_word_overlap(self) -> None:
-        self.assertEqual(
-            _pending_new_text_combined("It costs 1,000", "1000 dollars per year"),
-            "It costs 1,000 dollars per year",
-        )
-
-    def test_pending_new_text_trims_internal_chinese_restart_from_monitoring(self) -> None:
-        pending = "它是先做成一个寿司条，然后把这米再切断了，摆成四个墩儿墩儿，然后就是火山的底座，然后上面这个撒的就更像熔岩一样，然后用喷枪"
-        new = "条，然后把这米再切断了，摆成四个墩儿墩儿，然后就是火山的底座，然后上面这个洒的就更像熔岩一样，然后用喷枪"
-
-        self.assertEqual(
-            _pending_new_text_combined(pending, new),
-            "它是先做成一个寿司条，然后把这米再切断了，摆成四个墩儿墩儿，然后就是火山的底座，然后上面这个洒的就更像熔岩一样，然后用喷枪",
-        )
-
-    def test_pending_new_text_keeps_distinct_chinese_continuation(self) -> None:
-        self.assertEqual(
-            _pending_new_text_combined("这个长得真的好像火山啊", "然后用喷枪把上面烤一下"),
-            "这个长得真的好像火山啊然后用喷枪把上面烤一下",
-        )
-
-    def test_pending_new_text_drops_incomplete_tail_before_ack_revision_from_log(self) -> None:
-        # Regression from avc-whisper.log.1 chunks 847-848.
-        self.assertEqual(
-            _pending_new_text_combined(
-                "It will take him probably a",
-                "Okay. It will take them probably a month.",
-            ),
-            "Okay. It will take them probably a month.",
-        )
-
-    def test_sentence_boundary_does_not_complete_incomplete_tail_before_ack_revision_from_log(self) -> None:
-        # Regression from avc-whisper.log.1 chunks 847-848.
-        detector = LegacyRegexSentenceBoundaryDetector()
-
-        result = detector.split(
-            "It will take him probably a",
-            "Okay. It will take them probably a month.",
-            "en",
-        )
-
-        self.assertEqual(result.completed, ["Okay.", "It will take them probably a month."])
-        self.assertEqual(result.pending, "")
-        self.assertNotIn("It will take him probably a Okay.", result.completed)
 
     def test_sentence_boundary_soft_splits_long_english_restart_without_punctuation(self) -> None:
         detector = LegacyRegexSentenceBoundaryDetector()
@@ -142,18 +73,6 @@ class WhisperSentenceBoundaryTest(unittest.TestCase):
 
         self.assertEqual(result.completed, [])
         self.assertIn("그런데 새 문장이", result.pending)
-
-    def test_sentence_boundary_does_not_prepend_short_pending_before_revised_completed_sentence(self) -> None:
-        detector = LegacyRegexSentenceBoundaryDetector()
-
-        result = detector.split(
-            "You have quick",
-            "Here it shows you your vehicle. You have quick controls at the",
-            "en",
-        )
-
-        self.assertEqual(result.completed, ["Here it shows you your vehicle."])
-        self.assertEqual(result.pending, "You have quick controls at the")
 
     def test_sentence_boundary_soft_splits_here_is_restart_from_log(self) -> None:
         detector = LegacyRegexSentenceBoundaryDetector()
@@ -214,18 +133,6 @@ class WhisperSentenceBoundaryTest(unittest.TestCase):
         )
         self.assertEqual(result.pending, "So it shows you how many kilowatt hours")
         self.assertEqual(result.soft_boundary_count, 1)
-
-    def test_sentence_boundary_drops_dangling_and_before_revised_sentence_from_log(self) -> None:
-        detector = LegacyRegexSentenceBoundaryDetector()
-
-        result = detector.split(
-            "And",
-            "if you ever need service, go in",
-            "en",
-        )
-
-        self.assertEqual(result.completed, [])
-        self.assertEqual(result.pending, "if you ever need service, go in")
 
     def test_sentence_boundary_does_not_soft_split_lowercase_this_inside_phrase_from_log(self) -> None:
         detector = LegacyRegexSentenceBoundaryDetector()

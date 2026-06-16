@@ -62,7 +62,7 @@
 | raw/final 분리 | raw STT window를 사용자 출력으로 쓰지 않고 staged/final 생명주기를 둔다. | 중복 출력, tail echo, partial revision이 사용자 결과로 새지 않아야 한다. |
 | stable token | 같은 window에서 반복 유지되는 prefix/tail을 결정론적으로 비교한다. | 모델 출력을 다시 생성하지 않고 STT window 간 안정 구간을 찾아야 한다. |
 | revision lifecycle | `pending`, `staged`, `final`, `suppressed`, `revised` 상태로 후보를 관리한다. | final은 append-only이고, 미확정 후보만 교체/수정 가능해야 한다. |
-| CJK 접합 | 공백 없는 중국어는 문자 n-gram, prefix/suffix, 내부 prefix overlap을 우선한다. | 내부 재시작을 새 continuation으로 오인하지 않아야 한다. |
+| CJK 접합 | 폐기 | 공백 없는 중국어의 문자 n-gram, prefix/suffix, 내부 prefix overlap 기반 접합 보정은 학술적 근거가 부족해 운영 요구사항에서 제외한다. |
 | final-only 번역 | staged/partial 후보를 번역하지 않는다. | 원문 revision이 번역 중복과 premature translation으로 전파되지 않아야 한다. |
 
 ## 사전 이력: 2026-06-12 위스퍼 GUI, 번역, 성능 설정 준비
@@ -379,15 +379,15 @@ old_result=...喷枪 条，然后把这米再切断了...
 
 | 관측 | 아이디어 | 결과 |
 | --- | --- | --- |
-| pending tail 뒤에 새 STT가 같은 CJK 구간 중간부터 다시 시작함 | CJK no-space 텍스트에서는 내부 prefix overlap을 찾아 `pending prefix + new_text`로 병합한다. | `pending_new_text_combined()`가 내부 재시작과 독립 continuation을 구분하도록 정리됐다. |
-| 서로 다른 중국어 continuation 사이에 공백이 삽입됨 | CJK continuation은 인위적 공백 없이 이어붙인다. | 중국어 pending 접합에서 의미 없는 whitespace 삽입을 줄였다. |
+| pending tail 뒤에 새 STT가 같은 CJK 구간 중간부터 다시 시작함 | 당시에는 CJK no-space 내부 prefix overlap 접합으로 분류했다. | 현재는 학술적 근거 부족으로 접합 보정을 폐기하고 STT/backend 품질과 revision lifecycle 관측으로 돌린다. |
+| 서로 다른 중국어 continuation 사이에 공백이 삽입됨 | 당시에는 CJK continuation을 인위적 공백 없이 이어붙였다. | 현재는 언어별 접합 보정을 폐기하고 detector 입력 생성을 위한 단순 결합만 수행한다. |
 | 원문창이 staged 후보를 보여주던 시기의 로그가 raw STT 품질 판단을 흐림 | 원문창은 `stt_raw` 이벤트만 표시하고, staged/partial은 진단 로그로만 둔다. | raw STT 품질, revision lifecycle, final 출력의 관측 위치를 분리했다. |
 | `raw_without_final`이 증가했지만 입력 큐 드롭은 없었음 | 후보 차단/보류 규칙을 늘리기보다 final 생성률 회복을 우선한다. | 명백한 오류만 차단하고 나머지는 staged 교체와 재확인으로 처리하는 방향을 채택했다. |
 | CJK revision 내용이 바뀌어도 기존 confirmations가 남을 수 있음 | 실제 내용이 바뀐 revision은 confirmations를 1부터 다시 센다. | 흔들리는 후보가 누적 확인만으로 final이 되는 문제를 줄였다. |
 
 ### 반영 판단
 
-- CJK no-space 텍스트에서 긴 내부 prefix overlap이 확인되면 `pending prefix + new_text`로 병합한다.
+- CJK no-space 텍스트의 내부 prefix overlap 기반 접합 보정은 운영 요구사항에서 제외한다.
 - 서로 다른 중국어 continuation은 인위적 공백 없이 이어붙인다.
 - 원문창은 `stt_raw` 이벤트만 표시한다.
 - staged/partial 후보는 final 확정 전 내부 상태이므로 원문창에 표시하지 않는다.

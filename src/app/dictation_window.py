@@ -32,7 +32,6 @@ from src.app.dictation_transcript_logic import (
     _new_text_delta,
     _next_revision_confirmation_count,
     _normalized_text,
-    _pending_new_text_combined,
     _pending_overrun_reason,
     _pending_text_diagnostic_flags,
     _format_transcript_metrics,

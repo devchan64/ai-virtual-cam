@@ -44,7 +44,7 @@
 | 같은 음성 구간이 여러 window에 반복 포함됨 | final transcript는 중복 append되지 않고, 이미 확정된 문장은 echo suppression으로 억제된다. |
 | 다음 window가 이전 hypothesis를 수정함 | 미확정 `pending`/`staged`만 revision되고, 이미 final인 문장은 되돌리지 않는다. |
 | 문장 경계가 늦게 나옴 | pending은 진단 로그로 추적되고, final 후보는 `sentenceFinalizeAge`와 품질 게이트를 통과한 뒤 확정된다. |
-| 중국어 no-space 구간이 내부 중간부터 다시 시작됨 | 내부 prefix overlap을 제거해 접합하고, 서로 다른 continuation에는 인위적 공백을 넣지 않는다. |
+| 중국어 no-space 구간이 내부 중간부터 다시 시작됨 | STT/backend 품질과 revision lifecycle에서 관측한다. 학술적 근거가 부족한 pending/new 접합 보정은 운영 요구사항에서 제외한다. |
 | 번역이 켜져 있음 | 번역 큐에는 final transcript만 들어가며 staged/partial은 번역하지 않는다. |
 
 ## 설정 저장 구조
@@ -101,14 +101,13 @@
 - 같은 문장이 여러 번 출력된다.
 - 이미 보인 후보가 뒤 window에서 수정된다.
 - 문장 경계가 늦게 나오거나 잘못 나온다.
-- 중국어/CJK처럼 공백 기반 단어 경계가 약한 언어에서 pending 접합이 흔들린다.
 - 확정되지 않은 문장을 번역하면 번역 중복과 premature translation이 발생한다.
 
 따라서 raw STT 출력은 사용자 final 문장이나 번역 입력으로 직접 사용하지 않는다. 받아쓰기 AI의 핵심은 raw STT 품질, 문장 경계, revision lifecycle, 번역 품질을 분리해 계측하고 각각 개선하는 것이다.
 
 ## 실시간 처리 파이프라인
 
-목표는 raw STT window를 사용자 final 문장이나 번역 입력으로 직접 쓰지 않는 것이다. 최소 파이프라인은 중복 window, 뒤늦은 revision, CJK pending 접합 흔들림, premature translation을 막는 데 필요한 단계만 둔다.
+목표는 raw STT window를 사용자 final 문장이나 번역 입력으로 직접 쓰지 않는 것이다. 최소 파이프라인은 중복 window, 뒤늦은 revision, premature translation을 막는 데 필요한 단계만 둔다.
 
 ```text
 오디오 입력
@@ -116,11 +115,6 @@
 슬라이딩 윈도우 STT
   - 언어별 운영 backend 실행
   - raw STT window 결과 생성
-  ↓
-정규화/접합
-  - pending tail과 새 raw의 overlap 제거
-  - CJK no-space 내부 재시작 접합
-  - 최근 final echo 억제
   ↓
 안정성/경계 판단
   - 여러 window에서 유지되는 token/char 구간 확인
@@ -140,7 +134,7 @@ final-only 번역
 | 단계 | 현재 상태 | 적용 판단 |
 | --- | --- | --- |
 | 슬라이딩 윈도우 STT | 구현됨 | `windowSeconds`, `stepSeconds` 기준으로 최근 오디오 window를 STT 입력으로 사용하고 raw STT window를 원문창에만 표시한다. |
-| 정규화/접합 | 구현됨 | pending/new overlap, CJK no-space 내부 재시작, 최근 final echo를 처리한다. |
+| 정규화/접합 보정 | 폐기 | pending/new overlap 제거, CJK no-space 내부 재시작 접합은 학술적 근거가 부족하므로 운영 요구사항에서 제외한다. detector 입력 생성을 위한 단순 문자열 결합만 수행한다. |
 | 안정성/경계 판단 | 구현됨 | stable token/char 신호와 SaT/SBD 경계 후보를 staged 생명주기 입력으로 사용한다. VAD/silence는 운영 경로에서 제외한다. |
 | 세그먼트 생명주기 | 구현됨 | `pending`, `staged`, `final`, `suppressed`, `revised`를 분리하고 final은 append-only로 유지한다. |
 | final-only 번역 | 구현됨 | 품질 게이트를 통과한 final transcript만 번역 큐에 넣는다. staged/partial 번역은 운영 경로에서 제거한다. |
@@ -190,7 +184,7 @@ final-only 번역
 | 계층 | 의미 | 정책 |
 | --- | --- | --- |
 | `hypothesis_text` | 가장 최근 STT window 디코딩 결과 | 내부 비교용이다. 사용자 final로 직접 쓰지 않는다. |
-| `pending_text` | 재작성 가능한 후보 구간 | 경계/접합/재확인을 기다린다. |
+| `pending_text` | 재작성 가능한 후보 구간 | 경계/재확인을 기다린다. |
 | `confirmed_text` | 안정 판정 후 append-only 출력되는 구간 | 전사 창과 번역 큐의 입력이다. |
 
 ## 문장 경계 처리 전략
@@ -506,12 +500,12 @@ new_text=条，然后把这米再切断了，摆成四个墩儿墩儿，然后�
 old_result=...喷枪 条，然后把这米再切断了...
 ```
 
-이 케이스는 SBD 구두점 결정 문제가 아니라 pending/new 접합 단계에서 내부 재시작을 새 continuation으로 오인한 문제다.
+이 케이스는 SBD 구두점 결정 문제가 아니라 pending/new 접합 단계에서 내부 재시작을 새 continuation으로 오인한 문제로 분류했었다.
 
-반영 판단:
+폐기 판단:
 
-- `pending_new_text_combined()`는 CJK no-space 텍스트에 한해 긴 내부 prefix overlap이 확인되면 `pending prefix + new_text`로 병합한다.
-- 서로 다른 중국어 continuation은 인위적 공백을 넣지 않고 그대로 이어붙인다.
+- CJK no-space 내부 prefix overlap 기반 접합 보정은 학술적 근거가 부족하므로 운영 요구사항에서 제외한다.
+- `boundary_input_text()`는 detector 입력을 만들기 위한 단순 결합만 수행한다.
 - STT 원문창은 staged 후보가 아니라 raw STT window만 표시해야 한다.
 
 ### 2026-06-16 원문창 의미 재정의

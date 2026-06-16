@@ -43,7 +43,7 @@
 
 ## 중국어 / CJK STT와 오류 보정
 
-이 묶음은 중국어 raw STT 품질, CJK no-space 후처리, 고유명사/동음어 오류 보정 검토용이다. 운영 판단에서는 STT 모델 품질과 revision lifecycle 품질을 분리해 보고, 언어별 정규식 보정이 아니라 모델/백엔드 비교와 오류 계측을 우선한다.
+이 묶음은 중국어 raw STT 품질, 고유명사/동음어 오류 검토용이다. 운영 판단에서는 STT 모델 품질과 revision lifecycle 품질을 분리해 보고, 언어별 정규식/접합 보정이 아니라 모델/백엔드 비교와 오류 계측을 우선한다.
 
 Qwen3-ASR vLLM streaming, Dolphin-CN-Dialect, WeNet의 프로젝트 내 세부검증 판단은 [받아쓰기 AI 중국어 STT 후보 세부검증 리포트](2026-06-16-dictation-ai-chinese-stt-candidate-validation.md)에 둔다.
 

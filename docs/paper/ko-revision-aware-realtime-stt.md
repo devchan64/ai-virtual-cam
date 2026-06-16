@@ -95,7 +95,7 @@ Whisper 계열 모델은 강력한 오프라인 전사 성능을 보이지만, �
 | `coalesce` | 중국어 completed 후보를 같은 STT 윈도우 관찰 단위로 병합하고 영어/한국어 경계 단위는 보존하는지 |
 | `duplicate_suppression` | 이미 확정된 문장의 재출력을 억제하는지 |
 | `final_quality` | final 후보가 CJK 반복 n-gram, 내부 공백, 과도한 fragment 같은 품질 위험을 갖는지 |
-| `pending_quality` | pending 버퍼가 다음 STT 윈도우와 잘못 접합되거나 반복 누적되는지 |
+| `pending_quality` | pending 버퍼가 반복 누적되거나 장기 보류되는지 |
 | `runtime_metrics` | 중복 억제, delta trim, final quality, translation skip을 분리 계측하는지 |
 | `translation_quality` | 번역 출력의 고유명사/도메인 용어/환각 회귀를 추적하는지 |
 
@@ -107,7 +107,7 @@ Whisper 계열 모델은 강력한 오프라인 전사 성능을 보이지만, �
 
 2026-06-14 중국어 30분 모니터링에서는 stage replace/unconfirmed replacement가 많이 발생했고, 계산 시간보다 후보 생명주기가 병목으로 나타났다. `windowSeconds=30`은 raw STT 흔들림을 줄였지만, 긴 문장 확정과 final 지연을 증가시켰다. 2026-06-16 로그에서는 한 STT chunk 안의 후속 completed 후보가 첫 관찰 후보를 `next_completed`로 즉시 final 확정시키는 사례가 관측되어, 중국어 multi-completed 후보를 하나의 관찰 단위로 병합하고 교체 직전 확정에 `sentenceFinalizeAge` 기준을 적용했다.
 
-2026-06-15 로그에서는 pending 텍스트와 다음 STT 윈도우가 같은 CJK 구간을 내부 중간부터 다시 내보내는 현상이 관측되었다. 이 문제는 문장 경계 모델의 실패라기보다 pending/new 접합 단계의 문제였다. 이에 따라 CJK no-space 텍스트에서 긴 내부 prefix overlap이 확인되면 `pending prefix + new_text`로 병합하는 접합 무결성 보정을 적용했다.
+2026-06-15 로그에서는 pending 텍스트와 다음 STT 윈도우가 같은 CJK 구간을 내부 중간부터 다시 내보내는 현상이 관측되었다. 한때 pending/new 접합 보정으로 분류했지만, 학술적 근거가 부족해 운영 요구사항에서는 제외한다. 현재는 STT/backend 품질, 문장 경계, revision lifecycle 지표로 분리해 관측한다.
 
 ## 9. 논의
 

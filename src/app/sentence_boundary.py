@@ -31,14 +31,6 @@ SOFT_BOUNDARY_INCOMPLETE_TAIL_WORDS = {
     "which",
     "with",
 }
-ACK_SENTENCE_WORDS = {
-    "okay",
-    "ok",
-    "right",
-    "yeah",
-    "yes",
-    "no",
-}
 SENTENCE_BOUNDARY_BACKENDS = {"sat", "mock"}
 DEFAULT_SAT_MODEL = "sat-3l-sm"
 
@@ -96,103 +88,6 @@ def join_text_units(units: list[str], separator: str) -> str:
     return separator.join(units).strip()
 
 
-def has_cjk_chars(text: str) -> bool:
-    return any("\u3400" <= char <= "\u9fff" for char in text)
-
-
-@dataclass(frozen=True)
-class _JoinUnit:
-    key: str
-    start: int
-    end: int
-
-
-JOIN_WORD_RE = re.compile(
-    r"\d{1,3}(?:,\d{3})+(?:\.\d+)?[A-Za-z가-힣]*|"
-    r"\d+(?:\.\d+)?[A-Za-z가-힣]*|"
-    r"[A-Za-z가-힣]+|"
-    r"[\u3400-\u4dbf\u4e00-\u9fff]"
-)
-
-
-def join_units_for_text(text: str) -> list[_JoinUnit]:
-    normalized = normalized_text(text)
-    if not normalized:
-        return []
-    if has_cjk_chars(normalized) and " " not in normalized:
-        return [_JoinUnit(char, index, index + 1) for index, char in enumerate(normalized)]
-    return [
-        _JoinUnit(match.group(0).replace(",", "").lower(), match.start(), match.end())
-        for match in JOIN_WORD_RE.finditer(normalized)
-    ]
-
-
-def join_text_fragments(left: str, right_suffix: str) -> str:
-    left = normalized_text(left)
-    right_suffix = normalized_text(right_suffix)
-    if not left:
-        return right_suffix
-    if not right_suffix:
-        return left
-    if has_cjk_chars(left[-1]) and has_cjk_chars(right_suffix[0]):
-        return f"{left}{right_suffix}"
-    return normalized_text(f"{left} {right_suffix}")
-
-
-def _unit_keys(units: list[_JoinUnit]) -> list[str]:
-    return [unit.key for unit in units]
-
-
-def _suffix_prefix_overlap(left_keys: list[str], right_keys: list[str]) -> int:
-    for overlap in range(min(len(left_keys), len(right_keys)), 0, -1):
-        if left_keys[-overlap:] == right_keys[:overlap]:
-            return overlap
-    return 0
-
-
-def _combine_by_internal_restart(pending: str, new: str, pending_units: list[_JoinUnit], new_units: list[_JoinUnit]) -> str | None:
-    if len(pending_units) < 12 or len(new_units) < 12:
-        return None
-    pending_keys = _unit_keys(pending_units)
-    new_keys = _unit_keys(new_units)
-    best_i = 0
-    best_len = 0
-    for index in range(1, len(pending_keys)):
-        length = 0
-        while index + length < len(pending_keys) and length < len(new_keys) and pending_keys[index + length] == new_keys[length]:
-            length += 1
-        if length > best_len:
-            best_i = index
-            best_len = length
-    if best_len < 12:
-        return None
-    if best_len / max(len(new_keys), 1) < 0.45:
-        return None
-    prefix = normalized_text(pending[: pending_units[best_i].start])
-    return join_text_fragments(prefix, new)
-
-
-def _combine_by_token_overlap(pending: str, new: str) -> str | None:
-    pending_units = join_units_for_text(pending)
-    new_units = join_units_for_text(new)
-    if not pending_units or not new_units:
-        return None
-    pending_keys = _unit_keys(pending_units)
-    new_keys = _unit_keys(new_units)
-    if len(new_keys) >= len(pending_keys) and new_keys[: len(pending_keys)] == pending_keys:
-        return new
-    internal_restart = _combine_by_internal_restart(pending, new, pending_units, new_units)
-    if internal_restart is not None:
-        return internal_restart
-    overlap = _suffix_prefix_overlap(pending_keys, new_keys)
-    if overlap > 0:
-        if overlap >= len(new_units):
-            return pending
-        suffix = new[new_units[overlap].start :]
-        return join_text_fragments(pending, suffix)
-    return None
-
-
 def strip_incomplete_tail(text: str) -> str:
     normalized = normalized_text(text)
     units, separator = text_units(normalized)
@@ -204,58 +99,14 @@ def strip_incomplete_tail(text: str) -> str:
     return normalized
 
 
-def has_incomplete_tail(text: str) -> bool:
-    words = word_units(text)
-    return bool(words and words[-1] in SOFT_BOUNDARY_INCOMPLETE_TAIL_WORDS)
-
-
-def starts_with_ack_sentence(text: str) -> bool:
-    normalized = normalized_text(text)
-    match = SENTENCE_END_RE.match(normalized)
-    if not match:
-        return False
-    words = word_units(match.group(1))
-    return len(words) == 1 and words[0] in ACK_SENTENCE_WORDS
-
-
-def pending_new_text_combined(pending_text: str, new_text: str) -> str:
+def boundary_input_text(pending_text: str, new_text: str) -> str:
     pending = normalized_text(pending_text)
     new = normalized_text(new_text)
     if not pending:
         return new
     if not new:
         return pending
-    pending_words = word_units(pending)
-    new_words = word_units(new)
-    if pending_words and new_words[: len(pending_words)] == pending_words:
-        return new
-    dangling_connectives = {"and", "but", "so", "or"}
-    if len(pending_words) == 1 and pending_words[0] in dangling_connectives and new_words:
-        return new
-    if pending_words and len(pending_words) <= 4:
-        max_start = len(new_words) - len(pending_words)
-        for start in range(1, max_start + 1):
-            if new_words[start : start + len(pending_words)] == pending_words:
-                return new
-    if has_incomplete_tail(pending) and starts_with_ack_sentence(new):
-        return new
-    connective_words = {"and", "but", "because", "so", "or"}
-    if pending_words and new_words and len(pending_words) <= 2 and pending_words[0] in connective_words and new_words[0] in connective_words:
-        return new
-    token_join = _combine_by_token_overlap(pending, new)
-    if token_join is not None:
-        return token_join
-    pending_units, pending_separator = text_units(pending)
-    new_units, new_separator = text_units(new)
-    if pending_separator != new_separator:
-        return join_text_fragments(pending, new)
-    max_overlap = min(len(pending_units), len(new_units))
-    for overlap in range(max_overlap, 0, -1):
-        if pending_units[-overlap:] == new_units[:overlap]:
-            return join_text_units(pending_units + new_units[overlap:], pending_separator)
-    if pending_separator == "" and has_cjk_chars(pending) and has_cjk_chars(new):
-        return join_text_units(pending_units + new_units, "")
-    return join_text_fragments(pending, new)
+    return normalized_text(f"{pending} {new}")
 
 
 def sentence_end_count(text: str) -> int:
@@ -339,7 +190,7 @@ class SatSentenceBoundaryDetector:
     ) -> SentenceBoundaryResult:
         del language
         del boundary_confidence
-        combined = pending_new_text_combined(pending_text, new_text)
+        combined = boundary_input_text(pending_text, new_text)
         if not combined:
             return _boundary_result([], "", self.backend)
         normalized = normalized_text(combined)
@@ -395,7 +246,7 @@ class LegacyRegexSentenceBoundaryDetector:
         *,
         boundary_confidence: float | None = None,
     ) -> SentenceBoundaryResult:
-        combined = pending_new_text_combined(pending_text, new_text)
+        combined = boundary_input_text(pending_text, new_text)
         if not combined:
             return _boundary_result([], "", self.backend)
         completed: list[str] = []
@@ -470,7 +321,7 @@ class MockSentenceBoundaryDetector:
     ) -> SentenceBoundaryResult:
         del language
         del boundary_confidence
-        combined = pending_new_text_combined(pending_text, new_text)
+        combined = boundary_input_text(pending_text, new_text)
         return _boundary_result([], combined, self.backend, source_text=combined)
 
 

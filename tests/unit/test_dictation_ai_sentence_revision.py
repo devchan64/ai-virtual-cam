@@ -16,7 +16,6 @@ from src.app.dictation_window import (
     _format_transcript_metrics,
     _new_text_delta,
     _next_revision_confirmation_count,
-    _pending_new_text_combined,
     _pending_text_diagnostic_flags,
     _prefer_sentence_revision,
     _replacement_decision_reason,

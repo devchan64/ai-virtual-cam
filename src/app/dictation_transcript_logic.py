@@ -4,7 +4,6 @@ import re
 from difflib import SequenceMatcher
 
 from src.app.sentence_boundary import (
-    pending_new_text_combined,
     sentence_end_count as _boundary_sentence_end_count,
     split_completed_sentences as _boundary_split_completed_sentences,
 )
@@ -1245,14 +1244,6 @@ def _next_revision_confirmation_count(
             return max(current_confirmations, 1)
         return 1
     return current_confirmations + 1
-
-
-
-def _pending_new_text_combined(pending_text: str, new_text: str) -> str:
-    from src.app.sentence_boundary import pending_new_text_combined
-
-    return pending_new_text_combined(pending_text, new_text)
-
 
 def _split_completed_sentences(pending_text: str, new_text: str) -> tuple[list[str], str]:
     return _boundary_split_completed_sentences(pending_text, new_text)
