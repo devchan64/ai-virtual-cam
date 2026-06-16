@@ -24,7 +24,7 @@
 | 구현 기술 | Whisper/faster-whisper | 받아쓰기 AI에서 선택 가능한 STT 또는 영어 번역 백엔드 |
 | 구현 기술 | SaT/NLLB/M2M100 | 받아쓰기 AI에서 선택 가능한 STT, 문장 경계, 번역 백엔드 |
 
-따라서 사용자에게 보이는 탭/창/문서 제목은 `받아쓰기 AI`를 사용한다. 기존 `setting.json`의 `whisper` 블록, `DictationAiConfig`, 일부 파일명은 호환성 유지를 위한 내부 계약 이름으로 남긴다. 내부 키를 즉시 변경하면 기존 설정 파일과 테스트 자산을 깨뜨리므로, 별도 마이그레이션 설계 전까지는 사용자 노출 이름과 내부 호환 키를 분리한다.
+따라서 사용자에게 보이는 탭/창/문서 제목은 `받아쓰기 AI`를 사용한다. 초기에는 사용 모델이 Whisper였기 때문에 설정 블록도 `whisper`로 지정했지만, 기능이 확장되면서 도메인명과 모델명을 동일하게 가져가는 것이 오류가 되었다. 현재 설정 저장 기준은 `setting.json`의 `dictationAi` 블록이며, `whisper`는 과거 기술명/일부 내부 구현 맥락에 남은 호환 명칭으로만 취급한다. 내부 코드의 일부 클래스명과 파일명은 별도 정리 전까지 사용자 노출 이름과 분리한다.
 
 ## 0) 개정 배포 배경
 
@@ -447,49 +447,15 @@ STT 모델과 STT 결과 문장 경계 처리 모델의 책임을 분리해 검�
 
 #### 후보 1: Qwen3-ASR vLLM streaming
 
-- Qwen3-ASR Technical Report와 공식 모델 카드는 `Qwen3-ASR-0.6B`, `Qwen3-ASR-1.7B`가 중국어, 영어, 한국어를 포함한 30개 언어와 22개 중국어 방언을 지원한다고 설명한다.
-- 공식 모델 카드는 offline/streaming 통합 추론, 긴 오디오 전사, transformers 백엔드와 vLLM 백엔드를 제공한다고 설명한다. streaming 경로는 transformers in-process backend보다 vLLM backend 중심으로 검토한다.
-- 논문은 1.7B가 오픈소스 ASR 중 SOTA 수준이며, 0.6B는 정확도/효율 균형과 낮은 TTFT를 목표로 한다고 보고한다.
-- 2026-06-14 운영 로그에서 Qwen3-ASR도 완전한 서비스 기준을 만족하지는 못했지만, 같은 중국어 실험군 안에서는 Whisper/faster-whisper와 FunASR Paraformer보다 의미 보존과 문장 구조가 더 나은 후보로 관측되었다.
-- 현재 GPU VRAM 조건에서는 `Qwen3-ASR-0.6B`를 먼저 검증한다. `1.7B`와 vLLM streaming은 모델 상주 메모리, 번역 모델 동시 사용, 별도 서버 수명주기 정책을 분리해 후속 실험으로 진행한다.
-
-권장 실험값:
-
-```json
-{
-  "sttBackendZh": "qwen3-asr-transformers",
-  "sttModelZh": "qwen3-asr-0.6b",
-  "windowSeconds": 30.0,
-  "sentenceBoundaryBackendZh": "sat",
-  "sentenceBoundaryModelZh": "sat-3l-sm"
-}
-```
-
-후속 streaming 설계:
-
-- `qwen3-asr-vllm-streaming` 같은 별도 backend를 추가한다.
-- in-process STT가 아니라 별도 ASR service backend로 분리해 vLLM 프로세스 수명주기와 GPU 메모리 정책을 관리한다.
-- partial/final 이벤트, session id, stream reset, backpressure, model-ready/download-ready 상태를 명시 계약으로 둔다.
+Qwen3-ASR vLLM streaming의 세부검증 판단은 새 기준 문서인 [받아쓰기 AI 중국어 STT 후보 세부검증 리포트](2026-06-16-dictation-ai-chinese-stt-candidate-validation.md)로 이관한다. 이 폐기 예정 문서에서는 Qwen3-ASR 계열을 중국어 품질 우선 후보로 보고, vLLM streaming은 공유 `.venv`가 아니라 별도 격리 런타임 후보로 둔다는 결론만 보존한다.
 
 #### 후보 2: Dolphin-CN-Dialect
 
-- Dolphin-CN-Dialect는 중국어/방언 중심 ASR 후보로, 중국어 문자 단위 tokenizer와 영어 subword tokenizer를 구분하는 구조가 중국어 동음/문맥 의존성 문제와 맞닿아 있다.
-- 중국어/방언 중심 품질 후보로 추적하되, 현재 프로젝트에는 런타임/다운로드/라이선스/모델 캐시 계약이 아직 없다.
-- Qwen3보다 통합 불확실성이 크므로 2차 후보로 둔다. 모델 파일 확보, CUDA 추론 경로, streaming 지원 형태, 입력 chunk/cache API를 먼저 검증한다.
-
-검증 체크리스트:
-
-- 공개 모델 가중치와 로컬 캐시 경로를 확인한다.
-- CUDA 또는 ONNX Runtime/TensorRT 경로가 현재 RTX 5070 Laptop GPU에서 동작하는지 확인한다.
-- streaming API가 partial/final 이벤트를 제공하는지 확인한다.
-- Mandarin, Taiwan Mandarin, code-switching, 음식/지명/가격 표현 로그 샘플로 replay 비교한다.
+Dolphin-CN-Dialect의 세부검증 판단은 새 기준 문서인 [받아쓰기 AI 중국어 STT 후보 세부검증 리포트](2026-06-16-dictation-ai-chinese-stt-candidate-validation.md)로 이관한다. 이 폐기 예정 문서에서는 Dolphin-CN-Dialect를 중국어/방언과 코드스위칭 품질 비교를 위한 2차 후보로 둔다는 결론만 보존한다.
 
 #### 후보 3: WeNet
 
-- WeNet은 streaming/non-streaming E2E ASR을 production-oriented 구조로 제공하며, dynamic chunk와 CTC/attention rescoring 기반으로 latency와 정확도를 조절할 수 있다.
-- 중국어 streaming ASR 연구/운영 기반은 탄탄하지만, 현재 프로젝트에는 WeNet 의존성, 모델 캐시, setup 다운로드, Python adapter가 없다.
-- 장점은 streaming 구조 검증에 적합하다는 점이고, 단점은 Qwen3 같은 LLM 기반 문맥 품질을 바로 기대하기 어렵고 통합 비용이 크다는 점이다.
-- Qwen3 vLLM streaming이 메모리/운영비용 때문에 막히는 경우의 구조 비교군으로 유지한다.
+WeNet의 세부검증 판단은 새 기준 문서인 [받아쓰기 AI 중국어 STT 후보 세부검증 리포트](2026-06-16-dictation-ai-chinese-stt-candidate-validation.md)로 이관한다. 이 폐기 예정 문서에서는 WeNet을 Qwen3-ASR vLLM streaming이 막힐 때 비교할 native streaming 구조 후보로 둔다는 결론만 보존한다.
 
 #### 폐기 예정: FunASR STT 계열
 

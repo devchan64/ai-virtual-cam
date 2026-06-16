@@ -4,7 +4,7 @@
 
 이 문서는 기존 [받아쓰기 AI 기능 설계](2026-06-13-dictation-ai-feature-design.md)와 [프레젠테이션 실시간 전사/번역 세그먼트 설계 참고](2026-06-15-presentation-dictation-segmentation-references.md)를 통합한 기준 설계/실험 노트다.
 
-기존 두 문서는 원본 기록으로 남겨두되, 새 변경과 운영 판단은 이 문서에 먼저 반영한다. 커밋 기록 기반 실험 흐름은 [받아쓰기 AI 실험일지](2026-06-16-dictation-ai-experiment-log.md)에 두고, 설정 계약과 기본값은 [받아쓰기 AI 계약과 기본값](2026-06-16-dictation-ai-contract-defaults.md)에 둔다. 외부 논문, 모델 카드, 구현 링크는 [받아쓰기 AI 참조 레퍼런스 모음](2026-06-16-dictation-ai-reference-index.md)에 둔다.
+기존 두 문서는 원본 기록으로 남겨두되, 새 변경과 운영 판단은 이 문서에 먼저 반영한다. 커밋 기록 기반 실험 흐름은 [받아쓰기 AI 실험일지](2026-06-16-dictation-ai-experiment-log.md)에 두고, 설정 계약과 기본값은 [받아쓰기 AI 계약과 기본값](2026-06-16-dictation-ai-contract-defaults.md)에 둔다. Qwen3-ASR vLLM streaming, Dolphin-CN-Dialect, WeNet의 세부검증 판단은 [받아쓰기 AI 중국어 STT 후보 세부검증 리포트](2026-06-16-dictation-ai-chinese-stt-candidate-validation.md)에 둔다. 외부 논문, 모델 카드, 구현 링크는 [받아쓰기 AI 참조 레퍼런스 모음](2026-06-16-dictation-ai-reference-index.md)에 둔다.
 
 ## 기능 도메인
 
@@ -49,7 +49,7 @@
 
 ## 설정 저장 구조
 
-받아쓰기 AI 설정은 호환성을 위해 `setting.json`의 `whisper` 블록에 저장된다. 사용자 기능명은 받아쓰기 AI이며, `whisper`는 기존 설정/코드 호환 키다.
+받아쓰기 AI 설정은 `setting.json`의 `dictationAi` 블록에 저장된다. 초기에는 사용 모델이 Whisper였기 때문에 `whisper` 블록으로 시작했지만, 기능이 STT, STT 결과 문장 경계 처리, 번역, 모델 준비 흐름으로 확장되면서 도메인명과 특정 모델명을 동일하게 가져가는 것이 오류가 되었다. 따라서 현재 저장 기준은 기능 도메인명인 `dictationAi`이고, `whisper`는 과거 기술명/일부 내부 구현 맥락에 남은 호환 명칭으로만 취급한다.
 
 주요 active 키:
 
@@ -383,17 +383,9 @@ STT 결과 문장 경계 처리 계약:
 
 ### 중국어 STT 후보 상세
 
-| 후보 | 장점 | 보류/제외 사유 | 현재 판단 |
-| --- | --- | --- | --- |
-| `qwen3-asr-transformers` + `qwen3-asr-0.6b` | 중국어 의미 보존과 문장 구조가 FunASR보다 안정적이었다. 로컬 in-process 실행으로 현재 구조에 붙이기 쉽다. | FunASR보다 느리고 긴 window에서는 final 지연 비용이 있다. | 중국어 운영 우선값이다. |
-| `qwen3-asr-1.7b` | 같은 계열의 품질 상향 후보이며 중국어/다국어 성능 기대치가 높다. | VRAM, 지연, 번역 모델 동시 사용 비용을 별도 검증해야 한다. | 품질 비교 후보다. |
-| `qwen3-asr-vllm-streaming` | streaming/TTFT 개선 후보이며 별도 ASR service로 확장 가능하다. | 공유 `.venv`에서 vLLM 의존성이 충돌한다. 프로세스 수명주기, backpressure, model-ready 상태 계약이 필요하다. | 격리 런타임 설계 전까지 보류한다. |
-| Dolphin-CN-Dialect | 중국어/방언 중심 후보이며 code-switching, 대만 만다린, 음식/지명 표현 replay 비교에 적합하다. | 런타임, 다운로드, 라이선스, 모델 캐시 계약이 아직 없다. | 2차 품질 후보다. |
-| WeNet | streaming/non-streaming E2E ASR 구조 검증에 적합하고 dynamic chunk/CTC-attention rescoring을 제공한다. | Python adapter, 모델 캐시, setup 다운로드, 현 GPU 경로 검증이 필요하다. | Qwen streaming이 막힐 때 구조 비교군으로 둔다. |
-| FunASR Paraformer/SenseVoice | 처리 속도가 빠르다. | 의미 보존, stage churn, 확정률에서 Qwen3-ASR보다 불리했다. | 운영 후보에서 제외하고 과거 기준선으로만 남긴다. |
-| Whisper/faster-whisper 중국어 | 기존 경로와 비교하기 쉽다. | 중국어 정확도와 문장 구조 안정성이 부족했다. | 중국어에서는 baseline으로만 둔다. |
+중국어 운영 우선값은 `qwen3-asr-transformers`와 `qwen3-asr-0.6b`다. `qwen3-asr-1.7b`는 품질 상향 비교 후보이고, `qwen3-asr-vllm-streaming`, Dolphin-CN-Dialect, WeNet은 후속 streaming 또는 방언/구조 비교 후보다. FunASR Paraformer/SenseVoice는 처리 속도는 빨랐지만 의미 보존, stage churn, 확정률에서 불리해 운영 후보에서 제외하고 과거 기준선으로만 남긴다. Whisper/faster-whisper 중국어 경로는 baseline으로만 둔다.
 
-후속 streaming backend가 필요해지면 partial/final 이벤트, session id, stream reset, backpressure, model-ready/download-ready 상태를 명시 계약으로 추가한다.
+Qwen3-ASR vLLM streaming, Dolphin-CN-Dialect, WeNet의 세부 판단은 [받아쓰기 AI 중국어 STT 후보 세부검증 리포트](2026-06-16-dictation-ai-chinese-stt-candidate-validation.md)에 둔다. 후속 streaming backend가 필요해지면 partial/final 이벤트, session id, stream reset, backpressure, model-ready/download-ready 상태를 명시 계약으로 추가한다.
 
 ## 런타임 의존성과 모델 캐시 제약
 
