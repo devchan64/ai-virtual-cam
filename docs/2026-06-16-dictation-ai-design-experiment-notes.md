@@ -27,6 +27,26 @@
 - config 오류는 모달만으로 표시하지 않고 stdout에도 출력한다.
 - config stdout에는 저장, Serve 시작/중지, 가상 장치 생성/삭제 같은 주요 버튼 동작을 출력한다.
 
+## 배포 범위와 수용 시나리오
+
+배포 범위는 raw STT를 사용자가 복사/번역하는 final 문장으로 안정화하는 경로에 한정한다.
+
+| 구분 | 범위 |
+| --- | --- |
+| 포함 | sliding window 후보 집계, STT 결과 문장 경계 처리 backend 선택, staged/final 확정 정책, 중복 억제, final-only 번역 입력 정책 |
+| 제외 | 오디오 캡처 계층 교체, 카메라/비디오 파이프라인, GUI 레이아웃 전면 개편, 모델 학습 또는 fine-tune |
+| 제한 | config GUI는 운영 기본값과 후보 선택만 다루고, 실행 중 자동 backend 전환이나 CPU fallback을 제공하지 않는다. |
+
+배포 수용 시나리오:
+
+| 시나리오 | 수용 기준 |
+| --- | --- |
+| 같은 음성 구간이 여러 window에 반복 포함됨 | final transcript는 중복 append되지 않고, 이미 확정된 문장은 echo suppression으로 억제된다. |
+| 다음 window가 이전 hypothesis를 수정함 | 미확정 `pending`/`staged`만 revision되고, 이미 final인 문장은 되돌리지 않는다. |
+| 문장 경계가 늦게 나옴 | pending은 진단 로그로 추적되고, final 후보는 `sentenceFinalizeAge`와 품질 게이트를 통과한 뒤 확정된다. |
+| 중국어 no-space 구간이 내부 중간부터 다시 시작됨 | 내부 prefix overlap을 제거해 접합하고, 서로 다른 continuation에는 인위적 공백을 넣지 않는다. |
+| 번역이 켜져 있음 | 번역 큐에는 final transcript만 들어가며 staged/partial은 번역하지 않는다. |
+
 ## 설정 저장 구조
 
 받아쓰기 AI 설정은 호환성을 위해 `setting.json`의 `whisper` 블록에 저장된다. 사용자 기능명은 받아쓰기 AI이며, `whisper`는 기존 설정/코드 호환 키다.
@@ -114,6 +134,20 @@ Semantic Boundary Detection
 
 이 흐름에서는 "음성이 멈췄는가"보다 "토큰이 안정되었는가"와 "의미 경계가 확인되었는가"가 우선이다.
 
+## 문헌 구현 정렬
+
+문헌과 구현 판단은 [받아쓰기 AI 참조 레퍼런스 모음](2026-06-16-dictation-ai-reference-index.md)에 둔 레퍼런스를 기준으로 다음처럼 정렬한다.
+
+| 문헌/개념 | 구현 반영 |
+| --- | --- |
+| Whisper streaming/local agreement | raw STT window를 final로 직접 쓰지 않고, stable token/revision lifecycle을 통해 final을 확정한다. |
+| Streaming ASR Stability | `UPWR`, `UPSR`, revision, replacement, stability 지표로 partial 흔들림을 관찰한다. |
+| Simul-Whisper / latency-stability tradeoff | `stt_rtf`, `total_rtf`, finalization latency, pending overrun을 함께 본다. |
+| SaT/wtpsplit | 다국어 SBD 후보 생성기로 사용하되 final 결정자는 아니라고 명시한다. |
+| Streaming punctuation | boundary score 보조 신호로만 본다. free-form rewrite는 alignment 위험 때문에 기본 경로에서 제외한다. |
+| Speech translation segmentation | VAD/pause threshold는 translation trigger의 주 신호가 아니라 SBD confidence 보조 feature로 둔다. |
+| Chinese ASR/domain candidates | Qwen3-ASR, Dolphin-CN-Dialect, WeNet은 STT backend 후보로 추적하고, FunASR는 과거 기준선으로 남긴다. |
+
 ## 흐름별 적합 AI 모델
 
 이 섹션은 받아쓰기 AI 파이프라인의 각 흐름에 어떤 AI 모델이 적합한지 정리한다. 운영 기본값은 실시간성, 로컬 실행 가능성, Fail-Fast 정책, 언어별 품질을 함께 만족해야 한다. 후보 모델은 바로 기본값으로 편입하지 않고, 동일 입력 replay와 추적 지표로 검증한 뒤 승격한다.
@@ -191,6 +225,35 @@ VAP, TurnGPT 같은 turn-taking 모델은 회의 대화의 turn end 예측에는
 - STT 원문창은 `stt_raw` 이벤트만 표시한다.
 - 최종 복사용 문장은 전사 창에만 표시한다.
 
+## 핵심 데이터 모델과 런타임 상태
+
+받아쓰기 AI 런타임 상태는 raw STT window, 경계 후보, staged 후보, final transcript를 분리해 추적한다. 원본 설계 문서의 데이터 모델은 다음 기준으로 통합한다.
+
+| 상태/필드 | 의미 | 운영 판단 |
+| --- | --- | --- |
+| `audio_buffer` | `windowSeconds` 기준 오디오 원본 | STT 입력 단위다. final 출력 단위와 동일하지 않다. |
+| `last_window_text` | 직전 window 전체 전사 | stable token, delta, echo suppression 비교에 사용한다. |
+| `pending_text` | 아직 확정되지 않은 누적 후보 | 내부 상태와 진단 로그 대상이며 번역하지 않는다. |
+| `committed_text` | 이미 final로 확정된 append-only 텍스트 | 사용자 전사 창과 번역 큐의 기준이다. |
+| `recent_committed_fragments` | 최근 final 조각 | echo/중복 억제 보조 참조다. |
+| `sentence_boundary_detector` | STT 결과 문장 경계 처리 detector | STT 텍스트를 completed/pending 후보로 나눈다. |
+| `boundary_detector_language` | detector가 현재 맞춰진 언어 | 언어 변경 시 detector 재생성 필요 여부를 판단한다. |
+| `staged_sentence` | final 전 재확인 중인 완료 후보 | 다음 window에서 revision/교체/확정될 수 있다. |
+| `staged_confirmations` | 같은 후보가 재관측된 횟수 | `sentenceFinalizeAge` 기준과 함께 final 승격에 사용한다. |
+| `staged_age` | 후보가 staged 상태로 남은 chunk 수 | 장기 보류 진단 신호다. 단독 확정/폐기 기준으로 쓰지 않는다. |
+| `staged_forced` | forced 후보 여부 | forced 후보도 별도 재확인과 품질 게이트를 통과해야 한다. |
+| `replacement_decision` | staged 교체 판단 사유 | `unconfirmed`, `open_korean_clause`, `partial_revision`, `partial_preserve`, `duplicate_or_suffix`, `aged` 같은 이유를 로그로 남긴다. |
+| `lifecycle_metrics` | 세션 누적 생명주기 카운터 | 장기 품질 추세와 회귀 판단에 사용한다. |
+| `chunk_metrics` | 현재 chunk 생명주기 카운터 | 특정 chunk에서 stage/revision/final 이벤트가 폭증하는지 본다. |
+
+출력 계층 용어는 다음처럼 정리한다.
+
+| 계층 | 의미 | 정책 |
+| --- | --- | --- |
+| `hypothesis_text` | 가장 최근 STT window 디코딩 결과 | 내부 비교용이다. 사용자 final로 직접 쓰지 않는다. |
+| `pending_text` | 재작성 가능한 후보 구간 | 경계/접합/재확인을 기다린다. |
+| `confirmed_text` | 안정 판정 후 append-only 출력되는 구간 | 전사 창과 번역 큐의 입력이다. |
+
 ## 문장 경계 처리 전략
 
 ### 기본 선언
@@ -248,6 +311,51 @@ VAD는 음성/비음성 구간을 찾는 데 유용하지만 프레젠테이션 
 
 후보 차단 규칙이 늘어나면 final 생성률이 급격히 낮아질 수 있으므로, 나머지는 staged 교체와 재확인으로 처리한다.
 
+## 경계 인터페이스와 운영 backend
+
+STT 결과 문장 경계 처리는 받아쓰기 AI 실행 루프에서 분리한다. 구현 기준은 `src/app/sentence_boundary.py`의 detector 인터페이스다.
+
+```python
+@dataclass(frozen=True)
+class SentenceBoundaryResult:
+    completed: list[str]
+    pending: str
+    backend: str
+    boundary_count: int
+    soft_boundary_count: int = 0
+
+
+class SentenceBoundaryDetector:
+    def split(
+        self,
+        pending_text: str,
+        new_text: str,
+        language: str = "en",
+        *,
+        boundary_confidence: float | None = None,
+    ) -> SentenceBoundaryResult:
+        ...
+```
+
+운영 루프는 `create_sentence_boundary_detector`로 생성한 detector의 `split()`을 호출한다. `split_completed_sentences` 래퍼는 과거 회귀 테스트와 legacy helper 용도로만 유지하고, 운영 루프와 설정 기본값에는 사용하지 않는다.
+
+backend 정렬:
+
+| backend | 용도 | 운영 판단 |
+| --- | --- | --- |
+| `sat` | 현재 운영 기본 경계 backend | `wtpsplit.SaT` 계열을 로드하고 `cuda/float16`을 우선한다. 로딩/분절 실패 시 Fail-Fast다. |
+| `mock` | 테스트/격리용 | 실제 품질 비교군이나 운영 기본값으로 사용하지 않는다. |
+| `legacy-regex` | 과거 회귀 테스트 보존 helper | 운영 backend, 설정 허용값, 기준선 비교군으로 사용하지 않는다. |
+
+STT 결과 문장 경계 처리 계약:
+
+- STT backend/model과 sentence boundary backend/model은 분리한다.
+- SBD는 completed/pending 후보를 제안하지만 final을 직접 결정하지 않는다.
+- final 승격은 staged confirmation, `sentenceFinalizeAge`, revision lifecycle이 담당한다.
+- 중국어에서 SBD가 한 window 안에 여러 completed 후보를 반환하면 같은 STT window의 하나의 관찰 단위로 병합한다.
+- 영어/한국어는 경계 모델 출력 단위를 보존한다.
+- boundary backend/model은 명시 설정값만 사용한다. 실행 중 언어에 따라 backend/model을 암묵 변경하지 않는다.
+
 ## 언어별 STT 백엔드와 파라미터
 
 ### 영어 / 한국어
@@ -272,6 +380,34 @@ VAD는 음성/비음성 구간을 찾는 데 유용하지만 프레젠테이션 
 - FunASR STT 계열은 처리 속도는 빠르지만 의미 보존, stage churn, 확정률에서 불리해 운영 후보에서 제외한다.
 - Qwen3-ASR vLLM streaming은 vLLM 의존성이 `mediapipe`/`protobuf`와 충돌해 공유 `.venv`에서는 지원하지 않는다. 별도 격리 런타임 설계가 필요하다.
 - Dolphin-CN-Dialect와 WeNet은 후속 streaming 후보로 추적한다.
+
+### 중국어 STT 후보 상세
+
+| 후보 | 장점 | 보류/제외 사유 | 현재 판단 |
+| --- | --- | --- | --- |
+| `qwen3-asr-transformers` + `qwen3-asr-0.6b` | 중국어 의미 보존과 문장 구조가 FunASR보다 안정적이었다. 로컬 in-process 실행으로 현재 구조에 붙이기 쉽다. | FunASR보다 느리고 긴 window에서는 final 지연 비용이 있다. | 중국어 운영 우선값이다. |
+| `qwen3-asr-1.7b` | 같은 계열의 품질 상향 후보이며 중국어/다국어 성능 기대치가 높다. | VRAM, 지연, 번역 모델 동시 사용 비용을 별도 검증해야 한다. | 품질 비교 후보다. |
+| `qwen3-asr-vllm-streaming` | streaming/TTFT 개선 후보이며 별도 ASR service로 확장 가능하다. | 공유 `.venv`에서 vLLM 의존성이 충돌한다. 프로세스 수명주기, backpressure, model-ready 상태 계약이 필요하다. | 격리 런타임 설계 전까지 보류한다. |
+| Dolphin-CN-Dialect | 중국어/방언 중심 후보이며 code-switching, 대만 만다린, 음식/지명 표현 replay 비교에 적합하다. | 런타임, 다운로드, 라이선스, 모델 캐시 계약이 아직 없다. | 2차 품질 후보다. |
+| WeNet | streaming/non-streaming E2E ASR 구조 검증에 적합하고 dynamic chunk/CTC-attention rescoring을 제공한다. | Python adapter, 모델 캐시, setup 다운로드, 현 GPU 경로 검증이 필요하다. | Qwen streaming이 막힐 때 구조 비교군으로 둔다. |
+| FunASR Paraformer/SenseVoice | 처리 속도가 빠르다. | 의미 보존, stage churn, 확정률에서 Qwen3-ASR보다 불리했다. | 운영 후보에서 제외하고 과거 기준선으로만 남긴다. |
+| Whisper/faster-whisper 중국어 | 기존 경로와 비교하기 쉽다. | 중국어 정확도와 문장 구조 안정성이 부족했다. | 중국어에서는 baseline으로만 둔다. |
+
+후속 streaming backend가 필요해지면 partial/final 이벤트, session id, stream reset, backpressure, model-ready/download-ready 상태를 명시 계약으로 추가한다.
+
+## 런타임 의존성과 모델 캐시 제약
+
+받아쓰기 AI는 CUDA/float16 중심의 Fail-Fast 정책을 따른다. 모델과 의존성은 실행 중 암묵 변경하지 않는다.
+
+| 항목 | 현재 판단 |
+| --- | --- |
+| `faster-whisper`, SaT, NLLB/M2M100 | Serve 런타임에서 로컬 캐시만 사용한다. 캐시가 없거나 부분 다운로드 상태면 다운로드하지 않고 실패한다. |
+| 모델 다운로드 | `scripts/setup/download-dictation-ai-models.py`와 config GUI 모델 다운로드 모달 경로로 제한한다. `serve`는 다운로드를 수행하지 않는다. |
+| `qwen-asr` | `qwen-asr==0.0.6`은 `transformers==4.57.6` 요구와 함께 고정한다. |
+| `gradio` | qwen-asr 의존성 범위가 넓어 resolver 역추적을 만들 수 있으므로 dry-run에서 확인한 호환 버전을 고정한다. |
+| `wtpsplit` | Hugging Face Hub 메타데이터 제약이 Qwen3-ASR/transformers와 충돌할 수 있어 setup/env sync에서 `--no-deps` 설치를 전제로 한다. 필요한 런타임 의존성은 별도 명시한다. |
+| vLLM | 공유 `.venv`에 넣지 않는다. 필요 시 별도 프로세스/격리 런타임으로 설계한다. |
+| fallback | CUDA/float16 요구 경로에서 CPU, regex, Whisper, 다른 STT backend로 자동 대체하지 않는다. |
 
 ## 번역 정책
 
@@ -369,6 +505,49 @@ NLLB 번역 기본 테스트값:
 - `Latency = p95(stt_rtf)` 및 `p95(total_rtf)`
 - `confirmed_only_ratio = confirmed_delta_bytes / total_transcript_bytes`
 - `translation_redundant_ratio = duplicated_translation_chars / total_translation_chars`
+- `translation_delay_p95 = p95(translation_submit_ts - confirmed_commit_ts)`
+
+번역 영향 지표:
+
+| 지표 | 의미 | 판단 |
+| --- | --- | --- |
+| `confirmed_only_ratio` | 전체 transcript 중 final로 확정된 입력 비율 | 0.9 이상을 기본 목표로 둔다. |
+| `translation_redundant_ratio` | 중복 번역 문자의 비율 | partial 번역이나 echo 번역이 새는지 확인한다. |
+| `translation_delay_p95` | final 확정 후 번역 큐 투입까지의 p95 지연 | 번역 backend 지연과 UI 반영 지연을 분리해 본다. |
+| `translation_quality` | 고유명사, 도메인 용어, 금지 오역 회귀 | 현재 회귀 샘플 기반 지표이며, 실제 backend 실행 pass/fail과 분리한다. |
+| `BLEU`/`CHRF` | 정답 번역이 있는 오프라인 평가 지표 | 실시간 운영 게이트가 아니라 모델 비교 리포트 보조 지표로 쓴다. |
+
+비교군 정의:
+
+| 비교군 | 의미 |
+| --- | --- |
+| Baseline | 이전 운영 로그와 수집 지표. `sentenceBoundaryBackend=regex`는 폐기된 기준선이므로 새 운영 기준으로 재사용하지 않는다. |
+| Candidate A | `sentenceBoundaryBackend=sat` 기본값 |
+| Candidate B | `sat + pending/강제 확정 임계치 조정` 같은 후속 실험 |
+
+필수 로그 입력:
+
+| 이벤트 | 필수 필드 |
+| --- | --- |
+| split event | `chunk`, `completed`, `final`, `pending_text`, `forced_by`, `pending_overrun`, `boundary_backend`, `pending_chars`, `pending_chunks`, `pending_chars_per_chunk` |
+| commit event | `step`, `window`, `stt_elapsed`, `stt_rtf`, `translation_elapsed`, `total_elapsed`, `total_rtf`, `beam`, `max_tokens`, `text_chars` |
+| transcript fragment | `delta_text`, `state`, `revision_id` |
+
+판정 규칙:
+
+| 판정 | 조건 |
+| --- | --- |
+| Go | `UPWR`, `UPSR`가 baseline 대비 각각 15% 이상 개선되고, `pending_chars_p90`이 10% 이상 개선되며, `confirmed_only_ratio >= 0.9`이고 `p95(total_rtf)`가 목표값 안에 있다. |
+| No-Go | `p95(total_rtf)`가 baseline 대비 20% 이상 악화되거나, `UPWR`/`UPSR`이 15% 이상 악화되거나, `DupAmplification > 1.3`이 지속된다. |
+| Ramp | Go/No-Go 임계에는 못 미치지만 `pending_chars`와 `forced_by`가 개선되고 `rtf` 악화가 5% 이하인 경우다. |
+
+KPI 리포트 산출물은 `docs/reports/dictation-ai-kpi-{{date}}.md` 형태를 권장한다. 최소 항목은 실행 식별자, 실험군, 조건, 언어별 KPI 표, 회귀 Top 5 로그 예시, 다음 액션 체크리스트다.
+
+운영 주기:
+
+- 일간: 1회 KPI 수집, `forced_by`, `UPSR`, `rtf` 급변 감시.
+- 주간: 후보군 비교 리포트 리뷰.
+- 릴리스 직전 2주: 동일 세션셋으로 재현성 검증.
 
 ## 실험 노트
 
@@ -452,12 +631,30 @@ old_result=...喷枪 条，然后把这米再切断了...
 6. 동일 환경/동일 로그 조건에서 결과 비교
 7. 전환 후 1~2주 관측 기간 동안 안정성 회귀 모니터링
 
+릴리스 기준:
+
+| 단계 | 기준 |
+| --- | --- |
+| RC 1 | `final-only` 출력/번역 경로와 실패 대응 계획이 동작한다. |
+| RC 2 | `sat` 운영 지표가 이전 로그 대비 중복/누락을 줄이고, 다국어 경계 회귀가 허용 범위 안에 있다. |
+| GA 후보 | KO/EN/ZH 지표 개선이 반복 실험에서 확인되고 장애율이 기준 안에 있다. |
+
+구현 우선순위:
+
+1. 문자열 LCP와 재확인 카운트 기반 stable 확정.
+2. 문장 경계 detector 분리와 `sat` backend 운영 정합화.
+3. `UPWR`, `UPSR`, `forced_by` 지표 수집.
+4. 안정성 기준 통과 후 replacements trimming 계층 검토.
+5. Two-Pass/causal fine-tune 같은 모델 계층 변경 검토.
+
 실패 대응:
 
 - 백엔드 초기화/로딩/분절 실패는 조건부 CPU fallback 또는 legacy regex fallback 대신 즉시 실패한다.
 - 모델 다운로드가 필요한 경로는 다운로드 가능성을 사전에 로그로 출력한다.
 - 다운로드/로딩 단계가 끝나기 전에는 오디오 입력 장치를 열지 않고 전사/번역 job을 시작하지 않는다.
 - 임계 지표가 악화되면 자동 rollback보다 운영자 개입과 원인 로그 수집을 우선한다.
+- 배포 직후 24시간은 `pending`, `confirmed`, `stage_replaced_unconfirmed`, `raw_without_final`, `translation_quality`를 짧은 주기로 확인한다.
+- 회귀가 누적되면 원본 배포 채널로 되돌리고 원인 로그를 묶어 1페이지 인시던트 노트를 작성한다.
 
 ## 현재 미해결 과제
 

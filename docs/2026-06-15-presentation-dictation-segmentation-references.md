@@ -5,6 +5,8 @@
 > 이 문서는 [받아쓰기 AI 설계 및 실험 노트](2026-06-16-dictation-ai-design-experiment-notes.md)로 통합되었다. 새 변경과 운영 판단은 통합 문서에 먼저 반영한다.
 >
 > 폐기 예정 사유: 이 문서는 프레젠테이션 긴 발화의 세그먼트/SBD/VAD 판단만 분리해 다루던 참고 문서였지만, 해당 판단은 받아쓰기 AI의 문장 경계 처리와 확정 생명주기 설계 안에서 함께 관리되어야 한다. 참고 문헌 목록도 [받아쓰기 AI 참조 레퍼런스 모음](2026-06-16-dictation-ai-reference-index.md)으로 이관되었으므로, 이 문서는 과거 원본 기록으로만 남긴다.
+>
+> 이관 현황(2026-06-16): VAD/무음 구간의 보조 신호화, `Streaming ASR -> Stable Token Detection -> Semantic Boundary Detection -> Translation Trigger` 흐름, final-only 번역 정책, 관련 레퍼런스는 새 기준 문서/실험일지/레퍼런스 모음으로 이관했다.
 
 ## 목적
 
