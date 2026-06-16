@@ -12,7 +12,13 @@ from src.app.dictation_window import (
     _sentence_output_delta,
     _sentences_are_revisions,
 )
-from src.app.dictation_transcript_logic import _should_finalize_boundary_candidate
+from src.app.dictation_transcript_logic import (
+    _next_revision_confirmation_count,
+    _should_finalize_before_replacement,
+    _should_finalize_boundary_candidate,
+    _should_finalize_replaced_sentence,
+    _should_stage_boundary_candidate,
+)
 
 
 # These tracking cases are mined from accumulated .tmp/logs/avc-whisper.log* files.
@@ -32,6 +38,7 @@ TRACKING_TARGETS = {
     "duplicate_suppression": {"target_cases": 4, "target_rate": 1.00},
     "runtime_metrics": {"target_cases": 20, "target_rate": 1.00},
     "stable_metrics": {"target_cases": 4, "target_rate": 1.00},
+    "finalization": {"target_cases": 5, "target_rate": 0.80},
 }
 
 REVISION_TRACKING_CASES = [
@@ -1529,6 +1536,110 @@ def _make_stability_tracking_test(index: int, sequence: list[str]):
     return test
 
 
+FINALIZATION_TRACKING_CASES = [
+    {
+        "kind": "before_replacement",
+        "sentence": "对啊这个很棒好推荐大家一定要来",
+        "language": "zh",
+        "confirmations": 1,
+        "age": 3,
+        "sentence_finalize_age": 3,
+        "expected": True,
+        "source": "2026-06-17 chunk 341 stable CJK candidate stayed final=0",
+    },
+    {
+        "kind": "before_replacement",
+        "sentence": "对啊这个很棒好推荐大家一定要来",
+        "language": "zh",
+        "confirmations": 2,
+        "age": 2,
+        "sentence_finalize_age": 3,
+        "expected": True,
+        "source": "2026-06-17 chunk 341 two-observation CJK finalization target",
+    },
+    {
+        "kind": "revision_age",
+        "sequence": ["远方忽远忽近", "远方忽远忽近它", "远方忽远忽近他在放", "远方忽远忽近它在发亮"],
+        "language": "zh",
+        "age": 3,
+        "sentence_finalize_age": 3,
+        "expected": False,
+        "source": "2026-06-17 chunks 521-524 revised short CJK candidate should remain quality-blocked",
+    },
+    {
+        "kind": "replaced",
+        "staged": "远 方 忽 远 忽",
+        "candidate": "幸福终将会抵达，越过思念来到身旁。转身看见的远方，无远无近，它在发亮。幸福。",
+        "confirmations": 1,
+        "forced": False,
+        "age": 4,
+        "sentence_finalize_age": 3,
+        "expected": False,
+        "source": "2026-06-17 chunk 525 aged spaced CJK fragment must not finalize",
+    },
+    {
+        "kind": "replaced",
+        "staged": "前进，没有方向，逃不出去。你为是我的决心，还是我自己，此生此刻依然好奇。我幸福中。",
+        "candidate": "自己怎生怎可以燃好奇？幸福中就会抵达，越过彷徨来到身旁，转身看见。",
+        "confirmations": 1,
+        "forced": False,
+        "age": 1,
+        "sentence_finalize_age": 3,
+        "expected": False,
+        "source": "2026-06-17 chunk 462 single-observation CJK replacement should wait",
+    },
+    {
+        "kind": "stage_candidate",
+        "sentence": "票 都 超 贵 的 大 家 就 是 都 要 心 里 准 备 但 是 呢 没 关 系 我 们 想 要 去 拍 好 看 的 东 西 给 大 家 然 后 呢 我 们 这 次 呢 会 拍",
+        "language": "zh",
+        "expected": False,
+        "source": "2026-06-17 chunk 641 spaced CJK candidate should be stage-quality-blocked",
+    },
+]
+
+
+def _make_finalization_tracking_test(index: int, case: dict[str, object]):
+    def test(self: WhisperPerformanceTrackingTest) -> None:
+        kind = str(case["kind"])
+        if kind == "before_replacement":
+            actual = _should_finalize_before_replacement(
+                str(case["sentence"]),
+                str(case["language"]),
+                staged_confirmations=int(case.get("confirmations", 0)),
+                staged_age=int(case.get("age", 0)),
+                sentence_finalize_age=int(case["sentence_finalize_age"]),
+            )
+        elif kind == "revision_age":
+            sequence = [str(item) for item in case["sequence"]]
+            confirmations = 1
+            previous = sequence[0]
+            for candidate in sequence[1:]:
+                confirmations = _next_revision_confirmation_count(previous, candidate, confirmations)
+                previous = candidate
+            actual = _should_finalize_before_replacement(
+                sequence[-1],
+                str(case["language"]),
+                staged_confirmations=confirmations,
+                staged_age=int(case.get("age", 0)),
+                sentence_finalize_age=int(case["sentence_finalize_age"]),
+            )
+        elif kind == "replaced":
+            actual = _should_finalize_replaced_sentence(
+                str(case["staged"]),
+                str(case["candidate"]),
+                int(case.get("confirmations", 1)),
+                bool(case.get("forced", False)),
+                int(case.get("age", 0)),
+                int(case["sentence_finalize_age"]),
+            )
+        elif kind == "stage_candidate":
+            actual = _should_stage_boundary_candidate(str(case["sentence"]), str(case["language"]))
+        else:
+            actual = False
+        self._record("finalization", f"finalization_{index:03d}", actual is bool(case["expected"]))
+    return test
+
+
 for _index, _case in enumerate(COALESCE_TRACKING_CASES, 1):
     setattr(
         WhisperPerformanceTrackingTest,
@@ -1571,6 +1682,13 @@ for _index, _case in enumerate(STABLE_METRIC_TRACKING_CASES, 1):
         WhisperPerformanceTrackingTest,
         f"test_tracking_stable_metrics_{_index:03d}",
         _make_stable_metric_tracking_test(_index, _case),
+    )
+
+for _index, _case in enumerate(FINALIZATION_TRACKING_CASES, 1):
+    setattr(
+        WhisperPerformanceTrackingTest,
+        f"test_tracking_finalization_{_index:03d}",
+        _make_finalization_tracking_test(_index, _case),
     )
 
 for _index, _case in enumerate(PENDING_QUALITY_TRACKING_CASES, 1):

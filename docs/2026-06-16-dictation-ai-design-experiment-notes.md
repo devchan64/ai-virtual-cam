@@ -359,7 +359,7 @@ NLLB 번역 기본 테스트값:
 
 ## 품질 지표
 
-받아쓰기 AI 실시간 전사/번역 경로의 품질은 unittest 성공/실패만으로 판단하지 않는다. 테스트는 누적 운영 로그에서 관측한 실패 사례를 실행해 현재 로직의 성능 추이를 출력하는 추적 하네스다.
+받아쓰기 AI 실시간 전사/번역 경로의 품질은 unittest 성공/실패만으로 판단하지 않는다. 테스트는 누적 운영 로그에서 관측한 실패 사례를 실행해 현재 로직의 성능 추이를 출력하는 추적 하네스다. 특히 `test_dictation_ai_performance_tracking.py`는 실패 현상 재현과 튜닝 근거 수집이 목적이며, 개별 tracking case가 모두 성공해야 한다는 품질 게이트가 아니다. unittest 성공은 metric collection이 실행됐다는 의미이고, 출력되는 tracking rate와 gap을 줄이는 것이 개선 목표다.
 
 | 도메인 | 의미 | 목표 |
 | --- | --- | ---: |
@@ -371,6 +371,7 @@ NLLB 번역 기본 테스트값:
 | `pending` | 긴 pending이 확정되지 않는 사유를 추적하는지 | 90% 이상 |
 | `pending_quality` | pending 버퍼에 CJK 반복 n-gram 같은 오염 신호가 누적되는지 | 100% |
 | `final_quality` | final 후보의 품질 위험을 추적하는지 | 90% 이상 |
+| `finalization` | 로그에서 확정되지 않았거나 과확정된 후보가 현재 정책에서 어떤 방향으로 처리되는지 | 80% 이상 |
 | `coalesce` | 중국어 multi-completed 후보를 하나의 관찰 단위로 병합하는지 | 100% |
 | `duplicate_suppression` | 이미 확정/관측된 후보가 중복 출력되지 않도록 억제되는지 | 100% |
 | `runtime_metrics` | 런타임 누적 지표와 queue/backlog 지표가 안정성 요약으로 올바르게 집계되는지 | 100% |

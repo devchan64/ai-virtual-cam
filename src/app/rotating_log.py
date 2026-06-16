@@ -10,7 +10,7 @@ from typing import TextIO
 
 
 DEFAULT_MAX_BYTES = 5 * 1024 * 1024
-DEFAULT_BACKUP_COUNT = 5
+DEFAULT_BACKUP_COUNT = 1000
 
 
 class _TeeStream:
