@@ -1194,8 +1194,34 @@ def _prefer_sentence_revision(left: str, right: str) -> str:
     return _normalized_text(left)
 
 
-def _next_revision_confirmation_count(previous: str, preferred: str, current_confirmations: int) -> int:
+def _should_preserve_revision_confirmation_from_internal_stability(
+    previous: str,
+    preferred: str,
+    stable_internal_ratio: float = 0.0,
+    stable_overlap_source: str = "",
+) -> bool:
+    if preferred == _normalized_text(previous):
+        return False
+    if not (_is_cjk_text(previous) or _is_cjk_text(preferred)):
+        return False
+    return stable_overlap_source == "none" and stable_internal_ratio >= 0.75
+
+
+def _next_revision_confirmation_count(
+    previous: str,
+    preferred: str,
+    current_confirmations: int,
+    stable_internal_ratio: float = 0.0,
+    stable_overlap_source: str = "",
+) -> int:
     if preferred != _normalized_text(previous) and (_is_cjk_text(previous) or _is_cjk_text(preferred)):
+        if _should_preserve_revision_confirmation_from_internal_stability(
+            previous,
+            preferred,
+            stable_internal_ratio,
+            stable_overlap_source,
+        ):
+            return max(current_confirmations, 1)
         return 1
     return current_confirmations + 1
 

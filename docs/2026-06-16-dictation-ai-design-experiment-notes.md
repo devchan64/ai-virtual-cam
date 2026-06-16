@@ -681,6 +681,27 @@ stable token 지표를 추가한 뒤 같은 중국어 실시간 경로를 약 5�
 - 추적 테스트에 `stage_candidate_quality_blocked`, `stage_candidate_quality`, `stage_candidate_quality_spaced_cjk`, `stage_candidate_quality_no_end_marker`를 추가한다.
 - 다음 관측에서는 `stage_candidate_quality_blocked` 증가와 함께 `stage_replaced_unconfirmed`, `stage_revision_confirmation_reset`, `raw_without_final`이 줄어드는지 본다.
 
+추가 5분 모니터링 결과:
+
+- stage 후보 품질 차단은 실제 운영 로그에서 반복적으로 동작했다. `spaced_cjk,cjk_internal_gap,no_end_marker` 조합 후보가 stage에 올라가지 않아 해당 chunk의 즉시 교체/confirmation reset은 줄었다.
+- 누적 지표 기준으로 `stage_candidate_quality_blocked`는 증가했지만, `raw_without_final`과 `stage_revision_confirmation_reset`은 여전히 높았다. 이는 품질 차단만으로는 sliding window 시작점 흔들림을 설명하기 부족하다는 신호다.
+- 여러 chunk에서 Qwen window가 같은 의미 구간을 내부에 유지하면서도 prefix 또는 suffix-prefix로는 맞지 않아 `stable_token_ratio=0`, `stable_overlap_source=none`으로 기록됐다.
+- 처리 부하는 계속 안정적이었다. `stt_step_load`와 `total_step_load`가 병목 신호를 만들지 않았으므로 런타임 파라미터는 유지한다.
+
+추가 반영 판단:
+
+- `stable_internal_chars`, `stable_internal_ratio`를 진단 지표로 추가한다. 이 값은 이전/현재 window의 최장 내부 공통 구간을 측정하지만, 아직 `stable_prefix_text`, boundary confidence, final 확정 판단에는 사용하지 않는다.
+- `stable_overlap_source=none`이면서 `stable_internal_ratio`가 높은 케이스를 추적 테스트에 추가한다. 이후 같은 패턴이 반복되면 내부 공통 구간을 revision lifecycle의 보조 feature로 승격할지 별도 검증한다.
+- 안정성 요약 로그에 `stage_candidate_quality_cjk_internal_gap`, `stage_candidate_quality_mixed_latin_zh`를 추가한다. `mixed_latin_zh` 단독 stage 차단은 하지 않지만, 오염 후보가 다른 차단 flag와 함께 얼마나 나타나는지 관측한다.
+- 추적 테스트의 stable metric 케이스를 4개로 늘려 prefix, suffix-prefix, 내부 overlap, stage 후보 품질 차단을 모두 유지한다.
+
+내부 overlap 보조 신호 적용:
+
+- `stable_overlap_source=none`이고 `stable_internal_ratio>=0.75`인 CJK stage revision은 완전히 다른 후보라기보다 window 시작점이 흔들린 동일 구간 재표현일 가능성이 높다.
+- 이 조건에서는 final 확정 기준을 완화하지 않는다. 대신 `stage_revision_confirmation_reset`을 올리지 않고 기존 confirmation count를 유지한다.
+- 안정성 요약 로그에 `revision_preserved_internal`을 추가해 reset 감소와 보존 증가를 함께 본다.
+- 추적 테스트에 `stage_revision_confirmation_preserved_internal`을 추가한다. 다음 운영 관측에서는 `revision_preserved_internal` 증가가 오확정 증가로 이어지는지 `final_quality`, `translation_skip_final_quality`, recent echo 억제 지표와 함께 검증한다.
+
 ## 배포 순서와 실패 대응
 
 점진적 적용 순서:

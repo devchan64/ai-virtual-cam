@@ -49,6 +49,7 @@ from src.app.dictation_transcript_logic import (
     _should_age_staged_sentence,
     _should_finalize_before_replacement,
     _should_stage_boundary_candidate,
+    _should_preserve_revision_confirmation_from_internal_stability,
     _is_recent_final_echo,
     _should_translate_final_sentence,
     _split_completed_sentences,
@@ -758,7 +759,15 @@ class WhisperTranscriptWorker:
                 if preferred_changed:
                     count_metric("stage_revision_changed")
                     if _is_cjk_text(staged_before) or _is_cjk_text(preferred):
-                        count_metric("stage_revision_confirmation_reset")
+                        if _should_preserve_revision_confirmation_from_internal_stability(
+                            staged_before,
+                            preferred,
+                            stable_analysis.stable_internal_ratio,
+                            stable_analysis.stable_overlap_source,
+                        ):
+                            count_metric("stage_revision_confirmation_preserved_internal")
+                        else:
+                            count_metric("stage_revision_confirmation_reset")
                 else:
                     candidate_flags = set(_final_sentence_diagnostic_flags(candidate, detected))
                     staged_flags = set(_final_sentence_diagnostic_flags(staged_before, detected))
@@ -769,6 +778,8 @@ class WhisperTranscriptWorker:
                     staged_before,
                     preferred,
                     staged_confirmations,
+                    stable_analysis.stable_internal_ratio,
+                    stable_analysis.stable_overlap_source,
                 )
                 staged_age = 0
                 staged_forced = staged_forced or forced
@@ -947,6 +958,11 @@ class WhisperTranscriptWorker:
                     count_metric("stable_window_observed")
                     count_metric("stable_prefix_chars", stable_analysis.stable_prefix_chars)
                     count_metric("unstable_tail_chars", stable_analysis.unstable_tail_chars)
+                    count_metric("stable_internal_chars", stable_analysis.stable_internal_chars)
+                    count_metric(
+                        "stable_internal_ratio_per_1000",
+                        int(round(stable_analysis.stable_internal_ratio * 1000)),
+                    )
                     count_metric("stable_token_ratio_per_1000", int(round(stable_analysis.stable_token_ratio * 1000)))
                     count_metric(f"stable_overlap_source_{stable_analysis.stable_overlap_source}")
                 adjusted_boundary_confidence = combine_boundary_confidence(
@@ -1092,6 +1108,8 @@ class WhisperTranscriptWorker:
                     f"window_chars={len(_normalized_text(window_text))} stable_chars={len(_normalized_text(stable_text))} "
                     f"stable_prefix_chars={stable_analysis.stable_prefix_chars} "
                     f"unstable_tail_chars={stable_analysis.unstable_tail_chars} "
+                    f"stable_internal_chars={stable_analysis.stable_internal_chars} "
+                    f"stable_internal_ratio={stable_analysis.stable_internal_ratio:.3f} "
                     f"stable_token_ratio={stable_analysis.stable_token_ratio:.3f} "
                     f"stable_overlap_source={stable_analysis.stable_overlap_source} "
                     f"repeat_collapse_chars={repeat_collapse_chars} repeat_collapse_rules={','.join(repeat_collapse_rules) or 'none'} "
@@ -1204,6 +1222,10 @@ class WhisperTranscriptWorker:
                 stage_revision_count = chunk_lifecycle_metrics.get("stage_revision", 0)
                 stage_revision_changed_count = chunk_lifecycle_metrics.get("stage_revision_changed", 0)
                 stage_revision_reset_count = chunk_lifecycle_metrics.get("stage_revision_confirmation_reset", 0)
+                stage_revision_preserved_internal_count = chunk_lifecycle_metrics.get(
+                    "stage_revision_confirmation_preserved_internal",
+                    0,
+                )
                 stage_finalize_before_replace_count = chunk_lifecycle_metrics.get("stage_finalize_before_replace", 0)
                 finalize_count = chunk_lifecycle_metrics.get("finalized", 0)
                 duplicate_suppressed_count = chunk_lifecycle_metrics.get("candidate_duplicate_suppressed", 0)
@@ -1211,12 +1233,22 @@ class WhisperTranscriptWorker:
                 delta_trimmed_count = chunk_lifecycle_metrics.get("candidate_delta_trimmed", 0)
                 stable_prefix_chars = chunk_lifecycle_metrics.get("stable_prefix_chars", 0)
                 unstable_tail_chars = chunk_lifecycle_metrics.get("unstable_tail_chars", 0)
+                stable_internal_chars = chunk_lifecycle_metrics.get("stable_internal_chars", 0)
+                stable_internal_ratio_per_1000 = chunk_lifecycle_metrics.get("stable_internal_ratio_per_1000", 0)
                 stable_token_ratio_per_1000 = chunk_lifecycle_metrics.get("stable_token_ratio_per_1000", 0)
                 stage_candidate_quality_blocked_count = chunk_lifecycle_metrics.get("stage_candidate_quality_blocked", 0)
                 stage_candidate_quality_count = sum(
                     value
                     for key, value in chunk_lifecycle_metrics.items()
                     if key.startswith("stage_candidate_quality_") and key != "stage_candidate_quality_blocked"
+                )
+                stage_candidate_quality_cjk_internal_gap_count = chunk_lifecycle_metrics.get(
+                    "stage_candidate_quality_cjk_internal_gap",
+                    0,
+                )
+                stage_candidate_quality_mixed_latin_count = chunk_lifecycle_metrics.get(
+                    "stage_candidate_quality_mixed_latin_zh",
+                    0,
                 )
                 final_quality_count = sum(
                     value for key, value in chunk_lifecycle_metrics.items() if key.startswith("final_quality_")
@@ -1230,14 +1262,19 @@ class WhisperTranscriptWorker:
                     "받아쓰기 AI 안정성 지표: "
                     f"chunk={chunks} replace={stage_replace_count} replaced_unconfirmed={stage_replaced_unconfirmed_count} "
                     f"revision={stage_revision_count} revision_changed={stage_revision_changed_count} "
-                    f"revision_reset={stage_revision_reset_count} finalized={finalize_count} "
+                    f"revision_reset={stage_revision_reset_count} "
+                    f"revision_preserved_internal={stage_revision_preserved_internal_count} finalized={finalize_count} "
                     f"finalize_before_replace={stage_finalize_before_replace_count} "
                     f"duplicate_suppressed={duplicate_suppressed_count} recent_echo_suppressed={recent_echo_suppressed_count} "
                     f"delta_trimmed={delta_trimmed_count} "
                     f"stable_prefix_chars={stable_prefix_chars} unstable_tail_chars={unstable_tail_chars} "
+                    f"stable_internal_chars={stable_internal_chars} "
+                    f"stable_internal_ratio={stable_internal_ratio_per_1000 / 1000:.3f} "
                     f"stable_token_ratio={stable_token_ratio_per_1000 / 1000:.3f} "
                     f"stage_candidate_quality_blocked={stage_candidate_quality_blocked_count} "
                     f"stage_candidate_quality={stage_candidate_quality_count} "
+                    f"stage_candidate_quality_cjk_internal_gap={stage_candidate_quality_cjk_internal_gap_count} "
+                    f"stage_candidate_quality_mixed_latin_zh={stage_candidate_quality_mixed_latin_count} "
                     f"final_quality={final_quality_count} translation_skip={translation_skip_count} "
                     f"raw_without_final={raw_without_final_count} "
                     f"replace_unconfirmed_rate={stage_replaced_unconfirmed_count / max(stage_replace_count, 1):.2f} "

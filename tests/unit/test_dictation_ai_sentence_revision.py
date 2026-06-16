@@ -29,6 +29,7 @@ from src.app.dictation_window import (
     _should_finalize_replaced_sentence,
     _should_confirm_staged_sentence,
     _should_stage_boundary_candidate,
+    _should_preserve_revision_confirmation_from_internal_stability,
     _should_translate_final_sentence,
     _split_completed_sentences,
     _stable_window_text,
@@ -57,6 +58,34 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
 
         self.assertEqual(_next_revision_confirmation_count(previous, preferred, 4), 1)
         self.assertEqual(_next_revision_confirmation_count(preferred, preferred, 4), 5)
+
+    def test_cjk_revision_confirmation_is_preserved_for_high_internal_stability(self) -> None:
+        previous = "喜欢按赞点点，可以呃分享可以。欢迎大家继续坚持，很累了，坚持到几万步，两万二。"
+        preferred = "喜欢按赞点A，可以呃分享可以分享。大家现在已经接近累了，今天的几万步，两万二。"
+
+        self.assertTrue(
+            _should_preserve_revision_confirmation_from_internal_stability(
+                previous,
+                preferred,
+                0.80,
+                "none",
+            )
+        )
+        self.assertEqual(_next_revision_confirmation_count(previous, preferred, 2, 0.80, "none"), 2)
+
+    def test_cjk_revision_confirmation_still_resets_without_internal_stability(self) -> None:
+        previous = "喜欢按赞点点，可以呃分享可以。欢迎大家继续坚持，很累了，坚持到几万步，两万二。"
+        preferred = "完全不同的话题开始了。"
+
+        self.assertFalse(
+            _should_preserve_revision_confirmation_from_internal_stability(
+                previous,
+                preferred,
+                0.40,
+                "none",
+            )
+        )
+        self.assertEqual(_next_revision_confirmation_count(previous, preferred, 2, 0.40, "none"), 1)
 
     def test_cjk_revision_trims_repeated_pending_prefix_from_monitoring(self) -> None:
         # Regression from 2026-06-15 20s Chinese monitoring chunks 1-2.

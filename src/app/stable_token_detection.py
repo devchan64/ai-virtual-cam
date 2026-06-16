@@ -22,6 +22,9 @@ class StableWindowAnalysis:
     current_units: int
     stable_prefix_chars: int
     unstable_tail_chars: int
+    stable_internal_units: int
+    stable_internal_chars: int
+    stable_internal_ratio: float
     stable_token_ratio: float
     stable_overlap_source: str
     boundary_confidence: float | None
@@ -68,6 +71,24 @@ def suffix_prefix_overlap_units(previous_units: list[str], current_units: list[s
     return 0
 
 
+def longest_common_contiguous_units(previous_units: list[str], current_units: list[str]) -> tuple[int, int]:
+    if not previous_units or not current_units:
+        return 0, 0
+    previous_match_lengths = [0] * (len(current_units) + 1)
+    best_length = 0
+    best_current_end = 0
+    for previous_unit in previous_units:
+        current_match_lengths = [0] * (len(current_units) + 1)
+        for current_index, current_unit in enumerate(current_units, start=1):
+            if previous_unit == current_unit:
+                current_match_lengths[current_index] = previous_match_lengths[current_index - 1] + 1
+                if current_match_lengths[current_index] > best_length:
+                    best_length = current_match_lengths[current_index]
+                    best_current_end = current_index
+        previous_match_lengths = current_match_lengths
+    return best_length, max(best_current_end - best_length, 0)
+
+
 def stable_overlap_units(previous_units: list[str], current_units: list[str]) -> tuple[int, str]:
     prefix_units = stable_prefix_units(previous_units, current_units)
     suffix_units = suffix_prefix_overlap_units(previous_units, current_units)
@@ -90,7 +111,13 @@ def analyze_stable_window(previous_text: str, current_text: str, language: str) 
     )
     stable_prefix = join_units(current_units[:stable_units], separator)
     unstable_tail = join_units(current_units[stable_units:], separator)
+    stable_internal_units, stable_internal_start = longest_common_contiguous_units(previous_units, current_units)
+    stable_internal_text = join_units(
+        current_units[stable_internal_start : stable_internal_start + stable_internal_units],
+        separator,
+    )
     ratio = stable_units / max(len(current_units), 1)
+    stable_internal_ratio = stable_internal_units / max(len(current_units), 1)
     confidence: float | None
     if not previous_units or not current_units:
         confidence = None
@@ -111,6 +138,9 @@ def analyze_stable_window(previous_text: str, current_text: str, language: str) 
         current_units=len(current_units),
         stable_prefix_chars=len(stable_prefix),
         unstable_tail_chars=len(unstable_tail),
+        stable_internal_units=stable_internal_units,
+        stable_internal_chars=len(stable_internal_text),
+        stable_internal_ratio=stable_internal_ratio,
         stable_token_ratio=ratio,
         stable_overlap_source=stable_overlap_source,
         boundary_confidence=confidence,

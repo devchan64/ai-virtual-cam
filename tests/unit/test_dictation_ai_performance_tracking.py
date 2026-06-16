@@ -30,8 +30,8 @@ TRACKING_TARGETS = {
     "translation_quality": {"target_cases": 8, "target_rate": 0.80},
     "coalesce": {"target_cases": 10, "target_rate": 1.00},
     "duplicate_suppression": {"target_cases": 4, "target_rate": 1.00},
-    "runtime_metrics": {"target_cases": 11, "target_rate": 1.00},
-    "stable_metrics": {"target_cases": 3, "target_rate": 1.00},
+    "runtime_metrics": {"target_cases": 12, "target_rate": 1.00},
+    "stable_metrics": {"target_cases": 4, "target_rate": 1.00},
 }
 
 REVISION_TRACKING_CASES = [
@@ -930,6 +930,15 @@ RUNTIME_METRIC_TRACKING_CASES = [
         "source": "2026-06-15 Chinese monitor CJK revision reset",
     },
     {
+        "metrics": {
+            "stage_revision": 1,
+            "stage_revision_changed": 1,
+            "stage_revision_confirmation_preserved_internal": 1,
+        },
+        "expected": {"revision_changed": 1, "revision_preserved_internal": 1},
+        "source": "2026-06-16 CJK internal overlap revision confirmation preserved",
+    },
+    {
         "metrics": {"input_queue_drops": 5},
         "expected": {"input_queue_drops": 5},
         "source": "2026-06-15 30s/1s Chinese monitor Pulse queue saturation",
@@ -997,6 +1006,8 @@ STABLE_METRIC_TRACKING_CASES = [
         "metrics": {
             "stable_window_observed": 1,
             "stable_prefix_chars": 18,
+            "stable_internal_chars": 18,
+            "stable_internal_ratio_per_1000": 750,
             "stable_overlap_source_common_prefix": 1,
             "unstable_tail_chars": 8,
             "stable_token_ratio_per_1000": 750,
@@ -1004,6 +1015,8 @@ STABLE_METRIC_TRACKING_CASES = [
         "expected": {
             "stable_window_observed": 1,
             "stable_prefix_chars": 18,
+            "stable_internal_chars": 18,
+            "stable_internal_ratio_per_1000": 750,
             "stable_overlap_common_prefix": 1,
             "unstable_tail_chars": 8,
             "stable_token_ratio_per_1000": 750,
@@ -1014,6 +1027,8 @@ STABLE_METRIC_TRACKING_CASES = [
         "metrics": {
             "stable_window_observed": 1,
             "stable_prefix_chars": 6,
+            "stable_internal_chars": 6,
+            "stable_internal_ratio_per_1000": 750,
             "stable_overlap_source_suffix_prefix": 1,
             "unstable_tail_chars": 2,
             "stable_token_ratio_per_1000": 750,
@@ -1021,6 +1036,8 @@ STABLE_METRIC_TRACKING_CASES = [
         "expected": {
             "stable_window_observed": 1,
             "stable_prefix_chars": 6,
+            "stable_internal_chars": 6,
+            "stable_internal_ratio_per_1000": 750,
             "stable_overlap_suffix_prefix": 1,
             "unstable_tail_chars": 2,
             "stable_token_ratio_per_1000": 750,
@@ -1029,14 +1046,37 @@ STABLE_METRIC_TRACKING_CASES = [
     },
     {
         "metrics": {
+            "stable_window_observed": 1,
+            "stable_prefix_chars": 0,
+            "stable_internal_chars": 20,
+            "stable_internal_ratio_per_1000": 800,
+            "stable_overlap_source_none": 1,
+            "unstable_tail_chars": 25,
+            "stable_token_ratio_per_1000": 0,
+        },
+        "expected": {
+            "stable_window_observed": 1,
+            "stable_prefix_chars": 0,
+            "stable_internal_chars": 20,
+            "stable_internal_ratio_per_1000": 800,
+            "stable_overlap_none": 1,
+            "unstable_tail_chars": 25,
+            "stable_token_ratio_per_1000": 0,
+        },
+        "source": "2026-06-16 5m monitor CJK internal overlap diagnostic",
+    },
+    {
+        "metrics": {
             "stage_candidate_quality_blocked": 1,
             "stage_candidate_quality_spaced_cjk": 1,
+            "stage_candidate_quality_cjk_internal_gap": 1,
             "stage_candidate_quality_no_end_marker": 1,
         },
         "expected": {
             "stage_candidate_quality_blocked": 1,
-            "stage_candidate_quality": 2,
+            "stage_candidate_quality": 3,
             "stage_candidate_quality_spaced_cjk": 1,
+            "stage_candidate_quality_cjk_internal_gap": 1,
             "stage_candidate_quality_no_end_marker": 1,
         },
         "source": "2026-06-16 5m monitor spaced CJK candidate blocked before staging",
@@ -1129,6 +1169,7 @@ def _runtime_metric_summary(metrics: dict[str, int]) -> dict[str, int]:
         "completed_coalesced": int(metrics.get("completed_coalesced", 0)),
         "revision_changed": int(metrics.get("stage_revision_changed", 0)),
         "revision_reset": int(metrics.get("stage_revision_confirmation_reset", 0)),
+        "revision_preserved_internal": int(metrics.get("stage_revision_confirmation_preserved_internal", 0)),
         "input_queue_drops": int(metrics.get("input_queue_drops", 0)),
         "revision_candidate_quality_blocked": int(metrics.get("stage_revision_candidate_quality_blocked", 0)),
         "raw_without_final": int(metrics.get("raw_without_final", 0)),
@@ -1138,9 +1179,12 @@ def _runtime_metric_summary(metrics: dict[str, int]) -> dict[str, int]:
         "stable_window_observed": int(metrics.get("stable_window_observed", 0)),
         "stable_prefix_chars": int(metrics.get("stable_prefix_chars", 0)),
         "unstable_tail_chars": int(metrics.get("unstable_tail_chars", 0)),
+        "stable_internal_chars": int(metrics.get("stable_internal_chars", 0)),
+        "stable_internal_ratio_per_1000": int(metrics.get("stable_internal_ratio_per_1000", 0)),
         "stable_token_ratio_per_1000": int(metrics.get("stable_token_ratio_per_1000", 0)),
         "stable_overlap_common_prefix": int(metrics.get("stable_overlap_source_common_prefix", 0)),
         "stable_overlap_suffix_prefix": int(metrics.get("stable_overlap_source_suffix_prefix", 0)),
+        "stable_overlap_none": int(metrics.get("stable_overlap_source_none", 0)),
         "stage_candidate_quality_blocked": int(metrics.get("stage_candidate_quality_blocked", 0)),
         "stage_candidate_quality": sum(
             value
@@ -1148,6 +1192,8 @@ def _runtime_metric_summary(metrics: dict[str, int]) -> dict[str, int]:
             if key.startswith("stage_candidate_quality_") and key != "stage_candidate_quality_blocked"
         ),
         "stage_candidate_quality_spaced_cjk": int(metrics.get("stage_candidate_quality_spaced_cjk", 0)),
+        "stage_candidate_quality_cjk_internal_gap": int(metrics.get("stage_candidate_quality_cjk_internal_gap", 0)),
+        "stage_candidate_quality_mixed_latin_zh": int(metrics.get("stage_candidate_quality_mixed_latin_zh", 0)),
         "stage_candidate_quality_no_end_marker": int(metrics.get("stage_candidate_quality_no_end_marker", 0)),
     }
 

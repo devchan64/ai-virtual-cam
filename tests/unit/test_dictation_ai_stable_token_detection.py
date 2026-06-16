@@ -58,11 +58,27 @@ class StableTokenDetectionTest(unittest.TestCase):
         self.assertEqual(analysis.stable_overlap_source, "suffix_prefix")
         self.assertEqual(analysis.stable_units, 5)
 
+    def test_cjk_internal_overlap_is_reported_without_changing_stable_prefix(self) -> None:
+        analysis = analyze_stable_window(
+            "今天来总结一下我们去了横滨然后连昌江之岛",
+            "回来了今天来总结一下我们去了横滨然后连昌江之岛哎",
+            "zh",
+        )
+
+        self.assertEqual(analysis.stable_prefix_text, "")
+        self.assertEqual(analysis.stable_units, 0)
+        self.assertEqual(analysis.stable_token_ratio, 0.0)
+        self.assertEqual(analysis.stable_overlap_source, "none")
+        self.assertGreaterEqual(analysis.stable_internal_units, 18)
+        self.assertGreaterEqual(analysis.stable_internal_ratio, 0.75)
+        self.assertGreaterEqual(analysis.stable_internal_chars, 18)
+
     def test_first_window_has_no_stability_confidence(self) -> None:
         analysis = analyze_stable_window("", "first raw window", "en")
 
         self.assertIsNone(analysis.boundary_confidence)
         self.assertEqual(analysis.stable_token_ratio, 0.0)
+        self.assertEqual(analysis.stable_internal_ratio, 0.0)
         self.assertEqual(analysis.unstable_tail_text, "first raw window")
         self.assertEqual(analysis.stable_overlap_source, "none")
 
