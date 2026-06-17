@@ -15,7 +15,6 @@ if str(REPO_ROOT) not in sys.path:
 
 from src.app.sentence_boundary import create_sentence_boundary_detector, normalized_text
 from src.app.dictation_transcript_logic import (
-    _coalesce_completed_sentences_for_staging,
     _collapse_adjacent_repeated_phrase_details,
     _final_sentence_diagnostic_flags,
     _forced_sentence_reason,
@@ -138,6 +137,16 @@ def _score_sequence(expected: list[str], actual: list[str]) -> dict[str, Any]:
         "recall": recall,
         "f1": f1,
         "exact": actual_normalized == expected_normalized,
+    }
+
+
+def _average_scores(results: list[dict[str, Any]], key: str) -> dict[str, float]:
+    if not results:
+        return {"precision": 0.0, "recall": 0.0, "f1": 0.0}
+    return {
+        "precision": sum(float(result[key]["precision"]) for result in results) / len(results),
+        "recall": sum(float(result[key]["recall"]) for result in results) / len(results),
+        "f1": sum(float(result[key]["f1"]) for result in results) / len(results),
     }
 
 
@@ -321,7 +330,6 @@ def _run_lifecycle_case(case: SbdCase, detector: Any) -> dict[str, Any]:
         if boundary.right_context_start_count:
             state.count("boundary_right_context_starts", boundary.right_context_start_count)
         if completed:
-            completed = _coalesce_completed_sentences_for_staging(completed, case.language)
             state.pending_chunks = 0
         elif state.pending_text:
             state.pending_chunks += 1
@@ -386,6 +394,27 @@ def _write_report(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def _validate_real_ai_cuda_args(args: argparse.Namespace) -> None:
+    backend = str(args.backend or "").strip().lower()
+    device = str(args.device or "").strip().lower()
+    compute_type = str(args.compute_type or "").strip().lower()
+    if backend != "sat":
+        raise ValueError(
+            "Dictation AI SBD benchmark must use the real AI backend: "
+            f"--backend=sat required, got {args.backend!r}. mock/smoke benchmarks are not valid performance data."
+        )
+    if device != "cuda":
+        raise ValueError(
+            "Dictation AI SBD benchmark must run on CUDA: "
+            f"--device=cuda required, got {args.device!r}. CPU benchmarks are not valid performance data."
+        )
+    if compute_type != "float16":
+        raise ValueError(
+            "Dictation AI SBD benchmark must use the production CUDA precision: "
+            f"--compute-type=float16 required, got {args.compute_type!r}."
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run text-only Dictation AI SBD lifecycle benchmark cases.")
     parser.add_argument("--cases", type=Path, default=REPO_ROOT / "tests/eval/dictation_ai/sbd_text_cases.sample.jsonl")
@@ -401,6 +430,7 @@ def main() -> int:
     )
     parser.add_argument("--min-pass-rate", type=float, default=1.0)
     args = parser.parse_args()
+    _validate_real_ai_cuda_args(args)
 
     cases = _load_cases(args.cases)
     detector = create_sentence_boundary_detector(
@@ -450,6 +480,8 @@ def main() -> int:
     pass_rate = pass_count / len(results)
     finalized = metric_totals.get("finalized", 0)
     stage_start = metric_totals.get("stage_start", 0)
+    final_score_avg = _average_scores(results, "final_score")
+    completed_last_score_avg = _average_scores(results, "completed_last_score")
     report = {
         "backend": args.backend,
         "model": args.model,
@@ -464,6 +496,12 @@ def main() -> int:
             "finalized": finalized,
             "stage_start": stage_start,
             "finalized_per_stage_start": finalized / max(stage_start, 1),
+            "final_precision_avg": final_score_avg["precision"],
+            "final_recall_avg": final_score_avg["recall"],
+            "final_f1_avg": final_score_avg["f1"],
+            "completed_last_precision_avg": completed_last_score_avg["precision"],
+            "completed_last_recall_avg": completed_last_score_avg["recall"],
+            "completed_last_f1_avg": completed_last_score_avg["f1"],
             "stage_revision": metric_totals.get("stage_revision", 0),
             "stage_replace": metric_totals.get("stage_replace", 0),
             "stage_replaced_unconfirmed": metric_totals.get("stage_replaced_unconfirmed", 0),
@@ -477,6 +515,7 @@ def main() -> int:
         "[dictation-ai-sbd-benchmark] "
         f"cases={len(results)} pass_rate={pass_rate:.3f} finalized={finalized} "
         f"stage_start={stage_start} finalized_per_stage_start={finalized / max(stage_start, 1):.3f} "
+        f"final_f1_avg={final_score_avg['f1']:.3f} "
         f"output={args.output}"
     )
     if args.fail_on_regression and pass_rate < args.min_pass_rate:

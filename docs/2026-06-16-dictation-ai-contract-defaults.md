@@ -2,7 +2,7 @@
 
 ## 문서 상태
 
-이 문서는 받아쓰기 AI 설정 계약, 허용값, 기본값, 검증 규칙을 정리한다. 설계 배경과 실험 판단은 [받아쓰기 AI 설계 및 실험 노트](2026-06-16-dictation-ai-design-experiment-notes.md)를 따르고, 외부 레퍼런스는 [받아쓰기 AI 참조 레퍼런스 모음](2026-06-16-dictation-ai-reference-index.md)에 둔다.
+이 문서는 받아쓰기 AI 설정 계약, 허용값, 기본값, 검증 규칙을 정리한다. 실시간 파이프라인 기준은 [받아쓰기 AI 실시간 처리 파이프라인 기준](2026-06-16-dictation-ai-realtime-pipeline.md)을 따르고, 실험 기록은 [받아쓰기 AI 실험일지](2026-06-16-dictation-ai-experiment-log.md)에 둔다. 외부 레퍼런스는 [받아쓰기 AI 참조 레퍼런스 모음](2026-06-16-dictation-ai-reference-index.md)에 둔다.
 
 받아쓰기 AI 설정의 코드 기준 진실 공급원은 `src/domain/contracts/dictation_ai.py`의 `DICTATION_AI_CONTRACT`다. 카메라 기능 enabled 계약은 `src/domain/contracts/camera.py`, 윈도우 지오메트리 저장 키와 파일 계약은 `src/domain/contracts/window_geometry.py`에 분리한다. 이 문서는 그 계약을 운영자가 읽을 수 있는 형태로 풀어쓴다.
 

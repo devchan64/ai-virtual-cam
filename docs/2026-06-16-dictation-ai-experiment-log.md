@@ -2,7 +2,7 @@
 
 ## 문서 상태
 
-이 문서는 폐기된 원본 문서 `docs/2026-06-13-dictation-ai-feature-design.md`의 Git 커밋 기록을 기준으로 재구성한 실험일지다. 이 파일은 이전에 다른 이름의 설계 문서로 존재했으므로 rename 이전 문서의 변경 이력까지 추적 대상에 포함한다. 또한 받아쓰기 AI의 실험 판단이 README, 논문 초안, 발표용 세그먼트 레퍼런스 문서에 분산되어 기록된 경우 해당 문서 업데이트 히스토리도 보조 근거로 포함한다. 설계/운영 기준은 [받아쓰기 AI 설계 및 실험 노트](2026-06-16-dictation-ai-design-experiment-notes.md), 설정 계약과 기본값은 [받아쓰기 AI 계약과 기본값](2026-06-16-dictation-ai-contract-defaults.md)을 따른다. Qwen3-ASR vLLM streaming, Dolphin-CN-Dialect, WeNet의 세부검증 판단은 [받아쓰기 AI 중국어 STT 후보 세부검증 리포트](2026-06-16-dictation-ai-chinese-stt-candidate-validation.md)에 둔다.
+이 문서는 폐기된 원본 문서 `docs/2026-06-13-dictation-ai-feature-design.md`의 Git 커밋 기록을 기준으로 재구성한 실험일지다. 이 파일은 이전에 다른 이름의 설계 문서로 존재했으므로 rename 이전 문서의 변경 이력까지 추적 대상에 포함한다. 또한 받아쓰기 AI의 실험 판단이 README, 논문 초안, 발표용 세그먼트 레퍼런스 문서에 분산되어 기록된 경우 해당 문서 업데이트 히스토리도 보조 근거로 포함한다. 실시간 파이프라인 기준은 [받아쓰기 AI 실시간 처리 파이프라인 기준](2026-06-16-dictation-ai-realtime-pipeline.md), 설정 계약과 기본값은 [받아쓰기 AI 계약과 기본값](2026-06-16-dictation-ai-contract-defaults.md)을 따른다. Qwen3-ASR vLLM streaming, Dolphin-CN-Dialect, WeNet의 세부검증 판단은 [받아쓰기 AI 중국어 STT 후보 세부검증 리포트](2026-06-16-dictation-ai-chinese-stt-candidate-validation.md)에 둔다.
 
 작성 기준:
 
@@ -474,6 +474,253 @@ old_result=...喷枪 条，然后把这米再切断了...
 | 문장 경계 기본값 | `sentenceBoundaryBackend=sat`, `sentenceBoundaryModel=sat-3l-sm`, `sentenceBoundaryDevice=cuda`, `sentenceBoundaryComputeType=float16` | regex 운영 경로를 폐기하고 모델 기반 SBD를 기본 후보 생성기로 쓰기 위해서다. |
 | 확정 정책 | tail 확정 지연류의 별도 조정값을 줄이고 `sentenceFinalizeAge=3`과 staged confirmation으로 일원화 | 규칙 수가 늘수록 final 생성률과 디버깅 가능성이 떨어졌기 때문이다. |
 | 번역 트리거 | 번역 입력을 final transcript only로 고정 | partial 번역 중복과 premature translation을 막기 위해서다. |
+
+## 2026-06-16~17: 중국어 운영 모니터링과 CJK replacement 튜닝
+
+이 섹션은 `653e7b08c4f98750a7220976b276223141323332` 커밋 당시 기준 문서에 기록됐으나 실험일지로 옮겨지지 않았던 운영 모니터링과 벤치 튜닝 이력을 반영한다.
+
+### 2026-06-16 stable 지표 적용 후 5분 운영 모니터링
+
+stable token 지표를 추가한 뒤 중국어 실시간 경로를 약 5분 더 관측했다. 처리량은 충분했고, `stt_step_load`는 대체로 `0.3~0.7` 구간에 있었으며 queue drop은 관측되지 않았다.
+
+관측된 병목:
+
+- `stable_token_ratio`가 높은 chunk에서도 후보 자체가 글자 단위 공백 CJK로 변환되면 staged 교체와 confirmation reset을 유발했다.
+- `raw_without_final`과 `stage_revision_confirmation_reset`은 계속 누적됐다.
+- `stage_replace_decision_unconfirmed_cjk`와 `stage_replaced_unconfirmed`가 누적되어, 불안정 후보를 stage에 올리기 전에 차단할 필요가 있었다.
+- `stable_overlap_source=suffix_prefix`는 정상 final 직전에도 관측되어 sliding overlap 지표가 유효한 진단 신호임을 확인했다.
+
+당시 반영:
+
+- `spaced_cjk`, `cjk_repeated_ngram`, `latin_only_for_zh`, `empty` 후보는 stage 진입 전에 차단한다.
+- `short_cjk`, `no_end_marker`, `mixed_latin_zh`는 stage 진입 차단 대상에 넣지 않고 final/translation 품질 게이트에서만 다룬다.
+- 안정성 요약 로그에 `stage_candidate_quality_blocked`, `stage_candidate_quality`를 추가한다.
+- 추적 테스트에 `stage_candidate_quality_blocked`, `stage_candidate_quality`, `stage_candidate_quality_spaced_cjk`, `stage_candidate_quality_no_end_marker`를 추가한다.
+
+추가 5분 모니터링에서는 stage 후보 품질 차단이 실제 운영 로그에서 반복적으로 동작했다. 그러나 `stage_candidate_quality_blocked` 증가에도 `raw_without_final`과 `stage_revision_confirmation_reset`은 여전히 높았다. 여러 chunk에서 Qwen window가 같은 의미 구간을 내부에 유지하면서도 prefix 또는 suffix-prefix로 맞지 않아 `stable_token_ratio=0`, `stable_overlap_source=none`으로 기록됐다.
+
+추가 반영:
+
+- `stable_internal_chars`, `stable_internal_ratio`를 진단 지표로 추가한다.
+- `stable_overlap_source=none`이면서 `stable_internal_ratio`가 높은 케이스를 추적 테스트에 추가한다.
+- 안정성 요약 로그에 `stage_candidate_quality_cjk_internal_gap`, `stage_candidate_quality_mixed_latin_zh`를 추가한다.
+- `segment_state_pending/staged/final/suppressed/revised`를 안정성 요약 로그와 runtime tracking에 추가한다.
+
+현재 재정리 판단:
+
+- stable token/char 지표와 상태 전환 metric은 최소 파이프라인의 관측 지표로 유지한다.
+- 내부 overlap을 이용한 delta 재작성 또는 pending/new 접합 보정은 2026-06-17~18 재정리에서 폐기했다.
+
+### 2026-06-16 내부 overlap 적용 후 5분 운영 모니터링
+
+내부 overlap 보조 신호를 적용한 뒤 중국어 실시간 경로를 약 5분 더 관측했다.
+
+관측값:
+
+- chunk 320 누적 기준 `finalized=19`, `raw_without_final=300`, `stage_replaced_unconfirmed=63`, `stage_revision_confirmation_preserved_internal=30`, `stage_revision_confirmation_reset=109`였다.
+- `stable_internal_ratio>=0.75` 케이스는 `revision_preserved_internal`로 분리되어 reset을 줄였지만, 0.60대 내부 overlap을 가진 같은 문맥 확장 리비전은 여전히 reset됐다.
+- `stable_internal_chars=65`, `stable_internal_ratio=0.619`, `stable_overlap_source=none`인 chunk는 같은 문맥 확장인데 reset됐다.
+- `stable_internal_chars=39`, `stable_internal_ratio=0.867`처럼 ratio는 높지만 내부 공통 구간이 짧은 케이스도 있어 ratio 단독 완화는 위험했다.
+- `stage_candidate_quality_blocked`는 32까지 누적되어 `spaced_cjk`, `cjk_internal_gap`, `cjk_repeated_ngram` 차단이 계속 동작했다.
+- 후반 일부 구간에서 `stt_step_load`가 2.9 내외로 올라가고 queue가 30대까지 쌓였지만 drop은 없었다.
+
+당시 튜닝:
+
+- CJK revision confirmation 보존 기준을 `stable_internal_ratio>=0.60`과 `stable_internal_chars>=40`의 동시 조건으로 조정한다.
+- final 확정 기준은 그대로 유지한다. 이 튜닝은 reset 완화만 수행하며 확정/번역 큐 진입을 직접 앞당기지 않는다.
+- 안정성 요약 로그에 `revision_internal_high`, `revision_internal_mid`, `revision_internal_low`를 추가한다.
+- 추적 테스트에 high bucket 보존 케이스와 mid bucket reset 케이스를 추가한다.
+
+현재 재정리 판단:
+
+- 내부 overlap은 안정성 관측 지표로는 남길 수 있다.
+- 내부 overlap을 근거로 문자열 delta를 재작성하는 로직은 의미 단위 재작성 위험이 있어 폐기했다.
+
+### 2026-06-17 중국어 30분 운영 모니터링
+
+중국어 실시간 경로를 약 30분 모니터링했다. 실행 조건은 로그 기준 `qwen3-asr-0.6b`, `window=15.0`, `step=1.0`, `beam=3`, `maxNewTokens=192`다.
+
+관측값:
+
+- `stt_step_load`와 `total_step_load`는 대부분 1.0 미만이고 `input_queue_drops=0`으로 유지되어 계산 성능은 주 병목으로 보지 않았다.
+- 일부 구간에서 queue가 순간적으로 50까지 쌓였다. drop은 없었지만 queue peak/backlog는 별도 추적 지표가 필요했다.
+- chunk 656 누적 스냅샷 기준 `finalized=36`, `stage_start=141`, `stage_replaced_unconfirmed=104`, `stage_revision_confirmation_preserved_internal=121`, `stage_revision_confirmation_reset=192`였다.
+- 해당 스냅샷의 `finalized_per_stage_start`는 약 `0.255`, `stage_replaced_unconfirmed_per_stage_start`는 약 `0.738`, `revision_preserve_rate`는 약 `0.387`이었다.
+- `stage_candidate_quality_blocked`, `raw_without_final`, `segment_state_revised/suppressed`가 계속 누적되어 품질 병목은 처리량보다 staged 생명주기 churn에 가까웠다.
+- 문장형 후보가 보이더라도 `staged_confirmations=1/3` 또는 `2/3` 상태에서 다음 window 재표현으로 reset/교체되어 final까지 도달하지 않는 사례가 반복됐다.
+- 기존 구현은 revision 처리 때 `staged_age`를 0으로 되돌려, completed 후보가 매 chunk 나오는 중국어 경로에서 age 기반 확정이 사실상 누적되기 어려웠다.
+
+당시 반영:
+
+- 기본 런타임 파라미터는 유지한다.
+- `input_queue_size_peak`, `input_queue_backlog_chunk`를 런타임 지표에 추가한다.
+- `finalized_per_stage_start`, `stage_replaced_unconfirmed_per_stage_start`, `revision_preserve_rate`를 tracking metric으로 추가한다.
+- revision으로 같은 staged lifecycle이 유지될 때 `staged_age`를 누적한다.
+- CJK 후보는 첫 관측 확정을 계속 막되, 짧은 조각/글자 단위 공백/반복 n-gram/내부 공백 오염이 없는 후보가 2회 이상 관측되거나 age 기준을 채우면 `stable_cjk`/`aged` 사유로 final 승격할 수 있게 한다.
+- `stage_finalize_stable_cjk`, `stage_age_finalize`, `stage_age_quality_blocked` 지표를 추가한다.
+- age 기준 확정도 `short_cjk`, `spaced_cjk`, `cjk_internal_gap`, `cjk_repeated_ngram`, `latin_only_for_zh` 품질 게이트를 통과해야 한다.
+
+패치 반영 후 새 실행 초반 chunk 431 누적 기준 `finalized=70`, `stage_start=115`, `stage_replaced_unconfirmed=44`, `stage_age_finalize=41`, `stage_finalize_stable_cjk=25`가 관측됐다. 30분 모니터링 종료 직전 chunk 761 누적 기준은 `finalized=120`, `stage_start=195`, `stage_replaced_unconfirmed=72`, `input_queue_drops=0`, `input_queue_size_peak=10`이었다.
+
+현재 재정리 판단:
+
+- age 누적과 상태/지표 추가는 생명주기 관측과 확정 지연 분석에 필요한 이력으로 유지한다.
+- 학술적 근거가 부족한 pending/new 접합 보정은 재도입하지 않는다.
+
+### 2026-06-17 후속 30분 운영 모니터링
+
+로그 회전 보존 개수를 1000개로 늘린 뒤 중국어 실시간 경로를 다시 관측했다. 분석 범위는 `.tmp/logs/avc-whisper.log*`의 `2026-06-17 00:11:59`부터 `00:41:59`까지 약 30분이다. 실행 조건은 로그 기준 `qwen3-asr-0.6b`, `window=15.0`, `step=1.0`, `beam=3`, `maxNewTokens=192`, 번역 OFF 구간 중심이다.
+
+관측값:
+
+- `perf` 로그 1039개 기준 평균 `total_step_load≈0.63`, 최대 `1.39`, `input_queue_drops_total=0`, 최대 `queue_peak=10`이었다.
+- `completed=1 final=0` 진단은 863회, `final=1` 진단은 651회 관측됐다.
+- 주요 이벤트는 `stage_candidate_quality_blocked=184`, `stage_replaced_unconfirmed=84`, `stage_revision_reset=379`, `stage_age_finalize=108`, `stage_finalize_stable_cjk=44`, `confirmed_finalize=11`, `translation_skip_final_quality=104`였다.
+- 대표 품질 차단은 글자 단위 공백 CJK였다. 예: `顶 级 的 夏 威 夷 对 品 质 之 上 的 很 好 吃 好 看 这 个 哇 好 吃`.
+- 대표 final 품질 관측은 `no_end_marker` 또는 `short_cjk,no_end_marker`였다. 예: `好乖好棒好棒怎么那么棒你看他还去当指挥交通的`, `拍照那我们就进去耶`.
+- 안정 신호가 높아도 첫 관측 또는 단일 교체 후보인 경우에는 final로 보내지 않는 현재 정책이 유지됐다. 예: chunk 80의 긴 CJK 후보는 `stable_token_ratio=0.924`였지만 `staged_confirmations=1`, `staged_age=0`이라 `unconfirmed_cjk` 교체로 남았다.
+
+튜닝 판단:
+
+- 계산 처리량은 병목이 아니므로 `stepSecondsZh=1.0`, `beamSizeZh=3`, `maxNewTokensZh=192`는 유지한다.
+- 2026-06-17 SaT 벤치 기준 `sentenceFinalizeAgeZh=2`가 현재 기본 후보 중 가장 낫다. `no_end_marker` final은 0으로 유지하면서 `finalized=20`, `stage_start=34`, `finalized_per_stage_start=0.588`로 age 3의 `finalized=19`, `stage_start=35`, `finalized_per_stage_start=0.543`보다 확정 지표가 개선됐다. 4 이상은 `finalized=18`, `finalized_per_stage_start=0.514`로 누락 쪽으로 기울었다.
+- `windowSecondsZh=15.0`은 현재 STT 안정성과 확정 지연의 균형점으로 유지한다. 이번 구간에서 queue drop이 없으므로 처리량 때문에 줄일 근거는 없다.
+- 로직 변경은 보류한다. 이번 구간의 주된 보강은 성능 추적 케이스 누적이며, `stable_token_ratio`가 높은 단일 관측 후보를 곧바로 final로 올리는 정책은 과확정 위험이 있어 다음 로그 비교 뒤 판단한다.
+
+반영:
+
+- 성능 추적 테스트의 `final_quality`, `finalization`, `runtime_metrics` 케이스를 보강했다.
+- `finalization` tracking에는 stage 품질 차단, short/no-end 관측 후보, age final, 단일 관측 교체 보류 케이스를 추가했다.
+- 순수 비중국어/라틴 단독 후보는 중국어 성능 추적 케이스에서 제거했다.
+- runtime aggregate에는 `finalized_per_stage_start`, `stage_replaced_unconfirmed_per_stage_start`, `finalization_rate_per_1000`, `stage_candidate_quality_*`, `translation_skip`을 비교할 수 있도록 이번 30분 스냅샷을 추가했다.
+
+### 2026-06-17 실제 SaT 벤치 기반 CJK replacement 튜닝
+
+벤치 조건:
+
+- `tests/eval/dictation_ai/sbd_text_cases.sample.jsonl` 24건
+- `sat-3l-sm`, CUDA, `float16`
+- `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`
+- mock/smoke 경로는 성능 판단에 사용하지 않았다.
+
+기준선:
+
+- `cases=24`, `pass_rate=0.083`
+- `finalized=34`, `stage_start=54`, `finalized_per_stage_start=0.630`
+- `stage_revision=109`, `stage_replace=6`, `stage_replaced_unconfirmed=6`
+- `stage_candidate_quality_blocked=17`
+
+튜닝:
+
+- CJK staged 후보가 다음 completed 후보로 교체될 때, 후보에 문장 종료 신호가 있고 `short_cjk`, `spaced_cjk`, `cjk_internal_gap`, `cjk_repeated_ngram`, `latin_only_for_zh`, `no_end_marker` 차단 flag가 없으면 첫 관측 이후에도 교체 직전 확정을 허용한다.
+- 이 값은 `CJK_REPLACEMENT_CONFIRM_CHUNKS=1`로 분리한다.
+- 목적은 케이스별 보정이 아니라 sliding window 재표현으로 인해 문장형 CJK 후보가 `unconfirmed_cjk`로 suppress되는 비율을 줄이는 것이다.
+
+튜닝 후:
+
+- `cases=24`, `pass_rate=0.083`
+- `finalized=38`, `stage_start=58`, `finalized_per_stage_start=0.655`
+- `stage_revision=120`, `stage_replace=6`, `stage_replaced_unconfirmed=6`
+- `stage_candidate_quality_blocked=12`
+
+판단:
+
+- pass rate는 그대로지만 이 벤치는 품질 게이트가 아니라 누락/중복 추적용이다.
+- 실제 모델 기준으로 final 확정 수가 34에서 38로 늘고, 품질 차단 후보가 17에서 12로 줄어 개선 방향이다.
+- `stage_replaced_unconfirmed`은 줄지 않았으므로 다음 튜닝은 replacement suppress 자체보다 spaced CJK 후보 품질 차단과 revision granularity를 분리해 관측한다.
+- 중국어 문장 경계 문제는 정규식 또는 케이스별 규칙으로 해결하지 않는다.
+
+현재 재정리 판단:
+
+- 이 튜닝은 653e7b 커밋의 직접 실험 이력으로 보존한다.
+- 이후 반복 벤치와 재설계 정리에서 기준 문서는 최소 파이프라인만 유지하고, 튜닝/폐기 후보는 실험일지에서만 관리한다.
+
+## 2026-06-17~18: 재설계 기준 재정리와 과거 보정 폐기
+
+### 실험 질문
+
+- 2026-06-16 재설계 이후에도 이전 FunASR/Whisper 시절 보정 로직이 남아 있는가?
+- 파라미터 튜닝으로 확정률 개선이 보이지 않는다면 로직 구조 문제로 볼 수 있는가?
+- 기준 문서에 실험 기록과 폐기 후보가 섞이면 필수 구현처럼 오해되는가?
+- 벤치/성능 추적 테스트가 품질 게이트가 아니라 성능 추세 관측 도구로 동작하는가?
+
+### 관측
+
+반복 벤치와 로그 모니터링에서 중국어 STT 결과 중 final로 넘어가지 못하는 문장과 중복 출력 후보가 계속 관측되었다. 수치 조정만으로 개선 폭이 뚜렷하지 않아, 파라미터보다 생명주기 구조와 과거 보정 잔존 여부를 우선 검토했다.
+
+확인된 과거 로직:
+
+- 2026-06-14 계열에서 들어온 completed 후보 재구성 로직
+- staged 후보 교체 전 suffix/overlap 판단으로 기존 후보를 확정하는 보정
+- pending/new 내부 overlap을 continuation처럼 잘라내는 delta 보정
+- CJK no-space 내부 재시작 접합 아이디어
+- 실험 후보였던 최근 문장 수 제한, 글자 수 cap, no-end-marker age 확정 완화
+
+실제 SaT/CUDA 벤치 조건:
+
+```text
+cases=24
+backend=sat
+device=cuda
+compute_type=float16
+HF_HUB_OFFLINE=1
+TRANSFORMERS_OFFLINE=1
+```
+
+최소 파이프라인 기준으로 정리한 뒤 기준선:
+
+```text
+pass_rate=0.083
+finalized=100
+stage_start=557
+finalized_per_stage_start=0.180
+final_f1_avg=0.112
+```
+
+### 반영 판단
+
+- 기준 파이프라인은 다음 최소 구조로 고정한다.
+
+```text
+오디오 입력
+  ↓
+슬라이딩 윈도우 STT
+  ↓
+안정성/경계 판단
+  ↓
+세그먼트 생명주기
+  ↓
+final-only 번역
+```
+
+- 기준 문서는 실험 기록을 포함하지 않는다.
+- 실험 기록은 이 파일에서 관리한다.
+- 기준 문서는 `docs/2026-06-16-dictation-ai-realtime-pipeline.md`로 분리한다.
+- completed 후보 재구성 또는 합성은 재설계 기준에서 제외한다.
+- pending/new overlap 접합 보정과 CJK no-space 내부 재시작 접합 보정은 폐기한다.
+- internal overlap 기반 delta 보정은 의미 단위 재작성에 가까워 제거한다.
+- 여러 completed 후보가 한 window에서 나와도 SBD 모델 경계 단위를 보존한다.
+- VAD/silence는 final trigger나 boundary confidence 보정에 넣지 않는다.
+- 벤치 실행은 실제 모델 기준인 `sat + cuda + float16`만 성능 판단 근거로 삼는다. mock/smoke/CPU 결과는 성능 튜닝 근거로 사용하지 않는다.
+- 성능 추적 테스트는 품질 게이트가 아니라 누락/중복/확정 지연의 추세 관측 도구로 유지한다.
+
+### 로직 변경 아이데이션
+
+| 관측 | 판단 | 결과 |
+| --- | --- | --- |
+| 같은 chunk 안 여러 completed 후보가 단일 staged slot에서 서로 밀어냄 | 후보를 합치기보다 문장 단위 lifecycle 구조 문제로 본다. | completed 재구성 로직과 관련 테스트를 제거했다. |
+| internal overlap delta가 일부 중복을 줄일 수 있음 | pending/new 접합 보정과 유사한 의미 재작성 위험이 있다. | 내부 overlap delta 보정과 품질 게이트 테스트를 제거했다. |
+| 수치 튜닝 후보가 일부 지표를 개선함 | 기준 파이프라인을 흐리면 필수 구현처럼 오해된다. | 기준 문서에서 튜닝 후보와 폐기 후보 표를 제거하고 실험일지로 이동했다. |
+| 성능 벤치를 mock/CPU로 돌릴 수 있음 | 실제 운영 품질 판단과 무관한 결과가 된다. | 벤치 CLI에서 `sat + cuda + float16`만 허용하도록 했다. |
+
+### 문서 정리
+
+| 문서 | 역할 |
+| --- | --- |
+| `2026-06-16-dictation-ai-realtime-pipeline.md` | 현재 실시간 파이프라인 기준 |
+| `2026-06-16-dictation-ai-experiment-log.md` | 실험 관측, 폐기 판단, 벤치 이력 |
+| `2026-06-16-dictation-ai-contract-defaults.md` | 설정 계약, 허용값, 기본값 |
+| `2026-06-16-dictation-ai-reference-index.md` | 외부 레퍼런스 인덱스 |
 
 ## 현재 기준선
 

@@ -9,7 +9,6 @@ from src.app.dictation_transcript_logic import (
 from src.app.dictation_window import (
     _collapse_adjacent_repeated_phrase_details,
     _collapse_adjacent_repeated_phrases,
-    _coalesce_completed_sentences_for_staging,
     _diagnostic_tail,
     _final_sentence_diagnostic_flags,
     _forced_sentence_reason,
@@ -598,23 +597,6 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         self.assertTrue(_sentences_are_revisions(first, revised))
         self.assertEqual(_prefer_sentence_revision(first, revised), revised)
 
-    def test_revision_lifecycle_simulates_revised_tail_extension(self) -> None:
-        # Regression-like sequence: pending sentence tail gets expanded, then confirmed.
-        completed, pending = _split_completed_sentences("", "It's like a shark now")
-        self.assertEqual(completed, [])
-        self.assertEqual(pending, "It's like a shark now")
-
-        # Later revision candidate from Whisper is considered a revision of staged text.
-        revised = "It's hunting like a shark Now, it's hunting."
-        staged = pending
-        self.assertTrue(_sentences_are_revisions(staged, revised))
-
-        finalized = _prefer_sentence_revision(staged, revised)
-        self.assertEqual(finalized, revised)
-
-        # Sliding delta behavior for the same segment should remain minimal after confirmation.
-        self.assertEqual(_new_text_delta(staged, finalized), "it's hunting.")
-
     def test_revision_lifecycle_simulates_connective_and_numeric_fragment_block(self) -> None:
         # sequence observed with tail fragments like numeric and connective artifacts.
         self.assertEqual(
@@ -783,22 +765,6 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
 
         self.assertEqual(_replacement_decision_reason(staged, candidate, 3, False, 0), "confirmed")
         self.assertTrue(_should_finalize_replaced_sentence(staged, candidate, 3, False, 0))
-
-    def test_chinese_completed_fragments_from_same_chunk_use_one_observation_unit(self) -> None:
-        # Regression from 2026-06-14 zh monitoring chunks 121-122. Prior Chinese STT
-        # punctuation can return multiple completed fragments for one sliding
-        # window. Treat them as one lifecycle observation so a later fragment in
-        # the same raw window cannot force a first-observation fragment to final.
-        completed = [
-            "放了放一下吧，自己迷你韩美就是使劲夸夸，我们知道吗？",
-            "魔法师你在吸我。",
-        ]
-
-        self.assertEqual(
-            _coalesce_completed_sentences_for_staging(completed, "zh"),
-            ["放了放一下吧，自己迷你韩美就是使劲夸夸，我们知道吗？魔法师你在吸我。"],
-        )
-        self.assertEqual(_coalesce_completed_sentences_for_staging(completed, "ko"), completed)
 
     def test_boundary_candidate_allows_repeated_cjk_fragments_after_simplification(self) -> None:
         self.assertTrue(_should_finalize_boundary_candidate("西 门 泾 的", "zh"))

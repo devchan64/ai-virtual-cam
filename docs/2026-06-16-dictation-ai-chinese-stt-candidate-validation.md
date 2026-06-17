@@ -2,7 +2,7 @@
 
 ## 문서 상태
 
-이 문서는 받아쓰기 AI 중국어 STT 후속 후보인 Qwen3-ASR vLLM streaming, Dolphin-CN-Dialect, WeNet의 세부검증 판단을 분리해 정리한다. 기준 설계와 운영 기본값은 [받아쓰기 AI 설계 및 실험 노트](2026-06-16-dictation-ai-design-experiment-notes.md)를 따르고, 설정 계약과 허용값은 [받아쓰기 AI 계약과 기본값](2026-06-16-dictation-ai-contract-defaults.md)을 따른다.
+이 문서는 받아쓰기 AI 중국어 STT 후속 후보인 Qwen3-ASR vLLM streaming, Dolphin-CN-Dialect, WeNet의 세부검증 판단을 분리해 정리한다. 실시간 파이프라인 기준은 [받아쓰기 AI 실시간 처리 파이프라인 기준](2026-06-16-dictation-ai-realtime-pipeline.md)을 따르고, 설정 계약과 허용값은 [받아쓰기 AI 계약과 기본값](2026-06-16-dictation-ai-contract-defaults.md)을 따른다.
 
 이 문서는 후보별 검증 리포트다. 각 후보는 모델 적합성, 실시간 처리 구조, 런타임 통합 비용, 현재 운영 판단으로 평가한다.
 

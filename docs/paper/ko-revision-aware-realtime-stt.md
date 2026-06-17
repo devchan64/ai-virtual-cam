@@ -127,7 +127,7 @@ Whisper 계열 모델은 강력한 오프라인 전사 성능을 보이지만, �
 
 ## 참고 문헌
 
-상세 참고 문헌은 [받아쓰기 AI 참조 레퍼런스 모음](../2026-06-16-dictation-ai-reference-index.md)에 통합한다. 상세 설계와 프레젠테이션 긴 발화 세그먼트 설계 근거는 [받아쓰기 AI 설계 및 실험 노트](../2026-06-16-dictation-ai-design-experiment-notes.md)를 따른다. 핵심 근거는 다음과 같다.
+상세 참고 문헌은 [받아쓰기 AI 참조 레퍼런스 모음](../2026-06-16-dictation-ai-reference-index.md)에 통합한다. 실시간 처리 파이프라인 기준은 [받아쓰기 AI 실시간 처리 파이프라인 기준](../2026-06-16-dictation-ai-realtime-pipeline.md)을 따른다. 핵심 근거는 다음과 같다.
 
 - Whisper-Streaming: local agreement policy와 self-adaptive latency
 - WhisperPipe: overlapping context window와 dynamic buffering

@@ -3,7 +3,6 @@ import unittest
 
 from src.app.dictation_window import (
     _collapse_adjacent_repeated_phrase_details,
-    _coalesce_completed_sentences_for_staging,
     _final_sentence_diagnostic_flags,
     _normalized_text,
     _pending_overrun_reason,
@@ -36,7 +35,6 @@ TRACKING_TARGETS = {
     "pending_quality": {"target_cases": 1, "target_rate": 1.00},
     "final_quality": {"target_cases": 24, "target_rate": 0.90},
     "translation_quality": {"target_cases": 8, "target_rate": 0.80},
-    "coalesce": {"target_cases": 10, "target_rate": 1.00},
     "duplicate_suppression": {"target_cases": 4, "target_rate": 1.00},
     "runtime_metrics": {"target_cases": 21, "target_rate": 1.00},
     "stable_metrics": {"target_cases": 4, "target_rate": 1.00},
@@ -921,13 +919,13 @@ FINAL_QUALITY_TRACKING_CASES = [
 
 RUNTIME_METRIC_TRACKING_CASES = [
     {
-        "metrics": {"candidate_duplicate_suppressed": 1, "completed_coalesced": 1},
-        "expected": {"duplicate_suppressed": 1, "completed_coalesced": 1},
+        "metrics": {"candidate_duplicate_suppressed": 1},
+        "expected": {"duplicate_suppressed": 1},
         "source": "2026-06-15 avc-whisper.log chunk 3039",
     },
     {
         "metrics": {"candidate_delta_trimmed": 1, "candidate_delta_trimmed_cjk": 1, "stage_start": 1},
-        "expected": {"delta_trimmed": 1, "completed_coalesced": 0},
+        "expected": {"delta_trimmed": 1},
         "source": "2026-06-14 avc-whisper.log.1 chunk 1820",
     },
     {
@@ -1012,7 +1010,6 @@ RUNTIME_METRIC_TRACKING_CASES = [
     },
     {
         "metrics": {
-            "completed_coalesced": 365,
             "final_quality_cjk_repeated_ngram": 1,
             "final_quality_mixed_latin_zh": 1,
             "final_quality_no_end_marker": 6,
@@ -1025,7 +1022,6 @@ RUNTIME_METRIC_TRACKING_CASES = [
             "translation_skip_final_quality": 7,
         },
         "expected": {
-            "completed_coalesced": 365,
             "final_quality": 11,
             "finalization_rate_per_1000": 73,
             "raw_without_final": 357,
@@ -1077,7 +1073,6 @@ RUNTIME_METRIC_TRACKING_CASES = [
     },
     {
         "metrics": {
-            "completed_coalesced": 863,
             "final_quality_mixed_latin_zh": 5,
             "final_quality_no_end_marker": 104,
             "final_quality_short_cjk": 1,
@@ -1099,7 +1094,6 @@ RUNTIME_METRIC_TRACKING_CASES = [
         },
         "expected": {
             "age_finalize": 108,
-            "completed_coalesced": 863,
             "final_quality": 110,
             "finalization_rate_per_1000": 159,
             "finalized": 163,
@@ -1316,7 +1310,6 @@ def _runtime_metric_summary(metrics: dict[str, int]) -> dict[str, int]:
         "finalization_rate_per_1000": rate_per_1000(finalized, final_opportunities),
         "translation_skip": translation_skip,
         "translation_skip_per_final_quality_per_1000": rate_per_1000(translation_skip, final_quality),
-        "completed_coalesced": int(metrics.get("completed_coalesced", 0)),
         "revision_changed": int(metrics.get("stage_revision_changed", 0)),
         "revision_reset": int(metrics.get("stage_revision_confirmation_reset", 0)),
         "revision_preserved_internal": int(metrics.get("stage_revision_confirmation_preserved_internal", 0)),
@@ -1434,103 +1427,6 @@ REVISION_TRACKING_CASES.extend([
         "source": "2026-06-14 avc-whisper.log chunk 10 Chinese committed tail block reuse",
     },
 ])
-
-
-COALESCE_TRACKING_CASES = [
-    {
-        "language": "zh",
-        "sentences": ["放了放一下吧，自己迷你韩美就是使劲夸夸，我们知道吗？", "魔法师你在吸我。"],
-        "expected_count": 1,
-        "source": "avc-whisper.log chunk 121",
-    },
-    {
-        "language": "zh",
-        "sentences": ["使使夸夸我们，你知道吗？", "魔法师，你在吸我的氧气吗？"],
-        "expected_count": 1,
-        "source": "avc-whisper.log chunk 122",
-    },
-    {
-        "language": "zh",
-        "sentences": ["奎是什么？", "他说他不知道，我又不是。"],
-        "expected_count": 1,
-        "source": "avc-whisper.log chunk 139",
-    },
-    {
-        "language": "zh",
-        "sentences": ["怎么啦？", "但餐厅的每一个角落真的很好看，尤其是中间划分出一个区域。", "中午的阳光透过玻璃洒进来，真。"],
-        "expected_count": 1,
-        "source": "avc-whisper.log chunk 128",
-    },
-    {
-        "language": "zh",
-        "sentences": ["为什么不在九月？", "因为他八月手嘛，然后突破浪截真的有可能。", "哎，现在都十一月。"],
-        "expected_count": 1,
-        "source": "avc-whisper.log chunk 158",
-    },
-    {
-        "language": "zh",
-        "sentences": ["Helps笨蛋，我们是笨蛋，你大家不笨蛋，它是芒果口味的。", "我一直以来你以为它是山楂。"],
-        "expected_count": 1,
-        "source": "avc-whisper.log chunk 241",
-    },
-    {
-        "language": "zh",
-        "sentences": ["你大家不笨蛋，它是芒果口味的。", "我一直以来你以为它是山楂口味的，很好吃。", "哎，冰。"],
-        "expected_count": 1,
-        "source": "avc-whisper.log chunk 242",
-    },
-    {
-        "language": "zh",
-        "sentences": ["唱的很高很高，是好朋友，你怎么容了？", "好朋友，我为什么还是这么猛烈？", "我们不是还要。"],
-        "expected_count": 1,
-        "source": "avc-whisper.log chunk 251",
-    },
-    {
-        "language": "zh",
-        "sentences": ["怎么容了？", "好朋友，我为什么还是这么萌的呀？", "我们不是还要贴贴脸吗？", "你怎。"],
-        "expected_count": 1,
-        "source": "avc-whisper.log chunk 252",
-    },
-    {
-        "language": "zh",
-        "sentences": ["果是怎么样？", "然后我让小哥哥给我拿了几台测试一下，就是室。"],
-        "expected_count": 1,
-        "source": "avc-whisper.log chunk 269",
-    },
-    {
-        "language": "zh",
-        "sentences": ["果是怎么样？", "然后我让小哥哥给我拿了几台测试一下，就是室内室外光线不一样的。"],
-        "expected_count": 1,
-        "source": "avc-whisper.log chunk 270",
-    },
-    {
-        "language": "zh",
-        "sentences": ["他们都会就是跟你拿你的包包然。", "后给你换上相对应的。"],
-        "expected_count": 1,
-        "source": "avc-whisper.log.3 chunk 15722 unprocessed multi-completed zh",
-    },
-    {
-        "language": "zh",
-        "sentences": ["有一种莫名的熟悉感。", "第一次来韩国的时候是solo trip,去年是跟助理们一起来。"],
-        "expected_count": 1,
-        "source": "avc-whisper.log.3 chunk 15777 unprocessed mixed zh-latin multi-completed",
-    },
-    {
-        "language": "ko",
-        "sentences": ["첫 번째 문장입니다.", "두 번째 문장입니다."],
-        "expected_count": 2,
-        "source": "non-zh control",
-    },
-]
-
-
-def _make_coalesce_tracking_test(index: int, case: dict[str, object]):
-    def test(self: WhisperPerformanceTrackingTest) -> None:
-        sentences = [str(item) for item in case["sentences"]]
-        actual = _coalesce_completed_sentences_for_staging(sentences, str(case["language"]))
-        matched = len(actual) == int(case["expected_count"])
-        self._record("coalesce", f"coalesce_{index:03d}", matched)
-    return test
 
 
 def _make_pending_tracking_test(index: int, case: dict[str, object]):
@@ -1737,14 +1633,6 @@ def _make_finalization_tracking_test(index: int, case: dict[str, object]):
             actual = False
         self._record("finalization", f"finalization_{index:03d}", actual is bool(case["expected"]))
     return test
-
-
-for _index, _case in enumerate(COALESCE_TRACKING_CASES, 1):
-    setattr(
-        WhisperPerformanceTrackingTest,
-        f"test_tracking_coalesce_{_index:03d}",
-        _make_coalesce_tracking_test(_index, _case),
-    )
 
 
 for _index, _case in enumerate(DUPLICATE_SUPPRESSION_TRACKING_CASES, 1):

@@ -1,6 +1,7 @@
 import importlib.util
 import sys
 import unittest
+from argparse import Namespace
 from pathlib import Path
 
 from src.app.sentence_boundary import split_punctuated_text
@@ -66,6 +67,24 @@ class DictationAiSbdBenchmarkTest(unittest.TestCase):
         self.assertEqual(result["actual_staged"], "Completed sentence.")
         self.assertEqual(result["metrics"].get("segment_state_pending"), 1)
         self.assertEqual(result["metrics"].get("stage_start"), 1)
+
+    def test_cli_benchmark_rejects_mock_or_cpu_performance_runs(self) -> None:
+        with self.assertRaisesRegex(ValueError, "--backend=sat required"):
+            benchmark._validate_real_ai_cuda_args(
+                Namespace(backend="mock", device="cuda", compute_type="float16")
+            )
+        with self.assertRaisesRegex(ValueError, "--device=cuda required"):
+            benchmark._validate_real_ai_cuda_args(
+                Namespace(backend="sat", device="cpu", compute_type="float16")
+            )
+        with self.assertRaisesRegex(ValueError, "--compute-type=float16 required"):
+            benchmark._validate_real_ai_cuda_args(
+                Namespace(backend="sat", device="cuda", compute_type="float32")
+            )
+
+        benchmark._validate_real_ai_cuda_args(
+            Namespace(backend="sat", device="cuda", compute_type="float16")
+        )
 
 
 if __name__ == "__main__":

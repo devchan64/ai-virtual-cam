@@ -25,7 +25,6 @@ from src.app.transcript_revision import append_context as _append_committed_text
 from src.app.dictation_transcript_logic import (
     _collapse_adjacent_repeated_phrase_details,
     _collapse_adjacent_repeated_phrases,
-    _coalesce_completed_sentences_for_staging,
     _diagnostic_tail,
     _final_sentence_diagnostic_flags,
     _forced_sentence_reason,
@@ -1091,19 +1090,6 @@ class WhisperTranscriptWorker:
                     if boundary_right_context_starts:
                         count_metric("boundary_right_context_starts", boundary_right_context_starts)
                     if completed_sentences:
-                        coalesced_completed_sentences = _coalesce_completed_sentences_for_staging(completed_sentences, str(detected))
-                        if len(coalesced_completed_sentences) != len(completed_sentences):
-                            count_metric("completed_coalesced")
-                            count_metric(f"completed_coalesced_lang_{str(detected).strip().lower() or 'unknown'}")
-                            self._emit(
-                                "status",
-                                "받아쓰기 AI completed 후보 병합: "
-                                f"chunk={chunks} language={detected} before={len(completed_sentences)} "
-                                f"after={len(coalesced_completed_sentences)} "
-                                f"tail={_diagnostic_tail(coalesced_completed_sentences[0])}",
-                                display=False,
-                            )
-                        completed_sentences = coalesced_completed_sentences
                         pending_chunks = 0
                     elif pending_transcript_text:
                         pending_chunks += 1
@@ -1411,8 +1397,7 @@ class WhisperTranscriptWorker:
                     f"replace_unconfirmed_rate={stage_replaced_unconfirmed_count / max(stage_replace_count, 1):.2f} "
                     f"input_queue_size_peak={input_queue_size_peak} "
                     f"input_queue_backlog={input_queue_backlog_count} "
-                    f"decision_count={stage_decision_count} "
-                    f"completed_coalesced={chunk_lifecycle_metrics.get('completed_coalesced', 0)}",
+                    f"decision_count={stage_decision_count}",
                     display=False,
                 )
                 self._emit(

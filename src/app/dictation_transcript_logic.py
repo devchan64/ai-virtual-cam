@@ -26,14 +26,6 @@ CJK_REVISION_INTERNAL_STABILITY_MIN_RATIO = 0.60
 CJK_REVISION_INTERNAL_STABILITY_MIN_CHARS = 40
 
 
-def _coalesce_completed_sentences_for_staging(sentences: list[str], language: str) -> list[str]:
-    normalized_sentences = [_normalized_text(sentence) for sentence in sentences if _normalized_text(sentence)]
-    normalized_language = str(language or "").strip().lower()
-    if normalized_language == "zh" and len(normalized_sentences) > 1:
-        return ["".join(normalized_sentences)]
-    return normalized_sentences
-
-
 def _normalized_text(text: str) -> str:
     return " ".join(str(text).split())
 
@@ -76,9 +68,6 @@ def _new_text_delta(committed_text: str, stable_text: str) -> str:
             return _join_text_units(stable_units[overlap:], stable_separator)
     if stable in committed:
         return ""
-    internal_delta = _new_text_delta_after_internal_overlap(committed, stable)
-    if internal_delta is not None:
-        return internal_delta
     return stable
 
 
@@ -92,45 +81,6 @@ _WORD_UNIT_RE = re.compile(
 
 def _word_units(text: str) -> list[str]:
     return [match.group(0).replace(",", "") for match in _WORD_UNIT_RE.finditer(_normalized_text(text).lower())]
-
-
-def _new_text_delta_after_internal_overlap(committed_text: str, stable_text: str) -> str | None:
-    committed_words = _word_units(committed_text)
-    stable_units, stable_separator = _text_units(stable_text)
-    if stable_separator != " ":
-        return None
-    stable_word_pairs: list[tuple[str, int]] = []
-    for unit_index, unit in enumerate(stable_units):
-        for word in _word_units(unit):
-            stable_word_pairs.append((word, unit_index))
-    stable_words = [word for word, _unit_index in stable_word_pairs]
-    if len(committed_words) < 4 or len(stable_words) < 4:
-        return None
-
-    best_j = 0
-    best_len = 0
-    for i in range(len(committed_words)):
-        for j in range(len(stable_words)):
-            length = 0
-            while (
-                i + length < len(committed_words)
-                and j + length < len(stable_words)
-                and committed_words[i + length] == stable_words[j + length]
-            ):
-                length += 1
-            if length > best_len:
-                best_j = j
-                best_len = length
-    if best_len < 4:
-        return None
-    if best_len / max(len(stable_words), 1) >= 0.85:
-        return ""
-    suffix_word_index = best_j + best_len
-    if suffix_word_index >= len(stable_word_pairs):
-        return ""
-    suffix_unit_index = stable_word_pairs[suffix_word_index][1]
-    suffix = _join_text_units(stable_units[suffix_unit_index:], stable_separator)
-    return suffix or ""
 
 
 def _phrase_key(units: list[str]) -> list[str]:
