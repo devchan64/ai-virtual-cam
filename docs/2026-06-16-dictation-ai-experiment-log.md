@@ -1817,6 +1817,40 @@ final_f1_avg=0.224
 - 변경 후 82케이스 CUDA/SaT 벤치는 `pass_rate=0.171`, `finalized=215`, `finalized_per_stage_start=0.440`, `final_f1_avg=0.385`이다.
 - 신규 케이스에서는 반복 절이 포함된 오염 final이 차단되어 `stage_candidate_quality_repeated_word_ngram=1`이 추가로 관측됐다. 대신 완성 문장 `정부의 본래의 세금 권한과 전통화폐에 대한 지속성...`은 아직 final로 회수되지 않고 `정부의 본래의 세금 권한과` staged 잔류로 남는다.
 - 영향이 바뀐 기존 케이스는 3개였고 final 결과 하락은 관측되지 않았다. `zh_log_duplicate_myeongdong_departure_fragment_20260617_001`는 동일 final을 유지하면서 `stage_candidate_quality_repeated_word_ngram=1`만 추가됐고, `ko_log_duplicate_tesla_global_direction_fragment_20260617_001`, `ko_log_pending_overrun_follow_acquire_giveup_fragment_20260618_001`는 반복 품질 계측 횟수만 바뀌었다.
+- 2026-06-18 07:12-07:13 로그에서 `ko_log_mixed_submarine_space_no_end_delta_fragment_20260618_001`를 추가했다.
+- 운영 로그에서는 `무슨 말이냐면 만들어주면`, `빽빽합니다`, `우리가 이렇게 둥그러 선 채를 했다가 정말 빽빽합니다`처럼 종결 신호 없는 delta 조각이 final로 출력되고 번역은 `final_quality=no_end_marker`로 생략되는 흐름이 관측됐다. 같은 구간에서 더 완성된 window가 뒤따라와 확정 누락과 중복 억제가 섞인다.
+- 현재 코드 기준 83케이스 CUDA/SaT 벤치는 `pass_rate=0.169`, `finalized=224`, `finalized_per_stage_start=0.445`, `final_f1_avg=0.384`이다.
+- 신규 `submarine_space_no_end_delta` 케이스는 final F1 0.353이다. 실제 final은 `저 디자인이 더 스텔스라면...`, `그게 어렵나 봐요.`, `잠수함은 안에 여유 공간이 1cm도 없어요.`, `무슨 말이냐면 저는 이제 조선소에서 직접 배를 만들어 봤으니까`, `그 안에가 정말 빽빽합니다.` 등을 내보내고, `그러니까 틀리면 9번 세로 맞추기가 쉽지 않겠네.`가 staged에 남는다.
+- 벤치에서는 운영 로그의 짧은 delta 단독 final이 그대로 재현되지는 않았다. 현재 `_should_suppress_short_delta_final`이 `무슨 말이냐면 만들어주면`, `빽빽합니다` 유형을 억제 대상으로 판단하기 때문이다. 따라서 이번 반복에서는 로직을 추가하지 않고, serve 프로세스가 최신 로직으로 재시작된 뒤 같은 유형이 계속 나오는지 관찰한다.
+- 2026-06-18 07:15 로그에서 `ko_log_duplicate_submarine_full_speed_fragment_20260618_001`를 추가했다.
+- 이 케이스는 `예를 들어서 중앙주의센터에서 수중 전속력 전진` 구간이 한 final 안에 두 번 삽입되는 짧은 반복 final 유형이다. 기준선에서는 `예를 들어서 중앙주의센터에서 수중 전속력 전진 이러면 예를 들어서 중앙주의센터에서 수중 전속력 전진!`가 final로 나갔다.
+- 84케이스 CUDA/SaT 기준선은 `pass_rate=0.167`, `finalized=226`, `finalized_per_stage_start=0.448`, `final_f1_avg=0.380`이다.
+- 기존 `repeated_word_ngram`은 16 token 미만 후보를 보지 않아 13 token 안에서 6 token 구가 반복되는 이 케이스를 잡지 못했다. 반복 품질 게이트의 최소 후보 길이를 16 token에서 12 token으로 낮췄다. n-gram 크기는 6 token 이상을 유지해 짧은 단어 반복이나 정상 짧은 문장까지 넓히지 않았다.
+- 변경 후 84케이스 CUDA/SaT 벤치는 `pass_rate=0.167`, `finalized=226`, `finalized_per_stage_start=0.448`, `final_f1_avg=0.380`이다.
+- 영향이 바뀐 케이스는 신규 `submarine_full_speed` 1개뿐이다. 해당 케이스에서 `stage_candidate_quality_repeated_word_ngram=1`이 관측되고, 중복 final은 `예를 들어서 중앙주의시센터에서 수중 전속력 전진!` 단일 final로 줄었다. 정확도 점수는 `센터/시센터` STT 표기 차이 때문에 변하지 않았지만, 중복 확정 억제 목적에는 부합한다.
+- 2026-06-18 07:16 로그에서 `ko_log_pending_overrun_old_submarine_space_fragment_20260618_001`를 추가했다.
+- 이 케이스는 `오래된 잠수함... 마티지 같은데... 점점점` 구간이 pending 내부에서 반복 누적되어 186자 pending과 218자 staged 오염 후보로 커지는 유형이다.
+- 85케이스 CUDA/SaT 벤치는 `pass_rate=0.165`, `finalized=228`, `finalized_per_stage_start=0.448`, `final_f1_avg=0.385`이다.
+- 신규 `old_submarine_space` 케이스는 final F1 0.800이다. 실제 final은 `여유공간을 그래도 좀 늘렸어요.`, `옛날 보다.`까지 회수했고, 기대했던 긴 문장 `그래서 정말 오래된 잠수함은... 공간 안에 좀 더 여유가 있는 거죠.`는 staged에 남았다.
+- 이 케이스에서 `pending_quality_repeated_word_ngram=3`, `stage_candidate_quality_repeated_word_ngram=1`, `candidate_pending_prefix_mixed_suppressed=1`이 관측됐다. 반복 품질 게이트가 거대 오염 staged 후보를 차단한 근거는 생겼지만, final 회수는 아직 완성되지 않았다.
+- 2026-06-18 07:20-07:21 로그에서 `ko_log_mixed_carney_middle_power_fragment_20260618_001`를 추가했다.
+- 이 케이스는 `카니 총리입니다.`가 앞 문맥에 붙어 먼저 확정되고, 뒤이어 `카니 총리가 작년 말에 굉장히 의미심장한 연설을 했어요.`, `그게 뭐냐면 중견국 연합체를 만들죠.`가 stage 교체와 recent-final trimming 사이에서 흔들리는 유형이다.
+- 같은 구간에서 `한마디로`가 `final_quality=no_end_marker`로 확정된 뒤 번역 생략되는 현상도 관측됐다. 이 샘플은 단순 중복 억제보다 조기 조각 확정과 완성 문장 누락을 함께 추적하기 위한 벤치 케이스로 둔다.
+- 86케이스 CUDA/SaT 벤치는 `pass_rate=0.163`, `finalized=232`, `finalized_per_stage_start=0.449`, `final_f1_avg=0.380`이다.
+- 신규 `carney_middle_power` 케이스에서 짧은 `한마디로` 단독 final은 `finalize_short_delta_suppressed=1`로 억제됐다. 실제 final은 `안보를 완전히 의존했던 걸 탈피를 해가지고 새로운 파트너를 잡아야 되는데 카니 총리입니다.`, `카니 총리가 작년 말에 굉장히 살피를 해가지고 새로운 파트너를 잡아야 되는데 칸의 총리가 작년 말에 굉장히 의미심장한 연설을 했어요.`, `그게 뭐냐면 중견국 연합체를 만들죠.`, `한마디로 그 전에 했던 대로 하자는 거죠.`이다.
+- 아직 남은 문제는 두 번째 final처럼 앞 window의 open clause가 뒤 window의 완성 문장 앞에 섞이는 긴 후보다. 이 유형은 6 token 이상 반복 n-gram으로 항상 잡히지 않으므로, 반복 임계값을 더 낮추기보다 staged 순서 일관성과 조기 `next_completed` 확정 조건을 계속 관찰한다.
+- 2026-06-18 07:21 로그에서 `ko_log_pending_overrun_canada_security_threat_fragment_20260618_001`를 추가했다.
+- 운영 로그에서는 `최근에 캐나다에서 작년에 발표한 보고서가... 캐나다의 가장 큰 안보 위협` 구간이 pending 내부에서 40자, 73자, 140자, 196자로 누적된 뒤 260자 반복 final로 확정됐다.
+- 87케이스 CUDA/SaT 벤치는 `pass_rate=0.161`, `finalized=234`, `finalized_per_stage_start=0.451`, `final_f1_avg=0.376`이다.
+- 신규 `canada_security_threat` 케이스에서는 운영 로그의 260자 반복 final이 그대로 재현되지는 않았다. 현재 로직이 `pending_quality_repeated_word_ngram=3`, `stage_candidate_quality_repeated_word_ngram=1`로 반복 누적 후보를 차단했고, 실제 final은 `겉에 보면 그냥 트럼프 들으라고 하는 얘기예요.`, `캐나다에서 작년에 발표한 보고서가 나 있는데 그게 뭐냐면 캐나다의 가장 큰 안보 위협은 중국이다라는 거예요.`로 남았다.
+- 이 결과는 반복 품질 게이트가 오염 final 억제에는 효과가 있지만, 앞 문맥 `그런데 이제 그 이면에는...`을 완성 문장으로 회수하지는 못한다는 근거다. 이번 반복에서는 pending 절단/재접합 로직을 추가하지 않고 샘플과 지표로 축적한다.
+- 2026-06-18 07:50 로그에서 `ko_log_repeated_defense_weapon_technology_fragment_20260618_001`를 추가했다.
+- 운영 로그에서는 `방산의 무기 만들 수 있는 나라가 매우 제한적인 걸 보면...` 구간이 323자 반복 final로 확정됐다. 벤치에서는 현재 로직이 기대 final `방산의 무기 만들 수 있는 나라가 매우 제한적인 걸 보면 쉬운 기술이 아니라는 거고 첨단 기술이죠.`, `그 말은 기술 차이나 성능 차이나 이런 것에서 차이가 날 수밖에 없다는 거죠.`를 회수하고 pending `근데 이제 국방 부기 도입이라는 게`를 유지했다.
+- 2026-06-18 07:52-07:53 로그에서 `ko_log_mixed_consulting_company_control_system_fragment_20260618_001`를 추가했다.
+- 이 케이스는 `이름 못 들어본 컨설팅 회사를 고용하자는 거예요.`, `컨트롤 시스템을 안 썼어요.`, `왜냐?`, `우리나라에서 그걸 거부했거든요.` 구간이 짧은 조각으로 분리되고, 운영 로그에서는 `컨트롤 시스템을 안 썼어요`가 `final_quality=no_end_marker`로 확정되어 번역 생략됐다.
+- 89케이스 CUDA/SaT 벤치는 `pass_rate=0.169`, `finalized=247`, `finalized_per_stage_start=0.462`, `final_f1_avg=0.380`이다.
+- 신규 `consulting_company_control_system` 케이스는 오염 반복 final보다는 과분리와 마지막 staged 잔류가 주된 실패다. 실제 final은 `더 노골적.`, `근데 더 노골적으로 기술적으로 해요.`, `그러니까 티 안나게.`, `예를 들어서 뭐 이런거죠.`, `티 안 나게.`, `이름 못 들어본 컨설팅 회사를 고용하자는 거예요.`, `그 컨설팅 회사가 뭘 하냐 그랬더니 그것은 좀 차이가 있구나.`, `그런 걸 경험했었는데 결국은 컨트롤 시스템을 안 썼어요.`, `왜냐?`, `우리나라에서 그걸 거부했거든요.`, `그런 거 쓰면 안 된다.`이며 `우리는 그거 못 쓴다.`가 staged에 남았다.
+- 이번 반복에서는 조각 final을 더 강하게 억제하는 로직을 추가하지 않는다. 이미 `왜냐?` 같은 짧은 의문문은 정상 발화일 수 있고, 과분리 억제를 넓히면 final 누락이 커질 위험이 있다.
 
 판단:
 

@@ -711,7 +711,7 @@ def _has_repeated_cjk_ngram(words: list[str]) -> bool:
 
 
 def _has_repeated_word_ngram(words: list[str]) -> bool:
-    if len(words) < 16:
+    if len(words) < 12:
         return False
     for size in (12, 10, 9, 8, 7, 6):
         seen: dict[tuple[str, ...], int] = {}
