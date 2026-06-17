@@ -1,6 +1,23 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from src.domain.contracts.dictation_ai import resolve_qwen_asr_model_name
+
+
+def _hf_cache_dir(repo_id: str) -> Path:
+    safe = str(repo_id or "").strip().replace("/", "--")
+    return Path.home() / ".cache" / "huggingface" / "hub" / f"models--{safe}"
+
+
+def _has_incomplete_hf_blobs(repo_id: str) -> bool:
+    cache_dir = _hf_cache_dir(repo_id)
+    if not cache_dir.exists():
+        return False
+    try:
+        return any(cache_dir.rglob("*.incomplete"))
+    except OSError:
+        return True
 
 
 def is_hf_repo_cached(repo_id: str) -> bool:
@@ -13,7 +30,13 @@ def is_hf_repo_cached(repo_id: str) -> bool:
     except Exception:
         return False
     normalized = str(repo_id or "").strip()
-    return any(repo.repo_id == normalized or repo.repo_id.endswith(f"/{normalized}") for repo in cache_info.repos)
+    for repo in cache_info.repos:
+        if repo.repo_id != normalized and not repo.repo_id.endswith(f"/{normalized}"):
+            continue
+        if _has_incomplete_hf_blobs(repo.repo_id):
+            return False
+        return True
+    return False
 
 
 def is_qwen_asr_model_cached(model_name: str) -> bool:

@@ -376,17 +376,6 @@ Linux Docker 정책:
 - 번역까지 포함한 지연은 NLLB `translationBeamSize`와 `translationMaxNewTokens`의 영향을 받습니다. 실시간 응답성은 `translationBeamSize=1`, `translationMaxNewTokens=128`에서 시작하고, 번역 품질이나 긴 문장 완성도가 부족하면 각각 `3` 또는 `256`으로 올려 비교합니다.
 - 실시간 번역은 기본적으로 확정된 final 전사 문장만 대상으로 합니다. staged/partial 문장은 뒤 청크에서 수정될 가능성이 높아 중복 번역과 premature translation을 만들 수 있으므로 기본값에서 번역하지 않습니다. 실시간 파이프라인 기준은 [`docs/2026-06-16-dictation-ai-realtime-pipeline.md`](docs/2026-06-16-dictation-ai-realtime-pipeline.md)를 확인하고, 설정 계약과 기본값은 [`docs/2026-06-16-dictation-ai-contract-defaults.md`](docs/2026-06-16-dictation-ai-contract-defaults.md)를 따릅니다. 관련 레퍼런스 목록은 [`docs/2026-06-16-dictation-ai-reference-index.md`](docs/2026-06-16-dictation-ai-reference-index.md)에 통합합니다.
 
-성능 추적 벤치마크:
-
-```bash
-python3 tests/eval/dictation_ai/performance_tracking.py \
-  --output .tmp/eval/dictation-ai-performance-tracking/latest.json
-```
-
-- `tests/eval/dictation_ai/performance_tracking.py`는 누적 받아쓰기 AI 로그에서 수집한 revision, distinct, stability 관측 케이스를 성능 추적용으로 실행합니다.
-- 이 벤치마크는 품질 게이트가 아닙니다. 실행되면 `[dictation-ai-performance-tracking] ... rate=... target>=... rate_gap=...` 지표와 JSON 리포트를 출력하고, 이 지표를 올려가는 것을 개선 목표로 삼습니다.
-- 새 로그에서 중복/누락/잘못된 revision 사례가 보이면 tracking case를 추가하고, 이후 알고리즘 변경으로 rate가 오르고 gap이 줄어드는지 비교합니다. 실험 기록은 [`docs/2026-06-16-dictation-ai-experiment-log.md`](docs/2026-06-16-dictation-ai-experiment-log.md), 현재 기준은 [`docs/2026-06-16-dictation-ai-realtime-pipeline.md`](docs/2026-06-16-dictation-ai-realtime-pipeline.md)를 따릅니다.
-
 문장 경계 처리 텍스트 벤치마크:
 
 ```bash
@@ -400,6 +389,7 @@ python3 tests/eval/dictation_ai/sbd_benchmark.py \
 
 - SBD 품질 평가는 wav/STT 품질과 분리해 텍스트 케이스로 수행합니다. 케이스는 JSON Lines 형식이며 `chunks`, `language`, `expected_final`, `expected_pending`, `expected_staged`, `tags`를 기록합니다. 단일 입력만 검증할 때는 `chunks` 대신 `text`를 사용할 수 있습니다.
 - 벤치마크는 실제 문장 경계 백엔드(`sat`)를 직접 호출한 뒤 운영 파이프라인의 핵심 흐름인 `pending -> completed -> staged -> revision/confirmation/age -> final` 생명주기를 시뮬레이션합니다. 리포트에는 케이스별 chunk 상태, final exact score, staged/pending 상태, `stage_start`, `stage_revision`, `stage_replace`, `finalized`, `finalized_per_stage_start` 같은 안정성 지표가 저장됩니다.
+- 새 로그에서 중복/누락/잘못된 revision 사례가 보이면 `tests/eval/dictation_ai/sbd_text_cases.sample.jsonl`에 추가하고, 이후 알고리즘 변경 전후의 SBD 벤치 리포트를 비교합니다. 실험 기록은 [`docs/2026-06-16-dictation-ai-experiment-log.md`](docs/2026-06-16-dictation-ai-experiment-log.md), 현재 기준은 [`docs/2026-06-16-dictation-ai-realtime-pipeline.md`](docs/2026-06-16-dictation-ai-realtime-pipeline.md)를 따릅니다.
 - `--fail-on-regression --min-pass-rate <rate>`는 GPU 벤치 전용 품질 게이트가 필요할 때만 사용합니다. 일반 unit test 대신 누적 텍스트 코퍼스에서 경계 판단이 안정적으로 final까지 이어지는지 추세와 회귀를 확인하는 용도입니다.
 
 ## 오디오 운영 가이드

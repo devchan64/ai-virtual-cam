@@ -51,7 +51,7 @@ final-only 번역
 | 경계 판단 | 구현됨 | SaT/SBD, punctuation/end-mark, right-context 지표로 completed/pending 후보를 생성한다. |
 | 세그먼트 생명주기 | 구현됨 | `pending`, `staged`, `final`, `suppressed`, `revised` 상태를 분리한다. |
 | append-only final | 구현됨 | final transcript는 되돌리지 않고 append-only로 출력한다. |
-| 최근 final 중복 억제 | 구현됨 | 일정 기간 보관한 최근 final 문장과 확정 후보를 비교해 유사 후보의 중복 확정을 막고, 최근 final의 확장 후보는 새 suffix만 final로 넘긴다. |
+| 최근 final 중복 억제 | 구현됨 | 일정 기간 보관한 최근 final 문장과 확정 후보를 token-sentence compact 유사도로 비교해 유사 후보의 중복 확정을 막고, 최근 final의 확장 후보는 새 suffix만 final로 넘긴다. |
 | 짧은 CJK 확정 보류 | 구현됨 | 종결부호가 있는 짧은 CJK 후보는 다음 후보에 바로 밀려나지 않도록 제한적으로 더 보류해 반복 관측 confirmation을 채운다. |
 | final-only 번역 | 구현됨 | 번역 큐에는 final 문장만 넣는다. staged/partial은 번역하지 않는다. |
 | 과거 보정 경로 제거 | 구현됨 | 반복 phrase collapse, pending 강제 completed 승격, CJK 조기 replacement 확정 경로를 운영/벤치 기준에서 제거했다. |
@@ -90,6 +90,7 @@ detector 입력을 만들기 위한 단순 문자열 결합은 허용하지만, 
 - final transcript는 append-only다.
 - final로 확정한 문장은 UI와 번역 큐에서 되돌리지 않는다.
 - 최근 final과 같은 후보는 다시 final로 확정하지 않는다.
+- 최근 final의 유사 후보는 언어 코드별 예외 없이 token-sentence 유사도로 비교한다.
 - 최근 final의 확장 후보는 이미 확정된 prefix를 반복 출력하지 않고 새 suffix만 final로 확정한다.
 - staged/partial 후보는 다음 window에서 수정될 수 있으므로 번역하지 않는다.
 - STT 원문창은 raw 결과만 표시한다.
@@ -197,6 +198,7 @@ VAD와 silence 길이는 받아쓰기 AI 실시간 처리 파이프라인의 구
 | `stage_queue_enqueue/promote/revision/drop_oldest` | 순서 보존 staged queue의 보존/승격/갱신/폐기 흐름 |
 | `MAX_STAGED_SENTENCE_QUEUE=12` | sliding window에서 관측된 completed 후보를 순서대로 보존하는 최대 queue 크기 |
 | `revision_similarity_policy` | token-sentence revision/confirmation 유사도 임계값 묶음. 운영 설정이 아니라 내부 튜닝 policy로 관리하며 SBD 벤치 리포트에 기록한다. |
+| `AVC_DICTATION_*` revision env override | 리비전 임계값 벤치 실험용 override. 기본 운영값을 바꾸지 않고 동일 벤치에서 상수 조합을 비교하기 위한 내부 도구다. |
 | `stage_candidate_quality_low_value_cjk_fragment` | 문장 종료 부호 없는 CJK 초단편 후보 차단 횟수 |
 | `stage_revision_age_reset`, `stage_queue_revision_age_reset` | 내용이 바뀐 CJK revision의 age 재시작 횟수 |
 | `stage_replaced_unconfirmed` | 확정 전 교체된 staged 후보 |

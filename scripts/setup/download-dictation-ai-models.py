@@ -95,6 +95,13 @@ def _faster_whisper_repo_id(model_name: str) -> str:
     return f"Systran/faster-whisper-{normalized}"
 
 
+def _sat_repo_id(model_name: str) -> str:
+    normalized = str(model_name or "").strip()
+    if "/" in normalized:
+        return normalized
+    return f"segment-any-text/{normalized}"
+
+
 def _hf_model_total_size(repo_id: str) -> int | None:
     try:
         from huggingface_hub import model_info
@@ -231,7 +238,8 @@ def download_sat_model(model_name: str) -> None:
     _log(f"Downloading SaT sentence boundary model: {model_name}")
     from wtpsplit import SaT
 
-    total_size = _hf_model_total_size(model_name)
+    repo_id = _sat_repo_id(model_name)
+    total_size = _hf_model_total_size(repo_id)
 
     def action() -> None:
         with warnings.catch_warnings():
@@ -242,8 +250,8 @@ def download_sat_model(model_name: str) -> None:
             )
             SaT(model_name)
 
-    _run_with_progress(f"sat:{model_name}", [_hf_cache_dir(model_name)], total_size, action)
-    _log(f"SaT sentence boundary model ready: {model_name}")
+    _run_with_progress(f"sat:{model_name}", [_hf_cache_dir(repo_id)], total_size, action)
+    _log(f"SaT sentence boundary model ready: {model_name} resolved={repo_id}")
 
 
 def download_qwen_asr_model(model_name: str) -> None:

@@ -77,8 +77,8 @@
 
 ## 테스트 반영 원칙
 
-- `tests/eval/dictation_ai/performance_tracking.py`의 수집 케이스는 성공/실패 자체를 품질 게이트로 보지 않는다.
-- 벤치 실행 성공은 수집 케이스가 실행되고 tracking rate/gap이 출력됐다는 뜻이다.
+- `tests/eval/dictation_ai/sbd_text_cases.sample.jsonl`의 수집 케이스는 성공/실패 자체를 품질 게이트로 보지 않는다.
+- 벤치 실행 성공은 수집 케이스가 실행되고 SBD lifecycle 리포트가 출력됐다는 뜻이다.
 - 확정 미처리 케이스는 confirmation reset, staged age 누적, replacement 판단을 함께 넣어 실패 현상을 재현한다.
 - 품질 차단 케이스는 final 성공이 아니라 `spaced_cjk`, `cjk_internal_gap`, `short_cjk` 등 차단 사유가 유지되는지를 지표로 기록한다.
 - 로그 이후 이미 구현된 보완으로 matched가 올라가는 것은 성능 개선으로 해석한다. 반대로 matched가 낮은 케이스는 다음 파라미터 튜닝과 로직 보완의 근거로 남긴다.

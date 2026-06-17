@@ -3,6 +3,24 @@ from __future__ import annotations
 import re
 from difflib import SequenceMatcher
 
+from src.app.dictation_revision_policy import (
+    cjk_confirm_preserve_common_run_min as _cjk_confirm_preserve_common_run_min,
+    cjk_confirm_preserve_coverage_min as _cjk_confirm_preserve_coverage_min,
+    cjk_confirm_preserve_ratio_min as _cjk_confirm_preserve_ratio_min,
+    cjk_revision_common_run_min as _cjk_revision_common_run_min,
+    cjk_revision_coverage_min as _cjk_revision_coverage_min,
+    cjk_revision_fallback_ratio_min as _cjk_revision_fallback_ratio_min,
+    cjk_revision_max_length_delta as _cjk_revision_max_length_delta,
+    cjk_revision_ratio_min as _cjk_revision_ratio_min,
+    cjk_revision_short_max_units as _cjk_revision_short_max_units,
+    revision_fallback_common_run_min as _revision_fallback_common_run_min,
+    revision_fallback_coverage_min as _revision_fallback_coverage_min,
+    revision_prefix_common_run_min as _revision_prefix_common_run_min,
+    revision_prefix_run_min as _revision_prefix_run_min,
+    revision_similarity_policy as _revision_similarity_policy,
+    revision_tail_best_j_max as _revision_tail_best_j_max,
+    revision_tail_common_run_min as _revision_tail_common_run_min,
+)
 from src.app.sentence_boundary import (
     sentence_end_count as _boundary_sentence_end_count,
     split_completed_sentences as _boundary_split_completed_sentences,
@@ -24,41 +42,6 @@ SHORT_CJK_FINAL_UNITS = 10
 CJK_REVISION_INTERNAL_STABILITY_MIN_RATIO = 0.60
 CJK_REVISION_INTERNAL_STABILITY_MIN_CHARS = 40
 SHORT_CJK_REPLACEMENT_HOLD_CHUNKS = 2
-CJK_REVISION_SHORT_MAX_UNITS = 4
-CJK_REVISION_MAX_LENGTH_DELTA = 4
-CJK_REVISION_RATIO_MIN = 0.78
-CJK_REVISION_COMMON_RUN_MIN = 3
-CJK_REVISION_COVERAGE_MIN = 0.75
-CJK_REVISION_FALLBACK_RATIO_MIN = 0.70
-CJK_CONFIRM_PRESERVE_RATIO_MIN = 0.72
-CJK_CONFIRM_PRESERVE_COMMON_RUN_MIN = 3
-CJK_CONFIRM_PRESERVE_COVERAGE_MIN = 0.70
-REVISION_TAIL_COMMON_RUN_MIN = 8
-REVISION_TAIL_BEST_J_MAX = 3
-REVISION_PREFIX_RUN_MIN = 5
-REVISION_PREFIX_COMMON_RUN_MIN = 5
-REVISION_FALLBACK_COMMON_RUN_MIN = 4
-REVISION_FALLBACK_COVERAGE_MIN = 0.60
-
-
-def _revision_similarity_policy() -> dict[str, int | float]:
-    return {
-        "cjk_revision_short_max_units": CJK_REVISION_SHORT_MAX_UNITS,
-        "cjk_revision_max_length_delta": CJK_REVISION_MAX_LENGTH_DELTA,
-        "cjk_revision_ratio_min": CJK_REVISION_RATIO_MIN,
-        "cjk_revision_common_run_min": CJK_REVISION_COMMON_RUN_MIN,
-        "cjk_revision_coverage_min": CJK_REVISION_COVERAGE_MIN,
-        "cjk_revision_fallback_ratio_min": CJK_REVISION_FALLBACK_RATIO_MIN,
-        "cjk_confirm_preserve_ratio_min": CJK_CONFIRM_PRESERVE_RATIO_MIN,
-        "cjk_confirm_preserve_common_run_min": CJK_CONFIRM_PRESERVE_COMMON_RUN_MIN,
-        "cjk_confirm_preserve_coverage_min": CJK_CONFIRM_PRESERVE_COVERAGE_MIN,
-        "revision_tail_common_run_min": REVISION_TAIL_COMMON_RUN_MIN,
-        "revision_tail_best_j_max": REVISION_TAIL_BEST_J_MAX,
-        "revision_prefix_run_min": REVISION_PREFIX_RUN_MIN,
-        "revision_prefix_common_run_min": REVISION_PREFIX_COMMON_RUN_MIN,
-        "revision_fallback_common_run_min": REVISION_FALLBACK_COMMON_RUN_MIN,
-        "revision_fallback_coverage_min": REVISION_FALLBACK_COVERAGE_MIN,
-    }
 
 
 def _normalized_text(text: str) -> str:
@@ -563,15 +546,16 @@ def _cjk_revision_similarity(left_words: list[str], right_words: list[str]) -> t
 def _cjk_sentences_are_similar_revisions(left_words: list[str], right_words: list[str]) -> bool:
     ratio, common_run, coverage, length_delta = _cjk_revision_similarity(left_words, right_words)
     shorter = min(len(left_words), len(right_words))
-    if shorter <= CJK_REVISION_SHORT_MAX_UNITS and common_run == shorter and length_delta <= CJK_REVISION_MAX_LENGTH_DELTA:
+    max_length_delta = _cjk_revision_max_length_delta()
+    if shorter <= _cjk_revision_short_max_units() and common_run == shorter and length_delta <= max_length_delta:
         return True
-    if shorter > CJK_REVISION_SHORT_MAX_UNITS and ratio >= CJK_REVISION_RATIO_MIN and length_delta <= CJK_REVISION_MAX_LENGTH_DELTA:
+    if shorter > _cjk_revision_short_max_units() and ratio >= _cjk_revision_ratio_min() and length_delta <= max_length_delta:
         return True
     if (
-        common_run >= CJK_REVISION_COMMON_RUN_MIN
-        and coverage >= CJK_REVISION_COVERAGE_MIN
-        and ratio >= CJK_REVISION_FALLBACK_RATIO_MIN
-        and length_delta <= CJK_REVISION_MAX_LENGTH_DELTA
+        common_run >= _cjk_revision_common_run_min()
+        and coverage >= _cjk_revision_coverage_min()
+        and ratio >= _cjk_revision_fallback_ratio_min()
+        and length_delta <= max_length_delta
     ):
         return True
     return False
@@ -583,11 +567,11 @@ def _should_preserve_cjk_confirmation_by_similarity(previous: str, preferred: st
     if not previous_words or not preferred_words:
         return False
     ratio, common_run, coverage, length_delta = _cjk_revision_similarity(previous_words, preferred_words)
-    if length_delta > CJK_REVISION_MAX_LENGTH_DELTA:
+    if length_delta > _cjk_revision_max_length_delta():
         return False
-    return ratio >= CJK_CONFIRM_PRESERVE_RATIO_MIN or (
-        common_run >= CJK_CONFIRM_PRESERVE_COMMON_RUN_MIN
-        and coverage >= CJK_CONFIRM_PRESERVE_COVERAGE_MIN
+    return ratio >= _cjk_confirm_preserve_ratio_min() or (
+        common_run >= _cjk_confirm_preserve_common_run_min()
+        and coverage >= _cjk_confirm_preserve_coverage_min()
     )
 
 
@@ -620,23 +604,23 @@ def _sentences_are_revisions(left: str, right: str) -> bool:
         tail_blocks = [
             block
             for block in SequenceMatcher(None, left_words, right_words, autojunk=False).get_matching_blocks()
-            if block.size >= REVISION_TAIL_COMMON_RUN_MIN and block.a + block.size == len(left_words)
+            if block.size >= _revision_tail_common_run_min() and block.a + block.size == len(left_words)
         ]
         if tail_blocks:
             return True
     if (
-        common_run >= REVISION_TAIL_COMMON_RUN_MIN
+        common_run >= _revision_tail_common_run_min()
         and best_i + common_run == len(left_words)
-        and best_j <= REVISION_TAIL_BEST_J_MAX
+        and best_j <= _revision_tail_best_j_max()
     ):
         return True
     if (
-        prefix_run >= REVISION_PREFIX_RUN_MIN
-        and common_run >= REVISION_PREFIX_COMMON_RUN_MIN
+        prefix_run >= _revision_prefix_run_min()
+        and common_run >= _revision_prefix_common_run_min()
         and len(right_words) >= len(left_words)
     ):
         return True
-    return common_run >= REVISION_FALLBACK_COMMON_RUN_MIN and common_run / max(shorter, 1) >= REVISION_FALLBACK_COVERAGE_MIN
+    return common_run >= _revision_fallback_common_run_min() and common_run / max(shorter, 1) >= _revision_fallback_coverage_min()
 
 
 def _sentence_required_confirmations(forced: bool) -> int:
@@ -928,12 +912,11 @@ def _should_finalize_before_replacement(
     return True
 
 
-def _is_recent_final_echo(candidate: str, recent_sentence: str, language: str) -> bool:
-    normalized_language = str(language or "").strip().lower()
-    if normalized_language != "zh" and not (_is_cjk_text(candidate) and _is_cjk_text(recent_sentence)):
-        return False
+def _is_recent_final_echo(candidate: str, recent_sentence: str, _language: str) -> bool:
     candidate_words = _word_units(candidate)
     recent_words = _word_units(recent_sentence)
+    if _compact_recent_final_delta(candidate_words, recent_words) is not None:
+        return True
     if min(len(candidate_words), len(recent_words)) < 8:
         return False
     ratio = SequenceMatcher(None, recent_words, candidate_words, autojunk=False).ratio()
@@ -947,16 +930,37 @@ def _is_recent_final_echo(candidate: str, recent_sentence: str, language: str) -
     return False
 
 
-def _recent_final_sentence_delta(candidate: str, recent_sentence: str, language: str) -> str | None:
-    normalized_language = str(language or "").strip().lower()
-    if normalized_language != "zh" and not (_is_cjk_text(candidate) and _is_cjk_text(recent_sentence)):
+def _compact_recent_final_delta(candidate_words: list[str], recent_words: list[str]) -> str | None:
+    candidate_key = "".join(candidate_words).lower()
+    recent_key = "".join(recent_words).lower()
+    if min(len(candidate_key), len(recent_key)) < 8:
         return None
+    if candidate_key == recent_key or candidate_key in recent_key:
+        return ""
+    if recent_key in candidate_key:
+        return ""
+    matcher = SequenceMatcher(None, recent_key, candidate_key, autojunk=False)
+    ratio = matcher.ratio()
+    max_block = max((block.size for block in matcher.get_matching_blocks()), default=0)
+    shorter = min(len(candidate_key), len(recent_key))
+    longer = max(len(candidate_key), len(recent_key))
+    if ratio >= 0.82:
+        return ""
+    if max_block / max(shorter, 1) >= 0.78 and (longer - max_block) <= max(6, int(longer * 0.35)):
+        return ""
+    return None
+
+
+def _recent_final_sentence_delta(candidate: str, recent_sentence: str, language: str) -> str | None:
     normalized_candidate = _normalized_text(candidate)
     normalized_recent = _normalized_text(recent_sentence)
     if not normalized_candidate or not normalized_recent:
         return None
     candidate_words = _word_units(normalized_candidate)
     recent_words = _word_units(normalized_recent)
+    compact_delta = _compact_recent_final_delta(candidate_words, recent_words)
+    if compact_delta is not None:
+        return compact_delta
     if min(len(candidate_words), len(recent_words)) < 8:
         return None
     if _contains_word_sequence(recent_words, candidate_words):

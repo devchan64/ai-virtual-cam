@@ -759,19 +759,16 @@ final-only 번역
 
 ```text
 ./.venv/bin/python -m unittest \
-  tests.unit.test_dictation_ai_sentence_forcing \
-  tests.unit.test_dictation_ai_transcript_delta \
-  tests.unit.test_dictation_ai_sentence_boundary \
   tests.unit.test_transcript_revision
 
-./.venv/bin/python tests/eval/dictation_ai/performance_tracking.py \
-  --output .tmp/eval/dictation-ai-performance-tracking/latest.json
-
-./.venv/bin/python tests/eval/dictation_ai/sentence_revision_tracking.py
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/latest.json
 ```
 
 단위 테스트는 deterministic helper 회귀 검증으로 통과했다.
-성능 추적 케이스는 별도 벤치 리포트로 rate/gap을 출력한다.
+성능 추적 케이스는 SBD 벤치 리포트로 final/staged/pending lifecycle 지표를 출력한다.
 
 ```text
 ./.venv/bin/python -m py_compile \
@@ -1417,6 +1414,203 @@ final_f1_avg=0.277
 - 값 자체는 변경하지 않았다.
 - SBD 벤치 리포트에 `revision_similarity_policy`를 기록한다.
 - 이 값들은 아직 GUI/사용자 설정으로 노출하지 않고 내부 튜닝 policy로 관리한다.
+
+### 반복 튜닝: revision similarity 상수 조합 비교
+
+목적:
+
+- 중복 확정과 확정 누락이 리비전 유사도 상수 변경만으로 개선되는지 확인한다.
+- 기본 운영값을 직접 바꾸지 않고 `AVC_DICTATION_*` 환경변수로 동일 벤치에서 조합을 비교한다.
+
+CUDA/SaT 벤치 비교:
+
+```text
+baseline:
+pass_rate=0.200
+final_f1_avg=0.263
+final_precision_avg=0.279
+final_recall_avg=0.255
+finalized=107
+false_positive=82
+false_negative=110
+
+permissive:
+pass_rate=0.200
+final_f1_avg=0.257
+final_precision_avg=0.272
+final_recall_avg=0.250
+finalized=112
+false_positive=88
+false_negative=111
+
+strict:
+pass_rate=0.200
+final_f1_avg=0.260
+final_precision_avg=0.278
+final_recall_avg=0.251
+finalized=106
+false_positive=82
+false_negative=111
+
+tail/prefix relaxed:
+pass_rate=0.200
+final_f1_avg=0.263
+final_precision_avg=0.279
+final_recall_avg=0.255
+finalized=109
+false_positive=84
+false_negative=110
+
+confirm preserve strict:
+pass_rate=0.200
+final_f1_avg=0.263
+final_precision_avg=0.279
+final_recall_avg=0.255
+finalized=107
+false_positive=82
+false_negative=110
+
+CJK length delta/tail position relaxed:
+pass_rate=0.167
+final_f1_avg=0.256
+final_precision_avg=0.267
+final_recall_avg=0.256
+finalized=113
+false_positive=88
+false_negative=110
+
+CJK length delta strict:
+pass_rate=0.200
+final_f1_avg=0.263
+final_precision_avg=0.279
+final_recall_avg=0.255
+finalized=107
+false_positive=82
+false_negative=110
+```
+
+판단:
+
+- permissive 조합은 final 수를 늘렸지만 false positive와 false negative가 모두 악화되어 폐기한다.
+- strict 조합은 확정 수를 줄였지만 false negative를 줄이지 못해 폐기한다.
+- tail/prefix 완화는 F1은 유지했지만 false positive가 늘어 기본값 대비 이점이 없다.
+- confirmation 보존 강화와 CJK length delta 강화는 기준값과 동등해 채택 근거가 없다.
+- CJK length delta/tail position 완화는 pass rate와 precision을 낮춰 폐기한다.
+- 결론적으로 현재 벤치에서는 리비전 관리 상수 변경만으로 중복 확정과 확정 누락이 개선되지 않았다. 기본 상수는 유지하고, 다음 개선은 상수 튜닝보다 final 전 최근 확정 문장 유사도 비교와 staged queue 소비 설계 검토가 우선이다.
+
+### 추가 관측: 한국어 주행 로그 중복 확정
+
+관측 입력:
+
+```text
+오 주행하죠?
+지금 3배속이니까 1분의 1 속도로 보시면 요게 정...
+이게 정상속도입니다
+지금 3배속 이니까 1분의 1 속도로 보시면 요게 정상 속도입니다
+뭐 그렇게 빠른 건 아니에요
+일단 도심도로 지금 3배속이니까 1분의 1속도로 보시면 이게 정상속도입니다
+그렇게 빠른건 아니에요
+일단 도심도로 이런식으로 가고요
+이게 정상 속도입니다
+일단 도심도로 이런 식으로 가고요
+```
+
+보완:
+
+- `ko_log_duplicate_driving_speed_fragment_20260617_001`을 SBD 벤치 케이스로 추가했다.
+- 문장 확정 규칙은 언어 코드별 예외로 만들지 않는다.
+- 최근 final 후보 비교는 token-sentence compact 유사도 기반 공통 규칙으로 정리했다.
+
+CUDA/SaT 벤치 결과:
+
+```text
+cases=31
+pass_rate=0.194
+finalized=112
+stage_start=169
+finalized_per_stage_start=0.663
+final_f1_avg=0.257
+
+ko_log_duplicate_driving_speed_fragment_20260617_001:
+case_pass=false
+precision=0.200
+recall=0.250
+f1=0.222
+candidate_duplicate_suppressed=4
+final_quality_no_end_marker=3
+```
+
+판단:
+
+- 추가한 공통 recent-final compact 유사도 규칙으로 중복 후보 4개는 억제됐다.
+- 하지만 `요게 정...`, `이게 정상속도입니다`, `일단 도심도로 지금 3배속이니까` 같은 미완성 후보가 먼저 final로 나가 케이스는 아직 실패한다.
+- 다음 개선은 언어별 suffix 예외가 아니라 종결 신호 없는 staged 후보의 replacement-before-final 조건을 공통 규칙으로 재검토하는 방향이다.
+
+### 추가 관측: 한국어 경로 기억 로그의 누락+중복 복합 실패
+
+로그 근거:
+
+```text
+.tmp/logs/avc-whisper.log.1
+23:18:01 chunk=4 pending='...내가 갔던 길을 또 가야 되는'
+23:18:02 chunk=5 pending='...내가 갔던 길을 또 가야 되는 경우 많잖아요'
+23:18:03 chunk=6 final reason=confirmed quality_flags=no_end_marker
+23:18:05 chunk=8 stage_start='대부분 운전자들은 갔던 길'
+23:18:06 chunk=9 stage_replace decision=open_korean_clause
+23:18:06 chunk=9 final reason=next_completed quality_flags=no_end_marker
+23:18:11 chunk=14 stage_replace decision=open_korean_clause
+23:18:11 chunk=14 final reason=next_completed
+23:18:13 chunk=16 final reason=next_completed
+23:18:14 chunk=17 final reason=next_completed quality_flags=no_end_marker
+```
+
+보완:
+
+- `ko_log_duplicate_missing_route_memory_fragment_20260617_001`을 SBD 벤치 케이스로 추가했다.
+- 이 케이스는 단순 중복이 아니라 누락, 조각 final, 최근 final 억제가 동시에 나타나는 복합 실패로 분류한다.
+
+CUDA/SaT 벤치 결과:
+
+```text
+cases=32
+pass_rate=0.188
+finalized=116
+stage_start=174
+finalized_per_stage_start=0.667
+final_f1_avg=0.249
+
+ko_log_duplicate_missing_route_memory_fragment_20260617_001:
+case_pass=false
+precision=0.000
+recall=0.000
+f1=0.000
+false_positive=4
+false_negative=4
+finalized=4
+stage_finalize_before_replace=4
+stage_replace_decision_open_korean_clause=1
+stage_replaced_unconfirmed=1
+stage_revision=7
+stage_revision_changed=4
+candidate_duplicate_suppressed=4
+final_quality_no_end_marker=1
+```
+
+실제 final:
+
+```text
+이런 것들을 위주로 하는데 그런데 만약에 내가 갔던 길을 또 가야 되는 경우 많잖아요.
+대부분 운전자들은 갔던 길 또 가니까 집회사 집회사입니다
+아니 무슨 놀이공원 집회사 집회사입니다.
+그래서 갔던 길을 기억하고 있다가 그 길을 똑같이 가는 거 이게 되게 중요하거든요.
+```
+
+판단:
+
+- 최근 final 억제는 일부 동작해 `candidate_duplicate_suppressed=4`를 만들지만, 이미 잘못 final된 조각을 되돌릴 수 없다.
+- 핵심 원인은 `stage_finalize_before_replace=4`다. 다음 completed 후보가 들어올 때 기존 staged를 final로 밀어내는 규칙이 open clause와 no-end-marker 후보를 충분히 보류하지 못한다.
+- `stage_replace_decision_open_korean_clause=1`과 `stage_replaced_unconfirmed=1`은 일부 조각이 final 대신 교체 폐기됐음을 보여준다. 하지만 다른 후보들은 `next_completed`로 final되어 중복과 누락이 동시에 생겼다.
+- 따라서 다음 개선은 언어별 예외가 아니라 공통 규칙으로 `no_end_marker`/open-clause 성격의 staged 후보가 replacement-before-final을 통과하지 못하게 하는 방향이어야 한다.
 
 ## 남은 실험 과제
 
