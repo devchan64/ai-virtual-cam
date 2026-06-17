@@ -304,13 +304,12 @@ class WhisperTranscriptWorker:
         device = str(getattr(self._cfg, "sentenceBoundaryDevice", "cuda"))
         compute_type = str(getattr(self._cfg, "sentenceBoundaryComputeType", "float16"))
         backend, model = self._sentence_boundary_settings_for_language(detected_language)
-        download_source = "Hugging Face"
         self._emit(
             "status",
             "STT 결과 문장 경계 처리 모델 로딩 중: "
             f"profile={getattr(self._cfg, 'postProcessingProfile', 'manual')} backend={backend} model={model} "
             f"device={device} compute={compute_type} language={detected_language}. "
-            f"캐시에 없으면 {download_source} 모델 다운로드가 진행될 수 있습니다.",
+            "Serve 실행 중 다운로드는 하지 않으며, 캐시에 없으면 실패합니다.",
             display=False,
         )
         detector = create_sentence_boundary_detector(
@@ -462,7 +461,7 @@ class WhisperTranscriptWorker:
                 "STT 모델 로딩 중: "
                 f"profile={getattr(self._cfg, 'postProcessingProfile', 'manual')} backend={stt_backend} model={stt_model} "
                 f"device={self._cfg.device} compute={self._cfg.computeType} language={self._cfg.language}. "
-                "캐시에 없으면 Hugging Face 모델 다운로드가 진행될 수 있습니다.",
+                "Serve 실행 중 다운로드는 하지 않으며, 캐시에 없으면 실패합니다.",
             )
             try:
                 model = build_stt_model(
@@ -613,6 +612,7 @@ class WhisperTranscriptWorker:
         staged_confirmations = 0
         staged_age = 0
         staged_forced = False
+        staged_deferred_age_chunk = -1
         previous_window_text = ""
         lifecycle_metrics: dict[str, int] = {}
         chunk_lifecycle_metrics: dict[str, int] = {}
@@ -654,7 +654,7 @@ class WhisperTranscriptWorker:
                 break
 
         def finalize_staged_sentence(detected: str, reason: str) -> list[str]:
-            nonlocal committed_text, staged_sentence, staged_confirmations, staged_age, staged_forced
+            nonlocal committed_text, staged_sentence, staged_confirmations, staged_age, staged_forced, staged_deferred_age_chunk
             if not staged_sentence:
                 return []
             count_metric("finalize_attempt")
@@ -666,6 +666,7 @@ class WhisperTranscriptWorker:
             staged_confirmations = 0
             staged_age = 0
             staged_forced = False
+            staged_deferred_age_chunk = -1
             if not output_sentence:
                 count_metric("finalize_duplicate_suppressed")
                 count_segment_state("suppressed")
@@ -713,7 +714,7 @@ class WhisperTranscriptWorker:
             return [output_sentence]
 
         def stage_completed_sentence(sentence: str, detected: str, *, forced: bool = False) -> list[str]:
-            nonlocal staged_sentence, staged_confirmations, staged_age, staged_forced
+            nonlocal staged_sentence, staged_confirmations, staged_age, staged_forced, staged_deferred_age_chunk
             normalized_sentence = _normalized_text(sentence)
             candidate = _sentence_output_delta(committed_text, sentence)
             if candidate and candidate != normalized_sentence:
@@ -844,6 +845,31 @@ class WhisperTranscriptWorker:
                 sentence_finalize_age,
             )
             count_metric(f"stage_replace_decision_{replacement_reason}")
+            if replacement_reason == "unconfirmed_cjk":
+                count_metric("stage_replace_deferred")
+                if staged_deferred_age_chunk != chunks:
+                    staged_age += 1
+                    staged_deferred_age_chunk = chunks
+                    count_metric("stage_age_tick")
+                self._emit(
+                    "status",
+                    "받아쓰기 AI stage 교체 보류: "
+                    f"chunk={chunks} decision={replacement_reason} staged_confirmations={staged_confirmations} "
+                    f"staged_age={staged_age} staged_tail={_diagnostic_tail(staged_sentence)} "
+                    f"candidate_tail={_diagnostic_tail(candidate)}",
+                    display=False,
+                )
+                if _should_finalize_before_replacement(
+                    staged_sentence,
+                    detected,
+                    staged_confirmations,
+                    staged_age,
+                    sentence_finalize_age,
+                    staged_forced,
+                ):
+                    count_metric("stage_age_finalize")
+                    return finalize_staged_sentence(detected, "aged")
+                return []
             self._emit(
                 "status",
                 "받아쓰기 AI stage 교체: "
@@ -889,12 +915,14 @@ class WhisperTranscriptWorker:
                 staged_confirmations = 0
                 staged_age = 0
                 staged_forced = False
+                staged_deferred_age_chunk = -1
             count_metric("stage_start")
             count_segment_state("staged")
             staged_sentence = candidate
             staged_confirmations = 1
             staged_age = 0
             staged_forced = forced
+            staged_deferred_age_chunk = -1
             self._emit(
                 "status",
                 "받아쓰기 AI stage 시작: "

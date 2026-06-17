@@ -601,7 +601,7 @@ stable token 지표를 추가한 뒤 중국어 실시간 경로를 약 5분 더 
 - `tests/eval/dictation_ai/sbd_text_cases.sample.jsonl` 24건
 - `sat-3l-sm`, CUDA, `float16`
 - `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`
-- mock/smoke 경로는 성능 판단에 사용하지 않았다.
+- mock/smoke 경로는 성능 벤치 CLI에 두지 않는다.
 
 기준선:
 
@@ -701,7 +701,7 @@ final-only 번역
 - internal overlap 기반 delta 보정은 의미 단위 재작성에 가까워 제거한다.
 - 여러 completed 후보가 한 window에서 나와도 SBD 모델 경계 단위를 보존한다.
 - VAD/silence는 final trigger나 boundary confidence 보정에 넣지 않는다.
-- 벤치 실행은 실제 모델 기준인 `sat + cuda + float16`만 성능 판단 근거로 삼는다. mock/smoke/CPU 결과는 성능 튜닝 근거로 사용하지 않는다.
+- 벤치 실행은 실제 모델 기준인 `sat + cuda + float16`만 성능 판단 근거로 삼는다. mock/smoke/CPU 실행 경로는 벤치 CLI에 두지 않는다.
 - 성능 추적 테스트는 품질 게이트가 아니라 누락/중복/확정 지연의 추세 관측 도구로 유지한다.
 
 ### 로직 변경 아이데이션
@@ -711,7 +711,7 @@ final-only 번역
 | 같은 chunk 안 여러 completed 후보가 단일 staged slot에서 서로 밀어냄 | 후보를 합치기보다 문장 단위 lifecycle 구조 문제로 본다. | completed 재구성 로직과 관련 테스트를 제거했다. |
 | internal overlap delta가 일부 중복을 줄일 수 있음 | pending/new 접합 보정과 유사한 의미 재작성 위험이 있다. | 내부 overlap delta 보정과 품질 게이트 테스트를 제거했다. |
 | 수치 튜닝 후보가 일부 지표를 개선함 | 기준 파이프라인을 흐리면 필수 구현처럼 오해된다. | 기준 문서에서 튜닝 후보와 폐기 후보 표를 제거하고 실험일지로 이동했다. |
-| 성능 벤치를 mock/CPU로 돌릴 수 있음 | 실제 운영 품질 판단과 무관한 결과가 된다. | 벤치 CLI에서 `sat + cuda + float16`만 허용하도록 했다. |
+| 성능 벤치를 mock/smoke/CPU로 돌릴 수 있음 | 실제 운영 품질 판단과 무관한 결과가 된다. | 벤치 CLI에서 mock/smoke 경로를 폐기하고 `sat + cuda + float16`만 허용하도록 했다. |
 
 ### 문서 정리
 
@@ -760,14 +760,13 @@ final-only 번역
 ```text
 ./.venv/bin/python -m unittest \
   tests.unit.test_dictation_ai_sentence_revision \
-  tests.unit.test_dictation_ai_sbd_benchmark \
   tests.unit.test_dictation_ai_sentence_forcing \
   tests.unit.test_dictation_ai_performance_tracking \
   tests.unit.test_dictation_ai_transcript_delta \
   tests.unit.test_dictation_ai_sentence_boundary \
   tests.unit.test_transcript_revision
 
-Ran 394 tests
+Ran 391 tests
 OK
 ```
 
@@ -779,6 +778,66 @@ OK
 ```
 
 이번 검증은 코드 정리 검증이다. 성능 판단용 CUDA/SaT 벤치 수치는 별도 실행 결과만 기준으로 삼는다.
+
+후속 정리에서 `tests.unit.test_dictation_ai_sbd_benchmark`는 제거했다. 해당 테스트는 eval 벤치의 private lifecycle 함수를 다시 호출해 작은 벤치 하네스를 별도로 유지하는 구조였으므로, SBD 생명주기 성능 판단은 `tests/eval/dictation_ai/sbd_benchmark.py` 한 곳에서만 관리한다.
+
+## 2026-06-17 CJK staged 교체 보류 최소 개선
+
+### 문제
+
+로그와 벤치에서 중국어 completed 후보가 한 chunk 안에 여러 개 나올 때 단일 `staged_sentence` 슬롯이 계속 교체됐다. 기존 staged 후보는 대부분 `unconfirmed_cjk`로 suppress되어 final까지 도달하지 못했다.
+
+### 최소 변경
+
+- `unconfirmed_cjk` replacement는 즉시 suppress/replace하지 않고 `stage_replace_deferred`로 보류한다.
+- 보류는 chunk당 한 번만 `staged_age`를 증가시킨다.
+- staged 후보가 age 기준을 채우면 기존 append-only final 경로로 확정한다.
+- completed 후보 합성, overlap 접합, collapse 재작성은 다시 도입하지 않는다.
+
+### CUDA/SaT 벤치 결과
+
+조건:
+
+```text
+HF_HUB_OFFLINE=1
+TRANSFORMERS_OFFLINE=1
+backend=sat
+device=cuda
+compute_type=float16
+cases=24
+```
+
+변경 전:
+
+```text
+pass_rate=0.083
+finalized=8
+stage_start=809
+finalized_per_stage_start=0.010
+stage_replace=781
+stage_replaced_unconfirmed=781
+final_f1_avg=0.083
+```
+
+변경 후:
+
+```text
+pass_rate=0.083
+finalized=63
+stage_start=164
+finalized_per_stage_start=0.384
+stage_replace=532
+stage_replace_deferred=451
+stage_replaced_unconfirmed=81
+final_f1_avg=0.106
+```
+
+판단:
+
+- 실행은 정상이다.
+- final 확정 수와 staged 대비 final 비율이 크게 개선됐다.
+- pass rate는 그대로라 정답 기대치와 실제 final granularity는 추가 검토가 필요하다.
+- 현재 개선은 구조적 최소 보완으로 유지하고, 다음 단계는 다중 staged lifecycle 설계 여부를 별도로 판단한다.
 
 ## 남은 실험 과제
 

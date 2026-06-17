@@ -391,7 +391,6 @@ python3 -m unittest tests.unit.test_dictation_ai_performance_tracking
 ```bash
 python3 tests/eval/dictation_ai/sbd_benchmark.py \
   --cases tests/eval/dictation_ai/sbd_text_cases.sample.jsonl \
-  --backend sat \
   --model sat-3l-sm \
   --device cuda \
   --compute-type float16 \

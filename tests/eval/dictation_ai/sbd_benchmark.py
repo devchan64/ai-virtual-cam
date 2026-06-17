@@ -56,6 +56,7 @@ class LifecycleState:
     staged_confirmations: int = 0
     staged_age: int = 0
     staged_forced: bool = False
+    staged_deferred_age_chunk: int = -1
     final_sentences: list[str] | None = None
     metrics: dict[str, int] | None = None
 
@@ -158,6 +159,7 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str)
     state.staged_confirmations = 0
     state.staged_age = 0
     state.staged_forced = False
+    state.staged_deferred_age_chunk = -1
     if not output_sentence:
         state.count("finalize_duplicate_suppressed")
         state.count("segment_state_suppressed")
@@ -179,6 +181,7 @@ def _stage_completed_sentence(
     *,
     forced: bool,
     sentence_finalize_age: int,
+    chunk_index: int,
 ) -> list[str]:
     normalized_sentence = normalized_text(sentence)
     candidate = _sentence_output_delta(state.committed_text, normalized_sentence)
@@ -242,6 +245,23 @@ def _stage_completed_sentence(
         sentence_finalize_age,
     )
     state.count(f"stage_replace_decision_{replacement_reason}")
+    if replacement_reason == "unconfirmed_cjk":
+        state.count("stage_replace_deferred")
+        if state.staged_deferred_age_chunk != chunk_index:
+            state.staged_age += 1
+            state.staged_deferred_age_chunk = chunk_index
+            state.count("stage_age_tick")
+        if _should_finalize_before_replacement(
+            state.staged_sentence,
+            language,
+            state.staged_confirmations,
+            state.staged_age,
+            sentence_finalize_age,
+            state.staged_forced,
+        ):
+            state.count("stage_age_finalize")
+            return _finalize_staged_sentence(state, language, "aged")
+        return []
     if _should_finalize_replaced_sentence(
         state.staged_sentence,
         candidate,
@@ -269,12 +289,14 @@ def _stage_completed_sentence(
         state.staged_confirmations = 0
         state.staged_age = 0
         state.staged_forced = False
+        state.staged_deferred_age_chunk = -1
     state.count("stage_start")
     state.count("segment_state_staged")
     state.staged_sentence = candidate
     state.staged_confirmations = 1
     state.staged_age = 0
     state.staged_forced = forced
+    state.staged_deferred_age_chunk = -1
     return finalized
 
 
@@ -334,6 +356,7 @@ def _run_lifecycle_case(case: SbdCase, detector: Any) -> dict[str, Any]:
                 case.language,
                 forced=False,
                 sentence_finalize_age=case.sentence_finalize_age,
+                chunk_index=chunk_index,
             )
             produced.extend(finalized)
             for produced_sentence in finalized:
@@ -381,15 +404,12 @@ def _write_report(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+BENCHMARK_BACKEND = "sat"
+
+
 def _validate_real_ai_cuda_args(args: argparse.Namespace) -> None:
-    backend = str(args.backend or "").strip().lower()
     device = str(args.device or "").strip().lower()
     compute_type = str(args.compute_type or "").strip().lower()
-    if backend != "sat":
-        raise ValueError(
-            "Dictation AI SBD benchmark must use the real AI backend: "
-            f"--backend=sat required, got {args.backend!r}. mock/smoke benchmarks are not valid performance data."
-        )
     if device != "cuda":
         raise ValueError(
             "Dictation AI SBD benchmark must run on CUDA: "
@@ -405,7 +425,6 @@ def _validate_real_ai_cuda_args(args: argparse.Namespace) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run text-only Dictation AI SBD lifecycle benchmark cases.")
     parser.add_argument("--cases", type=Path, default=REPO_ROOT / "tests/eval/dictation_ai/sbd_text_cases.sample.jsonl")
-    parser.add_argument("--backend", default="sat", choices=("sat", "mock"))
     parser.add_argument("--model", default="sat-3l-sm")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--compute-type", default="float16")
@@ -421,7 +440,7 @@ def main() -> int:
 
     cases = _load_cases(args.cases)
     detector = create_sentence_boundary_detector(
-        args.backend,
+        BENCHMARK_BACKEND,
         model=args.model,
         device=args.device,
         compute_type=args.compute_type,
@@ -470,7 +489,7 @@ def main() -> int:
     final_score_avg = _average_scores(results, "final_score")
     completed_last_score_avg = _average_scores(results, "completed_last_score")
     report = {
-        "backend": args.backend,
+        "backend": BENCHMARK_BACKEND,
         "model": args.model,
         "device": args.device,
         "compute_type": args.compute_type,
