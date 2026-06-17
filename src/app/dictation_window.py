@@ -46,6 +46,7 @@ from src.app.dictation_transcript_logic import (
     _should_finalize_before_replacement,
     _should_stage_boundary_candidate,
     _should_preserve_revision_confirmation_from_internal_stability,
+    _should_reset_revision_age,
     _revision_internal_stability_bucket,
     _should_translate_final_sentence,
     _split_completed_sentences,
@@ -88,7 +89,7 @@ MAX_SEGMENT_NO_SPEECH_CJK_OVERRIDE_PROB = 0.90
 MIN_CJK_CHARS_FOR_NO_SPEECH_OVERRIDE = 12
 RECENT_TRANSCRIPT_WINDOW = 8
 MAX_RECENT_SHORT_TEXT_REPEATS = 2
-MAX_STAGED_SENTENCE_QUEUE = 8
+MAX_STAGED_SENTENCE_QUEUE = 12
 _WINDOW_TITLES = {
     "en": {
         "transcript": "ai-virtual-cam Dictation AI Transcript",
@@ -656,6 +657,13 @@ class WhisperTranscriptWorker:
                 if not _sentences_are_revisions(queued_sentence, candidate):
                     continue
                 preferred = _prefer_sentence_revision(queued_sentence, candidate)
+                reset_age = _should_reset_revision_age(
+                    queued_sentence,
+                    preferred,
+                    stable_analysis.stable_internal_ratio,
+                    stable_analysis.stable_internal_chars,
+                    stable_analysis.stable_overlap_source,
+                )
                 entry["sentence"] = preferred
                 entry["confirmations"] = _next_revision_confirmation_count(
                     queued_sentence,
@@ -665,10 +673,12 @@ class WhisperTranscriptWorker:
                     stable_analysis.stable_internal_chars,
                     stable_analysis.stable_overlap_source,
                 )
-                entry["age"] = int(entry["age"]) + 1
+                entry["age"] = 0 if reset_age else int(entry["age"]) + 1
                 entry["forced"] = bool(entry["forced"]) or forced
                 entry["deferred_age_chunk"] = chunks
                 count_metric("stage_queue_revision")
+                if reset_age:
+                    count_metric("stage_queue_revision_age_reset")
                 count_metric("stage_age_tick")
                 return
             if len(staged_queue) >= MAX_STAGED_SENTENCE_QUEUE:
@@ -892,7 +902,17 @@ class WhisperTranscriptWorker:
                     stable_analysis.stable_internal_chars,
                     stable_analysis.stable_overlap_source,
                 )
-                staged_age += 1
+                if _should_reset_revision_age(
+                    staged_before,
+                    preferred,
+                    stable_analysis.stable_internal_ratio,
+                    stable_analysis.stable_internal_chars,
+                    stable_analysis.stable_overlap_source,
+                ):
+                    staged_age = 0
+                    count_metric("stage_revision_age_reset")
+                else:
+                    staged_age += 1
                 staged_deferred_age_chunk = chunks
                 count_metric("stage_age_tick")
                 staged_forced = staged_forced or forced

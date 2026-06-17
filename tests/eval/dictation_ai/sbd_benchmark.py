@@ -22,6 +22,7 @@ from src.app.dictation_transcript_logic import (
     _prefer_sentence_revision,
     _recent_final_output_delta,
     _replacement_decision_reason,
+    _revision_similarity_policy,
     _sentence_max_age_chunks,
     _sentence_output_delta,
     _sentence_required_confirmations,
@@ -30,12 +31,13 @@ from src.app.dictation_transcript_logic import (
     _should_confirm_staged_sentence,
     _should_finalize_before_replacement,
     _should_finalize_replaced_sentence,
+    _should_reset_revision_age,
     _should_stage_boundary_candidate,
 )
 from src.app.transcript_revision import append_context as _append_committed_text
 from src.app.transcript_revision import consume_committed_prefix as _consume_committed_prefix
 
-MAX_STAGED_SENTENCE_QUEUE = 8
+MAX_STAGED_SENTENCE_QUEUE = 12
 
 
 @dataclass(frozen=True)
@@ -102,16 +104,19 @@ def _queue_staged_sentence(state: LifecycleState, candidate: str, forced: bool, 
         if not _sentences_are_revisions(queued_sentence, candidate):
             continue
         preferred = _prefer_sentence_revision(queued_sentence, candidate)
+        reset_age = _should_reset_revision_age(queued_sentence, preferred)
         entry["sentence"] = preferred
         entry["confirmations"] = _next_revision_confirmation_count(
             queued_sentence,
             preferred,
             int(entry["confirmations"]),
         )
-        entry["age"] = int(entry["age"]) + 1
+        entry["age"] = 0 if reset_age else int(entry["age"]) + 1
         entry["forced"] = bool(entry["forced"]) or forced
         entry["deferred_age_chunk"] = chunk_index
         state.count("stage_queue_revision")
+        if reset_age:
+            state.count("stage_queue_revision_age_reset")
         state.count("stage_age_tick")
         return
     if len(state.staged_queue) >= MAX_STAGED_SENTENCE_QUEUE:
@@ -299,7 +304,11 @@ def _stage_completed_sentence(
             state.count("stage_revision_changed")
         state.staged_sentence = preferred
         state.staged_confirmations = _next_revision_confirmation_count(previous, preferred, state.staged_confirmations)
-        state.staged_age += 1
+        if _should_reset_revision_age(previous, preferred):
+            state.staged_age = 0
+            state.count("stage_revision_age_reset")
+        else:
+            state.staged_age += 1
         state.staged_deferred_age_chunk = chunk_index
         state.count("stage_age_tick")
         state.staged_forced = state.staged_forced or forced
@@ -597,6 +606,7 @@ def main() -> int:
         "model": args.model,
         "device": args.device,
         "compute_type": args.compute_type,
+        "revision_similarity_policy": _revision_similarity_policy(),
         "case_count": len(results),
         "elapsed_ms": round((time.perf_counter() - started) * 1000.0, 3),
         "summary": {

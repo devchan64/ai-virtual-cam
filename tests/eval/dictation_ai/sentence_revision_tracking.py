@@ -12,6 +12,7 @@ from src.app.dictation_transcript_logic import (
     _recent_final_output_delta,
     _should_finalize_before_replacement,
     _should_finalize_boundary_candidate,
+    _should_reset_revision_age,
 )
 from src.app.dictation_window import (
     _diagnostic_tail,
@@ -850,6 +851,14 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         self.assertTrue(_sentences_are_revisions(staged, candidate))
         self.assertEqual(_prefer_sentence_revision(staged, candidate), candidate)
         self.assertEqual(_next_revision_confirmation_count(staged, candidate, 2), 1)
+
+    def test_changed_cjk_revision_resets_age_from_gs25_log(self) -> None:
+        staged = "那个咖啡二十五是做咖啡。"
+        preferred = "那个咖啡二十五是做咖啡的然后这边。"
+
+        self.assertTrue(_sentences_are_revisions(staged, preferred))
+        self.assertEqual(_next_revision_confirmation_count(staged, preferred, 2, 0.90, 69, "common_prefix"), 1)
+        self.assertTrue(_should_reset_revision_age(staged, preferred, 0.90, 69, "common_prefix"))
 
 def main() -> int:
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(WhisperSentenceRevisionTest)

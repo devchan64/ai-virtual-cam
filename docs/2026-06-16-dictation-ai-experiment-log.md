@@ -1306,6 +1306,118 @@ stage_queue_drop_oldest=23
 - 새로 추가한 `zh_log_low_value_cjk_stage_blocks_queue_20260617_001` 케이스는 여전히 final 1개만 생성했고, active staged 뒤에 queue가 쌓였다.
 - 남은 병목은 초단편 후보보다 active staged 확정/교체 소비 지연에 가깝다. 추가 로직을 늘리기 전, 이 병목을 별도 벤치 케이스로 추적한다.
 
+### 추가 보완: CJK revision 변경 시 age 재시작
+
+로그 판단:
+
+- GS25 구간에서 `那个咖啡二十五是做咖啡。`가 `那个咖啡二十五是做咖啡的然后这边。`으로 바뀌었다.
+- 이때 confirmation은 1로 리셋됐지만 age는 누적되어 `aged` final이 발생했다.
+- 결과적으로 아직 이어지는 열린 꼬리 문장이 final-only 번역 대상으로 넘어갈 수 있었다.
+
+보완:
+
+- CJK revision 내용이 바뀌고 similarity/internal stability 기준으로 confirmation 보존이 되지 않는 경우 staged age도 0으로 되돌린다.
+- queue 안의 revision도 같은 기준으로 age를 재시작한다.
+- 관측 지표로 `stage_revision_age_reset`, `stage_queue_revision_age_reset`을 추가했다.
+- `zh_log_revision_age_reset_gs25_20260617_001`을 SBD 벤치 케이스로 추가했다.
+
+CUDA/SaT 벤치 결과:
+
+```text
+cases=30
+pass_rate=0.133
+finalized=103
+stage_start=159
+finalized_per_stage_start=0.648
+final_f1_avg=0.239
+stage_revision_age_reset=23
+stage_queue_revision_age_reset=45
+```
+
+주요 케이스:
+
+```text
+zh_log_revision_age_reset_gs25_20260617_001:
+  actual_final:
+    "我们现在进来了一间GS二十五，就是这边的便利超商。"
+    "但这件很特别的是，它有非常多全自动的。"
+  actual_staged:
+    "那边那个是做披萨的，然后那边那个咖啡二十五是做咖啡的，然后这边这一个它。"
+```
+
+판단:
+
+- 전체 final 수는 109에서 103으로 줄었지만 `final_f1_avg`는 0.223에서 0.239로 올랐다.
+- 이는 확정 누락 개선이 아니라 잘못된 조기 확정과 번역 대상 오염을 줄인 개선이다.
+- active staged 뒤에 queue가 쌓이는 문제는 여전히 남아 있으므로 다음 튜닝은 queue 소비 조건을 별도 벤치로 확인한다.
+
+### 반복 튜닝: staged queue 크기와 승격 직후 확정
+
+검토한 변경:
+
+- queue에서 승격된 후보가 이미 확정 조건을 만족하면 즉시 final로 소비하는 로직을 시험했다.
+- `finalized`는 106으로 늘었지만 `final_f1_avg`가 0.239에서 0.236으로 낮아져 폐기했다.
+
+채택한 변경:
+
+- `MAX_STAGED_SENTENCE_QUEUE`를 8에서 12로 늘렸다.
+- 16도 시험했지만 12와 `final_f1_avg`가 같아 더 보수적인 12를 채택했다.
+
+CUDA/SaT 벤치 비교:
+
+```text
+revision age reset:
+finalized=103
+final_f1_avg=0.239
+stage_queue_drop_oldest=23
+
+queue immediate finalize trial:
+finalized=106
+final_f1_avg=0.236
+stage_queue_ready_finalize=24
+
+queue size 12:
+finalized=107
+final_f1_avg=0.256
+stage_queue_drop_oldest=2
+
+queue size 16:
+finalized=108
+final_f1_avg=0.256
+stage_queue_drop_oldest=0
+
+benchmark expectation fix:
+pass_rate=0.200
+final_f1_avg=0.263
+
+confirm chunks 2 trial:
+pass_rate=0.133
+finalized=129
+final_f1_avg=0.277
+```
+
+판단:
+
+- 승격 직후 확정은 final 수만 늘리고 품질 지표를 낮춰 폐기했다.
+- queue 크기 12는 drop_oldest를 크게 줄이고 `final_f1_avg`를 올렸다.
+- 16은 지표상 추가 이점이 없어 운영 지연과 메모리 증가를 피하기 위해 채택하지 않았다.
+- `orange_juice`와 `gs25` 케이스는 final 결과가 의도와 맞는데 staged/pending 기대값이 파이프라인 정의와 달라 pass를 깨고 있어 벤치 기대값을 정정했다.
+- confirmation 기준 2는 final 수와 F1은 올렸지만 pass_rate를 낮추고 `supper`, `gs25` 케이스를 실패로 바꿔 폐기했다.
+
+### 정리: token-sentence 유사도 임계값 policy화
+
+검토:
+
+- CJK token-sentence revision 판정과 confirmation 보존 기준에는 ratio, common-run, coverage, length-delta 임계값이 함수 안에 직접 들어 있었다.
+- 반복 벤치로 튜닝하려면 어떤 임계값으로 나온 결과인지 리포트에 남아야 한다.
+
+보완:
+
+- CJK revision similarity, confirmation preserve, 일반 revision fallback 임계값을 `dictation_transcript_logic.py` 상단 상수로 분리했다.
+- 값 자체는 변경하지 않았다.
+- SBD 벤치 리포트에 `revision_similarity_policy`를 기록한다.
+- 이 값들은 아직 GUI/사용자 설정으로 노출하지 않고 내부 튜닝 policy로 관리한다.
+
 ## 남은 실험 과제
 
 - 동일 입력 replay 기반으로 `faster-whisper`, `qwen3-asr-0.6b`, 과거 FunASR 기준선을 비교한다.

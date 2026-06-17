@@ -24,6 +24,41 @@ SHORT_CJK_FINAL_UNITS = 10
 CJK_REVISION_INTERNAL_STABILITY_MIN_RATIO = 0.60
 CJK_REVISION_INTERNAL_STABILITY_MIN_CHARS = 40
 SHORT_CJK_REPLACEMENT_HOLD_CHUNKS = 2
+CJK_REVISION_SHORT_MAX_UNITS = 4
+CJK_REVISION_MAX_LENGTH_DELTA = 4
+CJK_REVISION_RATIO_MIN = 0.78
+CJK_REVISION_COMMON_RUN_MIN = 3
+CJK_REVISION_COVERAGE_MIN = 0.75
+CJK_REVISION_FALLBACK_RATIO_MIN = 0.70
+CJK_CONFIRM_PRESERVE_RATIO_MIN = 0.72
+CJK_CONFIRM_PRESERVE_COMMON_RUN_MIN = 3
+CJK_CONFIRM_PRESERVE_COVERAGE_MIN = 0.70
+REVISION_TAIL_COMMON_RUN_MIN = 8
+REVISION_TAIL_BEST_J_MAX = 3
+REVISION_PREFIX_RUN_MIN = 5
+REVISION_PREFIX_COMMON_RUN_MIN = 5
+REVISION_FALLBACK_COMMON_RUN_MIN = 4
+REVISION_FALLBACK_COVERAGE_MIN = 0.60
+
+
+def _revision_similarity_policy() -> dict[str, int | float]:
+    return {
+        "cjk_revision_short_max_units": CJK_REVISION_SHORT_MAX_UNITS,
+        "cjk_revision_max_length_delta": CJK_REVISION_MAX_LENGTH_DELTA,
+        "cjk_revision_ratio_min": CJK_REVISION_RATIO_MIN,
+        "cjk_revision_common_run_min": CJK_REVISION_COMMON_RUN_MIN,
+        "cjk_revision_coverage_min": CJK_REVISION_COVERAGE_MIN,
+        "cjk_revision_fallback_ratio_min": CJK_REVISION_FALLBACK_RATIO_MIN,
+        "cjk_confirm_preserve_ratio_min": CJK_CONFIRM_PRESERVE_RATIO_MIN,
+        "cjk_confirm_preserve_common_run_min": CJK_CONFIRM_PRESERVE_COMMON_RUN_MIN,
+        "cjk_confirm_preserve_coverage_min": CJK_CONFIRM_PRESERVE_COVERAGE_MIN,
+        "revision_tail_common_run_min": REVISION_TAIL_COMMON_RUN_MIN,
+        "revision_tail_best_j_max": REVISION_TAIL_BEST_J_MAX,
+        "revision_prefix_run_min": REVISION_PREFIX_RUN_MIN,
+        "revision_prefix_common_run_min": REVISION_PREFIX_COMMON_RUN_MIN,
+        "revision_fallback_common_run_min": REVISION_FALLBACK_COMMON_RUN_MIN,
+        "revision_fallback_coverage_min": REVISION_FALLBACK_COVERAGE_MIN,
+    }
 
 
 def _normalized_text(text: str) -> str:
@@ -528,11 +563,16 @@ def _cjk_revision_similarity(left_words: list[str], right_words: list[str]) -> t
 def _cjk_sentences_are_similar_revisions(left_words: list[str], right_words: list[str]) -> bool:
     ratio, common_run, coverage, length_delta = _cjk_revision_similarity(left_words, right_words)
     shorter = min(len(left_words), len(right_words))
-    if shorter <= 4 and common_run == shorter and length_delta <= 4:
+    if shorter <= CJK_REVISION_SHORT_MAX_UNITS and common_run == shorter and length_delta <= CJK_REVISION_MAX_LENGTH_DELTA:
         return True
-    if shorter >= 5 and ratio >= 0.78 and length_delta <= 4:
+    if shorter > CJK_REVISION_SHORT_MAX_UNITS and ratio >= CJK_REVISION_RATIO_MIN and length_delta <= CJK_REVISION_MAX_LENGTH_DELTA:
         return True
-    if common_run >= 3 and coverage >= 0.75 and ratio >= 0.70 and length_delta <= 4:
+    if (
+        common_run >= CJK_REVISION_COMMON_RUN_MIN
+        and coverage >= CJK_REVISION_COVERAGE_MIN
+        and ratio >= CJK_REVISION_FALLBACK_RATIO_MIN
+        and length_delta <= CJK_REVISION_MAX_LENGTH_DELTA
+    ):
         return True
     return False
 
@@ -543,9 +583,12 @@ def _should_preserve_cjk_confirmation_by_similarity(previous: str, preferred: st
     if not previous_words or not preferred_words:
         return False
     ratio, common_run, coverage, length_delta = _cjk_revision_similarity(previous_words, preferred_words)
-    if length_delta > 4:
+    if length_delta > CJK_REVISION_MAX_LENGTH_DELTA:
         return False
-    return ratio >= 0.72 or (common_run >= 3 and coverage >= 0.70)
+    return ratio >= CJK_CONFIRM_PRESERVE_RATIO_MIN or (
+        common_run >= CJK_CONFIRM_PRESERVE_COMMON_RUN_MIN
+        and coverage >= CJK_CONFIRM_PRESERVE_COVERAGE_MIN
+    )
 
 
 def _sentences_are_revisions(left: str, right: str) -> bool:
@@ -577,15 +620,23 @@ def _sentences_are_revisions(left: str, right: str) -> bool:
         tail_blocks = [
             block
             for block in SequenceMatcher(None, left_words, right_words, autojunk=False).get_matching_blocks()
-            if block.size >= 8 and block.a + block.size == len(left_words)
+            if block.size >= REVISION_TAIL_COMMON_RUN_MIN and block.a + block.size == len(left_words)
         ]
         if tail_blocks:
             return True
-    if common_run >= 8 and best_i + common_run == len(left_words) and best_j <= 3:
+    if (
+        common_run >= REVISION_TAIL_COMMON_RUN_MIN
+        and best_i + common_run == len(left_words)
+        and best_j <= REVISION_TAIL_BEST_J_MAX
+    ):
         return True
-    if prefix_run >= 5 and common_run >= 5 and len(right_words) >= len(left_words):
+    if (
+        prefix_run >= REVISION_PREFIX_RUN_MIN
+        and common_run >= REVISION_PREFIX_COMMON_RUN_MIN
+        and len(right_words) >= len(left_words)
+    ):
         return True
-    return common_run >= 4 and common_run / max(shorter, 1) >= 0.6
+    return common_run >= REVISION_FALLBACK_COMMON_RUN_MIN and common_run / max(shorter, 1) >= REVISION_FALLBACK_COVERAGE_MIN
 
 
 def _sentence_required_confirmations(forced: bool) -> int:
@@ -1165,6 +1216,31 @@ def _next_revision_confirmation_count(
             return max(current_confirmations, 1)
         return 1
     return current_confirmations + 1
+
+
+def _should_reset_revision_age(
+    previous: str,
+    preferred: str,
+    stable_internal_ratio: float = 0.0,
+    stable_internal_chars: int = 0,
+    stable_overlap_source: str = "",
+) -> bool:
+    if preferred == _normalized_text(previous):
+        return False
+    if not (_is_cjk_text(previous) or _is_cjk_text(preferred)):
+        return False
+    if _should_preserve_cjk_confirmation_by_similarity(previous, preferred):
+        return False
+    if _should_preserve_revision_confirmation_from_internal_stability(
+        previous,
+        preferred,
+        stable_internal_ratio,
+        stable_internal_chars,
+        stable_overlap_source,
+    ):
+        return False
+    return True
+
 
 def _split_completed_sentences(pending_text: str, new_text: str) -> tuple[list[str], str]:
     return _boundary_split_completed_sentences(pending_text, new_text)

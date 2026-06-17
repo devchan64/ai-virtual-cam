@@ -195,7 +195,10 @@ VAD와 silence 길이는 받아쓰기 AI 실시간 처리 파이프라인의 구
 | `segment_state_pending/staged/final/suppressed/revised` | 세그먼트 상태 비율 |
 | `finalized_per_stage_start` | staged 후보 대비 final 확정 비율 |
 | `stage_queue_enqueue/promote/revision/drop_oldest` | 순서 보존 staged queue의 보존/승격/갱신/폐기 흐름 |
+| `MAX_STAGED_SENTENCE_QUEUE=12` | sliding window에서 관측된 completed 후보를 순서대로 보존하는 최대 queue 크기 |
+| `revision_similarity_policy` | token-sentence revision/confirmation 유사도 임계값 묶음. 운영 설정이 아니라 내부 튜닝 policy로 관리하며 SBD 벤치 리포트에 기록한다. |
 | `stage_candidate_quality_low_value_cjk_fragment` | 문장 종료 부호 없는 CJK 초단편 후보 차단 횟수 |
+| `stage_revision_age_reset`, `stage_queue_revision_age_reset` | 내용이 바뀐 CJK revision의 age 재시작 횟수 |
 | `stage_replaced_unconfirmed` | 확정 전 교체된 staged 후보 |
 | `raw_without_final` | raw STT 관측 대비 final 미발생 횟수 |
 | `boundary_end_marks` | punctuation/end-mark 경계 신호 |
