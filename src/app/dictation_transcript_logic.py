@@ -21,6 +21,7 @@ FORCED_SENTENCE_CONFIRM_CHUNKS = 4
 SENTENCE_CONFIRM_MAX_AGE_CHUNKS = 3
 FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS = 4
 SHORT_CJK_FINAL_UNITS = 10
+CJK_REPLACEMENT_CONFIRM_CHUNKS = 1
 CJK_REVISION_INTERNAL_STABILITY_MIN_RATIO = 0.60
 CJK_REVISION_INTERNAL_STABILITY_MIN_CHARS = 40
 
@@ -1070,7 +1071,7 @@ def _should_finalize_before_replacement(
     if _is_cjk_text(sentence):
         if flags.intersection({"short_cjk", "no_end_marker", "cjk_internal_gap"}):
             return False
-        cjk_replacement_confirmations = max(2, _sentence_required_confirmations(staged_forced) - 1)
+        cjk_replacement_confirmations = CJK_REPLACEMENT_CONFIRM_CHUNKS
         return (
             staged_confirmations >= cjk_replacement_confirmations
             or staged_age >= _sentence_max_age_chunks(staged_forced, sentence_finalize_age)

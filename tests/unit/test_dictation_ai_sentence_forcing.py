@@ -2,6 +2,7 @@ import unittest
 
 from src.app.sentence_boundary import LegacyRegexSentenceBoundaryDetector
 from src.app.dictation_window import _collapse_adjacent_repeated_phrase_details, _collapse_adjacent_repeated_phrases, _diagnostic_tail, _forced_sentence_reason, _pending_overrun_reason, _new_text_delta, _sentence_max_age_chunks, _sentence_output_delta, _sentence_required_confirmations, _sentences_are_revisions, _should_age_staged_sentence, _prefer_sentence_revision, _sentence_end_count, _split_completed_sentences, _stable_window_text
+from src.app.dictation_transcript_logic import _should_finalize_before_replacement
 
 
 class WhisperSentenceForcingTest(unittest.TestCase):
@@ -72,6 +73,30 @@ class WhisperSentenceForcingTest(unittest.TestCase):
     def test_forced_sentence_requires_extra_confirmation_and_age(self) -> None:
         self.assertGreater(_sentence_required_confirmations(True), _sentence_required_confirmations(False))
         self.assertGreater(_sentence_max_age_chunks(True), _sentence_max_age_chunks(False))
+
+    def test_cjk_completed_sentence_can_finalize_before_replacement_after_first_observation(self) -> None:
+        sentence = "现在已经到了凤恩寺站，七号出口就会直接到COEX。"
+
+        self.assertTrue(
+            _should_finalize_before_replacement(
+                sentence,
+                "zh",
+                staged_confirmations=1,
+                staged_age=0,
+                sentence_finalize_age=2,
+                staged_forced=False,
+            )
+        )
+        self.assertFalse(
+            _should_finalize_before_replacement(
+                "这里，COEX",
+                "zh",
+                staged_confirmations=1,
+                staged_age=0,
+                sentence_finalize_age=2,
+                staged_forced=False,
+            )
+        )
 
 
 if __name__ == "__main__":

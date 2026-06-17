@@ -689,6 +689,42 @@ stable token 지표를 추가한 뒤 같은 중국어 실시간 경로를 약 5�
 - runtime aggregate에는 `finalized_per_stage_start`, `stage_replaced_unconfirmed_per_stage_start`, `finalization_rate_per_1000`, `stage_candidate_quality_*`, `translation_skip`을 비교할 수 있도록 이번 30분 스냅샷을 추가했다.
 - 다음 개선 판단은 `stage_replaced_unconfirmed_per_stage_start`가 낮아지는지와 `final_quality_no_end_marker`가 과도하게 늘지 않는지를 함께 본다.
 
+### 2026-06-17 실제 SaT 벤치 기반 CJK replacement 튜닝
+
+벤치 조건:
+
+- `tests/eval/dictation_ai/sbd_text_cases.sample.jsonl` 24건
+- `sat-3l-sm`, CUDA, `float16`
+- `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`
+- mock/smoke 경로는 성능 판단에 사용하지 않았다.
+
+기준선:
+
+- `cases=24`, `pass_rate=0.083`
+- `finalized=34`, `stage_start=54`, `finalized_per_stage_start=0.630`
+- `stage_revision=109`, `stage_replace=6`, `stage_replaced_unconfirmed=6`
+- `stage_candidate_quality_blocked=17`
+
+튜닝:
+
+- CJK staged 후보가 다음 completed 후보로 교체될 때, 후보에 문장 종료 신호가 있고 `short_cjk`, `spaced_cjk`, `cjk_internal_gap`, `cjk_repeated_ngram`, `latin_only_for_zh`, `no_end_marker` 차단 flag가 없으면 첫 관측 이후에도 교체 직전 확정을 허용한다.
+- 이 값은 `CJK_REPLACEMENT_CONFIRM_CHUNKS=1`로 분리한다.
+- 목적은 케이스별 보정이 아니라 sliding window 재표현으로 인해 문장형 CJK 후보가 `unconfirmed_cjk`로 suppress되는 비율을 줄이는 것이다.
+
+튜닝 후:
+
+- `cases=24`, `pass_rate=0.083`
+- `finalized=38`, `stage_start=58`, `finalized_per_stage_start=0.655`
+- `stage_revision=120`, `stage_replace=6`, `stage_replaced_unconfirmed=6`
+- `stage_candidate_quality_blocked=12`
+
+판단:
+
+- pass rate는 그대로지만 이 벤치는 품질 게이트가 아니라 누락/중복 추적용이다.
+- 실제 모델 기준으로 final 확정 수가 34에서 38로 늘고, 품질 차단 후보가 17에서 12로 줄어 개선 방향이다.
+- `stage_replaced_unconfirmed`은 줄지 않았으므로 다음 튜닝은 replacement suppress 자체보다 spaced CJK 후보 품질 차단과 revision granularity를 분리해 관측한다.
+- 중국어 문장 경계 문제는 정규식 또는 케이스별 규칙으로 해결하지 않는다.
+
 ## 배포 순서와 실패 대응
 
 점진적 적용 순서:
