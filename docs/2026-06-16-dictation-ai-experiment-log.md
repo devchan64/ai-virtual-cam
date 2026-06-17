@@ -1612,6 +1612,219 @@ final_quality_no_end_marker=1
 - `stage_replace_decision_open_korean_clause=1`과 `stage_replaced_unconfirmed=1`은 일부 조각이 final 대신 교체 폐기됐음을 보여준다. 하지만 다른 후보들은 `next_completed`로 final되어 중복과 누락이 동시에 생겼다.
 - 따라서 다음 개선은 언어별 예외가 아니라 공통 규칙으로 `no_end_marker`/open-clause 성격의 staged 후보가 replacement-before-final을 통과하지 못하게 하는 방향이어야 한다.
 
+### 2026-06-17 추가 관측: `next_completed`와 짧은 delta 조각 final
+
+로그 근거:
+
+```text
+.tmp/logs/avc-whisper.log.1
+23:25:10 chunk=32 final reason=next_completed quality_flags=no_end_marker
+23:25:13 chunk=35 final reason=next_completed quality_flags=no_end_marker
+23:26:33 chunk=115 final reason=next_completed
+23:26:36 chunk=118 final reason=next_completed
+23:28:09 chunk=11 final reason=next_completed quality_flags=no_end_marker
+23:28:12 chunk=14 final reason=next_completed quality_flags=no_end_marker
+23:30:51 chunk=174 final reason=next_completed text='들죠'
+23:30:52 chunk=175 final reason=next_completed text='들죠'
+23:30:53 chunk=176 final reason=next_completed quality_flags=no_end_marker
+23:39:43 chunk=707 final reason=next_completed quality_flags=no_end_marker
+23:40:27 chunk=750 final reason=next_completed quality_flags=no_end_marker
+```
+
+보강한 SBD 벤치 케이스:
+
+- `ko_log_missing_ultrasonic_reinsert_fragment_20260617_001`
+- `ko_log_duplicate_li_auto_xiaomi_fragment_20260617_001`
+- `ko_log_duplicate_tesla_global_direction_fragment_20260617_001`
+- `ko_log_duplicate_short_delta_rear_camera_view_20260617_001`
+- `ko_log_duplicate_mobiline_breakup_fragment_20260617_001`
+- `ko_log_mixed_fsd_chip_production_fragment_20260617_001`
+- `ko_log_trailing_ellipsis_luminar_fragment_20260618_001`
+- `ko_log_mixed_lidar_camera_sensor_fragment_20260618_001`
+- `ko_log_alpha_mayo_no_end_fragment_20260618_001`
+- `ko_log_distillation_context_reorder_fragment_20260618_001`
+
+보수적 로직 변경:
+
+- 종결 신호가 없는 staged 후보는 required confirmation 전에는 `next_completed`로 final 확정하지 않는다.
+- final 직전 committed prefix 제거 결과가 원 staged보다 크게 짧아진 조각이고 종결 신호가 없으면 `finalize_short_delta_suppressed`로 계측하고 final 출력하지 않는다.
+- `duplicate_or_suffix`, `partial_preserve`, `aged` replacement 경로도 종결 신호 없는 미확인 staged 후보를 final로 확정하지 않는다.
+- 이 규칙은 한국어/중국어/영어 예외가 아니라 공통 sentence lifecycle 규칙이다.
+
+CUDA/SaT 벤치 결과:
+
+```text
+cases=36
+pass_rate=0.167
+finalized=121
+stage_start=215
+finalized_per_stage_start=0.563
+final_f1_avg=0.224
+```
+
+추가 실험:
+
+- `ko_log_duplicate_mobiline_breakup_fragment_20260617_001`를 추가해 케이스 수가 37개가 되었다.
+- replacement-before-final 전체에 반복 confirmation 또는 age 누적을 요구하는 강한 게이트를 시험했다.
+- 결과는 `cases=37`, `finalized=114`, `finalized_per_stage_start=0.451`, `final_f1_avg=0.209`로 악화되었다.
+- 특히 `ko_log_duplicate_mobiline_breakup_fragment_20260617_001`에서 final이 전부 막혀 확정 누락이 커졌다.
+- 따라서 강한 confirmation/age 게이트는 폐기하고, replacement 경로의 `no_end_marker` 미확정 final 차단만 유지한다.
+- `ko_log_mixed_fsd_chip_production_fragment_20260617_001`를 추가해 케이스 수가 38개가 되었다.
+- 이 케이스에서는 최근 final이 후보 suffix로 다시 붙어 `... 하는 건데 왜냐하면 삼성전자 있죠?`처럼 중복 확정되는 현상이 관측되었다.
+- token-sentence suffix 유사도 기반으로 최근 final suffix를 제거하도록 보정했다.
+- CUDA/SaT 벤치 결과는 `cases=38`, `pass_rate=0.158`, `finalized=127`, `finalized_per_stage_start=0.479`, `final_f1_avg=0.217`이다.
+- 신규 케이스에서 잘못된 suffix 반복 final은 제거됐지만, 기대 문장으로 확정되지는 않아 확정 누락은 남았다.
+- 2026-06-18 00:01 로그에서 `야 너 뭐 또 모르면서 루미나...`가 `next_completed`로 final되는 현상을 관측했다.
+- `...`/`…`로 끝나는 STT 후보는 실제 문장 종료가 아니라 다음 window에서 확장되는 미완성 후보로 다루도록 `trailing_ellipsis` 품질 flag를 추가했다.
+- `ko_log_trailing_ellipsis_luminar_fragment_20260618_001`는 final F1 1.0으로 개선됐고, 39케이스 CUDA/SaT 벤치는 `pass_rate=0.154`, `finalized=130`, `finalized_per_stage_start=0.478`, `final_f1_avg=0.239`를 기록했다.
+- 같은 모니터링 구간에서 `ko_log_mixed_lidar_camera_sensor_fragment_20260618_001`도 추가했다. 이 케이스는 뒤 문장들이 먼저 final되고, 첫 문장이 `를 막 찍고...`처럼 앞부분이 잘린 채 나중에 확정되는 순서 뒤집힘 계열이다.
+- 40케이스 CUDA/SaT 벤치는 `pass_rate=0.150`, `finalized=133`, `finalized_per_stage_start=0.477`, `final_f1_avg=0.233`이다. `lidar` 케이스는 아직 final F1 0.0이므로 다음 순서 관리 개선 근거로 남긴다.
+- 2026-06-18 00:06 로그에서 `ko_log_alpha_mayo_no_end_fragment_20260618_001`, `ko_log_distillation_context_reorder_fragment_20260618_001`를 추가했다.
+- `alpha_mayo`는 짧은 no-end-marker 후보가 `next_completed`로 final되고 뒤 문장이 pending/staged로 밀리는 유형이다.
+- `distillation`은 여러 completed 후보가 한 window 안에서 순서가 재배치되며 핵심 문장과 문맥 fragment가 뒤섞이는 유형이다.
+- 42케이스 CUDA/SaT 벤치는 `pass_rate=0.143`, `finalized=136`, `finalized_per_stage_start=0.458`, `final_f1_avg=0.222`이다.
+- 현재 코드 기준 `alpha_mayo`는 no-end-marker 중복 final은 막히지만 기대 문장까지 확정하지 못해 누락으로 남는다.
+- 현재 코드 기준 `distillation`은 질문 문장들은 확정하지만 `디스트릴레이션이라고 해서 증류라는 걸 하죠`가 staged에 남아 final 누락으로 남는다.
+- 2026-06-18 00:10 로그에서 `ko_log_repeated_overrun_level4_fragment_20260618_001`를 추가했다. 과거 실행에서는 `pending_overrun=long_no_boundary` 뒤 700자 이상의 반복 후보가 final됐지만, 현재 코드 기준 벤치에서는 거대 반복 final은 막히고 긴 staged가 확정되지 않는 누락으로 남는다.
+- 43케이스 CUDA/SaT 벤치는 `pass_rate=0.140`, `finalized=136`, `finalized_per_stage_start=0.453`, `final_f1_avg=0.217`이다.
+- 같은 로그 구간에서 `ko_log_mixed_ai_stock_allocation_fragment_20260618_001`를 추가했다. 이 케이스는 `AI발 주식시장` 문장이 앞선 `채권도 투자하고...` 조각과 뒤섞여 final되고, 이후 `실제로 최근에 다른 투자처의 자금들을...`처럼 최근 final suffix가 다른 문맥과 결합되는 유형이다.
+- 44케이스 CUDA/SaT 벤치는 `pass_rate=0.136`, `finalized=140`, `finalized_per_stage_start=0.459`, `final_f1_avg=0.212`이다. 신규 케이스는 final F1 0.0이며, `candidate_recent_final_delta_trimmed=2`, `candidate_duplicate_suppressed=4`가 관측됐지만 순서가 섞인 긴 `next_completed` final은 아직 남는다.
+- terminal-tail revision split을 추가해 종결부호가 있는 staged 문장의 tail이 다음 후보 뒤쪽에 재삽입되는 경우를 같은 문장의 revision으로 병합하지 않도록 했다. 이 변경은 `ko_log_mixed_ai_stock_allocation_fragment_20260618_001`에서 첫 문장 `우리가 채권도 투자하고 금도 투자하고 여러 투자처들이 있잖아요.`를 보존한다.
+- 같은 패치에서 committed prefix 제거 뒤 남는 짧은 no-end 조각 억제를 `confirmed` 계열 final에도 적용했다. 단, age 기반 확정까지 억제하면 중국어 `zh_log_missing_jongno_market_transfer_20260617_001` F1이 `0.353 -> 0.125`로 악화되어 age 경로는 제외했다.
+- 채택한 조합의 44케이스 CUDA/SaT 벤치는 `pass_rate=0.136`, `finalized=141`, `finalized_per_stage_start=0.461`, `final_f1_avg=0.224`이다.
+- 개선된 케이스는 `zh_log_missing_restroom_fragment_20260617_001` F1 `0.000 -> 0.250`, `ko_log_mixed_ai_stock_allocation_fragment_20260618_001` F1 `0.000 -> 0.286`이다. `stage_revision_terminal_tail_split=3`, `finalize_short_delta_suppressed=1`이 관측됐다.
+- 2026-06-18 00:22 로그에서 `ko_log_short_delta_treasury_investor_fragment_20260618_001`를 추가했다. `기관이에요`, `문제는` 같은 짧은 no-end 조각과 이전 pending 접두어 `근데`가 앞 문장에 붙는 순서 혼입이 함께 관측된 케이스다.
+- 45케이스 CUDA/SaT 벤치는 `pass_rate=0.133`, `finalized=146`, `finalized_per_stage_start=0.465`, `final_f1_avg=0.219`이다.
+- 신규 케이스는 final F1 0.0이며, 실제 출력은 `근데 의미는 중앙은행은...`처럼 pending 접두어가 앞 문장에 섞였다. 이 문제는 short-delta 억제만으로 해결되지 않고, pending/staged 순서 일관성 판단이 필요하다.
+- 2026-06-18 00:24 로그에서 `ko_log_short_terminal_overseas_demand_fragment_20260618_001`를 추가했다. `아까 해외.` 같은 짧은 terminal fragment가 긴 staged 후보를 밀어내고, 뒤이어 `해외 쪽의 수요가... 아까 해외 중앙은행...`처럼 문맥이 결합되는 유형이다.
+- 46케이스 CUDA/SaT 벤치는 `pass_rate=0.130`, `finalized=150`, `finalized_per_stage_start=0.469`, `final_f1_avg=0.214`이다.
+- 짧은 terminal fragment가 긴 staged를 교체하지 못하게 queue로 보류하는 실험을 했다. 결과는 `final_f1_avg=0.215`로 소폭 상승했지만 `stage_replace_deferred_short_terminal=65`로 너무 넓게 발동했고, 신규 `overseas_demand` 케이스 자체는 final F1 0.0으로 남았다.
+- 따라서 short-terminal defer 실험은 폐기하고, 케이스만 벤치 근거로 남긴다. 다음 개선은 단순 길이/종결부호 조건이 아니라 pending/staged 순서 혼입을 직접 식별하는 방향이어야 한다.
+- 2026-06-18 00:31 로그에서 `ko_log_mixed_bond_manager_fragment_20260618_001`를 추가했다. `좋은 재료가 없습니다.`가 이미 final된 뒤, 다음 후보 suffix에 `좋은 재료 없습니다.` tail이 다시 붙어 `그래서 채권 매니저들 사이에서는 당연히 좋은 재료 없습니다.`로 확정되는 유형이다.
+- 47케이스 CUDA/SaT 벤치는 `pass_rate=0.128`, `finalized=153`, `finalized_per_stage_start=0.472`, `final_f1_avg=0.222`이다.
+- 최근 final 전체가 아니라 최근 final의 짧은 tail이 후보 suffix로 재삽입되는 경우도 앞쪽 delta만 남기도록 보완했다.
+- 보완 후 47케이스 CUDA/SaT 벤치는 `pass_rate=0.128`, `finalized=153`, `finalized_per_stage_start=0.474`, `final_f1_avg=0.228`이다.
+- 개선된 케이스는 `ko_log_mixed_bond_manager_fragment_20260618_001` 하나로, final F1이 `0.571 -> 0.857`로 올랐다. 다른 케이스의 F1 하락은 관측되지 않았다.
+- 2026-06-18 00:35 로그에서 `ko_log_mixed_goods_economy_fragment_20260618_001`를 추가했다. `굉장히 힘들어지죠.`, `물건을 파는 게 굉장히 어려워집니다.`가 이미 final된 뒤 뒤 후보 suffix에 다시 붙어 `... 일본 정부가 제일 먼저 굉장히 어려워집니다.`처럼 섞이는 유형이다.
+- 48케이스 CUDA/SaT 벤치는 `pass_rate=0.125`, `finalized=156`, `finalized_per_stage_start=0.477`, `final_f1_avg=0.241`이다.
+- 신규 `goods_economy` 케이스는 최근 final tail trimming으로 final F1 0.857을 기록했다. 기대 final 중 `금리를 인하하겠죠.`는 staged에 남아 확정 누락이 남지만, 앞선 mixed-context final은 억제됐다.
+- 2026-06-18 00:40 로그에서 `ko_log_mixed_lost_decades_abe_fragment_20260618_001`를 추가했다. `이러다가 2013년에`와 `그래서 우리가 그거를 잃어버린 20년이라고 부릅니다.`가 window 순서에 따라 섞여 final될 수 있는 유형이다.
+- 49케이스 CUDA/SaT 벤치는 `pass_rate=0.143`, `finalized=159`, `finalized_per_stage_start=0.479`, `final_f1_avg=0.257`이다.
+- 신규 `lost_decades_abe` 케이스는 현재 recent-final delta trimming과 duplicate suppression으로 final F1 1.0을 기록했다. 별도 로직 증가는 필요하지 않다.
+- 같은 로그 구간에서 `ko_log_premature_no_end_ycc_fragment_20260618_001`를 추가했다. 운영 로그에서는 `... 국채금리를 0%`가 `no_end_marker`인데 confirmed final되고, 바로 뒤의 `... 0%에 고정시키게 됩니다.`가 중복 억제되는 조기 확정/확정 누락 유형이 관측됐다.
+- 같은 boundary 결과 안에 현재 staged 후보를 prefix로 갖는 더 긴 완료 후보가 뒤에 있으면, 종결 신호 없는 staged의 confirmed/next_completed 확정을 한 번 보류하도록 최소 정책을 추가했다.
+- 50케이스 CUDA/SaT 벤치는 `pass_rate=0.160`, `finalized=160`, `finalized_per_stage_start=0.476`, `final_f1_avg=0.272`이다.
+- 신규 `ycc` 케이스는 final F1 1.0을 기록했다. `stage_confirm_deferred_later_extension`은 전체 50케이스 중 1회만 발동해 과도한 발동은 관측되지 않았지만, 실제 로그 재현성과 함께 계속 관찰한다.
+- 2026-06-18 00:45 로그에서 `ko_log_mixed_yen_exchange_rate_fragment_20260618_001`, `ko_log_trailing_ellipsis_japan_bond_fragment_20260618_001`를 추가했다.
+- `yen_exchange_rate`는 pending tail `그래서 하려고 했는데 일본 N하고 달러하고의`가 앞 문장 `딱 봤는데 5% 수익률을 줘요.`와 섞여 final되는 유형이다. 현재 벤치에서는 mixed final은 억제되지만 `환율.`에서 먼저 final되어 다음 window의 `환율, 비용이 있어요.` 확장을 반영하지 못한다.
+- `trailing_ellipsis_japan_bond`는 `일본이 갖고 있었던 일본...`이 교체 과정에서 final될 수 있는 유형이다. 현재 벤치에서는 ellipsis final은 억제되지만 마지막 완료 문장 `미국의 국채를 팔기 시작합니다.`가 staged에 남아 final 누락으로 남는다.
+- 52케이스 CUDA/SaT 벤치는 `pass_rate=0.154`, `finalized=165`, `finalized_per_stage_start=0.481`, `final_f1_avg=0.289`이다.
+- 신규 케이스 점수는 `yen_exchange_rate` final F1 0.667, `trailing_ellipsis_japan_bond` final F1 0.800이다. 이번 반복에서는 미래 window 확장을 예측하는 넓은 지연 정책을 추가하지 않고 케이스만 누적한다.
+- 2026-06-18 00:47 로그에서 `ko_log_mixed_inflation_rate_cut_fragment_20260618_001`, `ko_log_mixed_samsung_foreign_selloff_fragment_20260618_001`를 추가했다.
+- `inflation_rate_cut`는 current pending tail `물가가 계속 올라가고 있다 보니까...`가 이전 completed 문장 `굉장히 민감한 이슈심이 하나입니다.` 앞에 붙어 final되는 유형이다.
+- `samsung_foreign_selloff`는 pending tail `삼성전자가 싫어서...`가 이전 문장 `조심하셔야 된다라는 얘기를 드리고 싶어요.` 앞에 붙는 유형이다. 현재 recent-final delta trimming으로 이 케이스는 final F1 1.0을 기록한다.
+- 54케이스 CUDA/SaT 벤치는 변경 전 `pass_rate=0.167`, `finalized=170`, `finalized_per_stage_start=0.484`, `final_f1_avg=0.297`이다.
+- completed 후보가 현재 pending tail과 같은 prefix로 시작하지만 서로 다른 suffix로 갈라지는 경우를 pending-prefix 혼합 후보로 보고 stage 전에 suppress하는 최소 정책을 추가했다.
+- 변경 후 54케이스 CUDA/SaT 벤치는 `pass_rate=0.167`, `finalized=170`, `finalized_per_stage_start=0.486`, `final_f1_avg=0.305`이다.
+- `candidate_pending_prefix_mixed_suppressed`는 전체 54케이스 중 1회만 발동했고, `inflation_rate_cut` final F1이 `0.000 -> 0.400`으로 개선됐다. 하락 케이스는 관측되지 않았다.
+- 2026-06-18 00:50 로그에서 `ko_log_mixed_inflation_transition_fragment_20260618_001`, `ko_log_mixed_global_supply_chain_fragment_20260618_001`를 추가했다.
+- `inflation_transition`은 짧은 pending prefix `인플레이션으로 전환되는`이 이전 문맥 `팔고 물가를...` 앞에 붙어 final되는 유형이다.
+- `global_supply_chain`은 `싼 곳에서 부품을 만들고 그 다음에 미국이...` 같은 no-end 조각이 final될 수 있는 유형이다. 현재 pending-prefix 혼합 후보 억제로 final F1 1.0을 기록한다.
+- 56케이스 CUDA/SaT 벤치는 `pass_rate=0.161`, `finalized=173`, `finalized_per_stage_start=0.489`, `final_f1_avg=0.312`이다.
+- `inflation_transition`은 아직 final F1 0.0이다. 원인은 pending prefix가 2 token으로 짧아 현재 4 token 기준 pending-prefix 혼합 후보 억제에 걸리지 않기 때문이다.
+- 짧은 pending prefix도 글자 길이가 충분하면 억제하는 실험을 했지만, 전체 지표와 발동 카운터가 변하지 않았다. 근거 없는 범위 확장이므로 폐기하고 기존 4 token 기준을 유지한다.
+- 2026-06-18 00:54 로그에서 `ko_log_mixed_corporate_bond_cost_fragment_20260618_001`, `ko_log_missing_stock_market_impact_fragment_20260618_001`를 추가했다.
+- `corporate_bond_cost`는 `결국은... 회사 채급...` no-end 후보가 final되고 뒤의 `기업 비용` 문맥과 섞일 수 있는 유형이다.
+- `stock_market_impact`는 aged final 뒤에 이어지는 `주식시장이 집착적으로 영향을 받아요.`가 중복 억제로 누락될 수 있는 유형이다.
+- 58케이스 CUDA/SaT 벤치는 `pass_rate=0.172`, `finalized=179`, `finalized_per_stage_start=0.496`, `final_f1_avg=0.335`이다.
+- 신규 두 케이스는 현재 로직에서 모두 final F1 1.0을 기록했다. 추가 로직은 적용하지 않는다.
+- 2026-06-18 00:56 로그에서 `ko_log_mixed_bond_rate_foreign_selloff_fragment_20260618_001`, `ko_log_trailing_ellipsis_korean_semiconductor_fragment_20260618_001`를 추가했다.
+- `bond_rate_foreign_selloff`는 `그런데 이때 사람들은...` pending tail이 이전 문맥 `주식시장의 내관으로 작동하는...`과 섞여 final될 수 있는 유형이다.
+- `korean_semiconductor`는 `한국의 반도체 주식이나 아니면 한국의...` ellipsis 후보가 final될 수 있는 유형이다.
+- 60케이스 CUDA/SaT 벤치는 `pass_rate=0.183`, `finalized=183`, `finalized_per_stage_start=0.499`, `final_f1_avg=0.357`이다.
+- 신규 두 케이스는 현재 로직에서 모두 final F1 1.0을 기록했다. ellipsis 후보는 staged/pending에 남고 final로 나가지 않는다. 추가 로직은 적용하지 않는다.
+- 2026-06-18 00:59 로그에서 `ko_log_mixed_macro_trend_fragment_20260618_001`, `ko_log_mixed_interest_parity_dollar_fragment_20260618_001`를 추가했다.
+- `macro_trend`는 `우리가 예전에 거시경제에서 배웠던 추세?`가 final되고 기대 문장 `이런 것 같이 잘 안 맞고 있어요.`가 누락되는 유형이다. 현재 final F1 0.0으로 남아 있다.
+- `interest_parity_dollar`는 이미 final된 `이게 이제 금리 평형 이론의 가장 기본이에요.` 뒤에 STT 오인식 후보 `성형이론의 가장 기본이에요.`가 다시 final되는 짧은 recent-final tail echo 유형이다.
+- 62케이스 CUDA/SaT 벤치는 변경 전 `pass_rate=0.177`, `finalized=187`, `finalized_per_stage_start=0.490`, `final_f1_avg=0.359`이다.
+- 짧은 후보가 최근 final의 tail과만 유사하면 recent-final echo로 suppress하도록 최소 정책을 추가했다.
+- 변경 후 62케이스 CUDA/SaT 벤치는 `pass_rate=0.194`, `finalized=185`, `finalized_per_stage_start=0.487`, `final_f1_avg=0.374`이다.
+- 개선된 케이스는 `ko_log_mixed_interest_parity_dollar_fragment_20260618_001` F1 `0.800 -> 1.000`, `ko_log_mixed_ai_stock_allocation_fragment_20260618_001` F1 `0.286 -> 1.000`이다. 하락 케이스는 관측되지 않았다.
+- 2026-06-18 01:03 로그에서 `ko_log_mixed_exchange_rate_prediction_fragment_20260618_001`를 추가했다. `몇 년인지 정확하게...` pending tail이 이미 final된 `제 느낌상 최소 3년은...` 문장과 결합될 수 있는 유형이다. 현재 코드는 final/pending F1 1.0을 기록하지만 stale staged가 남아 관찰 대상으로 둔다.
+- 2026-06-18 01:05 로그에서 `ko_log_mixed_fomc_rate_decision_fragment_20260618_001`를 추가했다. `6월에 있을 FOMC` 같은 이전 pending prefix가 최근 final tail `이런 상황이 벌어졌다고...` 앞에 붙어 오염 final이 되는 유형이다.
+- 64케이스 CUDA/SaT 벤치의 변경 전 기준은 `pass_rate=0.188`, `finalized=189`, `finalized_per_stage_start=0.480`, `final_f1_avg=0.388`이다.
+- 이전 pending prefix 뒤에 최근 final tail이 재삽입된 completed 후보를 stage 전에 suppress하는 최소 정책을 추가했다. 이 규칙은 특정 문구나 언어별 정규식이 아니라 `prior pending prefix + recent final tail similarity`를 보는 token-sentence lifecycle 필터다.
+- 변경 후 64케이스 CUDA/SaT 벤치는 `pass_rate=0.188`, `finalized=187`, `finalized_per_stage_start=0.475`, `final_f1_avg=0.393`이다.
+- `candidate_prior_pending_recent_final_mixed_suppressed`는 전체 64케이스 중 3회 발동했다.
+- 개선된 케이스는 `ko_log_mixed_fomc_rate_decision_fragment_20260618_001` F1 `0.667 -> 1.000`이다. `ko_log_duplicate_li_auto_xiaomi_fragment_20260617_001`와 `ko_log_duplicate_short_delta_rear_camera_view_20260617_001`에서도 오염 final이 각각 1개 줄었고, F1 하락은 관측되지 않았다.
+- 2026-06-18 01:15-01:16 로그에서 `ko_log_mixed_household_debt_governor_fragment_20260618_001`, `ko_log_mixed_rate_hike_domestic_demand_fragment_20260618_001`, `ko_log_mixed_exchange_rate_defense_fragment_20260618_001`를 추가했다.
+- `household_debt_governor`는 `GDP 대비 가계부채 비율이` pending이 최근 final tail `신임 총재가 오셨잖아요.`와 섞여 staged/final 후보가 되는 유형이다. 현재 벤치에서는 기대 final 중 핵심 문장 일부가 `staged`에 남고 final F1 0.500이다.
+- `rate_hike_domestic_demand`는 `금리를 올리겠다는 거.`, `굉장히 중요하게 생각을 하고 있는 거죠.` 같은 중간 fragment가 final로 나가고 뒤의 더 완성된 문장이 다시 final되는 유형이다. 현재 final F1은 0.667이다.
+- `exchange_rate_defense`는 이전 로그에서는 `환율이 지금 이슈가...` pending과 앞 문맥 `금리를 올리지는 않을 거다...`가 섞여 final됐지만, 현재 prior pending/recent final 혼합 억제와 terminal-tail split 조합으로 final F1 1.000을 기록한다.
+- 67케이스 CUDA/SaT 벤치는 `pass_rate=0.194`, `finalized=195`, `finalized_per_stage_start=0.481`, `final_f1_avg=0.408`이다.
+- 신규 샘플 추가 후 기존 64케이스의 final 결과 하락은 관측되지 않았다.
+- 2026-06-18 01:24-01:30 로그에서 `ko_log_mixed_corporate_debt_cost_fragment_20260618_001`, `ko_log_mixed_nvidia_earnings_repeated_sales_fragment_20260618_001`, `ko_log_mixed_hbm_market_share_repeated_fragment_20260618_001`를 추가했다.
+- `corporate_debt_cost`는 `금리가 굉장히...` trailing ellipsis 뒤에 회사채 비용 문장이 이어지는 유형이다. 현재 prior pending/recent final 혼합 억제와 recent-final delta trimming 조합으로 final F1 1.000을 기록한다.
+- `nvidia_earnings_repeated_sales`는 `어닝/워닝 서프라이즈... 매출을 갖고 왔고` 구간이 긴 completed 후보 안에서 반복 삽입되어 final되는 유형이다.
+- `hbm_market_share_repeated`는 `1차라고 보기에는... 왜냐하면 HBM 글로벌` 구간이 여러 번 재삽입되어 거대 final 후보가 되는 유형이다.
+- 70케이스 CUDA/SaT 기준선은 변경 전 `pass_rate=0.200`, `finalized=203`, `finalized_per_stage_start=0.489`, `final_f1_avg=0.420`이다.
+- 긴 후보 내부에서 동일한 token n-gram이 반복 삽입되는 경우 `repeated_word_ngram` 품질 플래그를 붙이고 stage/final/translation 후보에서 제외하도록 최소 정책을 추가했다. 이 규칙은 CJK 전용 반복 감지의 언어 예외 확장이 아니라 공백 기반 token-sentence에도 같은 반복 삽입 안전장치를 적용한 것이다.
+- 변경 후 70케이스 CUDA/SaT 벤치는 `pass_rate=0.200`, `finalized=201`, `finalized_per_stage_start=0.484`, `final_f1_avg=0.423`이다.
+- 개선된 케이스는 `ko_log_mixed_nvidia_earnings_repeated_sales_fragment_20260618_001` F1 `0.667 -> 0.800`, `ko_log_mixed_hbm_market_share_repeated_fragment_20260618_001` F1 `0.400 -> 0.500`이다. 기존 68케이스의 final 결과 변화는 관측되지 않았다.
+- 반복 삽입 final은 억제됐지만 두 케이스 모두 기대 문장이 final까지 승격되지는 못하고 staged에 남았다. 따라서 이번 변경은 성공률 개선보다 오염 final 억제 근거로 기록한다.
+- 2026-06-18 01:26-01:27 로그에서 `ko_log_mixed_productive_assets_fragment_20260618_001`, `ko_log_mixed_worker_product_price_fragment_20260618_001`를 추가했다.
+- `productive_assets`는 첫 window에서 올바른 staged `... 마지막이 요게 관건입니다`가 생성됐지만, 다음 window에서 pending prefix `이게 뭐냐면은/마지막 이게 뭐냐면은 생산자...`가 기존 staged 앞에 끼어든 후보로 revision되어 오염 final되는 유형이다.
+- `worker_product_price`는 `그러면 우리 같은 근로자들과 노동자들은...` 문장이 누락되고, `그리고 두 번째... 상품 가격...`과 `아니잖아요`가 no-end fragment로 나뉘어 확정되는 유형이다.
+- 72케이스 CUDA/SaT 기준선은 `pass_rate=0.194`, `finalized=204`, `finalized_per_stage_start=0.483`, `final_f1_avg=0.416`이다.
+- 종결 신호 없는 후보가 기존 staged 대부분을 suffix로 공유하면서 앞에 1-8 token prefix만 새로 끼워 넣은 형태이면 기존 staged를 보존하도록 revision 선호 규칙을 보강했다. 이 규칙은 특정 문구나 언어별 예외가 아니라 sliding window 순서 혼입을 막는 token-sentence lifecycle 규칙이다.
+- 변경 후 72케이스 CUDA/SaT 벤치는 `pass_rate=0.194`, `finalized=205`, `finalized_per_stage_start=0.482`, `final_f1_avg=0.416`이다.
+- `ko_log_mixed_productive_assets_fragment_20260618_001`는 오염 final `마지막 이게 뭐냐면은 생산자 ... 마지막이 요게 관건입니다`가 `예금쪽들도 ... 마지막이 요게 관건입니다`로 바뀌었다. 다만 punctuation 없는 final로 남아 F1은 아직 0.0이다.
+- 기존 케이스 중 `ko_log_duplicate_short_delta_rear_camera_view_20260617_001`도 같은 규칙으로 문장이 더 분리됐지만, 기대 문장 exact 기준 F1은 0.0으로 유지됐다. F1 하락 케이스는 관측되지 않았다.
+- 2026-06-18 01:31 로그에서 `ko_log_mixed_dollar_share_hegemony_fragment_20260618_001`, `ko_log_mixed_asset_pumping_repeat_fragment_20260618_001`, `ko_log_mixed_yuan_dollar_50years_fragment_20260618_001`를 추가했다.
+- `dollar_share_hegemony`는 `근데 중요한 건 뭐냐면...` pending prefix가 앞 문맥 `60% 언더는... 떨어지고 있죠`와 섞여 staged/final 후보가 되는 유형이다.
+- `asset_pumping_repeat`는 completed/final보다 pending tail 내부에서 `지금 미국이 하는 모든 정책들이... 자산 띄우기 작전인 것 같은데`가 반복 누적되는 유형이다.
+- `yuan_dollar_50years`는 `아직은 앞으로 50년은 없을 거에요`가 no-end staged/final 후보로 남고, 뒤의 `근데 지키지 않으면...` 문맥이 pending으로 밀리는 유형이다.
+- 75케이스 CUDA/SaT 벤치는 `pass_rate=0.187`, `finalized=205`, `finalized_per_stage_start=0.463`, `final_f1_avg=0.399`이다.
+- 벤치 하네스가 운영 로그와 동일하게 pending 품질 플래그를 계측하도록 `pending_quality_*` 집계를 추가했다. 계측 추가는 동작을 바꾸지 않으며, 75케이스 지표는 동일하다.
+- 변경 후 75케이스 CUDA/SaT 벤치에서 `pending_quality_repeated_word_ngram=8`이 관측됐다. 신규 `asset_pumping_repeat` 케이스에서는 2회 발생했다.
+- pending 반복 누적은 확정 중복 이전 단계의 문제로 확인됐지만, 지금 바로 pending을 절단/접합하면 과거에 폐기한 정규화/접합 로직으로 되돌아갈 위험이 있다. 따라서 이번 반복에서는 성능 관측 지표와 벤치 샘플로만 고정하고, pending 절단 정책은 별도 근거가 쌓일 때까지 적용하지 않는다.
+- 2026-06-18 01:35-01:36 로그에서 `ko_log_mixed_it_debt_liquidity_fragment_20260618_001`, `ko_log_mixed_money_function_fragment_20260618_001`를 추가했다.
+- `it_debt_liquidity`는 `IT쪽 부실이 3조 달러 정도...`와 `근데 그거를 짓누를 정도로...`가 completion 후보로 반복 등장하지만, 현재 로직에서는 기대 final이 확정되지 않고 `근데 그걸 짓누를 정도로...`가 staged에 남는 유형이다.
+- `money_function`은 `화폐 기능/화폐기능`, `가치척도/가치조정/가치저정`처럼 짧은 변형 반복이 이어지며, 현재 `repeated_word_ngram` 임계값에는 걸리지 않고 staged/pending 잔류로 남는 유형이다.
+- 77케이스 CUDA/SaT 벤치는 `pass_rate=0.182`, `finalized=205`, `finalized_per_stage_start=0.451`, `final_f1_avg=0.389`이다.
+- 신규 두 케이스 모두 final F1은 0.0이다. 다만 나쁜 final을 추가로 내보내는 형태보다는 no-end staged/pending 잔류가 주된 결과라서, 이번 반복에서는 token n-gram 임계값을 낮추거나 pending 절단 정책을 추가하지 않는다. 짧은 변형 반복까지 억제 범위를 넓히면 정상적인 짧은 문장 revision까지 막을 위험이 있으므로 벤치 근거로만 축적한다.
+- 2026-06-18 01:39-01:40 로그에서 `ko_log_mixed_ai_industry_stablecoin_fragment_20260618_001`를 추가했다.
+- 이 케이스는 `결국 AI 산업이죠.`가 먼저 확정된 뒤, `거기만 우승하면...` pending과 앞 문맥이 섞여 오염 후보가 만들어지고, 이어서 `그런 현상들의 모든 끝판왕이 뭐냐면 결국에는 이 스테이블 코인이죠.`가 중복/리비전 흐름 안에서 처리되는 유형이다.
+- 실제 로그 문맥을 맞추기 위해 직전 final `나는 몰빵 경제를 통해서 시장과 통화에 대한 패권 그리고 산업에 대한 우승, 특정 산업이죠.`부터 샘플에 포함했다.
+- 78케이스 CUDA/SaT 벤치는 `pass_rate=0.179`, `finalized=208`, `finalized_per_stage_start=0.449`, `final_f1_avg=0.391`이다.
+- 신규 `ai_industry_stablecoin` 케이스는 final F1 0.571이며, 실제 final은 `나는 몰빵 경제... 특정 산업이죠.`, `결국 AI 산업이죠.`, `그런 현상들의 모든 끝판왕이 뭐냐면 결국에는 이 스테이블 코인이죠.`로 남았다. 기대 문장 중 `거기만 우승하면 모든 걸 다 갖게 된다는 로직으로...`는 아직 final 누락이며, `근데 트럼프가 끝나고 나서 이제 모든 끝판왕이 뭐냐면은` stale staged도 남는다.
+- `짧은 pending prefix + 최근 final suffix` 억제 규칙을 검토했지만 최종 78케이스 벤치에서 별도 발동 근거를 만들지 못했다. 검증되지 않은 runtime 분기를 늘리지 않기 위해 이번 반복에서는 코드 반영 없이 벤치 샘플과 실험 기록만 남긴다.
+- 2026-06-18 01:46-01:49 로그에서 `ko_log_mixed_stablecoin_collateral_leverage_fragment_20260618_001`, `ko_log_mixed_svb_ceo_warning_fragment_20260618_001`를 추가했다.
+- `stablecoin_collateral_leverage`는 `스테이블콘/담보자산/미국 채권/레버리지` 구간이 window 안에서 반복 삽입되어 `여기서 미국 채권을 사든 뭘 새로운 아바타 돈을 만들 수 있고...` 같은 오염 final이 생성되는 유형이다. `candidate_prior_pending_recent_final_mixed_suppressed=1`, `pending_quality_repeated_word_ngram=1`, `stage_candidate_quality_repeated_word_ngram=1`이 관측됐지만 final F1은 0.0이다.
+- `svb_ceo_warning`은 `어땠죠?`가 먼저 final되고, `SBB/SVB가 국채에 몽땅 투자돼 있었잖아요`, `근데 새벽 3시인가 2시에...` 구간은 staged/pending으로 갈라져 final 누락되는 유형이다. final F1은 0.0이고, `stage_replace_decision_unconfirmed=4`, `stage_replaced_unconfirmed=5`가 관측됐다.
+- 80케이스 CUDA/SaT 벤치는 `pass_rate=0.175`, `finalized=210`, `finalized_per_stage_start=0.437`, `final_f1_avg=0.382`이다.
+- 신규 케이스들은 기존 품질 플래그와 prior-pending/recent-final 억제가 일부 동작함에도 완전 복구되지 않는다. 다만 실패 원인이 서로 다르고, 짧은 의문문 또는 긴 반복 후보를 일괄 차단하면 정상 문장 확정까지 흔들릴 수 있으므로 이번 반복에서는 로직을 추가하지 않는다.
+- 2026-06-18 01:52 로그에서 `ko_log_pending_overrun_follow_acquire_giveup_fragment_20260618_001`를 추가했다.
+- 이 케이스는 `따라가거나 아니면 획득하거나 아니면 포기하거나` 구간이 pending 내부에서 반복 누적되어 260자 이상으로 커졌다가, 다음 window에서 `그런데 이 중간에 있는 따라가거나가 서서히 좌절될 수밖에 없는 이 시스템의 변화의 속도가 너무 빠르다는 거예요.`로 정리되는 유형이다.
+- 81케이스 CUDA/SaT 벤치는 `pass_rate=0.173`, `finalized=211`, `finalized_per_stage_start=0.438`, `final_f1_avg=0.389`이다.
+- 신규 `follow_acquire_giveup` 케이스는 final F1 1.0이며, `pending_quality_repeated_word_ngram=2`, `stage_candidate_quality_repeated_word_ngram=2`가 관측됐다. 현재 반복 삽입 안전장치가 중간 오염 후보를 막고 최종 문장 확정은 유지한 사례로 본다.
+- 이 케이스는 실패 샘플이라기보다 pending 반복 누적을 계측하는 회귀 샘플이다. 현 시점에서는 pending 절단/접합 로직을 추가하지 않고, 반복 품질 지표가 최종 확정 품질을 해치지 않는지 계속 관찰한다.
+- 2026-06-18 01:54-01:55 로그에서 `ko_log_mixed_stablecoin_authority_no_end_fragment_20260618_001`를 추가했다.
+- 이 케이스는 `그렇게 되면 그 국가 존속의 경제 시스템은 기반은, 권위는 어떻게 되죠?`가 나중에 완성형으로 관측되지만, 직전 window에서 종결부호 없는 조각으로 먼저 확정되어 번역이 생략되고 후속 완성형은 중복 억제되는 유형이다. 이어서 `정부의 본래의 세금 권한과 전통화폐에 대한 지속성...` 구간은 긴 절이 후보 내부에 반복 삽입되어 오염 final이 된다.
+- 82케이스 CUDA/SaT 기준선은 `pass_rate=0.171`, `finalized=216`, `finalized_per_stage_start=0.442`, `final_f1_avg=0.385`이다.
+- 기준선에서 신규 케이스는 의미상 일부 문장을 final로 내보내지만, 마지막 final이 `정부의 본래의 세금 권한과 전통화폐에 대한 지속성...` 절을 두 번 포함한다. 이때 기존 `repeated_word_ngram`은 최소 24단어/8단어 n-gram 기준이라 6-7단어 길이의 절 반복을 잡지 못했다.
+- `repeated_word_ngram` 적용 범위를 최소 16단어, 6단어 이상 n-gram 반복까지 낮췄다. 이는 특정 문구를 삭제하거나 후보를 재작성하지 않고, 반복 삽입 후보를 stage/final/translation 품질 게이트에서 제외하는 기존 안전장치의 범위 조정이다.
+- 변경 후 82케이스 CUDA/SaT 벤치는 `pass_rate=0.171`, `finalized=215`, `finalized_per_stage_start=0.440`, `final_f1_avg=0.385`이다.
+- 신규 케이스에서는 반복 절이 포함된 오염 final이 차단되어 `stage_candidate_quality_repeated_word_ngram=1`이 추가로 관측됐다. 대신 완성 문장 `정부의 본래의 세금 권한과 전통화폐에 대한 지속성...`은 아직 final로 회수되지 않고 `정부의 본래의 세금 권한과` staged 잔류로 남는다.
+- 영향이 바뀐 기존 케이스는 3개였고 final 결과 하락은 관측되지 않았다. `zh_log_duplicate_myeongdong_departure_fragment_20260617_001`는 동일 final을 유지하면서 `stage_candidate_quality_repeated_word_ngram=1`만 추가됐고, `ko_log_duplicate_tesla_global_direction_fragment_20260617_001`, `ko_log_pending_overrun_follow_acquire_giveup_fragment_20260618_001`는 반복 품질 계측 횟수만 바뀌었다.
+
+판단:
+
+- `들죠`처럼 committed prefix 제거 뒤 남는 짧은 no-end-marker 조각 final은 억제할 수 있는 근거가 생겼다.
+- 최근 추가 케이스들은 조기 중복 확정이 줄어든 대신, 더 나은 미래 window revision을 기다리지 못한 확정 누락 또는 staged 잔류로 남는 경향이 있다.
+- 남은 주요 실패는 짧은 조각이 아니라 문맥이 섞인 긴 후보가 `next_completed`로 final되는 경우다. 예: `디스플레이 크기... 후진할 때 보면... 들죠`처럼 앞뒤 window 문맥이 한 문장으로 합쳐지는 경우.
+- 다음 개선은 문맥이 섞인 긴 후보를 케이스별 문구로 보정하지 않고, staged와 output delta의 순서 일관성, 최근 final suffix 결합, age/confirmation 누적을 함께 이용해 `next_completed`를 더 보수화하는 방향으로 검토한다.
+
 ## 남은 실험 과제
 
 - 동일 입력 replay 기반으로 `faster-whisper`, `qwen3-asr-0.6b`, 과거 FunASR 기준선을 비교한다.

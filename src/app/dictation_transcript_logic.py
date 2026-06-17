@@ -710,15 +710,35 @@ def _has_repeated_cjk_ngram(words: list[str]) -> bool:
     return False
 
 
+def _has_repeated_word_ngram(words: list[str]) -> bool:
+    if len(words) < 16:
+        return False
+    for size in (12, 10, 9, 8, 7, 6):
+        seen: dict[tuple[str, ...], int] = {}
+        for index in range(0, len(words) - size + 1):
+            ngram = tuple(words[index : index + size])
+            if len(set(ngram)) < max(4, size // 2):
+                continue
+            previous = seen.get(ngram)
+            if previous is not None and index - previous >= size:
+                return True
+            seen.setdefault(ngram, index)
+    return False
+
+
 def _final_sentence_diagnostic_flags(sentence: str, language: str) -> tuple[str, ...]:
     normalized = _normalized_text(sentence)
     words = _word_units(normalized)
     flags: list[str] = []
     if not words:
         return ("empty",)
+    if normalized.endswith("...") or normalized.endswith("…"):
+        flags.append("trailing_ellipsis")
     normalized_language = str(language or "").strip().lower()
     has_cjk = _has_cjk_words(words)
     has_latin = _has_latin_words(words)
+    if _has_repeated_word_ngram(words):
+        flags.append("repeated_word_ngram")
     if normalized_language == "zh" or has_cjk:
         cjk_units = [word for word in words if _has_cjk_words([word])]
         if 0 < len(cjk_units) <= SHORT_CJK_FINAL_UNITS:
@@ -743,6 +763,80 @@ def _final_sentence_diagnostic_flags(sentence: str, language: str) -> tuple[str,
     return tuple(flags)
 
 
+def _has_later_completed_extension(candidate: str, later_sentences: list[str] | tuple[str, ...]) -> bool:
+    normalized_candidate = _normalized_text(candidate)
+    if not normalized_candidate or _boundary_sentence_end_count(normalized_candidate) > 0:
+        return False
+    for sentence in later_sentences:
+        normalized_later = _normalized_text(sentence)
+        if _boundary_sentence_end_count(normalized_later) == 0:
+            continue
+        if not normalized_later.startswith(normalized_candidate):
+            continue
+        if len(normalized_later) - len(normalized_candidate) >= 4:
+            return True
+    return False
+
+
+def _is_pending_prefix_mixed_candidate(candidate: str, pending_text: str) -> bool:
+    normalized_candidate = _normalized_text(candidate)
+    normalized_pending = _normalized_text(pending_text)
+    if (
+        not normalized_candidate
+        or not normalized_pending
+        or _boundary_sentence_end_count(normalized_candidate) == 0
+    ):
+        return False
+    candidate_units = _word_units(normalized_candidate)
+    pending_units = _word_units(normalized_pending)
+    if len(candidate_units) < 5 or len(pending_units) < 5:
+        return False
+    common_prefix = 0
+    for candidate_unit, pending_unit in zip(candidate_units, pending_units):
+        if candidate_unit != pending_unit:
+            break
+        common_prefix += 1
+    if common_prefix < 4:
+        return False
+    if common_prefix == len(candidate_units) or common_prefix == len(pending_units):
+        return False
+    return True
+
+
+def _is_prior_pending_recent_final_mixed_candidate(
+    candidate: str,
+    prior_pending_text: str,
+    recent_sentences: list[str] | tuple[str, ...],
+    language: str,
+) -> bool:
+    normalized_candidate = _normalized_text(candidate)
+    normalized_pending = _normalized_text(prior_pending_text)
+    if not normalized_candidate or not normalized_pending or not recent_sentences:
+        return False
+    candidate_words = _word_units(normalized_candidate)
+    pending_words = _word_units(normalized_pending)
+    if len(pending_words) < 3 or len(candidate_words) < len(pending_words) + 4:
+        return False
+    if candidate_words[: len(pending_words)] != pending_words:
+        return False
+    suffix_words = candidate_words[len(pending_words) :]
+    if len(suffix_words) < 4:
+        return False
+    suffix_text = _sentence_delta_from_words(suffix_words)
+    for recent in reversed(recent_sentences):
+        recent_words = _word_units(recent)
+        if len(recent_words) < len(suffix_words):
+            continue
+        if _recent_final_sentence_delta(suffix_text, recent, language) == "":
+            return True
+        ratio = SequenceMatcher(None, recent_words, suffix_words, autojunk=False).ratio()
+        _best_i, best_j, common_run = _best_common_word_run(recent_words, suffix_words)
+        suffix_coverage = common_run / max(len(suffix_words), 1)
+        if best_j <= 3 and common_run >= 4 and (ratio >= 0.55 or suffix_coverage >= 0.55):
+            return True
+    return False
+
+
 def _should_confirm_staged_sentence(
     staged_sentence: str,
     staged_confirmations: int,
@@ -750,8 +844,10 @@ def _should_confirm_staged_sentence(
 ) -> bool:
     if _is_open_korean_clause(staged_sentence):
         return False
+    flags = set(_final_sentence_diagnostic_flags(staged_sentence, "zh" if _is_cjk_text(staged_sentence) else ""))
+    if "repeated_word_ngram" in flags:
+        return False
     if _is_cjk_text(staged_sentence):
-        flags = set(_final_sentence_diagnostic_flags(staged_sentence, "zh"))
         if flags.intersection({"empty", "no_end_marker", "spaced_cjk", "cjk_repeated_ngram", "latin_only_for_zh"}):
             return False
     return staged_confirmations >= _sentence_required_confirmations(staged_forced)
@@ -772,6 +868,28 @@ def _should_preserve_partial_replacement(staged_sentence: str, candidate: str) -
     if left_tail and right_tail:
         return True
     return _boundary_sentence_end_count(staged_sentence) > 0 and best_j == 0 and common_run >= 5
+
+
+def _should_split_terminal_tail_revision(staged_sentence: str, candidate: str) -> bool:
+    staged = _normalized_text(staged_sentence)
+    candidate_text = _normalized_text(candidate)
+    if not staged or not candidate_text or _boundary_sentence_end_count(staged) == 0:
+        return False
+    staged_words = _word_units(staged)
+    candidate_words = _word_units(candidate_text)
+    if len(staged_words) < 5 or len(candidate_words) < len(staged_words) + 3:
+        return False
+    best_i, best_j, common_run = _best_common_word_run(staged_words, candidate_words)
+    if common_run < min(6, len(staged_words)):
+        return False
+    if best_i + common_run != len(staged_words):
+        return False
+    if best_j < 3:
+        return False
+    prefix_words = candidate_words[:best_j]
+    if _contains_word_sequence(staged_words, prefix_words):
+        return False
+    return True
 
 
 def _replacement_decision_reason(
@@ -817,6 +935,7 @@ def _replacement_decision_reason(
 def _should_finalize_replaced_sentence(
     staged_sentence: str,
     candidate: str,
+    language: str,
     staged_confirmations: int,
     staged_forced: bool,
     staged_age: int,
@@ -830,14 +949,18 @@ def _should_finalize_replaced_sentence(
         staged_age,
         sentence_finalize_age,
     )
+    flags = set(_final_sentence_diagnostic_flags(staged_sentence, language))
+    if "no_end_marker" in flags and staged_confirmations < _sentence_required_confirmations(staged_forced):
+        return False
+    if "trailing_ellipsis" in flags:
+        return False
     if reason == "confirmed":
         return _should_confirm_staged_sentence(staged_sentence, staged_confirmations, staged_forced)
     if reason == "aged" and _is_cjk_text(staged_sentence):
-        flags = set(_final_sentence_diagnostic_flags(staged_sentence, "zh"))
         if flags.intersection({"empty", "short_cjk", "spaced_cjk", "cjk_internal_gap", "cjk_repeated_ngram", "latin_only_for_zh"}):
             return False
-        if "no_end_marker" in flags:
-            return False
+    if "repeated_word_ngram" in flags:
+        return False
     return reason in {"aged", "duplicate_or_suffix", "partial_preserve"}
 
 
@@ -854,9 +977,11 @@ def _should_translate_final_sentence(sentence: str, language: str) -> bool:
             "mixed_latin_zh",
             "short_cjk",
             "no_end_marker",
+            "trailing_ellipsis",
             "empty",
             "spaced_cjk",
             "cjk_repeated_ngram",
+            "repeated_word_ngram",
             "low_value_cjk_fragment",
         }
     )
@@ -869,6 +994,7 @@ def _should_stage_boundary_candidate(sentence: str, language: str) -> bool:
             "empty",
             "spaced_cjk",
             "cjk_repeated_ngram",
+            "repeated_word_ngram",
             "latin_only_for_zh",
             "low_value_cjk_fragment",
         }
@@ -895,7 +1021,11 @@ def _should_finalize_before_replacement(
     staged_forced: bool = False,
 ) -> bool:
     flags = set(_final_sentence_diagnostic_flags(sentence, language))
-    if flags.intersection({"empty", "spaced_cjk", "cjk_repeated_ngram", "latin_only_for_zh"}):
+    if flags.intersection({"empty", "spaced_cjk", "cjk_repeated_ngram", "repeated_word_ngram", "latin_only_for_zh"}):
+        return False
+    if "no_end_marker" in flags and staged_confirmations < _sentence_required_confirmations(staged_forced):
+        return False
+    if "trailing_ellipsis" in flags:
         return False
     if _is_cjk_text(sentence):
         if flags.intersection({"short_cjk", "no_end_marker", "cjk_internal_gap"}):
@@ -903,6 +1033,7 @@ def _should_finalize_before_replacement(
     if not _should_finalize_replaced_sentence(
         sentence,
         "",
+        language,
         staged_confirmations,
         staged_forced,
         staged_age,
@@ -910,6 +1041,23 @@ def _should_finalize_before_replacement(
     ):
         return False
     return True
+
+
+def _should_suppress_short_delta_final(staged_sentence: str, output_sentence: str, language: str, reason: str) -> bool:
+    if reason not in {"next_completed", "confirmed", "confirmed_forced"}:
+        return False
+    staged = _normalized_text(staged_sentence)
+    output = _normalized_text(output_sentence)
+    if not staged or not output or staged == output:
+        return False
+    output_words = _word_units(output)
+    staged_words = _word_units(staged)
+    if len(output_words) > 7 or len(output) > 32:
+        return False
+    if len(staged_words) < len(output_words) + 3:
+        return False
+    flags = set(_final_sentence_diagnostic_flags(output, language))
+    return "no_end_marker" in flags
 
 
 def _is_recent_final_echo(candidate: str, recent_sentence: str, _language: str) -> bool:
@@ -961,8 +1109,17 @@ def _recent_final_sentence_delta(candidate: str, recent_sentence: str, language:
     compact_delta = _compact_recent_final_delta(candidate_words, recent_words)
     if compact_delta is not None:
         return compact_delta
+    short_tail_delta = _recent_final_short_tail_echo_delta(candidate_words, recent_words)
+    if short_tail_delta is not None:
+        return short_tail_delta
     if min(len(candidate_words), len(recent_words)) < 8:
+        suffix_delta = _recent_final_suffix_delta(candidate_words, recent_words)
+        if suffix_delta is not None:
+            return suffix_delta
         return None
+    suffix_delta = _recent_final_suffix_delta(candidate_words, recent_words)
+    if suffix_delta is not None:
+        return suffix_delta
     if _contains_word_sequence(recent_words, candidate_words):
         return ""
     if _contains_word_sequence(candidate_words, recent_words):
@@ -1044,6 +1201,63 @@ def _recent_final_sentence_delta(candidate: str, recent_sentence: str, language:
         return ""
     delta = _cjk_delta_from_words(suffix_words) if _has_cjk_words(candidate_words) else _sentence_delta_from_words(suffix_words)
     return _with_candidate_terminal(delta, normalized_candidate)
+
+
+def _recent_final_short_tail_echo_delta(candidate_words: list[str], recent_words: list[str]) -> str | None:
+    if len(candidate_words) < 2 or len(candidate_words) > 5:
+        return None
+    if len(recent_words) < len(candidate_words) + 2:
+        return None
+    for suffix_len in range(min(len(candidate_words), 4), 1, -1):
+        candidate_suffix = candidate_words[-suffix_len:]
+        recent_suffix = recent_words[-suffix_len:]
+        candidate_key = "".join(candidate_suffix).lower()
+        recent_key = "".join(recent_suffix).lower()
+        if len(candidate_key) < 6:
+            continue
+        if SequenceMatcher(None, recent_key, candidate_key, autojunk=False).ratio() >= 0.86:
+            return ""
+    return None
+
+
+def _recent_final_suffix_delta(candidate_words: list[str], recent_words: list[str]) -> str | None:
+    if len(candidate_words) <= len(recent_words) or not recent_words:
+        return None
+    recent_key = "".join(recent_words).lower()
+    if len(recent_key) < 6:
+        return None
+    expected_start = len(candidate_words) - len(recent_words)
+    for start in range(max(1, expected_start - 2), min(len(candidate_words), expected_start + 3)):
+        suffix_words = candidate_words[start:]
+        suffix_key = "".join(suffix_words).lower()
+        if len(suffix_key) < 6:
+            continue
+        ratio = SequenceMatcher(None, recent_key, suffix_key, autojunk=False).ratio()
+        if ratio < 0.78:
+            continue
+        prefix_words = candidate_words[:start]
+        if len(prefix_words) < 4:
+            return ""
+        if _has_cjk_words(candidate_words):
+            return _cjk_delta_from_words(prefix_words)
+        return _sentence_delta_from_words(prefix_words)
+    for suffix_len in range(min(5, len(candidate_words) - 4), 1, -1):
+        suffix_words = candidate_words[-suffix_len:]
+        suffix_key = "".join(suffix_words).lower()
+        if len(suffix_key) < 6:
+            continue
+        for recent_len in range(suffix_len, min(len(recent_words), suffix_len + 1) + 1):
+            recent_tail_key = "".join(recent_words[-recent_len:]).lower()
+            ratio = SequenceMatcher(None, recent_tail_key, suffix_key, autojunk=False).ratio()
+            if ratio < 0.84:
+                continue
+            prefix_words = candidate_words[:-suffix_len]
+            if len(prefix_words) < 4:
+                return ""
+            if _has_cjk_words(candidate_words):
+                return _cjk_delta_from_words(prefix_words)
+            return _sentence_delta_from_words(prefix_words)
+    return None
 
 
 def _with_candidate_terminal(delta: str, candidate: str) -> str:
@@ -1142,13 +1356,41 @@ def _trim_repeated_cjk_revision_prefix(left: str, right: str) -> str:
     return _strip_leading_word_units(normalized, len(prefix_words))
 
 
+def _is_prefix_inserted_staged_tail_revision(left: str, right: str) -> bool:
+    normalized_right = _normalized_text(right)
+    if _boundary_sentence_end_count(normalized_right) > 0:
+        return False
+    left_words = _word_units(left)
+    right_words = _word_units(normalized_right)
+    if len(left_words) < 10 or len(right_words) <= len(left_words):
+        return False
+    for block in SequenceMatcher(None, left_words, right_words, autojunk=False).get_matching_blocks():
+        if block.size < 8:
+            continue
+        if block.a > 2:
+            continue
+        if not (1 <= block.b <= 8):
+            continue
+        if block.a + block.size < len(left_words) - 2:
+            continue
+        if block.size / max(len(left_words), 1) >= 0.65:
+            return True
+    return False
+
+
 def _prefer_sentence_revision(left: str, right: str) -> str:
     right = _trim_repeated_cjk_revision_prefix(left, right)
     left_words = _word_units(left)
     right_words = _word_units(right)
+    left_flags = set(_final_sentence_diagnostic_flags(left, "zh" if _is_cjk_text(left) else ""))
+    right_flags = set(_final_sentence_diagnostic_flags(right, "zh" if _is_cjk_text(right) else ""))
+    if "repeated_word_ngram" in right_flags and "repeated_word_ngram" not in left_flags:
+        return _normalized_text(left)
+    if "repeated_word_ngram" in left_flags and "repeated_word_ngram" not in right_flags:
+        return _normalized_text(right)
+    if _is_prefix_inserted_staged_tail_revision(left, right):
+        return _normalized_text(left)
     if _is_cjk_text(left) or _is_cjk_text(right):
-        left_flags = set(_final_sentence_diagnostic_flags(left, "zh"))
-        right_flags = set(_final_sentence_diagnostic_flags(right, "zh"))
         if "cjk_repeated_ngram" in right_flags and "cjk_repeated_ngram" not in left_flags:
             return _normalized_text(left)
         if "cjk_repeated_ngram" in left_flags and "cjk_repeated_ngram" not in right_flags:
@@ -1282,6 +1524,8 @@ def _pending_text_diagnostic_flags(pending_text: str, language: str, pending_chu
     flags: list[str] = []
     normalized_language = str(language or "").strip().lower()
     words = _word_units(normalized)
+    if _has_repeated_word_ngram(words):
+        flags.append("repeated_word_ngram")
     if (normalized_language == "zh" or _has_cjk_words(words)) and _has_repeated_cjk_ngram(words):
         flags.append("cjk_repeated_ngram")
     overrun = _pending_overrun_reason(normalized, pending_chunks)

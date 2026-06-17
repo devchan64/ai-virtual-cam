@@ -31,6 +31,9 @@ from src.app.dictation_transcript_logic import (
     _pending_overrun_reason,
     _pending_text_diagnostic_flags,
     _format_transcript_metrics,
+    _has_later_completed_extension,
+    _is_pending_prefix_mixed_candidate,
+    _is_prior_pending_recent_final_mixed_candidate,
     _is_cjk_text,
     _prefer_sentence_revision,
     _sentence_end_count,
@@ -45,9 +48,11 @@ from src.app.dictation_transcript_logic import (
     _should_age_staged_sentence,
     _should_finalize_before_replacement,
     _should_stage_boundary_candidate,
+    _should_suppress_short_delta_final,
     _should_preserve_revision_confirmation_from_internal_stability,
     _should_reset_revision_age,
     _revision_internal_stability_bucket,
+    _should_split_terminal_tail_revision,
     _should_translate_final_sentence,
     _split_completed_sentences,
     _stable_window_text,
@@ -786,6 +791,18 @@ class WhisperTranscriptWorker:
                 )
                 promote_next_staged_sentence(detected)
                 return []
+            if _should_suppress_short_delta_final(staged_before, output_sentence, detected, reason):
+                count_metric("finalize_short_delta_suppressed")
+                count_segment_state("suppressed")
+                self._emit(
+                    "status",
+                    "받아쓰기 AI 짧은 delta 확정 보류: "
+                    f"chunk={chunks} reason={reason} staged_tail={_diagnostic_tail(staged_before)} "
+                    f"output={output_sentence!r}",
+                    display=False,
+                )
+                promote_next_staged_sentence(detected)
+                return []
             count_metric("finalized")
             count_segment_state("final")
             final_quality_flags = _final_sentence_diagnostic_flags(output_sentence, detected)
@@ -806,7 +823,14 @@ class WhisperTranscriptWorker:
             promote_next_staged_sentence(detected)
             return [output_sentence]
 
-        def stage_completed_sentence(sentence: str, detected: str, *, forced: bool = False) -> list[str]:
+        def stage_completed_sentence(
+            sentence: str,
+            detected: str,
+            *,
+            forced: bool = False,
+            later_completed_sentences: list[str] | tuple[str, ...] = (),
+            prior_pending_text: str = "",
+        ) -> list[str]:
             nonlocal staged_sentence, staged_confirmations, staged_age, staged_forced, staged_deferred_age_chunk
             normalized_sentence = _normalized_text(sentence)
             candidate = _sentence_output_delta(committed_text, sentence)
@@ -827,6 +851,33 @@ class WhisperTranscriptWorker:
                 count_metric("candidate_duplicate_suppressed")
                 count_segment_state("suppressed")
                 self._emit("status", f"받아쓰기 AI 중복 문장 무시: chunk={chunks} text={sentence!r}", display=False)
+                return []
+            if _is_pending_prefix_mixed_candidate(candidate, pending_transcript_text):
+                count_metric("candidate_pending_prefix_mixed_suppressed")
+                count_segment_state("suppressed")
+                self._emit(
+                    "status",
+                    "받아쓰기 AI pending prefix 혼합 후보 무시: "
+                    f"chunk={chunks} candidate_tail={_diagnostic_tail(candidate)} "
+                    f"pending_tail={_diagnostic_tail(pending_transcript_text)}",
+                    display=False,
+                )
+                return []
+            if _is_prior_pending_recent_final_mixed_candidate(
+                candidate,
+                prior_pending_text,
+                tuple(self._recent_transcripts),
+                detected,
+            ):
+                count_metric("candidate_prior_pending_recent_final_mixed_suppressed")
+                count_segment_state("suppressed")
+                self._emit(
+                    "status",
+                    "받아쓰기 AI prior pending/recent final 혼합 후보 무시: "
+                    f"chunk={chunks} candidate_tail={_diagnostic_tail(candidate)} "
+                    f"prior_pending_tail={_diagnostic_tail(prior_pending_text)}",
+                    display=False,
+                )
                 return []
             if not _should_stage_boundary_candidate(candidate, detected):
                 count_metric("stage_candidate_quality_blocked")
@@ -861,6 +912,31 @@ class WhisperTranscriptWorker:
                 )
                 self._emit("transcript", staged_sentence, log_text=f"[{detected}] {staged_sentence}", final=False)
                 return []
+            if _should_split_terminal_tail_revision(staged_sentence, candidate):
+                count_metric("stage_revision_terminal_tail_split")
+                finalized = finalize_staged_sentence(detected, "terminal_tail_revision_split")
+                if not staged_sentence:
+                    promote_next_staged_sentence(detected)
+                if staged_sentence:
+                    queue_staged_sentence(candidate, forced)
+                    return finalized
+                count_metric("stage_start")
+                count_segment_state("staged")
+                staged_sentence = candidate
+                staged_confirmations = 1
+                staged_age = 0
+                staged_forced = forced
+                staged_deferred_age_chunk = chunks
+                self._emit(
+                    "status",
+                    "받아쓰기 AI stage 시작: "
+                    f"chunk={chunks} forced={forced} candidate_chars={len(_normalized_text(candidate))} "
+                    f"candidate_tail={_diagnostic_tail(candidate)} committed_chars={len(_normalized_text(committed_text))}",
+                    display=False,
+                )
+                self._emit("transcript", staged_sentence, log_text=f"[{detected}] {staged_sentence}", final=False)
+                return finalized
+
             is_revision = _sentences_are_revisions(staged_sentence, candidate)
             if is_revision:
                 count_metric("stage_revision")
@@ -891,7 +967,13 @@ class WhisperTranscriptWorker:
                 else:
                     candidate_flags = set(_final_sentence_diagnostic_flags(candidate, detected))
                     staged_flags = set(_final_sentence_diagnostic_flags(staged_before, detected))
-                    if "cjk_repeated_ngram" in candidate_flags and "cjk_repeated_ngram" not in staged_flags:
+                    if (
+                        "cjk_repeated_ngram" in candidate_flags
+                        and "cjk_repeated_ngram" not in staged_flags
+                    ) or (
+                        "repeated_word_ngram" in candidate_flags
+                        and "repeated_word_ngram" not in staged_flags
+                    ):
                         count_metric("stage_revision_candidate_quality_blocked")
                 staged_sentence = preferred
                 staged_confirmations = _next_revision_confirmation_count(
@@ -927,13 +1009,22 @@ class WhisperTranscriptWorker:
                     f"preferred={_diagnostic_tail(preferred)}",
                     display=False,
                 )
-                if _should_confirm_staged_sentence(
+                defer_for_later_extension = _has_later_completed_extension(staged_sentence, later_completed_sentences)
+                if defer_for_later_extension:
+                    count_metric("stage_confirm_deferred_later_extension")
+                    self._emit(
+                        "status",
+                        "받아쓰기 AI stage 확정 보류: "
+                        f"chunk={chunks} reason=later_completed_extension staged_tail={_diagnostic_tail(staged_sentence)}",
+                        display=False,
+                    )
+                if not defer_for_later_extension and _should_confirm_staged_sentence(
                     staged_sentence,
                     staged_confirmations,
                     staged_forced,
                 ):
                     return finalize_staged_sentence(detected, "confirmed_forced" if staged_forced else "confirmed")
-                if _should_finalize_before_replacement(
+                if not defer_for_later_extension and _should_finalize_before_replacement(
                     staged_sentence,
                     detected,
                     staged_confirmations,
@@ -998,6 +1089,7 @@ class WhisperTranscriptWorker:
             if _should_finalize_replaced_sentence(
                 staged_sentence,
                 candidate,
+                detected,
                 staged_confirmations,
                 staged_forced,
                 staged_age,
@@ -1199,6 +1291,7 @@ class WhisperTranscriptWorker:
                     self._emit("status", f"받아쓰기 AI 반복 전사 무시: chunk={chunks} text={text!r}", display=False)
                     text = ""
                 if text:
+                    prior_pending_transcript_text = pending_transcript_text
                     boundary_result = self._sentence_boundary_detector.split(
                         pending_transcript_text,
                         text,
@@ -1221,8 +1314,13 @@ class WhisperTranscriptWorker:
                         pending_chunks = 0
                     elif pending_transcript_text:
                         pending_chunks += 1
-                    for sentence in completed_sentences:
-                        produced_sentences = stage_completed_sentence(sentence, detected)
+                    for sentence_index, sentence in enumerate(completed_sentences):
+                        produced_sentences = stage_completed_sentence(
+                            sentence,
+                            detected,
+                            later_completed_sentences=completed_sentences[sentence_index + 1 :],
+                            prior_pending_text=prior_pending_transcript_text,
+                        )
                         final_sentences.extend(produced_sentences)
                         for produced_sentence in produced_sentences:
                             pending_transcript_text = _consume_committed_prefix(pending_transcript_text, produced_sentence)

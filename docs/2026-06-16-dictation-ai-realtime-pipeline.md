@@ -51,10 +51,20 @@ final-only 번역
 | 경계 판단 | 구현됨 | SaT/SBD, punctuation/end-mark, right-context 지표로 completed/pending 후보를 생성한다. |
 | 세그먼트 생명주기 | 구현됨 | `pending`, `staged`, `final`, `suppressed`, `revised` 상태를 분리한다. |
 | append-only final | 구현됨 | final transcript는 되돌리지 않고 append-only로 출력한다. |
-| 최근 final 중복 억제 | 구현됨 | 일정 기간 보관한 최근 final 문장과 확정 후보를 token-sentence compact 유사도로 비교해 유사 후보의 중복 확정을 막고, 최근 final의 확장 후보는 새 suffix만 final로 넘긴다. |
+| 최근 final 중복 억제 | 구현됨 | 일정 기간 보관한 최근 final 문장과 확정 후보를 token-sentence compact 유사도로 비교해 유사 후보의 중복 확정을 막고, 최근 final의 확장 후보는 새 suffix만 final로 넘기며, 최근 final 또는 최근 final의 짧은 tail이 후보 suffix로 재삽입된 경우는 앞쪽 delta만 남긴다. 짧은 후보가 최근 final tail과만 유사하면 recent-final echo로 억제한다. |
+| pending-prefix 혼합 후보 억제 | 구현됨 | completed 후보가 현재 pending tail과 같은 prefix로 시작하지만 서로 다른 suffix로 갈라지면, pending tail이 이전 문맥과 섞인 후보로 보고 stage 전에 suppressed로 계측한다. |
+| prior pending/recent final 혼합 후보 억제 | 구현됨 | 이전 window의 pending prefix 뒤에 최근 final tail이 재삽입된 completed 후보는 순서가 섞인 후보로 보고 stage 전에 suppressed로 계측한다. |
+| 짧은 delta 조각 final 억제 | 구현됨 | `next_completed` 확정 직전 committed prefix 제거 결과가 종결 신호 없는 짧은 조각이면 final로 내보내지 않고 suppressed로 계측한다. |
+| terminal-tail revision 분리 | 구현됨 | 종결부호가 있는 staged 문장의 tail이 다음 후보 뒤쪽에 재삽입되면 같은 문장의 revision으로 병합하지 않고 staged를 먼저 final로 소비한다. |
+| prefix 삽입 revision 보존 | 구현됨 | 종결 신호 없는 후보가 기존 staged 대부분을 suffix로 공유하면서 앞에 짧은 prefix만 새로 끼워 넣은 형태이면 sliding window 순서 혼입으로 보고 기존 staged를 보존한다. |
+| 동일 chunk 완료 후보 확장 보류 | 구현됨 | 같은 boundary 결과 안에 현재 staged 후보를 prefix로 갖는 더 긴 완료 후보가 뒤에 있으면, 종결 신호 없는 staged의 confirmed/next_completed 확정을 한 번 보류한다. |
+| replacement final 품질 게이트 | 구현됨 | `duplicate_or_suffix`, `partial_preserve`, `aged` replacement 확정도 final 공통 품질 기준을 우회하지 않는다. |
+| trailing ellipsis final 억제 | 구현됨 | STT가 `...`/`…`로 끝내는 미완성 후보는 end marker처럼 보이더라도 final/translation 대상으로 보내지 않는다. |
 | 짧은 CJK 확정 보류 | 구현됨 | 종결부호가 있는 짧은 CJK 후보는 다음 후보에 바로 밀려나지 않도록 제한적으로 더 보류해 반복 관측 confirmation을 채운다. |
+| 반복 삽입 후보 품질 게이트 | 구현됨 | completed 후보 내부에 동일한 token n-gram이 반복 삽입되면 stage/final/translation 대상에서 제외한다. 문장을 재작성하거나 접합하지 않고 오염 후보만 suppressed로 계측한다. |
 | final-only 번역 | 구현됨 | 번역 큐에는 final 문장만 넣는다. staged/partial은 번역하지 않는다. |
 | 과거 보정 경로 제거 | 구현됨 | 반복 phrase collapse, pending 강제 completed 승격, CJK 조기 replacement 확정 경로를 운영/벤치 기준에서 제거했다. |
+| 긴 `next_completed` 순서 뒤섞임 억제 | 관측 중 | 최근 로그에서 여러 문맥이 섞인 긴 후보가 `next_completed`로 final되는 유형이 남아 있다. 케이스별 보정 없이 staged 순서, 최근 final suffix 결합, age/confirmation 누적 신호로만 개선한다. |
 
 ## 폐기 범위
 
@@ -92,6 +102,15 @@ detector 입력을 만들기 위한 단순 문자열 결합은 허용하지만, 
 - 최근 final과 같은 후보는 다시 final로 확정하지 않는다.
 - 최근 final의 유사 후보는 언어 코드별 예외 없이 token-sentence 유사도로 비교한다.
 - 최근 final의 확장 후보는 이미 확정된 prefix를 반복 출력하지 않고 새 suffix만 final로 확정한다.
+- 최근 final 또는 최근 final의 짧은 tail이 후보의 suffix로 다시 붙은 경우도 반복 출력하지 않고 앞쪽 delta만 확정 후보로 남긴다.
+- 이전 pending prefix 뒤에 최근 final tail이 붙어 나온 completed 후보는 순서가 섞인 후보로 보고 final 후보에서 제외한다.
+- `next_completed` 확정은 종결 신호 없는 미확인 staged 후보를 밀어내지 않는다.
+- `next_completed` 확정은 순서가 뒤섞인 긴 후보를 확정하는 우회 경로가 되어서는 안 된다.
+- 종결부호가 있는 staged 문장의 tail이 다른 prefix 뒤에 붙은 후보는 같은 문장의 revision으로 보지 않는다.
+- 종결 신호 없는 후보가 기존 staged의 긴 suffix 앞에 짧은 prefix만 삽입한 형태이면 기존 staged를 더 신뢰한다.
+- replacement final 경로도 종결 신호 없는 미확인 staged 후보를 확정하지 않는다.
+- committed prefix 제거 결과가 원 staged보다 크게 짧아진 종결 신호 없는 조각이면 `next_completed` 또는 `confirmed` 계열 final로 확정하지 않는다.
+- STT가 미완성 후보를 `...` 또는 `…`로 끝낸 경우는 확정 문장 종료로 보지 않는다.
 - staged/partial 후보는 다음 window에서 수정될 수 있으므로 번역하지 않는다.
 - STT 원문창은 raw 결과만 표시한다.
 - 복사용 문장은 전사 창의 final 결과만 사용한다.
@@ -125,6 +144,7 @@ detector 입력을 만들기 위한 단순 문자열 결합은 허용하지만, 
 - punctuation/end-mark, right-context 시작 징후, soft boundary, end probability는 관측 지표로 기록한다.
 - 여러 completed 후보가 한 window에서 나와도 모델 경계 단위를 보존한다.
 - boundary backend/model은 명시 설정값만 사용한다. 실행 중 언어에 따라 암묵 전환하지 않는다.
+- completed 후보 내부에서 동일한 token n-gram이 반복 삽입되면 `repeated_word_ngram` 품질 플래그로 stage/final/translation 후보에서 제외한다. 이는 특정 언어 예외가 아니라 sliding window STT에서 같은 구가 재삽입된 후보를 막는 공통 lifecycle 안전장치다.
 
 ## VAD와 무음 구간
 
@@ -200,6 +220,8 @@ VAD와 silence 길이는 받아쓰기 AI 실시간 처리 파이프라인의 구
 | `revision_similarity_policy` | token-sentence revision/confirmation 유사도 임계값 묶음. 운영 설정이 아니라 내부 튜닝 policy로 관리하며 SBD 벤치 리포트에 기록한다. |
 | `AVC_DICTATION_*` revision env override | 리비전 임계값 벤치 실험용 override. 기본 운영값을 바꾸지 않고 동일 벤치에서 상수 조합을 비교하기 위한 내부 도구다. |
 | `stage_candidate_quality_low_value_cjk_fragment` | 문장 종료 부호 없는 CJK 초단편 후보 차단 횟수 |
+| `stage_candidate_quality_repeated_word_ngram` | 긴 후보 내부 token n-gram 반복 삽입 차단 횟수 |
+| `pending_quality_repeated_word_ngram` | pending tail 내부 token n-gram 반복 누적 관측 횟수. 현재는 관측 지표로만 쓰며, pending 접합/절단 정책으로 직접 사용하지 않는다. |
 | `stage_revision_age_reset`, `stage_queue_revision_age_reset` | 내용이 바뀐 CJK revision의 age 재시작 횟수 |
 | `stage_replaced_unconfirmed` | 확정 전 교체된 staged 후보 |
 | `raw_without_final` | raw STT 관측 대비 final 미발생 횟수 |
