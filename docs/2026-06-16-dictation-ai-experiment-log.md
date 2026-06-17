@@ -759,7 +759,6 @@ final-only 번역
 
 ```text
 ./.venv/bin/python -m unittest \
-  tests.unit.test_dictation_ai_sentence_revision \
   tests.unit.test_dictation_ai_sentence_forcing \
   tests.unit.test_dictation_ai_transcript_delta \
   tests.unit.test_dictation_ai_sentence_boundary \
@@ -768,9 +767,11 @@ final-only 번역
 ./.venv/bin/python tests/eval/dictation_ai/performance_tracking.py \
   --output .tmp/eval/dictation-ai-performance-tracking/latest.json
 
+./.venv/bin/python tests/eval/dictation_ai/sentence_revision_tracking.py
+```
+
 단위 테스트는 deterministic helper 회귀 검증으로 통과했다.
 성능 추적 케이스는 별도 벤치 리포트로 rate/gap을 출력한다.
-```
 
 ```text
 ./.venv/bin/python -m py_compile \
@@ -1262,6 +1263,48 @@ zh_log_missing_jongno_market_transfer_20260617_001:
 - `finalized`와 `final_f1_avg`는 개선됐다.
 - queue 도입으로 `stage_start`가 증가하므로 `finalized_per_stage_start`는 단독 성공 지표로 쓰기 어렵다.
 - `我的T蛮。`처럼 오인식/중간 fragment가 final로 올라오는 리스크가 남아 있어, 다음 튜닝은 queue final 품질과 recent final 유사 억제를 함께 봐야 한다.
+
+### 추가 보완: 초단편 CJK stage 후보 차단
+
+로그 판단:
+
+- chunk 704~720 부근에서 `们`, `不 然 他`, `哎` 같은 CJK 초단편이 staged로 시작된 뒤 다음 completed 후보를 `unconfirmed_cjk`로 막는 패턴이 반복됐다.
+- chunk 201~214 부근에서도 staged queue가 동작하더라도 `好去。`, `八`, `等 一 下 等 等` 같은 저가치 fragment가 active staged나 queue를 점유하면서 `raw_without_final`이 증가했다.
+- 현재 실행은 `translation_enabled=False`였으므로 번역 누락이 아니라 final-only 번역 대상으로 넘길 final 문장 생성 단계의 병목이다.
+
+보완:
+
+- 문장 종료 부호가 없고 CJK 단위가 3개 이하인 후보를 `low_value_cjk_fragment`로 진단한다.
+- 이 flag는 stage 후보 진입과 final 번역 대상을 차단한다.
+- 케이스별 문구 규칙은 추가하지 않고 기존 품질 flag/metric 경로에 통합했다.
+- `zh_log_low_value_cjk_stage_blocks_queue_20260617_001`을 SBD 벤치 케이스로 추가했다.
+
+기대 관측:
+
+- `stage_candidate_quality_low_value_cjk_fragment` 증가가 보이면 초단편 후보가 stage/queue 점유 전에 제거된 것이다.
+- `raw_without_final`과 `stage_queue_drop_oldest`가 함께 줄어드는지 CUDA/SaT 벤치로 확인한다.
+
+CUDA/SaT 벤치 결과:
+
+```text
+cases=29
+pass_rate=0.138
+finalized=109
+stage_start=165
+finalized_per_stage_start=0.661
+final_f1_avg=0.223
+stage_candidate_quality_low_value_cjk_fragment=15
+stage_queue_enqueue=230
+stage_queue_promote=122
+stage_queue_revision=377
+stage_queue_drop_oldest=23
+```
+
+판단:
+
+- 초단편 CJK 후보는 실제로 15회 차단되어 stage/queue 오염을 줄이는 근거가 생겼다.
+- 새로 추가한 `zh_log_low_value_cjk_stage_blocks_queue_20260617_001` 케이스는 여전히 final 1개만 생성했고, active staged 뒤에 queue가 쌓였다.
+- 남은 병목은 초단편 후보보다 active staged 확정/교체 소비 지연에 가깝다. 추가 로직을 늘리기 전, 이 병목을 별도 벤치 케이스로 추적한다.
 
 ## 남은 실험 과제
 

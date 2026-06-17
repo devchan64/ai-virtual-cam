@@ -688,6 +688,8 @@ def _final_sentence_diagnostic_flags(sentence: str, language: str) -> tuple[str,
         cjk_units = [word for word in words if _has_cjk_words([word])]
         if 0 < len(cjk_units) <= SHORT_CJK_FINAL_UNITS:
             flags.append("short_cjk")
+        if 0 < len(cjk_units) <= 3 and _boundary_sentence_end_count(normalized) == 0:
+            flags.append("low_value_cjk_fragment")
         text_units, separator = _text_units(normalized)
         cjk_text_units = [unit for unit in text_units if _has_cjk_words(_word_units(unit))]
         single_cjk_text_units = [unit for unit in cjk_text_units if len(_word_units(unit)) == 1]
@@ -820,13 +822,22 @@ def _should_translate_final_sentence(sentence: str, language: str) -> bool:
             "empty",
             "spaced_cjk",
             "cjk_repeated_ngram",
+            "low_value_cjk_fragment",
         }
     )
 
 
 def _should_stage_boundary_candidate(sentence: str, language: str) -> bool:
     flags = set(_final_sentence_diagnostic_flags(sentence, language))
-    return not flags.intersection({"empty", "spaced_cjk", "cjk_repeated_ngram", "latin_only_for_zh"})
+    return not flags.intersection(
+        {
+            "empty",
+            "spaced_cjk",
+            "cjk_repeated_ngram",
+            "latin_only_for_zh",
+            "low_value_cjk_fragment",
+        }
+    )
 
 
 def _should_finalize_boundary_candidate(

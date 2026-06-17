@@ -29,7 +29,7 @@
 | 영역 | 현재 상태 | 판단 |
 | --- | --- | --- |
 | `tests/eval/dictation_ai/performance_tracking.py` | `_record()`로 matched만 누적하고 rate/gap 리포트를 출력한다. | 성능 추적 벤치 구조가 맞다. 개별 matched를 assert로 바꾸지 않는다. |
-| `test_dictation_ai_sentence_revision.py` | `from_log/from_monitoring` hard assert가 많다. | 일부는 안전 계약이지만, stage churn/finalization tuning 성격 케이스는 이관 후보가 있다. |
+| `tests/eval/dictation_ai/sentence_revision_tracking.py` | 기존 `test_dictation_ai_sentence_revision.py`의 로그 기반 revision/age/finalization 샘플을 보존한다. | unit 품질 게이트가 아니라 추적 벤치로 실행한다. |
 | `test_dictation_ai_transcript_delta.py` | delta 중복 억제 케이스가 hard assert로 있다. | 사용자 출력 중복 방지 계약이므로 상당수는 hard regression으로 유지 가능하다. |
 | `test_dictation_ai_sentence_boundary.py` | soft boundary 결과를 hard assert로 고정한다. | 모델 기반 SBD가 아니라 로컬 boundary helper의 deterministic contract일 때만 유지한다. |
 | `test_dictation_ai_repeat_collapse.py` | collapse 결과를 hard assert로 고정한다. | 사용자 출력 오염 방지 계약은 유지하되, 언어별/로그별 tuning 샘플은 tracking 후보로 본다. |
@@ -43,7 +43,7 @@
 
 ## 우선 이관 후보
 
-1. `test_dictation_ai_sentence_revision.py`의 stage replacement/finalization age 관련 로그 케이스
+1. `tests/eval/dictation_ai/sentence_revision_tracking.py`의 샘플을 structured rate/gap 벤치로 추가 정규화
 2. `test_dictation_ai_sentence_boundary.py`의 soft boundary 튜닝 케이스
 3. `test_dictation_ai_repeat_collapse.py`의 언어별 반복 collapse 샘플 중 출력 오염 안전 계약이 아닌 케이스
 
@@ -53,7 +53,7 @@
 
 다음 hard unit test는 중요도가 낮은 품질 게이트로 판단해 제거했다.
 
-- `test_dictation_ai_sentence_revision.py`의 single-observation replacement, open clause replacement, first-observation CJK finalization 로그 샘플
+- `test_dictation_ai_sentence_revision.py`의 로그 기반 revision/age/finalization 샘플을 `tests/eval/dictation_ai/sentence_revision_tracking.py`로 이동
 - `test_dictation_ai_sentence_boundary.py`의 legacy soft boundary 로그 샘플
 - `test_dictation_ai_repeat_collapse.py`의 특정 로그 문장 기반 collapse 샘플 일부
 

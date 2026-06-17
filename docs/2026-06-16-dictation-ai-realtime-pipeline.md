@@ -195,6 +195,7 @@ VAD와 silence 길이는 받아쓰기 AI 실시간 처리 파이프라인의 구
 | `segment_state_pending/staged/final/suppressed/revised` | 세그먼트 상태 비율 |
 | `finalized_per_stage_start` | staged 후보 대비 final 확정 비율 |
 | `stage_queue_enqueue/promote/revision/drop_oldest` | 순서 보존 staged queue의 보존/승격/갱신/폐기 흐름 |
+| `stage_candidate_quality_low_value_cjk_fragment` | 문장 종료 부호 없는 CJK 초단편 후보 차단 횟수 |
 | `stage_replaced_unconfirmed` | 확정 전 교체된 staged 후보 |
 | `raw_without_final` | raw STT 관측 대비 final 미발생 횟수 |
 | `boundary_end_marks` | punctuation/end-mark 경계 신호 |
