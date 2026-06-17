@@ -939,7 +939,7 @@ def _should_confirm_staged_sentence(
         return False
     if _is_cjk_text(staged_sentence):
         flags = set(_final_sentence_diagnostic_flags(staged_sentence, "zh"))
-        if flags.intersection({"empty", "spaced_cjk", "cjk_repeated_ngram", "latin_only_for_zh"}):
+        if flags.intersection({"empty", "no_end_marker", "spaced_cjk", "cjk_repeated_ngram", "latin_only_for_zh"}):
             return False
     return staged_confirmations >= _sentence_required_confirmations(staged_forced)
 
@@ -1015,6 +1015,8 @@ def _should_finalize_replaced_sentence(
         flags = set(_final_sentence_diagnostic_flags(staged_sentence, "zh"))
         if flags.intersection({"empty", "short_cjk", "spaced_cjk", "cjk_internal_gap", "cjk_repeated_ngram", "latin_only_for_zh"}):
             return False
+        if "no_end_marker" in flags:
+            return False
     return reason in {"aged", "duplicate_or_suffix", "partial_preserve"}
 
 
@@ -1066,7 +1068,7 @@ def _should_finalize_before_replacement(
     if flags.intersection({"empty", "spaced_cjk", "cjk_repeated_ngram", "latin_only_for_zh"}):
         return False
     if _is_cjk_text(sentence):
-        if flags.intersection({"short_cjk", "cjk_internal_gap"}):
+        if flags.intersection({"short_cjk", "no_end_marker", "cjk_internal_gap"}):
             return False
         cjk_replacement_confirmations = max(2, _sentence_required_confirmations(staged_forced) - 1)
         return (

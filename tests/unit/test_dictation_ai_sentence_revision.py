@@ -279,23 +279,60 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         self.assertFalse(_should_confirm_staged_sentence("그런데 보면 최치PD가 등장하기", 4, True))
         self.assertTrue(_should_confirm_staged_sentence("신규 채용을 안 하고 있습니다.", 3, False))
 
-    def test_short_cjk_without_end_marker_can_confirm_when_repeated(self) -> None:
-        self.assertTrue(_should_confirm_staged_sentence("哇哇它为什么老麻", 3, False))
+    def test_short_cjk_without_end_marker_does_not_confirm_when_repeated(self) -> None:
+        self.assertFalse(_should_confirm_staged_sentence("哇哇它为什么老麻", 3, False))
         self.assertTrue(_should_confirm_staged_sentence("哇哇它为什么老麻。", 3, False))
 
-    def test_cjk_without_end_marker_can_confirm_by_repetition(self) -> None:
+    def test_short_cjk_no_end_marker_does_not_finalize_from_dumpling_log(self) -> None:
+        cases = [
+            "它一根一半就是我的食指皮薄肉馅超级",
+            "多来听一下这声音哦",
+        ]
+        for staged in cases:
+            with self.subTest(staged=staged):
+                self.assertIn("no_end_marker", _final_sentence_diagnostic_flags(staged, "zh"))
+                self.assertFalse(_should_confirm_staged_sentence(staged, 3, False))
+                self.assertFalse(
+                    _should_finalize_before_replacement(
+                        staged,
+                        "zh",
+                        staged_confirmations=1,
+                        staged_age=3,
+                        sentence_finalize_age=3,
+                    )
+                )
+
+    def test_cjk_without_end_marker_does_not_confirm_by_repetition(self) -> None:
         staged = "好大一棵果然皇上的园子里都是不一般的植物我觉得大家如果来西安的话可以到这个兴庆宫逛一逛"
 
-        self.assertTrue(_should_confirm_staged_sentence(staged, 3, False))
-        self.assertTrue(_should_confirm_staged_sentence(staged, 4, True))
+        self.assertFalse(_should_confirm_staged_sentence(staged, 3, False))
+        self.assertFalse(_should_confirm_staged_sentence(staged, 4, True))
+        self.assertFalse(
+            _should_finalize_before_replacement(
+                staged,
+                "zh",
+                staged_confirmations=1,
+                staged_age=3,
+                sentence_finalize_age=3,
+            )
+        )
+        self.assertFalse(
+            _should_finalize_before_replacement(
+                staged,
+                "zh",
+                staged_confirmations=2,
+                staged_age=0,
+                sentence_finalize_age=3,
+            )
+        )
 
     def test_replaced_confirmed_cjk_without_end_marker_can_finalize(self) -> None:
         staged = "股东自自食其力啊它这是牛杂锅啊你滋滋声就大锅很香啊说拿这个汤泡饭很顺吃的先尝一小口哦先尝一小口"
         candidate = "这个汤泡饭很顺吃的先尝一小口哦先尝一小口之后再继续"
 
         self.assertEqual(_replacement_decision_reason(staged, candidate, 3, False, 0), "confirmed")
-        self.assertTrue(_should_confirm_staged_sentence(staged, 3, False))
-        self.assertTrue(_should_finalize_replaced_sentence(staged, candidate, 3, False, 0))
+        self.assertFalse(_should_confirm_staged_sentence(staged, 3, False))
+        self.assertFalse(_should_finalize_replaced_sentence(staged, candidate, 3, False, 0))
 
     def test_spaced_cjk_without_end_marker_does_not_finalize_from_monitoring(self) -> None:
         staged = "见 什 么 都 想 吃 这 可 怎 么 办 呀 我 看 见 大 闸 丸 了 人 刚 才 来 的 啊 肉 丸"
@@ -681,7 +718,7 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
                 sentence_finalize_age=3,
             )
         )
-        self.assertTrue(
+        self.assertFalse(
             _should_finalize_before_replacement(
                 "也没有要买什么东西就只是走进去再走出来拍个照片这样拍个进去出来",
                 "zh",
