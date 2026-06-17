@@ -2,7 +2,6 @@ import sys
 import unittest
 
 from src.app.dictation_window import (
-    _collapse_adjacent_repeated_phrase_details,
     _final_sentence_diagnostic_flags,
     _normalized_text,
     _pending_overrun_reason,
@@ -28,7 +27,6 @@ from src.app.dictation_transcript_logic import (
 TRACKING_TARGETS = {
     "revision": {"target_cases": 90, "target_rate": 0.90},
     "distinct": {"target_cases": 25, "target_rate": 0.95},
-    "collapse": {"target_cases": 45, "target_rate": 0.90},
     "stability": {"target_cases": 10, "target_rate": 0.80},
     "replacement": {"target_cases": 11, "target_rate": 0.90},
     "pending": {"target_cases": 10, "target_rate": 0.90},
@@ -36,7 +34,7 @@ TRACKING_TARGETS = {
     "final_quality": {"target_cases": 24, "target_rate": 0.90},
     "translation_quality": {"target_cases": 8, "target_rate": 0.80},
     "duplicate_suppression": {"target_cases": 4, "target_rate": 1.00},
-    "runtime_metrics": {"target_cases": 21, "target_rate": 1.00},
+    "runtime_metrics": {"target_cases": 20, "target_rate": 1.00},
     "stable_metrics": {"target_cases": 4, "target_rate": 1.00},
     "finalization": {"target_cases": 11, "target_rate": 0.80},
 }
@@ -295,7 +293,7 @@ DISTINCT_TRACKING_CASES = [
   'right': '정부의 관계 이런 모든 투자 사이클이라든지 이런 부분들에서 다 나타나고 있다는 왜냐하면 연준은 금리 이상',
   'source': 'avc-whisper.log'}]
 
-COLLAPSE_TRACKING_CASES = [
+DISCARDED_REWRITE_TRACKING_CASES = [
     {"source": "2026-06-14 monitor chunk 936 repeated Chinese clause", "text": "这吃五里鸡王。香香香香香香香香。这吃五里鸡王。这吃五里鸡王。"},
     {"source": "2026-06-14 monitor chunk 947 repeated Chinese short clause", "text": "豆浆，豆浆，豆浆，豆浆。哇，好大一份啊。"},
 {'source': 'avc-whisper.log', 'text': '그래서 그 시나리오 대로라면 그래서 그 시나리오대로라면.'},
@@ -623,13 +621,13 @@ DISTINCT_TRACKING_CASES.extend([
     {"left": "앞으로 산업이 어떻게 새롭게 재편될지 그것도", "right": "이 모든 것은 저의 개인적인 생각입니다", "source": "2026-06-13 30m monitor chunk 837"},
 ])
 
-COLLAPSE_TRACKING_CASES.extend([
+DISCARDED_REWRITE_TRACKING_CASES.extend([
     {"source": "2026-06-13 30m monitor chunk 98", "text": "무나하지 않나요? 화성연료를 켠거에요. 우아하지 않나요?"},
     {"source": "2026-06-13 30m monitor chunk 133", "text": "밀어버린 거죠 건재하죠 건지하죠?"},
     {"source": "2026-06-13 30m monitor chunk 272", "text": "생각보다 핵융합은 초기 건설 비용 때문에 비싼 에너지원이에요. 생각보다 핵융합은 초기 건설 비용 때문에 비싼 에너지원이에요."},
 ])
 
-COLLAPSE_TRACKING_CASES.extend([
+DISCARDED_REWRITE_TRACKING_CASES.extend([
     {"source": "2026-06-13 monitor chunk 1111", "text": "그렇다면은 돈은 계속 풀어야 되는데 그렇다면 돈은 계속 풀어야 되는데 마지막 남은"},
     {"source": "2026-06-13 monitor chunk 1163", "text": "이 스테이블 코인은 새로운 화폐의 탄생 이라고 탄생이라고 보셔야 돼요."},
     {"source": "2026-06-13 monitor chunk 1212", "text": "왜냐하면 우리는 종이돈을 가지고서 맡겨서 스테이블콘 이라는 새로운 아바타 돈을 돈을 만들 수 있고 사실 내"},
@@ -888,7 +886,7 @@ FINAL_QUALITY_TRACKING_CASES = [
         "text": "有侧面，对不对？都还是有感受到我的爱。他没有不见，然后你看我脚趾头，都还是有在爱。好了，我啊发侧嘞。还有一个，不是我最爱，但是没关系，还是有三D效果。三D跟它联名的吧。",
         "language": "zh",
         "expected_flags": {"mixed_latin_zh"},
-        "source": "2026-06-17 30m monitor chunk 54 mixed latin stable_cjk final",
+        "source": "2026-06-17 30m monitor chunk 54 mixed latin final",
     },
     {
         "text": "好 看 这 个 哇 好 香",
@@ -979,11 +977,6 @@ RUNTIME_METRIC_TRACKING_CASES = [
         "source": "2026-06-16 Chinese monitor completed candidate replaced stable staged before final",
     },
     {
-        "metrics": {"stage_finalize_stable_cjk": 1},
-        "expected": {"finalize_stable_cjk": 1},
-        "source": "2026-06-17 CJK stable staged candidate finalized before full confirmation count",
-    },
-    {
         "metrics": {"stage_age_finalize": 1},
         "expected": {"age_finalize": 1},
         "source": "2026-06-17 CJK staged age accumulates across revisions before final",
@@ -1058,7 +1051,6 @@ RUNTIME_METRIC_TRACKING_CASES = [
             "stage_revision_confirmation_preserved_internal": 38,
             "stage_revision_confirmation_reset": 110,
             "stage_age_finalize": 41,
-            "stage_finalize_stable_cjk": 25,
             "input_queue_size_peak": 10,
         },
         "expected": {
@@ -1066,7 +1058,6 @@ RUNTIME_METRIC_TRACKING_CASES = [
             "stage_replaced_unconfirmed_per_stage_start_per_1000": 383,
             "revision_preserve_rate_per_1000": 257,
             "age_finalize": 41,
-            "finalize_stable_cjk": 25,
             "input_queue_size_peak": 10,
         },
         "source": "2026-06-17 post age-reset fix monitor chunk 431 lifecycle snapshot",
@@ -1085,7 +1076,6 @@ RUNTIME_METRIC_TRACKING_CASES = [
             "stage_candidate_quality_cjk_internal_gap": 184,
             "stage_candidate_quality_no_end_marker": 184,
             "stage_candidate_quality_spaced_cjk": 184,
-            "stage_finalize_stable_cjk": 44,
             "stage_replace": 85,
             "stage_replaced_unconfirmed": 84,
             "stage_revision_confirmation_reset": 379,
@@ -1320,7 +1310,6 @@ def _runtime_metric_summary(metrics: dict[str, int]) -> dict[str, int]:
         "revision_candidate_quality_blocked": int(metrics.get("stage_revision_candidate_quality_blocked", 0)),
         "raw_without_final": int(metrics.get("raw_without_final", 0)),
         "finalize_before_replace": int(metrics.get("stage_finalize_before_replace", 0)),
-        "finalize_stable_cjk": int(metrics.get("stage_finalize_stable_cjk", 0)),
         "age_finalize": int(metrics.get("stage_age_finalize", 0)),
         "age_quality_blocked": int(metrics.get("stage_age_quality_blocked", 0)),
         "recent_echo_suppressed": int(metrics.get("finalize_recent_echo_suppressed", 0)),
@@ -1398,15 +1387,6 @@ def _make_distinct_tracking_test(index: int, case: dict[str, object]):
         right = str(case["right"])
         matched = not _sentences_are_revisions(left, right)
         self._record("distinct", f"distinct_{index:03d}", matched)
-    return test
-
-
-def _make_collapse_tracking_test(index: int, case: dict[str, object]):
-    def test(self: WhisperPerformanceTrackingTest) -> None:
-        text = str(case["text"])
-        collapsed, rules = _collapse_adjacent_repeated_phrase_details(text)
-        matched = bool(rules) and len(_normalized_text(collapsed)) <= len(_normalized_text(text))
-        self._record("collapse", f"collapse_{index:03d}", matched)
     return test
 
 
@@ -1698,14 +1678,6 @@ for _index, _case in enumerate(DISTINCT_TRACKING_CASES, 1):
         f"test_tracking_distinct_{_index:03d}",
         _make_distinct_tracking_test(_index, _case),
     )
-
-for _index, _case in enumerate(COLLAPSE_TRACKING_CASES, 1):
-    setattr(
-        WhisperPerformanceTrackingTest,
-        f"test_tracking_collapse_{_index:03d}",
-        _make_collapse_tracking_test(_index, _case),
-    )
-
 
 for _index, _case in enumerate(PENDING_TRACKING_CASES, 1):
     setattr(

@@ -382,14 +382,14 @@ Linux Docker 정책:
 python3 -m unittest tests.unit.test_dictation_ai_performance_tracking
 ```
 
-- `test_dictation_ai_performance_tracking.py`는 누적 받아쓰기 AI 로그에서 수집한 revision, distinct, collapse, stability 관측 케이스를 성능 추적용으로 실행합니다.
+- `test_dictation_ai_performance_tracking.py`는 누적 받아쓰기 AI 로그에서 수집한 revision, distinct, stability 관측 케이스를 성능 추적용으로 실행합니다.
 - 이 테스트의 unittest 성공/실패는 품질 통과율을 의미하지 않습니다. 테스트가 실행되면 `[whisper-tracking] ... rate=... target>=... rate_gap=...` 지표를 출력하고, 이 지표를 올려가는 것을 개선 목표로 삼습니다.
 - 새 로그에서 중복/누락/잘못된 revision 사례가 보이면 tracking case를 추가하고, 이후 알고리즘 변경으로 rate가 오르고 gap이 줄어드는지 비교합니다. 실험 기록은 [`docs/2026-06-16-dictation-ai-experiment-log.md`](docs/2026-06-16-dictation-ai-experiment-log.md), 현재 기준은 [`docs/2026-06-16-dictation-ai-realtime-pipeline.md`](docs/2026-06-16-dictation-ai-realtime-pipeline.md)를 따릅니다.
 
 문장 경계 처리 텍스트 벤치마크:
 
 ```bash
-python3 scripts/eval/dictation-ai-sbd-benchmark.py \
+python3 tests/eval/dictation_ai/sbd_benchmark.py \
   --cases tests/eval/dictation_ai/sbd_text_cases.sample.jsonl \
   --backend sat \
   --model sat-3l-sm \

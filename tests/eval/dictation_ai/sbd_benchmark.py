@@ -9,15 +9,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.app.sentence_boundary import create_sentence_boundary_detector, normalized_text
 from src.app.dictation_transcript_logic import (
-    _collapse_adjacent_repeated_phrase_details,
     _final_sentence_diagnostic_flags,
-    _forced_sentence_reason,
     _next_revision_confirmation_count,
     _pending_overrun_reason,
     _prefer_sentence_revision,
@@ -229,8 +227,8 @@ def _stage_completed_sentence(
                 state.count("stage_age_finalize")
                 reason = "aged_forced" if state.staged_forced else "aged"
             else:
-                state.count("stage_finalize_stable_cjk")
-                reason = "stable_cjk"
+                state.count("stage_finalize_before_replace")
+                reason = "next_completed"
             return _finalize_staged_sentence(state, language, reason)
         return []
 
@@ -317,14 +315,8 @@ def _run_lifecycle_case(case: SbdCase, detector: Any) -> dict[str, Any]:
         boundary = detector.split(state.pending_text, chunk, case.language)
         completed = []
         for sentence in boundary.completed:
-            collapsed, rules = _collapse_adjacent_repeated_phrase_details(sentence)
-            completed.append(collapsed)
-            for rule in rules:
-                state.count(f"collapse_sentence_{rule}")
-        pending_before = boundary.pending
-        state.pending_text, pending_rules = _collapse_adjacent_repeated_phrase_details(pending_before)
-        for rule in pending_rules:
-            state.count(f"collapse_pending_{rule}")
+            completed.append(normalized_text(sentence))
+        state.pending_text = normalized_text(boundary.pending)
         if boundary.end_mark_count:
             state.count("boundary_end_marks", boundary.end_mark_count)
         if boundary.right_context_start_count:
@@ -334,18 +326,13 @@ def _run_lifecycle_case(case: SbdCase, detector: Any) -> dict[str, Any]:
         elif state.pending_text:
             state.pending_chunks += 1
             state.count("segment_state_pending")
-            forced_by = _forced_sentence_reason(state.pending_text, state.pending_chunks)
-            if forced_by:
-                state.count("forced_candidate")
-                completed = [state.pending_text]
         produced: list[str] = []
         for sentence in completed:
-            forced = bool(_forced_sentence_reason(state.pending_text, state.pending_chunks))
             finalized = _stage_completed_sentence(
                 state,
                 sentence,
                 case.language,
-                forced=forced,
+                forced=False,
                 sentence_finalize_age=case.sentence_finalize_age,
             )
             produced.extend(finalized)

@@ -1,7 +1,7 @@
 import unittest
 
 from src.app.sentence_boundary import LegacyRegexSentenceBoundaryDetector
-from src.app.dictation_window import _collapse_adjacent_repeated_phrase_details, _collapse_adjacent_repeated_phrases, _diagnostic_tail, _forced_sentence_reason, _new_text_delta, _sentence_max_age_chunks, _sentence_output_delta, _sentence_required_confirmations, _sentences_are_revisions, _should_age_staged_sentence, _prefer_sentence_revision, _sentence_end_count, _split_completed_sentences, _stable_window_text
+from src.app.dictation_window import _diagnostic_tail, _new_text_delta, _sentence_max_age_chunks, _sentence_output_delta, _sentence_required_confirmations, _sentences_are_revisions, _should_age_staged_sentence, _prefer_sentence_revision, _sentence_end_count, _split_completed_sentences, _stable_window_text
 
 
 class WhisperTranscriptDeltaTest(unittest.TestCase):
@@ -103,15 +103,6 @@ class WhisperTranscriptDeltaTest(unittest.TestCase):
             "and enjoy my cup of coffee while i m an observer of this thing driving",
         )
 
-    def test_sentence_output_delta_collapses_repeated_tap_close_phrase_from_log(self) -> None:
-        # Regression from avc-whisper.log chunks 100-102.
-        text = "Just tap on that lightning bolt icon and it will automatically open your charge port and you can tap on it again to close You can tap on it again to close it."
-
-        self.assertEqual(
-            _sentence_output_delta("", text),
-            "Just tap on that lightning bolt icon and it will automatically open your charge port and you can tap on it again to close it.",
-        )
-
     def test_sentence_output_delta_trims_fast_boundary_turn_signal_overlap_from_log(self) -> None:
         # Regression from avc-whisper.log chunks 246-256.
         committed = "halfway and another great new feature that came with a recent software update is the automatic turn signal"
@@ -132,16 +123,6 @@ class WhisperTranscriptDeltaTest(unittest.TestCase):
             "and make the trade off worth it for those couple extra minutes spent at chargers",
         )
 
-    def test_sentence_output_delta_trims_charger_status_tail_reuse_from_log(self) -> None:
-        # Regression from avc-whisper.log chunks 319-321.
-        committed = "it gives you a live status But so that you can see how many chargers are available how big that particular charger location is how many stalls there are what the nearby amenities are, and if there's any broken"
-        sentence = "location is, how many stalls there are, what the nearby amenities are, and if there's any broken stalls there are what the nearby amenities are and if there's any broken stalls at the current moment if there is a wait time at a particular charger, it will let you know, but a lot of times it will automatically reroute you as well, so you won't have to think about it but this also may be"
-
-        self.assertEqual(
-            _sentence_output_delta(committed, sentence),
-            "stalls at the current moment if there is a wait time at a particular charger it will let you know but a lot of times it will automatically reroute you as well so you won t have to think about it but this also may be",
-        )
-
     def test_delta_outputs_only_new_overlap_suffix(self) -> None:
         committed = "Folks I was one of the first people"
         stable = "the first people in the United States to take delivery"
@@ -158,12 +139,6 @@ class WhisperTranscriptDeltaTest(unittest.TestCase):
         stable = "世界今天很好"
 
         self.assertEqual(_new_text_delta(committed, stable), "今天很好")
-
-    def test_delta_uses_internal_overlap_for_sliding_window_revisions(self) -> None:
-        committed = "Not comfortable when it went over to that railroad crossing. It was going a little fast. Didn't"
-        stable = "go not comfortable when it went over to that railroad crossing it was going a little fast didn't like that so I'm"
-
-        self.assertEqual(_new_text_delta(committed, stable), "like that so I'm")
 
     def test_delta_suppresses_stable_text_already_covered_by_history(self) -> None:
         committed = "Now it is telling me. 52 second. Oh my goodness. Is it true?"

@@ -735,6 +735,51 @@ final-only 번역
 | 중국어 window 시작점 | `windowSecondsZh=12`, `stepSecondsZh=1` |
 | 영어/한국어 window 시작점 | `windowSecondsEn/Ko=7`, `stepSecondsEn/Ko=1` |
 
+## 2026-06-17 재설계 기준 코드 정리
+
+### 목적
+
+`2026-06-16-dictation-ai-realtime-pipeline.md`를 기준으로 과거 실험에서 추가된 보정 경로가 운영 파이프라인과 벤치 하네스에 남아 있는지 검토했다.
+
+### 제거한 경로
+
+- raw/window, completed, pending 텍스트에 적용하던 반복 phrase collapse 재작성
+- pending overrun을 completed 후보로 강제 승격하던 final trigger
+- CJK staged 후보를 replacement 전에 1회 관측만으로 확정하던 `stable_cjk` 조기 확정 경로
+- collapse 전용 성능 추적 bucket과 단위 테스트
+- internal overlap 기반 delta 보정을 고정하던 legacy 품질 게이트 테스트
+
+### 판단
+
+- 반복 collapse와 pending 강제 승격은 SBD 모델 경계와 staged lifecycle을 우회한다.
+- CJK 조기 replacement 확정은 `staged_confirmations`와 `sentenceFinalizeAge` 기준을 흐린다.
+- 해당 경로들은 실제 로그에서 보였던 일부 중복을 줄이는 실험 흔적이지만, 재설계 기준의 최소 파이프라인 필수요소가 아니다.
+
+### 검증
+
+```text
+./.venv/bin/python -m unittest \
+  tests.unit.test_dictation_ai_sentence_revision \
+  tests.unit.test_dictation_ai_sbd_benchmark \
+  tests.unit.test_dictation_ai_sentence_forcing \
+  tests.unit.test_dictation_ai_performance_tracking \
+  tests.unit.test_dictation_ai_transcript_delta \
+  tests.unit.test_dictation_ai_sentence_boundary \
+  tests.unit.test_transcript_revision
+
+Ran 394 tests
+OK
+```
+
+```text
+./.venv/bin/python -m py_compile \
+  src/app/dictation_transcript_logic.py \
+  src/app/dictation_window.py \
+  tests/eval/dictation_ai/sbd_benchmark.py
+```
+
+이번 검증은 코드 정리 검증이다. 성능 판단용 CUDA/SaT 벤치 수치는 별도 실행 결과만 기준으로 삼는다.
+
 ## 남은 실험 과제
 
 - 동일 입력 replay 기반으로 `faster-whisper`, `qwen3-asr-0.6b`, 과거 FunASR 기준선을 비교한다.

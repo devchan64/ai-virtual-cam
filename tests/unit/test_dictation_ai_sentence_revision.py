@@ -7,14 +7,12 @@ from src.app.dictation_transcript_logic import (
     _should_finalize_boundary_candidate,
 )
 from src.app.dictation_window import (
-    _collapse_adjacent_repeated_phrase_details,
-    _collapse_adjacent_repeated_phrases,
     _diagnostic_tail,
     _final_sentence_diagnostic_flags,
-    _forced_sentence_reason,
     _format_transcript_metrics,
     _new_text_delta,
     _next_revision_confirmation_count,
+    _pending_overrun_reason,
     _pending_text_diagnostic_flags,
     _prefer_sentence_revision,
     _replacement_decision_reason,
@@ -503,10 +501,10 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
         self.assertTrue(_sentences_are_revisions(staged, pending))
         self.assertTrue(_should_age_staged_sentence(staged, pending))
 
-    def test_sentence_pending_can_accumulate_long_fast_speech(self) -> None:
+    def test_sentence_pending_overrun_ignores_short_fast_fragment(self) -> None:
         pending = "this is a quick sentence fragment that keeps going without punctuation and should not be forced too early"
 
-        self.assertEqual(_forced_sentence_reason(pending, 4), "")
+        self.assertEqual(_pending_overrun_reason(pending, 4), "")
 
     def test_sentence_revision_detects_korean_tail_extension(self) -> None:
         # Regression-style Korean case: short committed tail extended by the next stable chunk.
@@ -623,7 +621,7 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
 
     def test_chinese_revision_uses_cjk_character_units_from_log(self) -> None:
         # Regression from 2026-06-13 zh monitoring chunks 89-91. Chinese text has
-        # no spaces, so lifecycle decisions must not collapse to an empty token set.
+        # no spaces, so lifecycle decisions must keep a non-empty token set.
         staged = "他给出了两个拒绝绑匪要求。"
         revised = "他给出了两个拒绝绑匪要求的理由，从。"
 

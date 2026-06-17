@@ -21,7 +21,6 @@ FORCED_SENTENCE_CONFIRM_CHUNKS = 4
 SENTENCE_CONFIRM_MAX_AGE_CHUNKS = 3
 FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS = 4
 SHORT_CJK_FINAL_UNITS = 10
-CJK_REPLACEMENT_CONFIRM_CHUNKS = 1
 CJK_REVISION_INTERNAL_STABILITY_MIN_RATIO = 0.60
 CJK_REVISION_INTERNAL_STABILITY_MIN_CHARS = 40
 
@@ -87,234 +86,21 @@ def _phrase_key(units: list[str]) -> list[str]:
     return _word_units(" ".join(units))
 
 
-def _repeated_phrase_key_matches(left_key: list[str], right_key: list[str]) -> bool:
-    if left_key == right_key:
-        return True
-    return len(left_key) >= 4 and len(left_key) == len(right_key) and left_key[1:] == right_key[1:]
-
-
-def _is_cjk_dominant_unit_stream(units: list[str]) -> bool:
-    keys = [_phrase_key([unit]) for unit in units]
-    flattened = [word for key in keys for word in key]
-    if len(flattened) < 6:
-        return False
-    cjk_count = sum(1 for word in flattened if _has_cjk_words([word]))
-    return cjk_count / max(len(flattened), 1) >= 0.70
-
-
-def _collapse_near_repeated_phrases(units: list[str]) -> bool:
-    if _is_cjk_dominant_unit_stream(units):
-        return False
-    for phrase_len in range(min(12, len(units) // 2), 3, -1):
-        for left_start in range(0, len(units) - phrase_len):
-            left_key = _phrase_key(units[left_start : left_start + phrase_len])
-            if not left_key:
-                continue
-            max_right_start = min(len(units) - phrase_len, left_start + phrase_len + 8)
-            for right_start in range(left_start + phrase_len, max_right_start + 1):
-                right_key = _phrase_key(units[right_start : right_start + phrase_len])
-                if _repeated_phrase_key_matches(left_key, right_key):
-                    delete_len = phrase_len
-                    while (
-                        left_start + delete_len < right_start
-                        and right_start + delete_len < len(units)
-                        and _phrase_key([units[left_start + delete_len]]) == _phrase_key([units[right_start + delete_len]])
-                    ):
-                        delete_len += 1
-                    del units[right_start : right_start + delete_len]
-                    return True
-    return False
-
-
-def _collapse_adjacent_repeated_prefix_units(units: list[str]) -> bool:
-    for index in range(1, len(units)):
-        previous_key = _phrase_key([units[index - 1]])
-        current_key = _phrase_key([units[index]])
-        if "-" in units[index] and len(previous_key) == 1 and len(current_key) >= 2 and previous_key[0] == current_key[0]:
-            del units[index - 1]
-            return True
-    return False
-
-
-def _collapse_adjacent_duplicate_determiners(units: list[str]) -> bool:
-    for index in range(1, len(units)):
-        previous_key = _phrase_key([units[index - 1]])
-        current_key = _phrase_key([units[index]])
-        if len(previous_key) == 1 and previous_key == current_key and previous_key[0] in {"a", "an", "the"}:
-            del units[index - 1]
-            return True
-    return False
-
-
-def _compact_hangul_phrase_key(units: list[str]) -> str:
-    compact = "".join(_word_units(" ".join(units)))
-    if not any("가" <= ch <= "힣" for ch in compact):
-        return ""
-    return compact
-
-
-def _collapse_adjacent_compact_korean_revisions(units: list[str]) -> bool:
-    max_phrase_len = min(12, len(units) // 2 + 2)
-    for left_start in range(0, len(units) - 3):
-        for left_len in range(1, max_phrase_len + 1):
-            right_start = left_start + left_len
-            if right_start >= len(units):
-                break
-            left_key = _compact_hangul_phrase_key(units[left_start:right_start])
-            if len(left_key) < 5:
-                continue
-            min_right_len = 2 if left_len == 1 else 1
-            for right_len in range(min_right_len, max_phrase_len + 1):
-                right_end = right_start + right_len
-                if right_end > len(units):
-                    break
-                right_key = _compact_hangul_phrase_key(units[right_start:right_end])
-                if left_key == right_key:
-                    del units[left_start:right_start]
-                    return True
-                shorter_key_len = min(len(left_key), len(right_key))
-                length_delta = abs(len(left_key) - len(right_key))
-                if shorter_key_len < 7 or length_delta > 2 or left_key[0] != right_key[0]:
-                    continue
-                if SequenceMatcher(None, left_key, right_key).ratio() < 0.88:
-                    continue
-                if len(left_key) >= len(right_key):
-                    del units[right_start:right_end]
-                else:
-                    del units[left_start:right_start]
-                return True
-    return False
-
-
-def _collapse_numeric_value_revisions(text: str) -> str:
-    return re.sub(
-        r"\bone\s+thousand\s+dollars(?:\s+worth)?\s+\$1,?000\s+worth\b",
-        "$1,000 worth",
-        text,
-        flags=re.IGNORECASE,
-    )
-
-
-_CJK_CLAUSE_SEPARATORS = set("，,。！？!?；;")
-
-
-def _split_cjk_clauses(text: str) -> list[tuple[str, str]]:
-    parts: list[tuple[str, str]] = []
-    buffer: list[str] = []
-    for char in text:
-        if char in _CJK_CLAUSE_SEPARATORS:
-            clause = "".join(buffer).strip()
-            if clause:
-                parts.append((clause, char))
-            buffer = []
-        else:
-            buffer.append(char)
-    tail = "".join(buffer).strip()
-    if tail:
-        parts.append((tail, ""))
-    return parts
-
-
-def _collapse_adjacent_repeated_cjk_clauses(text: str) -> tuple[str, bool]:
-    clauses = _split_cjk_clauses(text)
-    if len(clauses) < 3:
-        return text, False
-    collapsed: list[tuple[str, str]] = []
-    changed = False
-    index = 0
-    while index < len(clauses):
-        clause, separator = clauses[index]
-        key = _word_units(clause)
-        run_end = index + 1
-        while run_end < len(clauses) and key and _word_units(clauses[run_end][0]) == key:
-            run_end += 1
-        run_len = run_end - index
-        cjk_units = [word for word in key if _has_cjk_words([word])]
-        should_collapse = run_len >= 3 or (run_len >= 2 and len(cjk_units) >= 4)
-        if should_collapse:
-            collapsed.append((clause, clauses[run_end - 1][1] or separator))
-            changed = True
-        else:
-            collapsed.extend(clauses[index:run_end])
-        index = run_end
-    if not changed:
-        return text, False
-    return "".join(clause + separator for clause, separator in collapsed), True
-
-
-def _collapse_adjacent_repeated_phrase_details(text: str) -> tuple[str, list[str]]:
-    normalized_input = _normalized_text(text)
-    normalized = _collapse_numeric_value_revisions(normalized_input)
-    rules: list[str] = []
-    if normalized != normalized_input:
-        rules.append("numeric_value")
-    normalized, cjk_clause_changed = _collapse_adjacent_repeated_cjk_clauses(normalized)
-    if cjk_clause_changed:
-        rules.append("cjk_clause")
-    units, separator = _text_units(normalized)
-    if separator == "" or len(units) < 6:
-        return normalized, rules
-    while True:
-        if _collapse_adjacent_repeated_prefix_units(units):
-            rules.append("hyphen_prefix")
-            continue
-        if _collapse_adjacent_duplicate_determiners(units):
-            rules.append("duplicate_determiner")
-            continue
-        if _collapse_adjacent_compact_korean_revisions(units):
-            rules.append("compact_korean")
-            continue
-        break
-    passes = 0
-    changed = True
-    while changed and passes < 4:
-        passes += 1
-        changed = False
-        index = 0
-        while index < len(units):
-            collapsed = False
-            max_phrase_len = min(16, (len(units) - index) // 2)
-            for phrase_len in range(max_phrase_len, 2, -1):
-                left = units[index : index + phrase_len]
-                right = units[index + phrase_len : index + (phrase_len * 2)]
-                if _phrase_key(left) and _phrase_key(left) == _phrase_key(right):
-                    del units[index + phrase_len : index + (phrase_len * 2)]
-                    rules.append("adjacent_phrase")
-                    changed = True
-                    collapsed = True
-                    break
-            if not collapsed:
-                index += 1
-        if _collapse_near_repeated_phrases(units):
-            rules.append("near_phrase")
-            changed = True
-    collapsed_text = _join_text_units(units, separator)
-    numeric_collapsed = _collapse_numeric_value_revisions(collapsed_text)
-    if numeric_collapsed != collapsed_text:
-        rules.append("numeric_value")
-    return numeric_collapsed, rules
-
-
-def _collapse_adjacent_repeated_phrases(text: str) -> str:
-    collapsed, _rules = _collapse_adjacent_repeated_phrase_details(text)
-    return collapsed
-
-
 def _is_subsequence_at(words: list[str], candidate: list[str], start: int) -> bool:
     return words[start : start + len(candidate)] == candidate
 
 
-def _collapse_adjacent_words(words: list[str]) -> list[str]:
-    collapsed: list[str] = []
+def _dedupe_adjacent_words(words: list[str]) -> list[str]:
+    deduped: list[str] = []
     for word in words:
-        if collapsed and collapsed[-1] == word:
+        if deduped and deduped[-1] == word:
             continue
-        collapsed.append(word)
-    return collapsed
+        deduped.append(word)
+    return deduped
 
 
 def _duplicate_key_words(words: list[str]) -> list[str]:
-    key_words = _collapse_adjacent_words(words)
+    key_words = _dedupe_adjacent_words(words)
     while len(key_words) >= 3 and key_words[:2] in (["not", "just"], ["no", "not"]):
         key_words = key_words[2:]
     return key_words
@@ -601,7 +387,7 @@ def _sentence_delta_from_words(words: list[str]) -> str:
 
 
 def _sentence_output_delta(committed_text: str, sentence: str) -> str:
-    normalized = _collapse_adjacent_repeated_phrases(_normalized_text(sentence))
+    normalized = _normalized_text(sentence)
     if not normalized:
         return ""
     committed_normalized = _normalized_text(committed_text)
@@ -1021,11 +807,6 @@ def _should_finalize_before_replacement(
     if _is_cjk_text(sentence):
         if flags.intersection({"short_cjk", "no_end_marker", "cjk_internal_gap"}):
             return False
-        cjk_replacement_confirmations = CJK_REPLACEMENT_CONFIRM_CHUNKS
-        return (
-            staged_confirmations >= cjk_replacement_confirmations
-            or staged_age >= _sentence_max_age_chunks(staged_forced, sentence_finalize_age)
-        )
     if not _should_finalize_replaced_sentence(
         sentence,
         "",
@@ -1250,24 +1031,6 @@ def _pending_text_diagnostic_flags(pending_text: str, language: str, pending_chu
     if overrun:
         flags.append(f"overrun_{overrun}")
     return tuple(flags)
-
-
-def _forced_sentence_reason(pending_text: str, pending_chunks: int) -> str:
-    normalized = _normalized_text(pending_text)
-    if not normalized:
-        return ""
-    pending_chars = len(normalized)
-    chars_per_chunk = pending_chars / max(pending_chunks, 1)
-    if pending_chars >= MAX_PENDING_SENTENCE_CHARS and _sentence_end_count(normalized) > 0:
-        return "pending_chars"
-    if (
-        pending_chunks >= SLOW_PENDING_SENTENCE_CHUNKS
-        and SLOW_PENDING_SENTENCE_CHARS <= pending_chars <= SLOW_PENDING_MAX_SENTENCE_CHARS
-        and chars_per_chunk <= SLOW_PENDING_MAX_CHARS_PER_CHUNK
-        and not _has_unstable_numeric_tail(normalized)
-    ):
-        return "slow_pending"
-    return ""
 
 
 def _diagnostic_tail(text: str, limit: int = 90) -> str:

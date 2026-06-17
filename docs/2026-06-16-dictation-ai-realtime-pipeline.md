@@ -51,6 +51,7 @@ final-only 번역
 | 세그먼트 생명주기 | 구현됨 | `pending`, `staged`, `final`, `suppressed`, `revised` 상태를 분리한다. |
 | append-only final | 구현됨 | final transcript는 되돌리지 않고 append-only로 출력한다. |
 | final-only 번역 | 구현됨 | 번역 큐에는 final 문장만 넣는다. staged/partial은 번역하지 않는다. |
+| 과거 보정 경로 제거 | 구현됨 | 반복 phrase collapse, pending 강제 completed 승격, CJK 조기 replacement 확정 경로를 운영/벤치 기준에서 제거했다. |
 
 ## 폐기 범위
 
@@ -59,6 +60,8 @@ final-only 번역
 - pending/new overlap 접합 보정
 - CJK no-space 내부 재시작 접합 보정
 - completed 후보 재구성 또는 합성
+- 반복 phrase collapse 기반 raw/completed/pending 재작성
+- pending overrun을 completed 후보로 강제 승격하는 final trigger
 - regex 기반 운영 문장 분할
 - VAD/silence 기반 final trigger
 - 케이스별 정규식 또는 언어별 ad-hoc 문장 보정

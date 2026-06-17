@@ -7,7 +7,7 @@ from pathlib import Path
 from src.app.sentence_boundary import split_punctuated_text
 
 
-MODULE_PATH = Path(__file__).resolve().parents[2] / "scripts/eval/dictation-ai-sbd-benchmark.py"
+MODULE_PATH = Path(__file__).resolve().parents[2] / "tests/eval/dictation_ai/sbd_benchmark.py"
 SPEC = importlib.util.spec_from_file_location("dictation_ai_sbd_benchmark", MODULE_PATH)
 assert SPEC is not None and SPEC.loader is not None
 benchmark = importlib.util.module_from_spec(SPEC)
