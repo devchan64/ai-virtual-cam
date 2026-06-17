@@ -195,7 +195,7 @@ class DictationAiConfigTest(unittest.TestCase):
                 "temperatureKo": 0.0,
                 "stepSecondsZh": 1.0,
                 "windowSecondsZh": 12.0,
-                "sentenceFinalizeAgeZh": 3,
+                "sentenceFinalizeAgeZh": 2,
                 "beamSizeZh": 3,
                 "maxNewTokensZh": 192,
                 "temperatureZh": 0.0,

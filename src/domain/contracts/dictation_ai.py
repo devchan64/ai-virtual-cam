@@ -188,7 +188,7 @@ DICTATION_AI_CONTRACT: dict[str, ConfigFieldSpec] = {
     "stepSecondsZh": ConfigFieldSpec("stepSecondsZh", 1.0, float, min_value=0.5, max_value=5.0, ui_group="runtime.zh"),
     "windowSecondsZh": ConfigFieldSpec("windowSecondsZh", 12.0, float, min_value=1.0, max_value=30.0, ui_group="runtime.zh"),
     "sentenceFinalizeAgeZh": ConfigFieldSpec(
-        "sentenceFinalizeAgeZh", 3, int, min_value=1, max_value=8, ui_group="runtime.zh"
+        "sentenceFinalizeAgeZh", 2, int, min_value=1, max_value=8, ui_group="runtime.zh"
     ),
     "beamSizeZh": ConfigFieldSpec("beamSizeZh", 3, int, min_value=1, max_value=8, ui_group="runtime.zh"),
     "maxNewTokensZh": ConfigFieldSpec("maxNewTokensZh", 192, int, min_value=16, max_value=512, ui_group="runtime.zh"),

@@ -137,7 +137,7 @@ Final 품질 플래그:
 
 ## 판단
 
-- `windowSecondsZh=15.0`, `stepSecondsZh=1.0`, `beamSizeZh=3`, `maxNewTokensZh=192`, `sentenceFinalizeAgeZh=3`은 유지한다.
+- `windowSecondsZh=15.0`, `stepSecondsZh=1.0`, `beamSizeZh=3`, `maxNewTokensZh=192`은 유지하되, 이후 SaT 벤치 결과에 따라 `sentenceFinalizeAgeZh`는 2를 기본 후보로 낮춘다.
 - 처리량보다 STT raw 품질 흔들림과 stage 생명주기 churn이 병목이다.
 - 순수 비중국어/라틴 단독 후보는 중국어 문장 추출 성능 산정에서 제거한다.
 - final 품질 플래그 중 `no_end_marker`, `mixed_latin_zh`, `short_cjk`는 많지만, 전사 보존 목적상 즉시 final 차단으로 올리면 누락이 늘 수 있다.

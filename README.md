@@ -370,7 +370,7 @@ Linux Docker 정책:
 - 문장 후보 재확인: STT 결과 문장 경계 처리 모델이 완료 문장을 제안해도 즉시 final로 출력하지 않고, 다음 STT 윈도우에서 같은 후보가 다시 관측되는지 확인합니다. 문장 경계가 맞더라도 STT 후보 텍스트 자체가 뒤 청크에서 바뀌는 문제를 줄이기 위한 생명주기입니다.
 - `Beam 크기`(`beamSize`): 디코딩 후보를 몇 갈래로 탐색할지 결정합니다. `1`은 가장 빠른 greedy 디코딩에 가깝고 지연을 줄이는 데 유리합니다. 값을 키우면 후보 탐색이 늘어 일부 발화의 정확도와 안정성이 좋아질 수 있지만, large-v3에서는 GPU 사용량과 디코딩 시간이 늘어 응답이 늦어질 수 있습니다.
 - 영어/한국어 빠른 발화와 문장 누락이 문제라면 우선 `windowSeconds=7.0`, `stepSeconds=1.0`, `sentenceFinalizeAge=3`, `beamSize=3`, `temperature=0.0`, `maxNewTokens=192` 조합을 시작점으로 사용하세요.
-- 중국어는 `windowSeconds=12.0`, `stepSeconds=1.0`, `sentenceFinalizeAge=3`, `beamSize=3`, `temperature=0.0`, `maxNewTokens=192`를 시작점으로 사용합니다. 문장이 여전히 흔들리면 `windowSeconds`를 `16.0`, `20.0`, `24.0`, 최대 `30.0`까지 단계적으로 늘려 비교합니다. 30초는 장문 문맥 안정성에는 유리하지만 final script 갱신이 늦고 긴 문장 확정 비용이 커질 수 있습니다.
+- 중국어는 `windowSeconds=12.0`, `stepSeconds=1.0`, `sentenceFinalizeAge=2`, `beamSize=3`, `temperature=0.0`, `maxNewTokens=192`를 시작점으로 사용합니다. 문장이 여전히 흔들리면 `windowSeconds`를 `16.0`, `20.0`, `24.0`, 최대 `30.0`까지 단계적으로 늘려 비교합니다. 30초는 장문 문맥 안정성에는 유리하지만 final script 갱신이 늦고 긴 문장 확정 비용이 커질 수 있습니다.
 - GUI에서는 현재 선택한 STT 언어의 파라미터만 표시합니다. 언어를 바꾸면 이전 언어의 값은 메모리에 보존되고, `JSON 저장` 시 `setting.json`의 언어별 키로 함께 저장됩니다.
 - 속도는 충분하지만 고유명사나 짧은 발화 인식이 흔들리면 `beamSize`를 `3` 또는 `5`로 올려 비교합니다. 문장이 실제로 잘릴 때만 `maxNewTokens`를 `128` 또는 `192`로 올립니다. 짧은 청크에서는 이 값이 응답속도에 거의 영향을 주지 않을 수 있습니다.
 - 번역까지 포함한 지연은 NLLB `translationBeamSize`와 `translationMaxNewTokens`의 영향을 받습니다. 실시간 응답성은 `translationBeamSize=1`, `translationMaxNewTokens=128`에서 시작하고, 번역 품질이나 긴 문장 완성도가 부족하면 각각 `3` 또는 `256`으로 올려 비교합니다.
@@ -627,7 +627,7 @@ python3 scripts/eval/dictation-ai-sbd-benchmark.py \
     "stepSecondsZh": 1.0,
     "sentenceFinalizeAgeEn": 3,
     "sentenceFinalizeAgeKo": 3,
-    "sentenceFinalizeAgeZh": 3,
+    "sentenceFinalizeAgeZh": 2,
     "beamSizeEn": 3,
     "beamSizeKo": 3,
     "beamSizeZh": 3,

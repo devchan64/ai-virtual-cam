@@ -307,7 +307,7 @@ STT 결과 문장 경계 처리 계약:
 
 - Whisper/faster-whisper는 중국어에서는 baseline으로만 둔다.
 - 현재 STT는 `qwen3-asr-transformers` + `qwen3-asr-0.6b`다.
-- 시작값: `windowSeconds=12.0`, `stepSeconds=1.0`, `sentenceFinalizeAge=3`
+- 시작값: `windowSeconds=12.0`, `stepSeconds=1.0`, `sentenceFinalizeAge=2`
 
 중국어는 현재 Qwen 경로에서 준수한 성능으로 판단한다. 공백 기반 단어 경계가 약하고 동음 후보가 많아 긴 문맥이 raw STT 안정성에 도움이 될 수 있다. 하지만 긴 window는 final transcript 갱신 지연과 긴 문장 확정을 증가시킨다. 따라서 STT context와 final commit unit을 분리해서 본다.
 
@@ -348,7 +348,7 @@ NLLB 번역 기본 테스트값:
 | --- | ---: | ---: | --- |
 | `windowSeconds` | 7.0 | 12.0 | raw STT 안정성과 final 지연의 균형 |
 | `stepSeconds` | 1.0 | 1.0 | 화면 갱신과 반복 처리량의 균형 |
-| `sentenceFinalizeAge` | 3 | 3 | staged 후보 재관측 횟수 |
+| `sentenceFinalizeAge` | 3 | 2 | staged 후보 재관측 횟수 |
 | `beamSize` | 3 | 3 | 정확도/지연 비교 시작점 |
 | `temperature` | 0.0 | 0.0 | 재현성과 안정성 |
 | `maxNewTokens` | 192 | 192 | 긴 문장 절단 방지 |
@@ -677,7 +677,7 @@ stable token 지표를 추가한 뒤 같은 중국어 실시간 경로를 약 5�
 튜닝 판단:
 
 - 계산 처리량은 병목이 아니므로 `stepSecondsZh=1.0`, `beamSizeZh=3`, `maxNewTokensZh=192`는 유지한다.
-- `sentenceFinalizeAgeZh=3`도 유지한다. 2로 낮추면 `short_cjk/no_end_marker` final이 더 늘 수 있고, 4 이상으로 올리면 `stage_replaced_unconfirmed`가 늘 가능성이 크다.
+- 2026-06-17 SaT 벤치(`tests/eval/dictation_ai/sbd_text_cases.sample.jsonl`, 캐시 모델/CUDA) 기준 `sentenceFinalizeAgeZh=2`가 현재 기본 후보 중 가장 낫다. `no_end_marker` final은 0으로 유지하면서 `finalized=20`, `stage_start=34`, `finalized_per_stage_start=0.588`로 age 3의 `finalized=19`, `stage_start=35`, `finalized_per_stage_start=0.543`보다 확정 지표가 개선됐다. 4 이상은 `finalized=18`, `finalized_per_stage_start=0.514`로 누락 쪽으로 기운다.
 - `windowSecondsZh=15.0`은 현재 STT 안정성과 확정 지연의 균형점으로 유지한다. 이번 구간에서 queue drop이 없으므로 처리량 때문에 줄일 근거는 없다.
 - 로직 변경은 보류한다. 이번 구간의 주된 보강은 성능 추적 케이스 누적이며, `stable_token_ratio`가 높은 단일 관측 후보를 곧바로 final로 올리는 정책은 과확정 위험이 있어 다음 로그 비교 뒤 판단한다.
 

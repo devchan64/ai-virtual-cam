@@ -392,7 +392,7 @@ old_result=...喷枪 条，然后把这米再切断了...
 - 원문창은 `stt_raw` 이벤트만 표시한다.
 - staged/partial 후보는 final 확정 전 내부 상태이므로 원문창에 표시하지 않는다.
 - 영어/한국어 기본 시작점은 `windowSeconds=7`, `stepSeconds=1`, `sentenceFinalizeAge=3`이다.
-- 중국어/Qwen3-ASR 기본 시작점은 `windowSeconds=12`, `stepSeconds=1`, `sentenceFinalizeAge=3`이다.
+- 중국어/Qwen3-ASR 기본 시작점은 `windowSeconds=12`, `stepSeconds=1`, `sentenceFinalizeAge=2`이다.
 - 30초 window는 장문 안정성에는 유리할 수 있지만 final script 갱신 지연과 긴 문장 확정 비용이 커질 수 있다.
 
 ### 주요 기본값 변경
@@ -403,7 +403,7 @@ old_result=...喷枪 条，然后把这米再切断了...
 | 영어/한국어 window | `windowSecondsEn=7`, `windowSecondsKo=7` | `faster-whisper + large-v3`에서 실시간성과 문장 안정성의 균형점으로 판단했다. |
 | 중국어 window | `windowSecondsZh=12`를 시작점으로 설정 | 30초 window의 안정성은 인정하되 final 갱신 지연이 커서 운영 시작점은 낮췄다. |
 | step | `stepSecondsEn/Ko/Zh=1` | 화면 갱신성과 STT 처리량이 모두 감당 가능한 범위로 관측됐다. |
-| 확정 age | `sentenceFinalizeAgeEn/Ko/Zh=3` | 2회 확정보다 premature final을 줄이고, 4회 이상보다 지연을 낮추는 균형점이다. |
+| 확정 age | `sentenceFinalizeAgeEn/Ko=3`, `sentenceFinalizeAgeZh=2` | 2026-06-17 SaT 벤치에서 중국어 age 2가 `no_end_marker` final을 0으로 유지하면서 age 3보다 확정 수와 `finalized_per_stage_start`를 개선했다. |
 | STT 디코딩 | `beamSize=3`, `maxNewTokens=192`, `temperature=0.0`를 언어별 시작점으로 정리 | 빠른 발화와 긴 문장 절단을 줄이되 실시간 지연을 통제하기 위한 기준선이다. |
 
 ## 2026-06-16: 확정 절차 단순화, 계약 문서화, 문서 체계 분리
