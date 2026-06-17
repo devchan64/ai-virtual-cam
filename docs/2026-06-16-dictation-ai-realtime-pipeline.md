@@ -33,6 +33,7 @@
 세그먼트 생명주기
   - pending / staged / final / suppressed / revised
   - final은 append-only
+  - 최근 final 저장소로 유사 final 재확정 억제
   ↓
 final-only 번역
 ```
@@ -50,6 +51,8 @@ final-only 번역
 | 경계 판단 | 구현됨 | SaT/SBD, punctuation/end-mark, right-context 지표로 completed/pending 후보를 생성한다. |
 | 세그먼트 생명주기 | 구현됨 | `pending`, `staged`, `final`, `suppressed`, `revised` 상태를 분리한다. |
 | append-only final | 구현됨 | final transcript는 되돌리지 않고 append-only로 출력한다. |
+| 최근 final 중복 억제 | 구현됨 | 일정 기간 보관한 최근 final 문장과 확정 후보를 비교해 유사 후보의 중복 확정을 막고, 최근 final의 확장 후보는 새 suffix만 final로 넘긴다. |
+| 짧은 CJK 확정 보류 | 구현됨 | 종결부호가 있는 짧은 CJK 후보는 다음 후보에 바로 밀려나지 않도록 제한적으로 더 보류해 반복 관측 confirmation을 채운다. |
 | final-only 번역 | 구현됨 | 번역 큐에는 final 문장만 넣는다. staged/partial은 번역하지 않는다. |
 | 과거 보정 경로 제거 | 구현됨 | 반복 phrase collapse, pending 강제 completed 승격, CJK 조기 replacement 확정 경로를 운영/벤치 기준에서 제거했다. |
 
@@ -86,6 +89,8 @@ detector 입력을 만들기 위한 단순 문자열 결합은 허용하지만, 
 - raw STT window 결과는 사용자 final 출력으로 직접 append하지 않는다.
 - final transcript는 append-only다.
 - final로 확정한 문장은 UI와 번역 큐에서 되돌리지 않는다.
+- 최근 final과 같은 후보는 다시 final로 확정하지 않는다.
+- 최근 final의 확장 후보는 이미 확정된 prefix를 반복 출력하지 않고 새 suffix만 final로 확정한다.
 - staged/partial 후보는 다음 window에서 수정될 수 있으므로 번역하지 않는다.
 - STT 원문창은 raw 결과만 표시한다.
 - 복사용 문장은 전사 창의 final 결과만 사용한다.
@@ -98,9 +103,10 @@ detector 입력을 만들기 위한 단순 문자열 결합은 허용하지만, 
 | `last_window_text` | 직전 raw STT window 텍스트 |
 | `pending_text` | 아직 확정되지 않은 후보 구간 |
 | `committed_text` | 이미 final로 확정한 append-only 텍스트 |
-| `recent_committed_fragments` | 최근 final echo 억제를 위한 참조 |
+| `recent_committed_fragments` | 최근 final echo 억제와 확장 후보 delta 산출을 위한 제한된 참조 저장소 |
 | `sentence_boundary_detector` | STT 텍스트를 completed/pending 후보로 나누는 detector |
 | `staged_sentence` | final 전 재확인 중인 completed 후보 |
+| `staged_sentence_queue` | active staged 뒤에 순서대로 대기 중인 completed 후보 |
 | `staged_confirmations` | 같은 후보가 재관측된 횟수 |
 | `staged_age` | staged 상태로 남은 chunk 수 |
 | `lifecycle_metrics` | 세그먼트 상태와 확정 흐름 관측 지표 |
@@ -111,6 +117,10 @@ detector 입력을 만들기 위한 단순 문자열 결합은 허용하지만, 
 - 문장 경계 후보는 SaT/wtpsplit 같은 다국어 SBD 모델을 우선한다.
 - SBD 결과가 completed 후보를 제안해도 즉시 final로 출력하지 않는다.
 - final 승격은 staged confirmation, `sentenceFinalizeAge`, revision lifecycle이 담당한다.
+- age와 confirmation은 문자열 완전 일치가 아니라 token-sentence 유사도와 revision 판단을 기준으로 누적한다.
+- 종결부호가 있는 짧은 CJK 후보는 age만으로 바로 버리지 않고, 제한된 추가 보류 기간 동안 같은 후보 재관측을 기다릴 수 있다.
+- 한 window에서 여러 completed 후보가 나오면 모델 경계 순서를 보존한다. active staged와 다른 CJK 후보는 버리지 않고 제한된 staged queue에 넣고, active가 final/suppressed 된 뒤 순서대로 승격한다.
+- 같은 chunk에서 이미 revision/replacement로 age가 증가한 staged 후보는 추가 aging하지 않는다.
 - punctuation/end-mark, right-context 시작 징후, soft boundary, end probability는 관측 지표로 기록한다.
 - 여러 completed 후보가 한 window에서 나와도 모델 경계 단위를 보존한다.
 - boundary backend/model은 명시 설정값만 사용한다. 실행 중 언어에 따라 암묵 전환하지 않는다.
@@ -184,6 +194,7 @@ VAD와 silence 길이는 받아쓰기 AI 실시간 처리 파이프라인의 구
 | --- | --- |
 | `segment_state_pending/staged/final/suppressed/revised` | 세그먼트 상태 비율 |
 | `finalized_per_stage_start` | staged 후보 대비 final 확정 비율 |
+| `stage_queue_enqueue/promote/revision/drop_oldest` | 순서 보존 staged queue의 보존/승격/갱신/폐기 흐름 |
 | `stage_replaced_unconfirmed` | 확정 전 교체된 staged 후보 |
 | `raw_without_final` | raw STT 관측 대비 final 미발생 횟수 |
 | `boundary_end_marks` | punctuation/end-mark 경계 신호 |

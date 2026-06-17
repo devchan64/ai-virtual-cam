@@ -23,6 +23,7 @@ FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS = 4
 SHORT_CJK_FINAL_UNITS = 10
 CJK_REVISION_INTERNAL_STABILITY_MIN_RATIO = 0.60
 CJK_REVISION_INTERNAL_STABILITY_MIN_CHARS = 40
+SHORT_CJK_REPLACEMENT_HOLD_CHUNKS = 2
 
 
 def _normalized_text(text: str) -> str:
@@ -511,6 +512,42 @@ def _common_word_run(a_words: list[str], b_words: list[str]) -> int:
     return best_len
 
 
+def _cjk_revision_similarity(left_words: list[str], right_words: list[str]) -> tuple[float, int, float, int]:
+    if not left_words or not right_words or not (_has_cjk_words(left_words) and _has_cjk_words(right_words)):
+        return 0.0, 0, 0.0, 0
+    matcher = SequenceMatcher(None, left_words, right_words, autojunk=False)
+    ratio = matcher.ratio()
+    common_run = max((block.size for block in matcher.get_matching_blocks()), default=0)
+    shorter = min(len(left_words), len(right_words))
+    longer = max(len(left_words), len(right_words))
+    coverage = common_run / max(shorter, 1)
+    length_delta = longer - shorter
+    return ratio, common_run, coverage, length_delta
+
+
+def _cjk_sentences_are_similar_revisions(left_words: list[str], right_words: list[str]) -> bool:
+    ratio, common_run, coverage, length_delta = _cjk_revision_similarity(left_words, right_words)
+    shorter = min(len(left_words), len(right_words))
+    if shorter <= 4 and common_run == shorter and length_delta <= 4:
+        return True
+    if shorter >= 5 and ratio >= 0.78 and length_delta <= 4:
+        return True
+    if common_run >= 3 and coverage >= 0.75 and ratio >= 0.70 and length_delta <= 4:
+        return True
+    return False
+
+
+def _should_preserve_cjk_confirmation_by_similarity(previous: str, preferred: str) -> bool:
+    previous_words = _word_units(previous)
+    preferred_words = _word_units(preferred)
+    if not previous_words or not preferred_words:
+        return False
+    ratio, common_run, coverage, length_delta = _cjk_revision_similarity(previous_words, preferred_words)
+    if length_delta > 4:
+        return False
+    return ratio >= 0.72 or (common_run >= 3 and coverage >= 0.70)
+
+
 def _sentences_are_revisions(left: str, right: str) -> bool:
     left_words = _word_units(left)
     right_words = _word_units(right)
@@ -535,6 +572,8 @@ def _sentences_are_revisions(left: str, right: str) -> bool:
     best_i, best_j, common_run = _best_common_word_run(left_words, right_words)
     prefix_run = _longest_prefix_revision_run(left_words, right_words)
     if _has_cjk_words(left_words) and _has_cjk_words(right_words):
+        if _cjk_sentences_are_similar_revisions(left_words, right_words):
+            return True
         tail_blocks = [
             block
             for block in SequenceMatcher(None, left_words, right_words, autojunk=False).get_matching_blocks()
@@ -715,6 +754,14 @@ def _replacement_decision_reason(
         return "open_latin_clause"
     if staged_confirmations >= _sentence_required_confirmations(staged_forced):
         return "confirmed"
+    if _has_cjk_words(staged_words):
+        flags = set(_final_sentence_diagnostic_flags(staged_sentence, "zh"))
+        if (
+            "short_cjk" in flags
+            and "no_end_marker" not in flags
+            and staged_age < _sentence_max_age_chunks(staged_forced, sentence_finalize_age) + SHORT_CJK_REPLACEMENT_HOLD_CHUNKS
+        ):
+            return "unconfirmed_cjk"
     if staged_age >= _sentence_max_age_chunks(staged_forced, sentence_finalize_age):
         return "aged"
     if _has_cjk_words(staged_words):
@@ -836,6 +883,123 @@ def _is_recent_final_echo(candidate: str, recent_sentence: str, language: str) -
     if common_run / max(shorter, 1) >= 0.65 and (longer - common_run) <= max(8, int(longer * 0.35)):
         return True
     return False
+
+
+def _recent_final_sentence_delta(candidate: str, recent_sentence: str, language: str) -> str | None:
+    normalized_language = str(language or "").strip().lower()
+    if normalized_language != "zh" and not (_is_cjk_text(candidate) and _is_cjk_text(recent_sentence)):
+        return None
+    normalized_candidate = _normalized_text(candidate)
+    normalized_recent = _normalized_text(recent_sentence)
+    if not normalized_candidate or not normalized_recent:
+        return None
+    candidate_words = _word_units(normalized_candidate)
+    recent_words = _word_units(normalized_recent)
+    if min(len(candidate_words), len(recent_words)) < 8:
+        return None
+    if _contains_word_sequence(recent_words, candidate_words):
+        return ""
+    if _contains_word_sequence(candidate_words, recent_words):
+        for start in range(0, len(candidate_words) - len(recent_words) + 1):
+            if _is_subsequence_at(candidate_words, recent_words, start):
+                suffix_words = candidate_words[start + len(recent_words) :]
+                if not suffix_words:
+                    return ""
+                if _has_cjk_words(candidate_words) and len(suffix_words) < 4:
+                    return ""
+                delta = _cjk_delta_from_words(suffix_words) if _has_cjk_words(candidate_words) else _sentence_delta_from_words(suffix_words)
+                return _with_candidate_terminal(delta, normalized_candidate)
+    matcher = SequenceMatcher(None, recent_words, candidate_words, autojunk=False)
+    prefix_blocks = [
+        block
+        for block in matcher.get_matching_blocks()
+        if block.size and block.a <= len(recent_words) and block.b <= len(candidate_words)
+    ]
+    if prefix_blocks and prefix_blocks[0].a <= 1 and prefix_blocks[0].b <= 1:
+        covered_recent = 0
+        last_candidate_end = 0
+        previous_recent_end = 0
+        previous_candidate_end = 0
+        for block in prefix_blocks:
+            if block.a - previous_recent_end > 2 or block.b - previous_candidate_end > 2:
+                break
+            covered_recent += block.size
+            previous_recent_end = block.a + block.size
+            previous_candidate_end = block.b + block.size
+            last_candidate_end = previous_candidate_end
+        if covered_recent / max(len(recent_words), 1) >= 0.80 and last_candidate_end >= len(recent_words) - 2:
+            suffix_words = candidate_words[last_candidate_end:]
+            if not suffix_words:
+                return ""
+            if _has_cjk_words(candidate_words) and len(suffix_words) < 4:
+                return ""
+            delta = _cjk_delta_from_words(suffix_words) if _has_cjk_words(candidate_words) else _sentence_delta_from_words(suffix_words)
+            return _with_candidate_terminal(delta, normalized_candidate)
+    if _has_cjk_words(candidate_words) and _has_cjk_words(recent_words):
+        cjk_blocks = [
+            block
+            for block in matcher.get_matching_blocks()
+            if block.size >= 2
+        ]
+        matched_recent = sum(block.size for block in cjk_blocks)
+        if matched_recent >= 10 and matched_recent / max(len(recent_words), 1) >= 0.55:
+            last_candidate_end = max((block.b + block.size for block in cjk_blocks), default=0)
+            suffix_words = candidate_words[last_candidate_end:]
+            if not suffix_words:
+                return ""
+            if len(suffix_words) < 4:
+                return ""
+            return _with_candidate_terminal(_cjk_delta_from_words(suffix_words), normalized_candidate)
+        best_i, best_j, best_len = _best_common_word_run(recent_words, candidate_words)
+        recent_coverage = best_len / max(len(recent_words), 1)
+        if best_len >= 10 and recent_coverage >= 0.45:
+            suffix_words = candidate_words[best_j + best_len :]
+            if not suffix_words:
+                return ""
+            if len(suffix_words) < 4:
+                return ""
+            return _with_candidate_terminal(_cjk_delta_from_words(suffix_words), normalized_candidate)
+    if not _is_recent_final_echo(normalized_candidate, normalized_recent, language):
+        return None
+    blocks = [
+        block
+        for block in matcher.get_matching_blocks()
+        if block.size >= 8 and block.a <= 3 and block.b <= 3
+    ]
+    if not blocks:
+        return ""
+    block = max(blocks, key=lambda item: item.size)
+    if block.size / max(len(recent_words), 1) < 0.60:
+        return ""
+    suffix_words = candidate_words[block.b + block.size :]
+    if not suffix_words:
+        return ""
+    if _has_cjk_words(candidate_words) and len(suffix_words) < 4:
+        return ""
+    delta = _cjk_delta_from_words(suffix_words) if _has_cjk_words(candidate_words) else _sentence_delta_from_words(suffix_words)
+    return _with_candidate_terminal(delta, normalized_candidate)
+
+
+def _with_candidate_terminal(delta: str, candidate: str) -> str:
+    normalized_delta = _normalized_text(delta)
+    if not normalized_delta or _boundary_sentence_end_count(normalized_delta) > 0:
+        return normalized_delta
+    normalized_candidate = _normalized_text(candidate)
+    if normalized_candidate and normalized_candidate[-1] in ".!?。？！":
+        return normalized_delta + normalized_candidate[-1]
+    return normalized_delta
+
+
+def _recent_final_output_delta(candidate: str, recent_sentences: list[str] | tuple[str, ...], language: str) -> tuple[str, str | None]:
+    normalized = _normalized_text(candidate)
+    if not normalized:
+        return "", None
+    for recent in reversed(recent_sentences):
+        delta = _recent_final_sentence_delta(normalized, recent, language)
+        if delta is None:
+            continue
+        return delta, recent
+    return normalized, None
 
 
 def _is_short_staged_suffix_repeat(staged_sentence: str, pending_text: str) -> bool:
@@ -978,6 +1142,8 @@ def _next_revision_confirmation_count(
     stable_overlap_source: str = "",
 ) -> int:
     if preferred != _normalized_text(previous) and (_is_cjk_text(previous) or _is_cjk_text(preferred)):
+        if _should_preserve_cjk_confirmation_by_similarity(previous, preferred):
+            return current_confirmations + 1
         if _should_preserve_revision_confirmation_from_internal_stability(
             previous,
             preferred,

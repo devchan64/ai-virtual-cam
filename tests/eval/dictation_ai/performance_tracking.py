@@ -1,5 +1,11 @@
+import argparse
+import json
 import sys
-import unittest
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from src.app.dictation_window import (
     _final_sentence_diagnostic_flags,
@@ -20,10 +26,8 @@ from src.app.dictation_transcript_logic import (
 
 
 # These tracking cases are mined from accumulated .tmp/logs/avc-whisper.log* files.
-# This module is a performance trend harness, not a pass/fail quality gate.
-# unittest success only means the metric collection ran; the printed rates are the improvement targets.
-# Do not turn individual tracking matches into assert failures. A low rate is an
-# input for tuning, not a reason for this unittest module to fail.
+# This module is a performance trend benchmark, not a unit-test quality gate.
+# A low rate is an input for tuning, not a reason to block unrelated changes.
 TRACKING_TARGETS = {
     "revision": {"target_cases": 90, "target_rate": 0.90},
     "distinct": {"target_cases": 25, "target_rate": 0.95},
@@ -1215,33 +1219,9 @@ STABLE_METRIC_TRACKING_CASES = [
 ]
 
 
-class WhisperPerformanceTrackingTest(unittest.TestCase):
-    records: list[tuple[str, str, bool]] = []
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        by_domain: dict[str, list[bool]] = {}
-        for domain, _name, matched in cls.records:
-            by_domain.setdefault(domain, []).append(matched)
-
-        parts = []
-        for domain in sorted(TRACKING_TARGETS):
-            target = TRACKING_TARGETS[domain]
-            values = by_domain.get(domain, [])
-            passed = sum(values)
-            total = len(values)
-            rate = passed / total if total else 0.0
-            target_cases = int(target["target_cases"])
-            target_rate = float(target["target_rate"])
-            gap = max(0.0, target_rate - rate)
-            case_gap = max(0, target_cases - total)
-            parts.append(
-                f"{domain}={passed}/{total} rate={rate:.3f} "
-                f"target>={target_rate:.2f} cases_target>={target_cases} "
-                f"rate_gap={gap:.3f} case_gap={case_gap}"
-            )
-
-        print("[whisper-tracking] " + " ".join(parts), file=sys.stderr)
+class WhisperPerformanceTrackingTest:
+    def __init__(self) -> None:
+        self.records: list[tuple[str, str, bool]] = []
 
     def _record(self, domain: str, name: str, matched: bool) -> None:
         self.records.append((domain, name, matched))
@@ -1702,5 +1682,72 @@ for _index, _sequence in enumerate(STABILITY_TRACKING_SEQUENCES, 1):
 
 
 
+def _summarize_records(records: list[tuple[str, str, bool]]) -> dict[str, object]:
+    by_domain: dict[str, list[tuple[str, bool]]] = {}
+    for domain, name, matched in records:
+        by_domain.setdefault(domain, []).append((name, matched))
+
+    domains: dict[str, dict[str, object]] = {}
+    for domain in sorted(TRACKING_TARGETS):
+        target = TRACKING_TARGETS[domain]
+        values = by_domain.get(domain, [])
+        passed = sum(1 for _name, matched in values if matched)
+        total = len(values)
+        rate = passed / total if total else 0.0
+        target_cases = int(target["target_cases"])
+        target_rate = float(target["target_rate"])
+        failed_names = [name for name, matched in values if not matched]
+        domains[domain] = {
+            "passed": passed,
+            "total": total,
+            "rate": rate,
+            "target_rate": target_rate,
+            "target_cases": target_cases,
+            "rate_gap": max(0.0, target_rate - rate),
+            "case_gap": max(0, target_cases - total),
+            "failed": failed_names,
+        }
+    return {"domains": domains}
+
+
+def _run_tracking_methods() -> dict[str, object]:
+    tracker = WhisperPerformanceTrackingTest()
+    for name in sorted(dir(WhisperPerformanceTrackingTest)):
+        if name.startswith("test_tracking_"):
+            getattr(tracker, name)()
+    return _summarize_records(tracker.records)
+
+
+def _write_report(path: Path, report: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Run Dictation AI log-derived performance tracking benchmark.")
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path(".tmp/eval/dictation-ai-performance-tracking/latest.json"),
+    )
+    args = parser.parse_args()
+
+    report = _run_tracking_methods()
+    _write_report(args.output, report)
+    domains = report["domains"]
+    assert isinstance(domains, dict)
+    parts = []
+    for domain, raw_summary in sorted(domains.items()):
+        summary = dict(raw_summary)
+        parts.append(
+            f"{domain}={summary['passed']}/{summary['total']} "
+            f"rate={float(summary['rate']):.3f} target>={float(summary['target_rate']):.2f} "
+            f"cases_target>={summary['target_cases']} "
+            f"rate_gap={float(summary['rate_gap']):.3f} case_gap={summary['case_gap']}"
+        )
+    print("[dictation-ai-performance-tracking] " + " ".join(parts) + f" output={args.output}")
+    return 0
+
+
 if __name__ == "__main__":
-    unittest.main()
+    raise SystemExit(main())

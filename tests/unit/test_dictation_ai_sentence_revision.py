@@ -3,6 +3,7 @@ import unittest
 from src.app.sentence_boundary import LegacyRegexSentenceBoundaryDetector
 from src.app.dictation_transcript_logic import (
     _is_recent_final_echo,
+    _recent_final_output_delta,
     _should_finalize_before_replacement,
     _should_finalize_boundary_candidate,
 )
@@ -682,6 +683,22 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
                     )
                 )
 
+    def test_short_cjk_with_end_marker_gets_extra_replacement_hold_for_confirmation(self) -> None:
+        staged = "对，人好多哦。"
+        candidate = "人超多。"
+
+        self.assertEqual(_replacement_decision_reason(staged, candidate, 1, False, 2, 2), "unconfirmed_cjk")
+        self.assertEqual(_replacement_decision_reason(staged, candidate, 1, False, 3, 2), "unconfirmed_cjk")
+        self.assertEqual(_replacement_decision_reason(staged, candidate, 1, False, 4, 2), "aged")
+
+    def test_cjk_similarity_drives_revision_and_confirmation_for_short_corrections(self) -> None:
+        self.assertTrue(_sentences_are_revisions("对的，还超多。", "超多！"))
+        self.assertTrue(_sentences_are_revisions("好好大饭，好大。", "好好大，好大。"))
+        self.assertTrue(_sentences_are_revisions("现在人潮反而凶。", "现在人潮反而汹涌。"))
+        self.assertTrue(_sentences_are_revisions("我的T蛮。", "我的T money。"))
+        self.assertEqual(_next_revision_confirmation_count("现在人潮反而凶。", "现在人潮反而汹涌。", 1), 2)
+        self.assertEqual(_next_revision_confirmation_count("我的T蛮。", "我的T money。", 1), 2)
+
     def test_chinese_complete_sentence_can_finalize_before_replacement(self) -> None:
         self.assertFalse(
             _should_finalize_before_replacement(
@@ -740,6 +757,41 @@ class WhisperSentenceRevisionTest(unittest.TestCase):
                 "zh",
             )
         )
+
+    def test_chinese_recent_final_extension_outputs_only_new_suffix(self) -> None:
+        candidate = "对，经过了无数的规毛，然后又怕发生跟外婆家一样的事件，就不要点太多。"
+        recent = "对，经过了无数的龟毛，然后又怕发生跟外婆。"
+
+        output, source = _recent_final_output_delta(candidate, (recent,), "zh")
+
+        self.assertEqual(source, recent)
+        self.assertEqual(output, "家一样的事件就不要点太多。")
+
+    def test_chinese_recent_final_exact_echo_is_suppressed(self) -> None:
+        recent = "外面的座位区差不多就是这样。"
+
+        output, source = _recent_final_output_delta(recent, (recent,), "zh")
+
+        self.assertEqual(source, recent)
+        self.assertEqual(output, "")
+
+    def test_chinese_recent_final_internal_overlap_suppresses_repeated_variant(self) -> None:
+        recent = "哎，粉丝啊，超级松软，蛋超级多，蛋是超多，有没有选？"
+        candidate = "哦，它蛋超多哎，煮丝啊，超级松软，蛋超级多，特别超多。"
+
+        output, source = _recent_final_output_delta(candidate, (recent,), "zh")
+
+        self.assertEqual(source, recent)
+        self.assertEqual(output, "")
+
+    def test_chinese_recent_final_internal_overlap_suppresses_no_suffix_variant(self) -> None:
+        recent = "超级松软，但超级多，特别超多，有没有觉得？"
+        candidate = "哦，它蛋超多哎，煮丝啊，超级松软，蛋超级多，特别超多。"
+
+        output, source = _recent_final_output_delta(candidate, (recent,), "zh")
+
+        self.assertEqual(source, recent)
+        self.assertEqual(output, "")
 
 
     def test_chinese_short_fragments_do_not_finalize_on_replacement_from_log(self) -> None:

@@ -376,14 +376,15 @@ Linux Docker 정책:
 - 번역까지 포함한 지연은 NLLB `translationBeamSize`와 `translationMaxNewTokens`의 영향을 받습니다. 실시간 응답성은 `translationBeamSize=1`, `translationMaxNewTokens=128`에서 시작하고, 번역 품질이나 긴 문장 완성도가 부족하면 각각 `3` 또는 `256`으로 올려 비교합니다.
 - 실시간 번역은 기본적으로 확정된 final 전사 문장만 대상으로 합니다. staged/partial 문장은 뒤 청크에서 수정될 가능성이 높아 중복 번역과 premature translation을 만들 수 있으므로 기본값에서 번역하지 않습니다. 실시간 파이프라인 기준은 [`docs/2026-06-16-dictation-ai-realtime-pipeline.md`](docs/2026-06-16-dictation-ai-realtime-pipeline.md)를 확인하고, 설정 계약과 기본값은 [`docs/2026-06-16-dictation-ai-contract-defaults.md`](docs/2026-06-16-dictation-ai-contract-defaults.md)를 따릅니다. 관련 레퍼런스 목록은 [`docs/2026-06-16-dictation-ai-reference-index.md`](docs/2026-06-16-dictation-ai-reference-index.md)에 통합합니다.
 
-성능 추적 테스트:
+성능 추적 벤치마크:
 
 ```bash
-python3 -m unittest tests.unit.test_dictation_ai_performance_tracking
+python3 tests/eval/dictation_ai/performance_tracking.py \
+  --output .tmp/eval/dictation-ai-performance-tracking/latest.json
 ```
 
-- `test_dictation_ai_performance_tracking.py`는 누적 받아쓰기 AI 로그에서 수집한 revision, distinct, stability 관측 케이스를 성능 추적용으로 실행합니다.
-- 이 테스트의 unittest 성공/실패는 품질 통과율을 의미하지 않습니다. 테스트가 실행되면 `[whisper-tracking] ... rate=... target>=... rate_gap=...` 지표를 출력하고, 이 지표를 올려가는 것을 개선 목표로 삼습니다.
+- `tests/eval/dictation_ai/performance_tracking.py`는 누적 받아쓰기 AI 로그에서 수집한 revision, distinct, stability 관측 케이스를 성능 추적용으로 실행합니다.
+- 이 벤치마크는 품질 게이트가 아닙니다. 실행되면 `[dictation-ai-performance-tracking] ... rate=... target>=... rate_gap=...` 지표와 JSON 리포트를 출력하고, 이 지표를 올려가는 것을 개선 목표로 삼습니다.
 - 새 로그에서 중복/누락/잘못된 revision 사례가 보이면 tracking case를 추가하고, 이후 알고리즘 변경으로 rate가 오르고 gap이 줄어드는지 비교합니다. 실험 기록은 [`docs/2026-06-16-dictation-ai-experiment-log.md`](docs/2026-06-16-dictation-ai-experiment-log.md), 현재 기준은 [`docs/2026-06-16-dictation-ai-realtime-pipeline.md`](docs/2026-06-16-dictation-ai-realtime-pipeline.md)를 따릅니다.
 
 문장 경계 처리 텍스트 벤치마크:

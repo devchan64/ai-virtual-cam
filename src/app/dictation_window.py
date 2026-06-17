@@ -39,6 +39,7 @@ from src.app.dictation_transcript_logic import (
     _sentence_required_confirmations,
     _sentences_are_revisions,
     _replacement_decision_reason,
+    _recent_final_output_delta,
     _should_finalize_replaced_sentence,
     _should_confirm_staged_sentence,
     _should_age_staged_sentence,
@@ -46,7 +47,6 @@ from src.app.dictation_transcript_logic import (
     _should_stage_boundary_candidate,
     _should_preserve_revision_confirmation_from_internal_stability,
     _revision_internal_stability_bucket,
-    _is_recent_final_echo,
     _should_translate_final_sentence,
     _split_completed_sentences,
     _stable_window_text,
@@ -88,6 +88,7 @@ MAX_SEGMENT_NO_SPEECH_CJK_OVERRIDE_PROB = 0.90
 MIN_CJK_CHARS_FOR_NO_SPEECH_OVERRIDE = 12
 RECENT_TRANSCRIPT_WINDOW = 8
 MAX_RECENT_SHORT_TEXT_REPEATS = 2
+MAX_STAGED_SENTENCE_QUEUE = 8
 _WINDOW_TITLES = {
     "en": {
         "transcript": "ai-virtual-cam Dictation AI Transcript",
@@ -613,6 +614,7 @@ class WhisperTranscriptWorker:
         staged_age = 0
         staged_forced = False
         staged_deferred_age_chunk = -1
+        staged_queue: deque[dict[str, object]] = deque()
         previous_window_text = ""
         lifecycle_metrics: dict[str, int] = {}
         chunk_lifecycle_metrics: dict[str, int] = {}
@@ -624,6 +626,65 @@ class WhisperTranscriptWorker:
 
         def count_segment_state(state: str, amount: int = 1) -> None:
             count_metric(f"segment_state_{state}", amount)
+
+        def promote_next_staged_sentence(detected: str) -> None:
+            nonlocal staged_sentence, staged_confirmations, staged_age, staged_forced, staged_deferred_age_chunk
+            if staged_sentence or not staged_queue:
+                return
+            entry = staged_queue.popleft()
+            staged_sentence = str(entry["sentence"])
+            staged_confirmations = int(entry["confirmations"])
+            staged_age = int(entry["age"])
+            staged_forced = bool(entry["forced"])
+            staged_deferred_age_chunk = chunks
+            count_metric("stage_queue_promote")
+            count_metric("stage_start")
+            count_segment_state("staged")
+            self._emit(
+                "status",
+                "받아쓰기 AI stage 큐 승격: "
+                f"chunk={chunks} queue_remaining={len(staged_queue)} "
+                f"staged_confirmations={staged_confirmations} staged_age={staged_age} "
+                f"staged_tail={_diagnostic_tail(staged_sentence)}",
+                display=False,
+            )
+            self._emit("transcript", staged_sentence, log_text=f"[{detected}] {staged_sentence}", final=False)
+
+        def queue_staged_sentence(candidate: str, forced: bool) -> None:
+            for entry in staged_queue:
+                queued_sentence = str(entry["sentence"])
+                if not _sentences_are_revisions(queued_sentence, candidate):
+                    continue
+                preferred = _prefer_sentence_revision(queued_sentence, candidate)
+                entry["sentence"] = preferred
+                entry["confirmations"] = _next_revision_confirmation_count(
+                    queued_sentence,
+                    preferred,
+                    int(entry["confirmations"]),
+                    stable_analysis.stable_internal_ratio,
+                    stable_analysis.stable_internal_chars,
+                    stable_analysis.stable_overlap_source,
+                )
+                entry["age"] = int(entry["age"]) + 1
+                entry["forced"] = bool(entry["forced"]) or forced
+                entry["deferred_age_chunk"] = chunks
+                count_metric("stage_queue_revision")
+                count_metric("stage_age_tick")
+                return
+            if len(staged_queue) >= MAX_STAGED_SENTENCE_QUEUE:
+                staged_queue.popleft()
+                count_metric("stage_queue_drop_oldest")
+            staged_queue.append(
+                {
+                    "sentence": candidate,
+                    "confirmations": 1,
+                    "age": 0,
+                    "forced": forced,
+                    "deferred_age_chunk": -1,
+                }
+            )
+            count_metric("stage_queue_enqueue")
+            count_segment_state("staged")
 
         self._emit(
             "status",
@@ -675,24 +736,45 @@ class WhisperTranscriptWorker:
                     f"받아쓰기 AI 확정 후보 중복 무시: chunk={chunks} reason={reason} text={staged_before!r}",
                     display=False,
                 )
+                promote_next_staged_sentence(detected)
                 return []
-            echo_source = next(
-                (
-                    recent
-                    for recent in reversed(self._recent_transcripts)
-                    if _is_recent_final_echo(output_sentence, recent, detected)
-                ),
-                None,
+            recent_adjusted_sentence, echo_source = _recent_final_output_delta(
+                output_sentence,
+                tuple(self._recent_transcripts),
+                detected,
             )
             if echo_source is not None:
+                if recent_adjusted_sentence:
+                    count_metric("finalize_recent_delta_trimmed")
+                    self._emit(
+                        "status",
+                        "받아쓰기 AI 확정 후보 최근 final 중복 제거: "
+                        f"chunk={chunks} reason={reason} recent={echo_source!r} "
+                        f"before={output_sentence!r} after={recent_adjusted_sentence!r}",
+                        display=False,
+                    )
+                    output_sentence = recent_adjusted_sentence
+                else:
+                    count_metric("finalize_recent_echo_suppressed")
+                    count_segment_state("suppressed")
+                    self._emit(
+                        "status",
+                        "받아쓰기 AI 확정 후보 유사 대안 무시: "
+                        f"chunk={chunks} reason={reason} text={output_sentence!r} recent={echo_source!r}",
+                        display=False,
+                    )
+                    promote_next_staged_sentence(detected)
+                    return []
+            if not output_sentence:
                 count_metric("finalize_recent_echo_suppressed")
                 count_segment_state("suppressed")
                 self._emit(
                     "status",
                     "받아쓰기 AI 확정 후보 유사 대안 무시: "
-                    f"chunk={chunks} reason={reason} text={output_sentence!r} recent={echo_source!r}",
+                    f"chunk={chunks} reason={reason} text={staged_before!r}",
                     display=False,
                 )
+                promote_next_staged_sentence(detected)
                 return []
             count_metric("finalized")
             count_segment_state("final")
@@ -711,6 +793,7 @@ class WhisperTranscriptWorker:
                 display=False,
             )
             self._emit("transcript", output_sentence, log_text=f"[{detected}] {output_sentence}", final=True)
+            promote_next_staged_sentence(detected)
             return [output_sentence]
 
         def stage_completed_sentence(sentence: str, detected: str, *, forced: bool = False) -> list[str]:
@@ -721,6 +804,15 @@ class WhisperTranscriptWorker:
                 count_metric("candidate_delta_trimmed")
                 if _is_cjk_text(normalized_sentence):
                     count_metric("candidate_delta_trimmed_cjk")
+            if candidate:
+                recent_candidate, recent_source = _recent_final_output_delta(
+                    normalized_sentence,
+                    tuple(self._recent_transcripts),
+                    detected,
+                )
+                if recent_source is not None and recent_candidate != candidate:
+                    candidate = recent_candidate
+                    count_metric("candidate_recent_final_delta_trimmed")
             if not candidate:
                 count_metric("candidate_duplicate_suppressed")
                 count_segment_state("suppressed")
@@ -741,12 +833,15 @@ class WhisperTranscriptWorker:
                 )
                 return []
             if not staged_sentence:
+                promote_next_staged_sentence(detected)
+            if not staged_sentence:
                 count_metric("stage_start")
                 count_segment_state("staged")
                 staged_sentence = candidate
                 staged_confirmations = 1
                 staged_age = 0
                 staged_forced = forced
+                staged_deferred_age_chunk = chunks
                 self._emit(
                     "status",
                     "받아쓰기 AI stage 시작: "
@@ -798,6 +893,7 @@ class WhisperTranscriptWorker:
                     stable_analysis.stable_overlap_source,
                 )
                 staged_age += 1
+                staged_deferred_age_chunk = chunks
                 count_metric("stage_age_tick")
                 staged_forced = staged_forced or forced
                 required_confirmations = _sentence_required_confirmations(staged_forced)
@@ -846,6 +942,7 @@ class WhisperTranscriptWorker:
             )
             count_metric(f"stage_replace_decision_{replacement_reason}")
             if replacement_reason == "unconfirmed_cjk":
+                queue_staged_sentence(candidate, forced)
                 count_metric("stage_replace_deferred")
                 if staged_deferred_age_chunk != chunks:
                     staged_age += 1
@@ -916,13 +1013,18 @@ class WhisperTranscriptWorker:
                 staged_age = 0
                 staged_forced = False
                 staged_deferred_age_chunk = -1
+            if not staged_sentence:
+                promote_next_staged_sentence(detected)
+            if staged_sentence:
+                queue_staged_sentence(candidate, forced)
+                return finalized
             count_metric("stage_start")
             count_segment_state("staged")
             staged_sentence = candidate
             staged_confirmations = 1
             staged_age = 0
             staged_forced = forced
-            staged_deferred_age_chunk = -1
+            staged_deferred_age_chunk = chunks
             self._emit(
                 "status",
                 "받아쓰기 AI stage 시작: "
@@ -934,8 +1036,11 @@ class WhisperTranscriptWorker:
             return finalized
 
         def age_staged_sentence(detected: str, pending_text: str = "") -> list[str]:
-            nonlocal staged_sentence, staged_confirmations, staged_age, staged_forced
+            nonlocal staged_sentence, staged_confirmations, staged_age, staged_forced, staged_deferred_age_chunk
             if not staged_sentence:
+                return []
+            if staged_deferred_age_chunk == chunks:
+                count_metric("stage_age_same_chunk_skipped")
                 return []
             if not _should_age_staged_sentence(staged_sentence, pending_text):
                 count_metric("stage_age_hold")
@@ -948,6 +1053,7 @@ class WhisperTranscriptWorker:
                 )
                 return []
             staged_age += 1
+            staged_deferred_age_chunk = chunks
             count_metric("stage_age_tick")
             max_age = _sentence_max_age_chunks(staged_forced, sentence_finalize_age)
             if staged_age >= max_age:
@@ -973,6 +1079,7 @@ class WhisperTranscriptWorker:
                     staged_confirmations = 0
                     staged_age = 0
                     staged_forced = False
+                    promote_next_staged_sentence(detected)
                     return []
                 count_metric("stage_age_finalize")
                 return finalize_staged_sentence(detected, "aged_forced" if staged_forced else "aged")
@@ -1101,6 +1208,8 @@ class WhisperTranscriptWorker:
                             pending_transcript_text = _consume_committed_prefix(pending_transcript_text, produced_sentence)
                             if not pending_transcript_text:
                                 pending_chunks = 0
+                    if completed_sentences:
+                        final_sentences.extend(age_staged_sentence(detected, pending_transcript_text))
                     if pending_transcript_text:
                         count_segment_state("pending")
                         self._emit(
@@ -1286,6 +1395,10 @@ class WhisperTranscriptWorker:
                     "stage_revision_internal_stability_low",
                     0,
                 )
+                stage_queue_enqueue_count = chunk_lifecycle_metrics.get("stage_queue_enqueue", 0)
+                stage_queue_promote_count = chunk_lifecycle_metrics.get("stage_queue_promote", 0)
+                stage_queue_revision_count = chunk_lifecycle_metrics.get("stage_queue_revision", 0)
+                stage_queue_drop_oldest_count = chunk_lifecycle_metrics.get("stage_queue_drop_oldest", 0)
                 stage_finalize_before_replace_count = chunk_lifecycle_metrics.get("stage_finalize_before_replace", 0)
                 stage_age_finalize_count = chunk_lifecycle_metrics.get("stage_age_finalize", 0)
                 stage_age_quality_blocked_count = chunk_lifecycle_metrics.get("stage_age_quality_blocked", 0)
@@ -1340,6 +1453,11 @@ class WhisperTranscriptWorker:
                     f"revision_internal_high={stage_revision_internal_high_count} "
                     f"revision_internal_mid={stage_revision_internal_mid_count} "
                     f"revision_internal_low={stage_revision_internal_low_count} "
+                    f"stage_queue_enqueue={stage_queue_enqueue_count} "
+                    f"stage_queue_promote={stage_queue_promote_count} "
+                    f"stage_queue_revision={stage_queue_revision_count} "
+                    f"stage_queue_drop_oldest={stage_queue_drop_oldest_count} "
+                    f"stage_queue_len={len(staged_queue)} "
                     f"finalize_before_replace={stage_finalize_before_replace_count} "
                     f"age_finalize={stage_age_finalize_count} "
                     f"age_quality_blocked={stage_age_quality_blocked_count} "

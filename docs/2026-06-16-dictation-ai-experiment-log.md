@@ -761,13 +761,15 @@ final-only 번역
 ./.venv/bin/python -m unittest \
   tests.unit.test_dictation_ai_sentence_revision \
   tests.unit.test_dictation_ai_sentence_forcing \
-  tests.unit.test_dictation_ai_performance_tracking \
   tests.unit.test_dictation_ai_transcript_delta \
   tests.unit.test_dictation_ai_sentence_boundary \
   tests.unit.test_transcript_revision
 
-Ran 391 tests
-OK
+./.venv/bin/python tests/eval/dictation_ai/performance_tracking.py \
+  --output .tmp/eval/dictation-ai-performance-tracking/latest.json
+
+단위 테스트는 deterministic helper 회귀 검증으로 통과했다.
+성능 추적 케이스는 별도 벤치 리포트로 rate/gap을 출력한다.
 ```
 
 ```text
@@ -838,6 +840,428 @@ final_f1_avg=0.106
 - final 확정 수와 staged 대비 final 비율이 크게 개선됐다.
 - pass rate는 그대로라 정답 기대치와 실제 final granularity는 추가 검토가 필요하다.
 - 현재 개선은 구조적 최소 보완으로 유지하고, 다음 단계는 다중 staged lifecycle 설계 여부를 별도로 판단한다.
+
+## 2026-06-17 최근 final 기반 중복 확정 억제 최소 개선
+
+### 로그 관측
+
+최근 `avc-whisper.log`에서 `Dictation AI transcript` 라인은 staged 표시도 포함하므로 final 중복 판단 기준으로 쓰면 안 된다. 실제 final 기준인 `받아쓰기 AI 문장 확정` 로그를 보면, 짧게 확정된 문장이 뒤 window에서 더 긴 문장으로 다시 등장하는 케이스가 있었다.
+
+대표 케이스:
+
+```text
+최근 final: 对，经过了无数的龟毛，然后又怕发生跟外婆。
+후속 후보: 对，经过了无数的规毛，然后又怕发生跟外婆家一样的事件，就不要点太多。
+```
+
+### 최소 변경
+
+- 확정 직전에만 최근 final 저장소를 조회한다.
+- 최근 final과 같은 후보는 final/translation 대상에서 제외한다.
+- 최근 final의 확장 후보는 이미 확정된 prefix를 다시 내보내지 않고 suffix만 final로 확정한다.
+- 후보 생성, SBD 경계, staged lifecycle에는 새 병합 규칙을 추가하지 않는다.
+
+### CUDA/SaT 벤치 결과
+
+조건:
+
+```text
+HF_HUB_OFFLINE=1
+TRANSFORMERS_OFFLINE=1
+backend=sat
+device=cuda
+compute_type=float16
+cases=24
+```
+
+직전 기준:
+
+```text
+pass_rate=0.083
+finalized=63
+stage_start=164
+finalized_per_stage_start=0.384
+final_f1_avg=0.106
+finalize_recent_delta_trimmed=0
+finalize_duplicate_suppressed=0
+```
+
+변경 후:
+
+```text
+pass_rate=0.083
+finalized=62
+stage_start=164
+finalized_per_stage_start=0.378
+final_f1_avg=0.118
+finalize_recent_delta_trimmed=2
+finalize_duplicate_suppressed=1
+```
+
+판단:
+
+- 중복 final 후보를 줄이면서 final F1이 소폭 개선됐다.
+- final 수는 1개 줄었지만 staged 대비 final 비율은 거의 유지됐다.
+- 번역은 final sentence만 대상으로 하므로, 이 조정은 중복 번역 요청도 함께 줄인다.
+- 과도한 생명주기 확장은 하지 않고 최근 final 저장소를 확정 직전 비교에만 사용한다.
+
+### 의심 케이스 벤치 추가와 후보 단계 보완
+
+추가 케이스:
+
+```text
+tests/eval/dictation_ai/sbd_text_cases.sample.jsonl
+id=zh_log_recent_final_extension_delta_20260617_001
+```
+
+의도:
+
+- 최근 final이 뒤 window에서 더 긴 문장으로 다시 등장할 때 기존 final prefix를 중복 확정하지 않는다.
+- 확장 suffix는 문장 종결부호를 유지해 final-only 번역 대상이 될 수 있어야 한다.
+- 의심 상황은 품질 게이트가 아니라 벤치 지표로 유지한다.
+
+중간 결과:
+
+```text
+pass_rate=0.080
+finalized=63
+stage_start=166
+finalized_per_stage_start=0.380
+final_f1_avg=0.130
+candidate_recent_final_delta_trimmed=0
+```
+
+관측:
+
+- suffix 후보가 stage에 들어가기 전에 `committed_text` 기반 delta로 먼저 잘리면서 종결부호가 사라졌다.
+- 결과적으로 `no_end_marker` 상태가 되어 final/translation 대상까지 가지 못했다.
+
+보완:
+
+- recent final 확장 후보의 suffix는 원 후보의 종결부호를 보존한다.
+- stage 후보 생성 직전에도 최근 final 저장소를 한 번 조회해 suffix-only 후보를 만든다.
+- SBD 경계나 completed 후보 합성은 추가하지 않는다.
+
+보완 후 CUDA/SaT 벤치:
+
+```text
+pass_rate=0.120
+finalized=68
+stage_start=169
+finalized_per_stage_start=0.402
+stage_replace=511
+stage_replace_deferred=432
+stage_replaced_unconfirmed=79
+final_f1_avg=0.141
+candidate_recent_final_delta_trimmed=44
+finalize_recent_delta_trimmed=2
+finalize_duplicate_suppressed=1
+```
+
+추가 케이스 결과:
+
+```text
+case_pass=True
+actual_final=[
+  "对，经过了无数的龟毛，然后又怕发生跟外婆。",
+  "家一样的事件就不要点太多。"
+]
+candidate_recent_final_delta_trimmed=3
+```
+
+판단:
+
+- 문장 순서를 유지하면서 이미 확정된 prefix의 중복 final을 줄였다.
+- 확장 suffix가 종결부호를 유지해 번역 대상 확정 조건을 만족할 수 있게 됐다.
+- 변경은 최근 final 저장소를 이용한 후보 delta 산출에 한정되며, 과거의 pending/new 접합 또는 completed 합성 로직은 재도입하지 않았다.
+
+### 추가 관측: 빵/계란 설명 중복 후보
+
+사용자 관측:
+
+```text
+哎，很Q哎，风味面包，哇好可爱。
+哎，粉丝啊，超级松软，蛋超级多，蛋是超多，有没有选？
+哦，它蛋超多哎，煮丝啊，超级松软，蛋超级多，特别超多。
+
+再点一颗
+然后蛋煎很好，大蒜土司，然后蛋。
+超级松软，但超级多，特别超多，有没有觉得？
+再点一颗
+红蒜煎很好，大蒜土司，然后蛋，然后加上脆皮根，然后再加上它上面又有那个蒜香美奶汁，就是叫蒜头组合。
+```
+
+추가 케이스:
+
+```text
+tests/eval/dictation_ai/sbd_text_cases.sample.jsonl
+id=zh_log_duplicate_bread_egg_fragment_20260617_001
+```
+
+보완:
+
+- 최근 final과 후보의 CJK 공통 구간이 prefix가 아니라 내부에 있어도, matching block 누적 coverage가 충분하면 중복 후보로 본다.
+- 후보가 이미 확정된 recent final의 반복 변형이면 stage 진입 전에 suppress한다.
+- 짧은 fragment 자체를 final로 강제하지 않는다.
+
+CUDA/SaT 벤치:
+
+```text
+cases=26
+pass_rate=0.115
+finalized=68
+stage_start=172
+finalized_per_stage_start=0.395
+stage_replace=513
+stage_replace_deferred=429
+stage_replaced_unconfirmed=84
+final_f1_avg=0.153
+candidate_recent_final_delta_trimmed=65
+candidate_duplicate_suppressed=146
+```
+
+추가 케이스 결과:
+
+```text
+case_pass=False
+final_score_f1=0.444
+candidate_recent_final_delta_trimmed=2
+candidate_duplicate_suppressed=3
+actual_final=[
+  "哎，很Q哎，风味面包，哇好可爱。",
+  "哎，粉丝啊，超级松软，蛋超级多，蛋是超多，有没有选？",
+  "红蒜煎很好，大蒜土司，然后蛋，然后加上脆皮根，然后再加上它上面又有那个蒜香美奶汁，就是叫蒜头组合。"
+]
+```
+
+판단:
+
+- `蛋超级多...` 계열의 유사 중복 후보는 recent final 저장소로 억제됐다.
+- `大蒜土司...` 계열은 앞 문장이 final까지 가지 않고 staged에 머문 상태라 recent final 저장소로는 trim되지 않는다.
+- staged 후보까지 별도 순서 버퍼로 확장하면 과거 병합/재구성 로직으로 되돌아갈 위험이 있으므로 이번 패치에서는 추가하지 않는다.
+- 이 케이스는 중복 후보 억제와 확정 누락이 함께 있는 성능 벤치 케이스로 유지한다.
+
+### 추가 관측: 종로/광장시장 이동 설명 확정 누락
+
+사용자 관측:
+
+```text
+喝完咖啡，准备前往中路三街。
+我们要坐紫色，也就是从马步站坐到中路三街之后，走到中路街去广场市场拜。
+...
+好，我们现在在中路五街了。
+对，人好多哦。
+人超多。
+街上蛮多人下车的。
+我的Tmoney。
+现在寻找出口中。
+```
+
+추가 케이스:
+
+```text
+tests/eval/dictation_ai/sbd_text_cases.sample.jsonl
+id=zh_log_missing_jongno_market_transfer_20260617_001
+```
+
+관측:
+
+- `对，人好多哦。`, `人超多。`, `街上蛮多人下车的。`, `我的Tmoney。` 같은 짧은 CJK 후보가 다음 completed 후보에 밀리면서 confirmation을 채우기 전에 교체됐다.
+- `short_cjk` 후보는 age 기준 replacement에서 final 품질 게이트에 막히므로, 너무 빨리 `aged` replacement로 넘어가면 확정 누락이 늘어난다.
+
+보완:
+
+- 종결부호가 있는 `short_cjk` 후보는 replacement 직전 제한된 추가 chunk 동안 `unconfirmed_cjk`로 보류한다.
+- 같은 후보가 반복 관측되면 confirmation으로 final될 수 있게 한다.
+- `no_end_marker`가 있는 짧은 CJK 후보는 추가 보류 대상이 아니다.
+- 별도 ordered staged queue는 도입하지 않는다.
+
+CUDA/SaT 벤치 비교:
+
+```text
+변경 전:
+cases=27
+pass_rate=0.111
+finalized=71
+stage_start=184
+finalized_per_stage_start=0.386
+stage_replaced_unconfirmed=92
+final_f1_avg=0.154
+
+변경 후:
+cases=27
+pass_rate=0.111
+finalized=86
+stage_start=130
+finalized_per_stage_start=0.662
+stage_replaced_unconfirmed=21
+final_f1_avg=0.216
+```
+
+추가 케이스 결과:
+
+```text
+actual_final=[
+  "开完咖啡，准备前往中路三街。",
+  "三街，我们要坐紫色，也就是从马步站坐到中路三街之后，走到中路街去广场市场摆。",
+  "好，我们现在在中路五街了。",
+  "人超多。",
+  "街上蛮多人下车的。"
+]
+actual_staged="我的T-money。"
+```
+
+판단:
+
+- 짧은 CJK 후보의 확정 누락은 일부 개선됐다.
+- 전체 벤치에서 final 수, staged 대비 final 비율, final F1이 모두 개선됐다.
+- `我的Tmoney。`, `现在寻找出口中。`처럼 뒤 문장 순서를 더 잘 살리려면 단일 staged slot 한계를 다뤄야 한다.
+- ordered staged queue는 설계 변경 폭이 크므로 이번 패치에서는 도입하지 않고, 벤치 케이스로 남겨 추후 근거로 삼는다.
+
+### 추가 관측: 팬케이크 설명 확정 누락과 유사도 기반 age
+
+사용자 관측:
+
+```text
+一来了，其实每一餐都蛮多人哎。煎饼。好多。
+好好大饭，好大。
+之前一来看到最多菜的就是煎饼，各种煎饼。
+我的菜，等一下就可以吃煎饼了。现在人潮反而汹涌。真的。
+```
+
+추가 케이스:
+
+```text
+tests/eval/dictation_ai/sbd_text_cases.sample.jsonl
+id=zh_log_missing_pancake_crowd_fragment_20260617_001
+```
+
+원인 판단:
+
+- 기존 age/confirmation은 일부 짧은 CJK correction을 같은 token-sentence로 보지 못했다.
+- 예: `对的，还超多。` ↔ `超多！`, `好好大饭，好大。` ↔ `好好大，好大。`, `现在人潮反而凶。` ↔ `现在人潮反而汹涌。`
+- 유사 후보가 revision으로 인정되지 않으면 staged 후보는 갱신되지 않고, age만 오르다가 다른 completed 후보에 밀린다.
+
+보완:
+
+- CJK token-sentence 유사도 기준을 추가했다.
+- 짧은 CJK containment, 소폭 글자 교정, 짧은 mixed CJK/Latin correction은 같은 revision 후보로 본다.
+- preferred 문장이 소폭 교정된 수준이면 confirmation을 리셋하지 않고 누적한다.
+- 큰 확장 후보는 기존처럼 confirmation을 리셋해 과확정을 막는다.
+
+CUDA/SaT 벤치 비교:
+
+```text
+변경 전:
+cases=28
+pass_rate=0.107
+finalized=86
+stage_start=132
+finalized_per_stage_start=0.652
+stage_replaced_unconfirmed=22
+final_f1_avg=0.209
+
+변경 후:
+cases=28
+pass_rate=0.107
+finalized=92
+stage_start=134
+finalized_per_stage_start=0.687
+stage_replaced_unconfirmed=18
+final_f1_avg=0.219
+```
+
+관련 케이스 결과:
+
+```text
+zh_log_missing_jongno_market_transfer_20260617_001:
+  추가 final: "对，人好多哦。"
+  추가 final 유지: "人超多。", "街上蛮多人下车的。"
+  actual_staged: "现在寻找出口中。"
+
+zh_log_missing_pancake_crowd_fragment_20260617_001:
+  actual_final: ["哎，煎饼。"]
+  actual_staged: "好多。"
+```
+
+판단:
+
+- 유사도 기반 age/confirmation은 전체 지표와 일부 누락 케이스를 개선했다.
+- 팬케이크 케이스는 여러 completed 후보가 한 window에 반복 등장하는데 단일 staged slot이 하나만 붙잡기 때문에 대부분 누락된다.
+- 이 문제는 유사도 기준만으로 완전 해결되지 않으며, ordered staged queue 또는 다중 staged 후보 관리가 필요한 별도 설계 이슈다.
+- 이번 패치에서는 과도한 구조 변경을 피하고, 케이스를 벤치에 남겨 다음 설계 판단 근거로 사용한다.
+
+### 추가 보완: ordered staged queue와 chunk aging guard
+
+로그 판단:
+
+- 한 chunk에서 SaT/SBD가 여러 completed 후보를 순서대로 생성한다.
+- 기존 단일 staged slot은 active 후보와 다른 CJK 후보를 `unconfirmed_cjk`로 보류하면서도 실제로는 후보를 보존하지 못해 누락을 만들었다.
+- 확정된 final은 append-only로 유지해야 하므로, final 이후 재병합이 아니라 final 전 staged 후보만 순서대로 관리해야 한다.
+
+보완:
+
+- active staged 뒤에 제한된 `staged_sentence_queue`를 둔다.
+- active와 다른 CJK completed 후보는 폐기하지 않고 queue에 저장한다.
+- queue 안의 같은 token-sentence revision은 confirmation/age를 누적한다.
+- active staged가 final/suppressed 되면 queue에서 다음 후보를 순서대로 승격한다.
+- 같은 chunk에서 이미 revision/replacement로 age가 오른 후보는 chunk 말미 aging에서 제외한다.
+
+CUDA/SaT 벤치 비교:
+
+```text
+유사도 기반 age 기준:
+cases=28
+pass_rate=0.107
+finalized=92
+stage_start=134
+finalized_per_stage_start=0.687
+final_f1_avg=0.219
+
+ordered staged queue:
+cases=28
+pass_rate=0.143
+finalized=106
+stage_start=164
+finalized_per_stage_start=0.646
+final_f1_avg=0.231
+stage_queue_enqueue=236
+stage_queue_promote=123
+stage_queue_revision=371
+stage_queue_drop_oldest=27
+```
+
+주요 케이스:
+
+```text
+zh_log_missing_pancake_crowd_fragment_20260617_001:
+  변경 전 actual_final: ["哎，煎饼。"]
+  변경 후 actual_final:
+    "一来了，其实每一餐都蛮多人哎。"
+    "哎，煎饼。"
+    "好多。"
+    "好好大饭，好大。"
+    "之前一来看到最多菜的就是煎饼，各种煎饼。"
+    "我的菜，等一下就可以吃煎饼了。"
+
+zh_log_missing_jongno_market_transfer_20260617_001:
+  변경 후 actual_final:
+    "开完咖啡，准备前往中路三街。"
+    "我们要坐紫色，也就是从马步站坐到中路三街之后，走到中路街去广场市场拜。"
+    "好，我们现在在中路五街了。"
+    "对，人好多哦。"
+    "人超多。"
+    "街上蛮多人下车的。"
+    "我的T蛮。"
+    "我的Tmoney。"
+```
+
+판단:
+
+- 확정 누락은 줄었다.
+- `finalized`와 `final_f1_avg`는 개선됐다.
+- queue 도입으로 `stage_start`가 증가하므로 `finalized_per_stage_start`는 단독 성공 지표로 쓰기 어렵다.
+- `我的T蛮。`처럼 오인식/중간 fragment가 final로 올라오는 리스크가 남아 있어, 다음 튜닝은 queue final 품질과 recent final 유사 억제를 함께 봐야 한다.
 
 ## 남은 실험 과제
 

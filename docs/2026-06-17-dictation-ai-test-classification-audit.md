@@ -15,9 +15,9 @@
 - 로그에서 출발했더라도 최소 입력으로 축소되어 모델 출력 분포와 무관하다.
 - 실패하면 로직 계약이 깨진 것으로 볼 수 있다.
 
-### 성능 추적 테스트
+### 성능 추적 벤치마크
 
-다음 조건이면 `test_dictation_ai_performance_tracking.py`에 둔다.
+다음 조건이면 `tests/eval/dictation_ai/performance_tracking.py`에 둔다.
 
 - 5분/30분 로그 집계, rate, gap, per-stage-start 같은 추세 지표다.
 - raw STT 흔들림, stage churn, replacement churn, finalization latency를 관측한다.
@@ -28,7 +28,7 @@
 
 | 영역 | 현재 상태 | 판단 |
 | --- | --- | --- |
-| `test_dictation_ai_performance_tracking.py` | `_record()`로 matched만 누적하고 unittest는 실패시키지 않는다. | 성능 추적 하네스 구조가 맞다. 개별 matched를 assert로 바꾸지 않는다. |
+| `tests/eval/dictation_ai/performance_tracking.py` | `_record()`로 matched만 누적하고 rate/gap 리포트를 출력한다. | 성능 추적 벤치 구조가 맞다. 개별 matched를 assert로 바꾸지 않는다. |
 | `test_dictation_ai_sentence_revision.py` | `from_log/from_monitoring` hard assert가 많다. | 일부는 안전 계약이지만, stage churn/finalization tuning 성격 케이스는 이관 후보가 있다. |
 | `test_dictation_ai_transcript_delta.py` | delta 중복 억제 케이스가 hard assert로 있다. | 사용자 출력 중복 방지 계약이므로 상당수는 hard regression으로 유지 가능하다. |
 | `test_dictation_ai_sentence_boundary.py` | soft boundary 결과를 hard assert로 고정한다. | 모델 기반 SBD가 아니라 로컬 boundary helper의 deterministic contract일 때만 유지한다. |
@@ -36,10 +36,10 @@
 
 ## 정리 원칙
 
-- 새 로그 수집 케이스는 기본적으로 performance tracking에 추가한다.
+- 새 로그 수집 케이스는 기본적으로 performance tracking 벤치에 추가한다.
 - 일반 unit test에 로그 케이스를 추가하려면 주석에 `hard regression` 성격을 명시한다.
-- hard regression에서 성능 지표로 성격이 바뀐 케이스는 삭제하지 말고 performance tracking으로 먼저 복제한 뒤, 다음 패치에서 unit assert를 제거한다.
-- tracking rate가 낮아도 unittest 실패로 만들지 않는다. 낮은 rate는 개선 backlog와 파라미터 튜닝 근거다.
+- hard regression에서 성능 지표로 성격이 바뀐 케이스는 삭제하지 말고 performance tracking 벤치로 먼저 복제한 뒤, 다음 패치에서 unit assert를 제거한다.
+- tracking rate가 낮아도 품질 게이트 실패로 만들지 않는다. 낮은 rate는 개선 backlog와 파라미터 튜닝 근거다.
 
 ## 우선 이관 후보
 
@@ -64,4 +64,4 @@
 - 결정적 helper의 최소 계약
 - CJK repeated n-gram, spaced CJK, recent echo처럼 사용자 출력 오염을 직접 막는 안전 정책
 
-이후 로그에서 새로 발견한 stage churn, finalization latency, soft boundary, collapse 튜닝 케이스는 일반 unit test가 아니라 `test_dictation_ai_performance_tracking.py`에 추가한다.
+이후 로그에서 새로 발견한 stage churn, finalization latency, soft boundary, collapse 튜닝 케이스는 일반 unit test가 아니라 `tests/eval/dictation_ai/performance_tracking.py`에 추가한다.
