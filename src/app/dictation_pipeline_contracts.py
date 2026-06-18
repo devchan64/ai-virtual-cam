@@ -51,6 +51,36 @@ class SentenceCandidateSet:
 
 
 @dataclass
+class ActiveSentenceCandidate:
+    sentence: str = ""
+    confirmations: int = 0
+    age: int = 0
+    forced: bool = False
+    deferredAgeChunk: int = -1
+
+    def clear(self) -> None:
+        self.sentence = ""
+        self.confirmations = 0
+        self.age = 0
+        self.forced = False
+        self.deferredAgeChunk = -1
+
+    def start(self, sentence: str, *, forced: bool, chunk_index: int) -> None:
+        self.sentence = sentence
+        self.confirmations = 1
+        self.age = 0
+        self.forced = forced
+        self.deferredAgeChunk = chunk_index
+
+    def apply_buffer_entry(self, entry: dict[str, object]) -> None:
+        self.sentence = str(entry["sentence"])
+        self.confirmations = int(entry["confirmations"])
+        self.age = int(entry["age"])
+        self.forced = bool(entry["forced"])
+        self.deferredAgeChunk = int(entry["deferred_age_chunk"])
+
+
+@dataclass
 class CommitState:
     committedText: str = ""
     candidateBuffer: list[dict[str, Any]] = field(default_factory=list)

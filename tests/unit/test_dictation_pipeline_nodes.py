@@ -1,12 +1,15 @@
 import unittest
 from types import SimpleNamespace
 
-from src.app.dictation_pipeline_contracts import AudioEvidence, RecognitionHypothesis, UncommittedContext
-from src.app.dictation_pipeline_nodes import (
-    SentenceCandidateCommitBufferNode,
-    SpeechEvidenceToSttHypothesisNode,
-    SttHypothesisToSentenceCandidateNode,
+from src.app.dictation_pipeline_contracts import (
+    ActiveSentenceCandidate,
+    AudioEvidence,
+    RecognitionHypothesis,
+    UncommittedContext,
 )
+from src.app.dictation_node_sentence_candidate_commit_buffer import SentenceCandidateCommitBufferNode
+from src.app.dictation_node_speech_evidence_to_stt_hypothesis import SpeechEvidenceToSttHypothesisNode
+from src.app.dictation_node_stt_hypothesis_to_sentence_candidate import SttHypothesisToSentenceCandidateNode
 from src.app.sentence_boundary import SentenceBoundaryResult
 
 
@@ -37,6 +40,41 @@ class FakeBoundaryDetector:
 
 
 class DictationPipelineNodeTest(unittest.TestCase):
+    def test_active_sentence_candidate_tracks_commit_node_state(self) -> None:
+        active = ActiveSentenceCandidate()
+
+        active.start("candidate.", forced=True, chunk_index=4)
+
+        self.assertEqual(active.sentence, "candidate.")
+        self.assertEqual(active.confirmations, 1)
+        self.assertEqual(active.age, 0)
+        self.assertTrue(active.forced)
+        self.assertEqual(active.deferredAgeChunk, 4)
+
+        active.apply_buffer_entry(
+            {
+                "sentence": "queued.",
+                "confirmations": 2,
+                "age": 3,
+                "forced": False,
+                "deferred_age_chunk": 9,
+            }
+        )
+
+        self.assertEqual(active.sentence, "queued.")
+        self.assertEqual(active.confirmations, 2)
+        self.assertEqual(active.age, 3)
+        self.assertFalse(active.forced)
+        self.assertEqual(active.deferredAgeChunk, 9)
+
+        active.clear()
+
+        self.assertEqual(active.sentence, "")
+        self.assertEqual(active.confirmations, 0)
+        self.assertEqual(active.age, 0)
+        self.assertFalse(active.forced)
+        self.assertEqual(active.deferredAgeChunk, -1)
+
     def test_speech_evidence_node_emits_recognition_hypothesis_contract(self) -> None:
         node = SpeechEvidenceToSttHypothesisNode(
             SimpleNamespace(
@@ -60,7 +98,6 @@ class DictationPipelineNodeTest(unittest.TestCase):
             ),
             model=FakeSttModel(),
             stream_block=object(),
-            accepted_segment_texts=lambda segments: ([segment.text for segment in segments], [], 0.8),
             committed_text="",
             pending_text="",
         )
@@ -70,7 +107,7 @@ class DictationPipelineNodeTest(unittest.TestCase):
         self.assertEqual(hypothesis.language, "en")
         self.assertEqual(hypothesis.rawText, "Hello world.")
         self.assertEqual(hypothesis.deltaText, "Hello world.")
-        self.assertEqual(hypothesis.segmentBoundaryConfidence, 0.8)
+        self.assertAlmostEqual(hypothesis.segmentBoundaryConfidence, 0.91)
         self.assertIsNotNone(hypothesis.stability)
 
     def test_hypothesis_candidate_node_preserves_boundary_contract(self) -> None:
@@ -132,13 +169,13 @@ class DictationPipelineNodeTest(unittest.TestCase):
 
         self.assertEqual(len(node), 2)
         promoted = node.promote_if_idle(
-            active_sentence="",
             chunk_index=3,
             count_metric=count_metric,
             count_segment_state=count_state,
         )
 
-        self.assertEqual(promoted["sentence"], "first sentence.")
+        self.assertTrue(promoted)
+        self.assertEqual(node.active.sentence, "first sentence.")
         self.assertEqual(len(node), 1)
         self.assertEqual(metrics["stage_queue_enqueue"], 2)
         self.assertEqual(metrics["stage_queue_promote"], 1)
