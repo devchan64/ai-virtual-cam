@@ -1,247 +1,117 @@
-# 받아쓰기 AI 실시간 처리 파이프라인 기준
+# 받아쓰기 AI 실시간 파이프라인 디자인
 
-## 문서 상태
+## 컨텍스트
 
-이 문서는 받아쓰기 AI 실시간 처리 파이프라인의 기준 설계다. 기준은 2026-06-16 재설계 버전이며, 과거 실험에서 추가된 보정 시나리오와 튜닝 후보는 이 문서의 필수 구현 기준으로 취급하지 않는다.
+이 문서는 받아쓰기 AI 실시간 파이프라인을 파이프라인, 노드, 계약 중심으로 정의하는 압축 설계 컨텍스트다.
 
-커밋 기록 기반 실험 흐름은 [받아쓰기 AI 실험일지](2026-06-16-dictation-ai-experiment-log.md)에 두고, 설정 계약과 기본값은 [받아쓰기 AI 계약과 기본값](2026-06-16-dictation-ai-contract-defaults.md)에 둔다. 중국어 STT 후보 세부검증 판단은 [받아쓰기 AI 중국어 STT 후보 세부검증 리포트](2026-06-16-dictation-ai-chinese-stt-candidate-validation.md)에 둔다. 외부 논문, 모델 카드, 구현 링크는 [받아쓰기 AI 참조 레퍼런스 모음](2026-06-16-dictation-ai-reference-index.md)에 둔다.
+기존 흐름은 STT, 문장 경계 처리, revision lifecycle, 번역 입력 제어 코드가 한 실행 루프 안에 섞이기 쉬웠다. 이 문서는 구현 순서가 아니라 도메인 경계와 메시지 계약을 먼저 고정해 코드 분리와 회귀 판단의 기준으로 사용한다.
 
-## 핵심 문제 정의
+상세 설정 계약과 기본값은 [받아쓰기 AI 계약과 기본값](2026-06-16-dictation-ai-contract-defaults.md)에 두고, 실험 기록은 [받아쓰기 AI 실험일지](2026-06-16-dictation-ai-experiment-log.md)에 둔다.
 
-실시간 ASR은 매 step마다 최근 오디오 window 전체를 다시 전사한다. 같은 음성 구간이 여러 window에 반복 포함되므로 raw STT window 결과를 그대로 사용자 출력이나 번역 입력으로 쓰면 다음 문제가 생긴다.
+핵심 문제:
 
-- 같은 문장이 여러 번 출력된다.
-- 다음 window에서 이전 hypothesis가 수정된다.
-- 문장 경계가 늦게 나오거나 흔들린다.
-- 확정되지 않은 문장이 번역되어 중복 번역과 premature translation이 발생한다.
+실시간 ASR은 매 step마다 최근 오디오 window 전체를 다시 전사한다. 같은 음성 구간이 여러 window에 반복 포함되므로 raw STT 결과를 그대로 출력하거나 번역하면 중복 출력, 누락, premature translation, 뒤 window revision 문제가 생긴다.
 
-목표는 raw STT window 결과를 append-only final 문장으로 안정화하고, final 문장만 번역 큐에 넣는 것이다.
+목표는 raw STT window 결과를 append-only final 전사 이벤트로 안정화하고, final 이벤트만 전사 창과 번역 sink로 전달하는 것이다.
 
-## 실시간 처리 파이프라인
+구성 원칙:
+
+- 파이프라인은 실행 순서가 아니라 도메인 메시지 흐름으로 정의한다.
+- 노드는 입력 계약, 출력 계약, 소유 상태, 불변식으로 구분한다.
+- queue, list, loop는 구현 수단이며 도메인 경계가 아니다.
+- 노드 내부 상태는 해당 노드만 소유한다. 다른 노드는 출력 계약만 소비한다.
+- 전사 창과 번역은 sink다. sink는 final 계약만 소비하고 확정 정책에 개입하지 않는다.
+- regex/ad-hoc 문장 보정, VAD/silence final trigger, CPU/backend fallback은 운영 파이프라인 기준에서 제외한다.
+
+## 파이프라인
 
 ```text
-오디오 입력
-  ↓
-슬라이딩 윈도우 STT
-  - 언어별 운영 backend 실행
-  - raw STT window 결과 생성
-  ↓
-안정성/경계 판단
-  - 여러 window에서 유지되는 token/char 구간 확인
-  - SaT/SBD와 punctuation/right-context로 문장 경계 후보 생성
-  ↓
-세그먼트 생명주기
-  - pending / staged / final / suppressed / revised
-  - final은 append-only
-  - 최근 final 저장소로 유사 final 재확정 억제
-  ↓
-final-only 번역
+오디오 입력 source
+  -> AudioEvidence
+  -> 음성증거-STT가설 생성 노드
+  -> RecognitionHypothesis
+  -> STT가설-문장후보 해석 노드 + UncommittedContext
+  -> SentenceCandidateSet
+  -> 문장후보-확정전사 커밋 노드 + CommitState
+  -> CommittedTranscriptEvent
+  -> 전사 창 / 번역 sink
 ```
 
-이 흐름에서는 "음성이 멈췄는가"보다 "토큰이 안정되었는가"와 "문장 경계 후보가 확인되었는가"가 우선이다.
+이 파이프라인의 final 기준은 silence가 아니라 텍스트 안정성, 문장 후보 경계, revision 계열, candidate age, 소비 순서다.
 
-## 적용 상태
+## 노드
 
-| 단계 | 상태 | 기준 |
+| 노드 | 책임 | 입력 | 출력 | 소유 상태 | 불변식 |
+| --- | --- | --- | --- | --- | --- |
+| `음성증거-STT가설 생성 노드` | 설정된 시간 범위의 음성 증거를 단일 언어 STT 가설로 변환한다. | `AudioEvidence` | `RecognitionHypothesis` | 최근 window 텍스트, stable token/char 관측값 | raw text는 가설이며 final/translation으로 직접 나가지 않는다. 설정 backend/model/device 실패 시 자동 대체하지 않는다. |
+| `STT가설-문장후보 해석 노드` | STT 가설과 미확정 context를 문장 단위 후보로 해석한다. | `RecognitionHypothesis`, `UncommittedContext` | `SentenceCandidateSet` | pending tail, boundary detector, boundary metrics | 후보 순서를 보존한다. regex/ad-hoc 분할, 후보 의미 재작성, pending 강제 completed 승격을 하지 않는다. |
+| `문장후보-확정전사 커밋 노드` | 문장 후보의 revision lifecycle과 소비 순서를 관리해 final 이벤트만 발행한다. | `SentenceCandidateSet`, `CommitState` | `CommittedTranscriptEvent`, `SuppressedCandidate` | `candidateBuffer`, `revisionHashIndex`, `committedText`, recent finals, lifecycle metrics | final은 append-only다. 생성순서와 소비순서를 분리한다. 나중 revision이 먼저 소비되면 같은 revision 계열의 이전 미소비 후보는 폐기한다. |
+
+## 계약
+
+### 메시지
+
+| 계약 | 필수 의미 |
+| --- | --- |
+| `AudioEvidence` | `chunkIndex`, `inputDevice`, `sampleRate`, `windowSeconds`, `stepSeconds`, `audioWindow`, `queueDrops`를 포함한 특정 시간 범위의 음성 증거 |
+| `RecognitionHypothesis` | `chunkIndex`, `language`, `rawText`, `acceptedSegments`, `rejectedReasons`, `stableText`, `stability`, `segmentBoundaryConfidence`, `stableBoundaryConfidence`, `boundaryConfidence`를 포함한 미확정 STT 가설 |
+| `UncommittedContext` | 이미 final로 커밋된 `committedText`와 아직 커밋되지 않은 `pendingText` |
+| `SentenceCandidateSet` | 순서가 보존된 `completedCandidates[]`, `pendingTail`, `boundarySignals`, `candidateQualityFlags` |
+| `CommitState` | 후보 버퍼, revision 계열 인덱스, 소비순서, 최근 final 참조를 포함한 커밋 상태 |
+| `CommittedTranscriptEvent` | `consumeSequence`, `createdSequence`, `revisionHash`, `chunkIndex`, `language`, `text`, `qualityFlags`, `final=true`를 포함한 되돌릴 수 없는 전사 이벤트 |
+
+### 문장 후보 버퍼
+
+문장 후보 관리는 단순 queue가 아니라 생성순서와 소비순서를 함께 가진 revision-aware buffer다.
+
+| 필드 | 의미 |
+| --- | --- |
+| `createdSequence` | 후보가 처음 관측되어 버퍼에 들어온 순서. 같은 chunk 안 후보도 모델 경계 순서대로 증가한다. |
+| `revisionHash` | 같은 발화 구간의 revision 후보를 묶는 안정 식별자. 완전 동일 텍스트가 아니라 token-sentence 유사도와 위치 맥락으로 판단한다. |
+| `candidateAge` | 후보가 소비되지 않고 버퍼에서 재관측/검증된 chunk 수. final 소비 판단의 핵심 입력이다. |
+| `consumeSequence` | final 이벤트가 외부 sink로 발행된 순서. append-only transcript와 번역 sink는 이 순서만 따른다. |
+| `candidateBuffer` | 미소비 후보를 `createdSequence` 기준으로 보존하는 제한 크기 버퍼. 누락 소비와 중복 소비를 줄이기 위한 보류 장치다. |
+
+커밋 규칙:
+
+- 후보는 `createdSequence` 순서로 버퍼에 들어간다.
+- final 발행은 `consumeSequence` 순서로만 수행한다.
+- `candidateAge`가 기준에 도달하기 전에는 뒤 후보가 관측되어도 즉시 소비하지 않는다.
+- 같은 `revisionHash` 계열에서 나중 후보가 final로 소비되면, 이전 미소비 후보는 stale revision으로 폐기한다.
+- 다른 revision 계열이라도 뒤 후보가 앞 후보의 의미 구간을 포함하거나 대체한 것이 확인되면, 앞 후보는 중복 소비 방지를 위해 폐기한다.
+- 버퍼 초과는 강제 final 승격 사유가 아니다. age, revisionHash, recent final delta, 품질 기준을 만족하지 못한 오래된 후보는 suppressed로 폐기한다.
+- 생성순서 buffering은 누락 소비를 줄이기 위한 장치이며 append-only 소비 순서를 깨는 근거가 될 수 없다.
+
+### 출력 상태
+
+| 상태 | 의미 | sink 전달 |
 | --- | --- | --- |
-| 오디오 입력 | 구현됨 | 설정된 입력 장치에서 오디오를 읽는다. 설정값이 유효하지 않으면 자동 폴백하지 않고 실패한다. |
-| 슬라이딩 윈도우 STT | 구현됨 | `windowSeconds`, `stepSeconds` 기준으로 raw STT window 결과를 생성한다. |
-| raw STT 표시 | 구현됨 | 원문창은 raw STT window 결과만 표시한다. staged/final 처리 결과와 섞지 않는다. |
-| 안정성 판단 | 구현됨 | 여러 window에서 유지되는 token/char 구간을 관측한다. 이 신호는 staged 생명주기 판단 입력이다. |
-| 경계 판단 | 구현됨 | SaT/SBD, punctuation/end-mark, right-context 지표로 completed/pending 후보를 생성한다. |
-| 세그먼트 생명주기 | 구현됨 | `pending`, `staged`, `final`, `suppressed`, `revised` 상태를 분리한다. |
-| append-only final | 구현됨 | final transcript는 되돌리지 않고 append-only로 출력한다. |
-| 최근 final 중복 억제 | 구현됨 | 일정 기간 보관한 최근 final 문장과 확정 후보를 token-sentence compact 유사도로 비교해 유사 후보의 중복 확정을 막고, 최근 final의 확장 후보는 새 suffix만 final로 넘기며, 최근 final 또는 최근 final의 짧은 tail이 후보 suffix로 재삽입된 경우는 앞쪽 delta만 남긴다. 짧은 후보가 최근 final tail과만 유사하면 recent-final echo로 억제한다. |
-| pending-prefix 혼합 후보 억제 | 구현됨 | completed 후보가 현재 pending tail과 같은 prefix로 시작하지만 서로 다른 suffix로 갈라지면, pending tail이 이전 문맥과 섞인 후보로 보고 stage 전에 suppressed로 계측한다. |
-| prior pending/recent final 혼합 후보 억제 | 구현됨 | 이전 window의 pending prefix 뒤에 최근 final tail이 재삽입된 completed 후보는 순서가 섞인 후보로 보고 stage 전에 suppressed로 계측한다. |
-| 짧은 delta 조각 final 억제 | 구현됨 | `next_completed` 확정 직전 committed prefix 제거 결과가 종결 신호 없는 짧은 조각이면 final로 내보내지 않고 suppressed로 계측한다. |
-| terminal-tail revision 분리 | 구현됨 | 종결부호가 있는 staged 문장의 tail이 다음 후보 뒤쪽에 재삽입되면 같은 문장의 revision으로 병합하지 않고 staged를 먼저 final로 소비한다. |
-| prefix 삽입 revision 보존 | 구현됨 | 종결 신호 없는 후보가 기존 staged 대부분을 suffix로 공유하면서 앞에 짧은 prefix만 새로 끼워 넣은 형태이면 sliding window 순서 혼입으로 보고 기존 staged를 보존한다. |
-| 동일 chunk 완료 후보 확장 보류 | 구현됨 | 같은 boundary 결과 안에 현재 staged 후보를 prefix로 갖는 더 긴 완료 후보가 뒤에 있으면, 종결 신호 없는 staged의 confirmed/next_completed 확정을 한 번 보류한다. |
-| replacement final 품질 게이트 | 구현됨 | `duplicate_or_suffix`, `partial_preserve`, `aged` replacement 확정도 final 공통 품질 기준을 우회하지 않는다. |
-| trailing ellipsis final 억제 | 구현됨 | STT가 `...`/`…`로 끝내는 미완성 후보는 end marker처럼 보이더라도 final/translation 대상으로 보내지 않는다. |
-| 짧은 CJK 확정 보류 | 구현됨 | 종결부호가 있는 짧은 CJK 후보는 다음 후보에 바로 밀려나지 않도록 제한적으로 더 보류해 반복 관측 confirmation을 채운다. |
-| 반복 삽입 후보 품질 게이트 | 구현됨 | completed 후보 내부에 동일한 token n-gram이 반복 삽입되면 stage/final/translation 대상에서 제외한다. 문장을 재작성하거나 접합하지 않고 오염 후보만 suppressed로 계측한다. |
-| final-only 번역 | 구현됨 | 번역 큐에는 final 문장만 넣는다. staged/partial은 번역하지 않는다. |
-| 과거 보정 경로 제거 | 구현됨 | 반복 phrase collapse, pending 강제 completed 승격, CJK 조기 replacement 확정 경로를 운영/벤치 기준에서 제거했다. |
-| 긴 `next_completed` 순서 뒤섞임 억제 | 관측 중 | 최근 로그에서 여러 문맥이 섞인 긴 후보가 `next_completed`로 final되는 유형이 남아 있다. 케이스별 보정 없이 staged 순서, 최근 final suffix 결합, age/confirmation 누적 신호로만 개선한다. |
+| `raw` | 최신 STT window의 원시 가설 | 아니오 |
+| `pending` | 아직 경계 또는 안정성이 부족한 후보 | 아니오 |
+| `staged` | completed 후보이나 재확인 전 상태 | 아니오 |
+| `final` | 복사/번역 가능한 확정 이벤트 | 예 |
+| `suppressed` | 중복, 품질 문제, stale revision으로 폐기된 후보 | 아니오 |
+| `revised` | 다음 window에서 갱신된 후보 | 아니오 |
 
-## 폐기 범위
+### 관측 기준
 
-다음 항목은 재설계 기준의 필수 구현이 아니며 운영 기준에서 제외한다.
+관측 기준은 노드 경계와 계약 위반을 찾기 위한 최소 지표만 둔다. 모델 품질 실험이나 언어별 튜닝 근거는 실험일지에 둔다.
 
-- pending/new overlap 접합 보정
-- CJK no-space 내부 재시작 접합 보정
-- completed 후보 재구성 또는 합성
-- 반복 phrase collapse 기반 raw/completed/pending 재작성
-- pending overrun을 completed 후보로 강제 승격하는 final trigger
-- regex 기반 운영 문장 분할
-- VAD/silence 기반 final trigger
-- 케이스별 정규식 또는 언어별 ad-hoc 문장 보정
-- staged/partial 번역
-- CPU fallback 또는 실행 중 backend/model 자동 전환
+| 관측 대상 | 지표 | 판단 기준 |
+| --- | --- | --- |
+| `AudioEvidence` 처리량 | `input_queue_drops`, `input_queue_size_peak`, `stt_step_load`, `total_step_load` | drop이 발생하거나 step load가 1.0을 넘으면 실시간 처리량 초과로 본다. |
+| `RecognitionHypothesis` 안정성 | `stable_token_ratio`, `stable_internal_chars`, `raw_without_final` | raw 가설이 계속 나오는데 final이 없으면 인식/후보/커밋 경계 중 병목을 추적한다. |
+| `SentenceCandidateSet` 경계 품질 | `boundary_end_marks`, `boundary_right_context_starts`, `segment_state_pending`, `pending_quality_*` | completed/pending 분포와 경계 신호가 후보 생성 계약을 만족하는지 본다. |
+| `candidateBuffer` 동작 | `stage_queue_enqueue`, `stage_queue_promote`, `stage_queue_revision`, `stage_queue_drop_oldest`, `stage_replaced_unconfirmed` | 생성순서 보존, revision 갱신, 버퍼 폐기 흐름이 의도대로 발생하는지 본다. |
+| 커밋 품질 | `finalized_per_stage_start`, `segment_state_final`, `segment_state_suppressed`, `final_quality_*` | final 전환 비율과 suppressed 사유로 중복/오염 후보 차단 여부를 본다. |
+| final-only sink | `translation_skip_final_quality`, 번역 입력의 `final=true` 여부 | 번역 sink가 `CommittedTranscriptEvent` 외 입력을 소비하지 않는지 본다. |
 
-detector 입력을 만들기 위한 단순 문자열 결합은 허용하지만, 의미 단위 재작성이나 경계 보정으로 확장하지 않는다.
+### 불변 계약
 
-## 출력 상태
-
-| 상태 | 의미 | 화면 출력 | 번역 큐 |
-| --- | --- | --- | --- |
-| `raw` | 최신 STT window의 원시 전사 | 원문창 | 아니오 |
-| `pending` | 아직 문장 경계 또는 안정성이 부족한 후보 | 진단 로그 | 아니오 |
-| `staged` | completed 후보이나 재확인 전 상태 | 진단 로그 | 아니오 |
-| `final` | 복사/번역 가능한 확정 문장 | 전사 창 | 예 |
-| `suppressed` | 중복 또는 최근 final echo로 억제된 후보 | 아니오 | 아니오 |
-| `revised` | 다음 window에서 수정된 staged 후보 | 진단 로그 | 아니오 |
-
-정합성 규칙:
-
-- raw STT window 결과는 사용자 final 출력으로 직접 append하지 않는다.
-- final transcript는 append-only다.
-- final로 확정한 문장은 UI와 번역 큐에서 되돌리지 않는다.
-- 최근 final과 같은 후보는 다시 final로 확정하지 않는다.
-- 최근 final의 유사 후보는 언어 코드별 예외 없이 token-sentence 유사도로 비교한다.
-- 최근 final의 확장 후보는 이미 확정된 prefix를 반복 출력하지 않고 새 suffix만 final로 확정한다.
-- 최근 final 또는 최근 final의 짧은 tail이 후보의 suffix로 다시 붙은 경우도 반복 출력하지 않고 앞쪽 delta만 확정 후보로 남긴다.
-- 이전 pending prefix 뒤에 최근 final tail이 붙어 나온 completed 후보는 순서가 섞인 후보로 보고 final 후보에서 제외한다.
-- `next_completed` 확정은 종결 신호 없는 미확인 staged 후보를 밀어내지 않는다.
-- `next_completed` 확정은 순서가 뒤섞인 긴 후보를 확정하는 우회 경로가 되어서는 안 된다.
-- 종결부호가 있는 staged 문장의 tail이 다른 prefix 뒤에 붙은 후보는 같은 문장의 revision으로 보지 않는다.
-- 종결 신호 없는 후보가 기존 staged의 긴 suffix 앞에 짧은 prefix만 삽입한 형태이면 기존 staged를 더 신뢰한다.
-- replacement final 경로도 종결 신호 없는 미확인 staged 후보를 확정하지 않는다.
-- committed prefix 제거 결과가 원 staged보다 크게 짧아진 종결 신호 없는 조각이면 `next_completed` 또는 `confirmed` 계열 final로 확정하지 않는다.
-- STT가 미완성 후보를 `...` 또는 `…`로 끝낸 경우는 확정 문장 종료로 보지 않는다.
-- staged/partial 후보는 다음 window에서 수정될 수 있으므로 번역하지 않는다.
-- STT 원문창은 raw 결과만 표시한다.
-- 복사용 문장은 전사 창의 final 결과만 사용한다.
-
-## 런타임 상태
-
-| 상태/필드 | 의미 |
-| --- | --- |
-| `audio_buffer` | `windowSeconds` 기준 오디오 원본 |
-| `last_window_text` | 직전 raw STT window 텍스트 |
-| `pending_text` | 아직 확정되지 않은 후보 구간 |
-| `committed_text` | 이미 final로 확정한 append-only 텍스트 |
-| `recent_committed_fragments` | 최근 final echo 억제와 확장 후보 delta 산출을 위한 제한된 참조 저장소 |
-| `sentence_boundary_detector` | STT 텍스트를 completed/pending 후보로 나누는 detector |
-| `staged_sentence` | final 전 재확인 중인 completed 후보 |
-| `staged_sentence_queue` | active staged 뒤에 순서대로 대기 중인 completed 후보 |
-| `staged_confirmations` | 같은 후보가 재관측된 횟수 |
-| `staged_age` | staged 상태로 남은 chunk 수 |
-| `lifecycle_metrics` | 세그먼트 상태와 확정 흐름 관측 지표 |
-
-## 문장 경계 처리
-
-- 운영/설정 시나리오에서 regex 기반 문장 분할은 사용하지 않는다.
-- 문장 경계 후보는 SaT/wtpsplit 같은 다국어 SBD 모델을 우선한다.
-- SBD 결과가 completed 후보를 제안해도 즉시 final로 출력하지 않는다.
-- final 승격은 staged confirmation, `sentenceFinalizeAge`, revision lifecycle이 담당한다.
-- age와 confirmation은 문자열 완전 일치가 아니라 token-sentence 유사도와 revision 판단을 기준으로 누적한다.
-- 종결부호가 있는 짧은 CJK 후보는 age만으로 바로 버리지 않고, 제한된 추가 보류 기간 동안 같은 후보 재관측을 기다릴 수 있다.
-- 한 window에서 여러 completed 후보가 나오면 모델 경계 순서를 보존한다. active staged와 다른 CJK 후보는 버리지 않고 제한된 staged queue에 넣고, active가 final/suppressed 된 뒤 순서대로 승격한다.
-- 같은 chunk에서 이미 revision/replacement로 age가 증가한 staged 후보는 추가 aging하지 않는다.
-- punctuation/end-mark, right-context 시작 징후, soft boundary, end probability는 관측 지표로 기록한다.
-- 여러 completed 후보가 한 window에서 나와도 모델 경계 단위를 보존한다.
-- boundary backend/model은 명시 설정값만 사용한다. 실행 중 언어에 따라 암묵 전환하지 않는다.
-- completed 후보 내부에서 동일한 token n-gram이 반복 삽입되면 `repeated_word_ngram` 품질 플래그로 stage/final/translation 후보에서 제외한다. 이는 특정 언어 예외가 아니라 sliding window STT에서 같은 구가 재삽입된 후보를 막는 공통 lifecycle 안전장치다.
-
-## VAD와 무음 구간
-
-VAD와 silence 길이는 받아쓰기 AI 실시간 처리 파이프라인의 구현 목표에서 제외한다.
-
-이유:
-
-- pause가 sentence boundary와 반드시 일치하지 않는다.
-- 긴 발화에서는 명확한 silence가 드물다.
-- 짧은 pause로 연결된 문장은 VAD가 안정적으로 구분하기 어렵다.
-- 이 프로젝트의 final 기준은 텍스트 안정성, SBD, punctuation/right-context, staged confirmation이다.
-
-따라서 VAD/무음 길이/발화 종료 예측은 final trigger, boundary confidence 보정, 번역 큐 투입 조건에 넣지 않는다.
-
-## 번역 정책
-
-- 번역 입력은 final 문장만 사용한다.
-- staged/partial 번역은 운영 경로에서 사용하지 않는다.
-- NLLB 선택 시 Whisper backend는 `task=transcribe`만 수행하고 번역은 NLLB 경로만 사용한다.
-- 번역 backend/model/device/compute/beam/token 설정은 번역 대상 언어를 기준으로 결정한다.
-- 번역 경로도 CUDA/float16 요구 시 CPU fallback을 허용하지 않는다.
-
-## 운영 전제
-
-- 실행 진입점은 `./bin/avc`다.
-- `config`는 설정/GUI, `serve`는 저장된 설정 실행만 담당한다.
-- config GUI의 `Serve 시작`으로 실행할 때만 받아쓰기 AI 전사/번역 창을 연다.
-- 받아쓰기 AI 실행은 STT 모델, 문장 경계 모델, 번역 모델 준비가 끝난 뒤 오디오 입력 장치를 연다.
-- Serve 런타임은 로컬 모델 캐시만 사용한다.
-- 모델/장치/설정 오류는 자동 폴백하지 않고 실패한다.
-- CUDA/float16이 요구되는 경로는 CPU fallback으로 계속 실행하지 않는다.
-- config 오류는 모달뿐 아니라 stdout에도 출력한다.
-
-## 운영 파라미터 기준
-
-| 항목 | 영어/한국어 시작값 | 중국어 시작값 | 판단 기준 |
-| --- | ---: | ---: | --- |
-| `windowSeconds` | 7.0 | 12.0 | raw STT 안정성과 final 지연의 균형 |
-| `stepSeconds` | 1.0 | 1.0 | 화면 갱신과 반복 처리량의 균형 |
-| `sentenceFinalizeAge` | 3 | 2 | staged 후보 재관측 횟수 |
-| `beamSize` | 3 | 3 | 정확도/지연 비교 시작점 |
-| `temperature` | 0.0 | 0.0 | 재현성과 안정성 |
-| `maxNewTokens` | 192 | 192 | 긴 문장 절단 방지 |
-| `translationBeamSize` | 1 | 1 | 실시간 번역 시작점 |
-| `translationMaxNewTokens` | 128 | 128 | 번역 지연 제어 |
-
-성능 로그의 `stt_step_load` 또는 `total_step_load`가 1.0을 넘거나 `input_queue_drops`가 1 이상이면 실시간 처리량을 초과한 상태로 본다.
-
-## 품질 지표와 테스트 분류
-
-받아쓰기 AI 실시간 전사/번역 품질은 unittest 성공/실패만으로 판단하지 않는다.
-
-하드 품질 게이트로 둘 수 있는 경우:
-
-- 설정/계약/default 값처럼 입력과 출력이 명확한 public contract
-- CPU fallback 금지, 번역 큐 final-only 같은 안전 정책
-- 실패 시 사용자 출력이 즉시 오염되는 결정적 helper
-
-성능 추적 하네스에 둬야 하는 경우:
-
-- 누락/중복/확정 지연처럼 로그 분포에 따라 판단해야 하는 케이스
-- STT 모델 출력 흔들림에 의존하는 케이스
-- 파라미터 튜닝 근거용 케이스
-
-핵심 관측 지표:
-
-| 지표 | 의미 |
-| --- | --- |
-| `segment_state_pending/staged/final/suppressed/revised` | 세그먼트 상태 비율 |
-| `finalized_per_stage_start` | staged 후보 대비 final 확정 비율 |
-| `stage_queue_enqueue/promote/revision/drop_oldest` | 순서 보존 staged queue의 보존/승격/갱신/폐기 흐름 |
-| `MAX_STAGED_SENTENCE_QUEUE=12` | sliding window에서 관측된 completed 후보를 순서대로 보존하는 최대 queue 크기 |
-| `revision_similarity_policy` | token-sentence revision/confirmation 유사도 임계값 묶음. 운영 설정이 아니라 내부 튜닝 policy로 관리하며 SBD 벤치 리포트에 기록한다. |
-| `AVC_DICTATION_*` revision env override | 리비전 임계값 벤치 실험용 override. 기본 운영값을 바꾸지 않고 동일 벤치에서 상수 조합을 비교하기 위한 내부 도구다. |
-| `stage_candidate_quality_low_value_cjk_fragment` | 문장 종료 부호 없는 CJK 초단편 후보 차단 횟수 |
-| `stage_candidate_quality_repeated_word_ngram` | 긴 후보 내부 token n-gram 반복 삽입 차단 횟수 |
-| `pending_quality_repeated_word_ngram` | pending tail 내부 token n-gram 반복 누적 관측 횟수. 현재는 관측 지표로만 쓰며, pending 접합/절단 정책으로 직접 사용하지 않는다. |
-| `stage_revision_age_reset`, `stage_queue_revision_age_reset` | 내용이 바뀐 CJK revision의 age 재시작 횟수 |
-| `stage_replaced_unconfirmed` | 확정 전 교체된 staged 후보 |
-| `raw_without_final` | raw STT 관측 대비 final 미발생 횟수 |
-| `boundary_end_marks` | punctuation/end-mark 경계 신호 |
-| `boundary_right_context_starts` | right-context 시작 경계 신호 |
-| `stable_token_ratio` | 여러 window에서 유지되는 token/char 안정성 |
-| `translation_skip_final_quality` | final-only 번역 안전장치 작동 여부 |
-| `input_queue_drops` | 실시간 처리량 초과 여부 |
-
-## 배포 기준
-
-| 단계 | 기준 |
-| --- | --- |
-| RC 1 | raw/STT, staged/final, translation 입력이 분리되어 동작한다. |
-| RC 2 | SaT/SBD 운영 경로가 CUDA/float16 Fail-Fast 정책을 지킨다. |
-| GA 후보 | KO/EN/ZH에서 중복, 누락, 확정 지연 지표가 반복 측정에서 허용 범위 안에 있다. |
-
-실패 대응:
-
-- 백엔드 초기화/로딩/분절 실패는 CPU fallback 또는 regex fallback 없이 즉시 실패한다.
-- 모델 다운로드가 필요한 경로는 Serve 시작 전에 사용자에게 알려야 한다.
-- 다운로드/로딩 단계가 끝나기 전에는 오디오 입력 장치를 열지 않는다.
-- 임계 지표가 악화되면 자동 rollback보다 원인 로그 수집과 운영자 판단을 우선한다.
+- final transcript는 append-only이며 되돌리지 않는다.
+- STT 원문창은 raw만 표시하고, 복사용 전사 창은 final만 표시한다.
+- 번역 sink는 `CommittedTranscriptEvent`만 소비한다. staged/partial/pending은 번역하지 않는다.
+- 최근 final과 같은 후보, recent-final echo, 순서가 섞인 후보는 다시 final로 확정하지 않는다.
+- 외부 번역 backend 사용 시 Whisper는 `task=transcribe`만 수행하고 번역은 외부 번역 경로가 담당한다.
+- 모델/장치/설정 오류는 자동 폴백하지 않고 실패한다. CUDA/float16 요구 경로에서 CPU fallback은 허용하지 않는다.
+- 운영 파라미터와 모델/장치 허용값은 계약 기본값 문서를 따른다.

@@ -17,8 +17,13 @@ from pathlib import Path
 
 
 from src.app.rotating_log import install_rotating_stdout_log
+from src.app.dictation_pipeline_contracts import AudioEvidence, UncommittedContext
+from src.app.dictation_pipeline_nodes import (
+    SentenceCandidateCommitBufferNode,
+    SpeechEvidenceToSttHypothesisNode,
+    SttHypothesisToSentenceCandidateNode,
+)
 from src.app.sentence_boundary import create_sentence_boundary_detector
-from src.app.stable_token_detection import analyze_stable_window, combine_boundary_confidence
 from src.app.stt_model import build_stt_model
 from src.app.translation_model import TranslationRequest, build_text_translator
 from src.app.transcript_revision import append_context as _append_committed_text, consume_committed_prefix as _consume_committed_prefix, revision_lifecycle_context as _revision_lifecycle_context
@@ -365,6 +370,10 @@ class WhisperTranscriptWorker:
         self._sentence_boundary_detector = self._build_sentence_boundary_detector(normalized)
         self._boundary_detector_language = normalized
 
+    def _sentence_boundary_detector_for(self, detected_language: str):
+        self._sync_sentence_boundary_detector(detected_language)
+        return self._sentence_boundary_detector
+
     def _cjk_char_count(self, text: str) -> int:
         return sum(1 for char in str(text or "") if "\u3400" <= char <= "\u9fff" or "\uf900" <= char <= "\ufaff")
 
@@ -620,11 +629,12 @@ class WhisperTranscriptWorker:
         staged_age = 0
         staged_forced = False
         staged_deferred_age_chunk = -1
-        staged_queue: deque[dict[str, object]] = deque()
-        previous_window_text = ""
         lifecycle_metrics: dict[str, int] = {}
         chunk_lifecycle_metrics: dict[str, int] = {}
         last_audio_queue_drops = self._audio_queue_drop_count()
+        recognition_node = SpeechEvidenceToSttHypothesisNode(self._cfg)
+        candidate_node = SttHypothesisToSentenceCandidateNode(self._sentence_boundary_detector_for)
+        commit_buffer_node = SentenceCandidateCommitBufferNode(MAX_STAGED_SENTENCE_QUEUE)
 
         def count_metric(name: str, amount: int = 1) -> None:
             lifecycle_metrics[name] = lifecycle_metrics.get(name, 0) + amount
@@ -635,21 +645,23 @@ class WhisperTranscriptWorker:
 
         def promote_next_staged_sentence(detected: str) -> None:
             nonlocal staged_sentence, staged_confirmations, staged_age, staged_forced, staged_deferred_age_chunk
-            if staged_sentence or not staged_queue:
+            entry = commit_buffer_node.promote_if_idle(
+                active_sentence=staged_sentence,
+                chunk_index=chunks,
+                count_metric=count_metric,
+                count_segment_state=count_segment_state,
+            )
+            if entry is None:
                 return
-            entry = staged_queue.popleft()
             staged_sentence = str(entry["sentence"])
             staged_confirmations = int(entry["confirmations"])
             staged_age = int(entry["age"])
             staged_forced = bool(entry["forced"])
-            staged_deferred_age_chunk = chunks
-            count_metric("stage_queue_promote")
-            count_metric("stage_start")
-            count_segment_state("staged")
+            staged_deferred_age_chunk = int(entry["deferred_age_chunk"])
             self._emit(
                 "status",
                 "받아쓰기 AI stage 큐 승격: "
-                f"chunk={chunks} queue_remaining={len(staged_queue)} "
+                f"chunk={chunks} queue_remaining={len(commit_buffer_node)} "
                 f"staged_confirmations={staged_confirmations} staged_age={staged_age} "
                 f"staged_tail={_diagnostic_tail(staged_sentence)}",
                 display=False,
@@ -657,49 +669,14 @@ class WhisperTranscriptWorker:
             self._emit("transcript", staged_sentence, log_text=f"[{detected}] {staged_sentence}", final=False)
 
         def queue_staged_sentence(candidate: str, forced: bool) -> None:
-            for entry in staged_queue:
-                queued_sentence = str(entry["sentence"])
-                if not _sentences_are_revisions(queued_sentence, candidate):
-                    continue
-                preferred = _prefer_sentence_revision(queued_sentence, candidate)
-                reset_age = _should_reset_revision_age(
-                    queued_sentence,
-                    preferred,
-                    stable_analysis.stable_internal_ratio,
-                    stable_analysis.stable_internal_chars,
-                    stable_analysis.stable_overlap_source,
-                )
-                entry["sentence"] = preferred
-                entry["confirmations"] = _next_revision_confirmation_count(
-                    queued_sentence,
-                    preferred,
-                    int(entry["confirmations"]),
-                    stable_analysis.stable_internal_ratio,
-                    stable_analysis.stable_internal_chars,
-                    stable_analysis.stable_overlap_source,
-                )
-                entry["age"] = 0 if reset_age else int(entry["age"]) + 1
-                entry["forced"] = bool(entry["forced"]) or forced
-                entry["deferred_age_chunk"] = chunks
-                count_metric("stage_queue_revision")
-                if reset_age:
-                    count_metric("stage_queue_revision_age_reset")
-                count_metric("stage_age_tick")
-                return
-            if len(staged_queue) >= MAX_STAGED_SENTENCE_QUEUE:
-                staged_queue.popleft()
-                count_metric("stage_queue_drop_oldest")
-            staged_queue.append(
-                {
-                    "sentence": candidate,
-                    "confirmations": 1,
-                    "age": 0,
-                    "forced": forced,
-                    "deferred_age_chunk": -1,
-                }
+            commit_buffer_node.enqueue_or_revision(
+                candidate=candidate,
+                forced=forced,
+                chunk_index=chunks,
+                stable_analysis=stable_analysis,
+                count_metric=count_metric,
+                count_segment_state=count_segment_state,
             )
-            count_metric("stage_queue_enqueue")
-            count_segment_state("staged")
 
         self._emit(
             "status",
@@ -1222,24 +1199,24 @@ class WhisperTranscriptWorker:
             translation_started_at = chunk_started_at
             text = ""
             try:
-                stt_started_at = time.perf_counter()
-                transcribe_kwargs = {
-                    "language": language,
-                    "task": "transcribe",
-                    "beam_size": self._cfg.beamSize,
-                    "temperature": self._cfg.temperature,
-                    "max_new_tokens": self._cfg.maxNewTokens,
-                    "without_timestamps": True,
-                    "condition_on_previous_text": False,
-                }
-                if getattr(model, "streaming", False):
-                    transcribe_kwargs["stream_audio"] = block.astype(np.float32, copy=False)
-                    transcribe_kwargs["stream_chunk_seconds"] = self._cfg.stepSeconds
-                    transcribe_kwargs["stream_context_seconds"] = self._cfg.windowSeconds
-                segments, info = model.transcribe(audio, **transcribe_kwargs)
-                segment_list = list(segments)
-                accepted_texts, rejected_reasons, boundary_confidence = self._accepted_segment_texts(segment_list)
-                raw_window_text = " ".join(accepted_texts).strip()
+                evidence = AudioEvidence(
+                    chunkIndex=chunks,
+                    inputDevice=str(self._cfg.inputDevice),
+                    sampleRate=SAMPLE_RATE,
+                    windowSeconds=window_seconds,
+                    stepSeconds=step_seconds,
+                    audioWindow=audio,
+                    queueDrops=self._audio_queue_drop_count() - last_audio_queue_drops,
+                )
+                hypothesis = recognition_node.recognize(
+                    evidence=evidence,
+                    model=model,
+                    stream_block=block,
+                    accepted_segment_texts=self._accepted_segment_texts,
+                    committed_text=committed_text,
+                    pending_text=pending_transcript_text,
+                )
+                raw_window_text = hypothesis.rawText
                 if raw_window_text:
                     self._emit(
                         "stt_raw",
@@ -1247,10 +1224,9 @@ class WhisperTranscriptWorker:
                         log_text=f"[{language} raw] {raw_window_text}",
                         final=True,
                     )
-                window_text = _normalized_text(raw_window_text)
-                stable_text = _stable_window_text(window_text, 0.0, window_seconds)
-                stable_analysis = analyze_stable_window(previous_window_text, window_text, language)
-                previous_window_text = window_text
+                window_text = hypothesis.windowText
+                stable_text = hypothesis.stableText
+                stable_analysis = hypothesis.stability
                 if stable_analysis.current_units:
                     count_metric("stable_window_observed")
                     count_metric("stable_prefix_chars", stable_analysis.stable_prefix_chars)
@@ -1262,19 +1238,14 @@ class WhisperTranscriptWorker:
                     )
                     count_metric("stable_token_ratio_per_1000", int(round(stable_analysis.stable_token_ratio * 1000)))
                     count_metric(f"stable_overlap_source_{stable_analysis.stable_overlap_source}")
-                adjusted_boundary_confidence = combine_boundary_confidence(
-                    boundary_confidence,
-                    stable_analysis.boundary_confidence,
-                )
-                delta_base_text = _append_committed_text(committed_text, pending_transcript_text)
-                text = _new_text_delta(delta_base_text, stable_text)
-                stt_elapsed = time.perf_counter() - stt_started_at
-                detected = getattr(info, "language", self._cfg.language)
-                self._sync_sentence_boundary_detector(str(detected))
-                if rejected_reasons:
+                adjusted_boundary_confidence = hypothesis.boundaryConfidence
+                text = hypothesis.deltaText
+                stt_elapsed = hypothesis.elapsedSeconds
+                detected = hypothesis.language
+                if hypothesis.rejectedReasons:
                     self._emit(
                         "status",
-                        f"받아쓰기 AI 전사 후보 무시: chunk={chunks} reasons={'; '.join(rejected_reasons)}",
+                        f"받아쓰기 AI 전사 후보 무시: chunk={chunks} reasons={'; '.join(hypothesis.rejectedReasons)}",
                         display=False,
                     )
                 completed_sentences: list[str] = []
@@ -1292,20 +1263,21 @@ class WhisperTranscriptWorker:
                     text = ""
                 if text:
                     prior_pending_transcript_text = pending_transcript_text
-                    boundary_result = self._sentence_boundary_detector.split(
-                        pending_transcript_text,
-                        text,
-                        detected,
-                        boundary_confidence=adjusted_boundary_confidence,
+                    candidate_set = candidate_node.interpret(
+                        hypothesis=hypothesis,
+                        context=UncommittedContext(
+                            committedText=committed_text,
+                            pendingText=pending_transcript_text,
+                        ),
                     )
-                    completed_sentences = []
-                    for sentence in boundary_result.completed:
-                        completed_sentences.append(_normalized_text(sentence))
-                    pending_transcript_text = _normalized_text(boundary_result.pending)
-                    boundary_complete = boundary_result.boundary_count
-                    boundary_soft = boundary_result.soft_boundary_count
-                    boundary_end_marks = boundary_result.end_mark_count
-                    boundary_right_context_starts = boundary_result.right_context_start_count
+                    completed_sentences = list(candidate_set.completedCandidates)
+                    pending_transcript_text = candidate_set.pendingTail
+                    boundary_complete = int(candidate_set.boundarySignals.get("boundary_count", 0))
+                    boundary_soft = int(candidate_set.boundarySignals.get("soft_boundary_count", 0))
+                    boundary_end_marks = int(candidate_set.boundarySignals.get("end_mark_count", 0))
+                    boundary_right_context_starts = int(
+                        candidate_set.boundarySignals.get("right_context_start_count", 0)
+                    )
                     if boundary_end_marks:
                         count_metric("boundary_end_marks", boundary_end_marks)
                     if boundary_right_context_starts:
@@ -1367,8 +1339,8 @@ class WhisperTranscriptWorker:
                     f"boundary_backend={self._sentence_boundary_detector.backend} "
                     f"boundary_complete={boundary_complete} boundary_soft={boundary_soft} boundary_conf={boundary_confidence_display} "
                     f"boundary_end_marks={boundary_end_marks} boundary_right_context={boundary_right_context_starts} "
-                    f"boundary_conf_segment={boundary_confidence if boundary_confidence is not None else 'n/a'} "
-                    f"boundary_conf_stable={stable_analysis.boundary_confidence if stable_analysis.boundary_confidence is not None else 'n/a'} "
+                    f"boundary_conf_segment={hypothesis.segmentBoundaryConfidence if hypothesis.segmentBoundaryConfidence is not None else 'n/a'} "
+                    f"boundary_conf_stable={hypothesis.stableBoundaryConfidence if hypothesis.stableBoundaryConfidence is not None else 'n/a'} "
                     f"pending_chars={len(pending_transcript_text)} pending_chunks={pending_chunks} "
                     f"pending_chars_per_chunk={len(pending_transcript_text) / max(pending_chunks, 1):.1f} "
                     f"window_chars={len(_normalized_text(window_text))} stable_chars={len(_normalized_text(stable_text))} "
@@ -1575,7 +1547,7 @@ class WhisperTranscriptWorker:
                     f"stage_queue_promote={stage_queue_promote_count} "
                     f"stage_queue_revision={stage_queue_revision_count} "
                     f"stage_queue_drop_oldest={stage_queue_drop_oldest_count} "
-                    f"stage_queue_len={len(staged_queue)} "
+                    f"stage_queue_len={len(commit_buffer_node)} "
                     f"finalize_before_replace={stage_finalize_before_replace_count} "
                     f"age_finalize={stage_age_finalize_count} "
                     f"age_quality_blocked={stage_age_quality_blocked_count} "
