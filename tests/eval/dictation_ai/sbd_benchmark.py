@@ -33,6 +33,7 @@ from src.app.dictation_transcript_logic import (
     _sentences_are_revisions,
     _should_age_staged_sentence,
     _should_confirm_staged_sentence,
+    _should_defer_unconfirmed_replacement,
     _should_finalize_before_replacement,
     _should_finalize_replaced_sentence,
     _should_reset_revision_age,
@@ -382,6 +383,16 @@ def _stage_completed_sentence(
                 state.count("stage_finalize_before_replace")
                 reason = "next_completed"
             return _finalize_staged_sentence(state, language, reason, chunk_index)
+        if not defer_for_later_extension and state.staged_age >= _sentence_max_age_chunks(state.staged_forced, sentence_finalize_age):
+            state.count("stage_age_quality_blocked")
+            state.count("segment_state_suppressed")
+            state.staged_sentence = ""
+            state.staged_confirmations = 0
+            state.staged_age = 0
+            state.staged_forced = False
+            state.staged_deferred_age_chunk = -1
+            _promote_next_staged_sentence(state, chunk_index)
+            return []
         return []
 
     state.count("stage_replace")
@@ -394,7 +405,7 @@ def _stage_completed_sentence(
         sentence_finalize_age,
     )
     state.count(f"stage_replace_decision_{replacement_reason}")
-    if replacement_reason == "unconfirmed_cjk":
+    if _should_defer_unconfirmed_replacement(replacement_reason):
         _queue_staged_sentence(state, candidate, forced, chunk_index)
         state.count("stage_replace_deferred")
         if state.staged_deferred_age_chunk != chunk_index:
@@ -411,6 +422,15 @@ def _stage_completed_sentence(
         ):
             state.count("stage_age_finalize")
             return _finalize_staged_sentence(state, language, "aged", chunk_index)
+        if state.staged_age >= _sentence_max_age_chunks(state.staged_forced, sentence_finalize_age):
+            state.count("stage_age_quality_blocked")
+            state.count("segment_state_suppressed")
+            state.staged_sentence = ""
+            state.staged_confirmations = 0
+            state.staged_age = 0
+            state.staged_forced = False
+            state.staged_deferred_age_chunk = -1
+            _promote_next_staged_sentence(state, chunk_index)
         return []
     if _should_finalize_replaced_sentence(
         state.staged_sentence,

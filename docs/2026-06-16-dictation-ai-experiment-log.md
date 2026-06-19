@@ -1851,6 +1851,11 @@ final_f1_avg=0.224
 - 89케이스 CUDA/SaT 벤치는 `pass_rate=0.169`, `finalized=247`, `finalized_per_stage_start=0.462`, `final_f1_avg=0.380`이다.
 - 신규 `consulting_company_control_system` 케이스는 오염 반복 final보다는 과분리와 마지막 staged 잔류가 주된 실패다. 실제 final은 `더 노골적.`, `근데 더 노골적으로 기술적으로 해요.`, `그러니까 티 안나게.`, `예를 들어서 뭐 이런거죠.`, `티 안 나게.`, `이름 못 들어본 컨설팅 회사를 고용하자는 거예요.`, `그 컨설팅 회사가 뭘 하냐 그랬더니 그것은 좀 차이가 있구나.`, `그런 걸 경험했었는데 결국은 컨트롤 시스템을 안 썼어요.`, `왜냐?`, `우리나라에서 그걸 거부했거든요.`, `그런 거 쓰면 안 된다.`이며 `우리는 그거 못 쓴다.`가 staged에 남았다.
 - 이번 반복에서는 조각 final을 더 강하게 억제하는 로직을 추가하지 않는다. 이미 `왜냐?` 같은 짧은 의문문은 정상 발화일 수 있고, 과분리 억제를 넓히면 final 누락이 커질 위험이 있다.
+- 2026-06-19 22:32-22:39 로그에서 `ko_log_deferred_stage_stall_vehicle_safety_fragment_20260619_001`, `zh_log_short_cjk_false_positive_stage_delay_seongsu_food_20260619_001`를 추가했다.
+- `vehicle_safety` 케이스는 미확정 open-clause stage가 뒤 후보를 계속 보류해 `stage_replace_deferred`가 누적되고 final이 거의 나오지 않던 유형이다. 미확정 replacement는 기존 후보를 삭제하지 않고 candidate buffer에 보류하되, active 후보가 age 한계까지 final 품질을 만족하지 못하면 suppressed 처리 후 다음 후보를 승격하도록 조정했다.
+- `seongsu_food` 케이스는 `澳洲。` 같은 짧은 CJK 오인식 후보가 active stage를 잡고 있어 `吃完之后呢...`, `好，走，去吃饭。` 같은 뒤 후보 확정이 늦어지는 유형이다. 해당 조각은 final로 내보내지 않고 `stage_age_quality_blocked`로 정리되는지 관측한다.
+- revision 경로에서도 age 한계에 도달했지만 final 품질을 만족하지 못하는 후보는 suppress 후 queue 후보를 승격하도록 운영 루프와 벤치 모델을 맞췄다. 이는 age-only 경로에 이미 있던 품질 차단을 completed/revision 후보가 계속 들어오는 경로에도 동일하게 적용한 것이다.
+- 91케이스 CUDA/SaT 벤치는 `pass_rate=0.143`, `finalized=271`, `finalized_per_stage_start=0.585`, `final_f1_avg=0.347`이다. 신규 두 케이스는 아직 case pass가 아니며, 각각 `stage_age_quality_blocked=2`, `raw_without_final=0`을 기록했다. 현재 목적은 성공 케이스로 만들기보다 중복 확정/확정 누락 의심 흐름을 수치화해 후속 튜닝 기준으로 고정하는 것이다.
 
 판단:
 

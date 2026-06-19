@@ -932,6 +932,15 @@ def _replacement_decision_reason(
     return "unconfirmed"
 
 
+def _should_defer_unconfirmed_replacement(replacement_reason: str) -> bool:
+    return replacement_reason in {
+        "open_korean_clause",
+        "open_latin_clause",
+        "unconfirmed",
+        "unconfirmed_cjk",
+    }
+
+
 def _should_finalize_replaced_sentence(
     staged_sentence: str,
     candidate: str,

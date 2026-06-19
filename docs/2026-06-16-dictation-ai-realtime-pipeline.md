@@ -77,6 +77,7 @@
 - 후보는 `createdSequence` 순서로 버퍼에 들어간다.
 - final 발행은 `consumeSequence` 순서로만 수행한다.
 - `candidateAge`가 기준에 도달하기 전에는 뒤 후보가 관측되어도 즉시 소비하지 않는다.
+- 미확정 replacement는 기존 후보를 삭제하지 않고 새 후보를 candidate buffer에 보류한다. 앞 후보는 확정, revision 대체, 품질/중복 suppress 중 하나로 정리된 뒤에 다음 후보로 넘어간다.
 - 같은 `revisionHash` 계열에서 나중 후보가 final로 소비되면, 이전 미소비 후보는 stale revision으로 폐기한다.
 - 다른 revision 계열이라도 뒤 후보가 앞 후보의 의미 구간을 포함하거나 대체한 것이 확인되면, 앞 후보는 중복 소비 방지를 위해 폐기한다.
 - 버퍼 초과는 강제 final 승격 사유가 아니다. age, revisionHash, recent final delta, 품질 기준을 만족하지 못한 오래된 후보는 suppressed로 폐기한다.
@@ -102,7 +103,7 @@
 | `AudioEvidence` 처리량 | `input_queue_drops`, `input_queue_size_peak`, `stt_step_load`, `total_step_load` | drop이 발생하거나 step load가 1.0을 넘으면 실시간 처리량 초과로 본다. |
 | `RecognitionHypothesis` 안정성 | `stable_token_ratio`, `stable_internal_chars`, `raw_without_final` | raw 가설이 계속 나오는데 final이 없으면 인식/후보/커밋 경계 중 병목을 추적한다. |
 | `SentenceCandidateSet` 경계 품질 | `boundary_end_marks`, `boundary_right_context_starts`, `segment_state_pending`, `pending_quality_*` | completed/pending 분포와 경계 신호가 후보 생성 계약을 만족하는지 본다. |
-| `candidateBuffer` 동작 | `stage_queue_enqueue`, `stage_queue_promote`, `stage_queue_revision`, `stage_queue_drop_oldest`, `stage_replaced_unconfirmed` | 생성순서 보존, revision 갱신, 버퍼 폐기 흐름이 의도대로 발생하는지 본다. |
+| `candidateBuffer` 동작 | `stage_queue_enqueue`, `stage_queue_promote`, `stage_queue_revision`, `stage_queue_drop_oldest`, `stage_replace_deferred`, `stage_replaced_unconfirmed` | 생성순서 보존, revision 갱신, 미확정 replacement 보류, 버퍼 폐기 흐름이 의도대로 발생하는지 본다. `stage_replaced_unconfirmed`가 많이 발생하면 확정 전 후보 삭제로 인한 누락 가능성을 우선 검토한다. |
 | 커밋 품질 | `finalized_per_stage_start`, `segment_state_final`, `segment_state_suppressed`, `final_quality_*` | final 전환 비율과 suppressed 사유로 중복/오염 후보 차단 여부를 본다. |
 | final-only sink | `translation_skip_final_quality`, 번역 입력의 `final=true` 여부 | 번역 sink가 `CommittedTranscriptEvent` 외 입력을 소비하지 않는지 본다. |
 

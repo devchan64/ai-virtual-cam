@@ -24,6 +24,7 @@ from src.app.dictation_transcript_logic import (
     _is_pending_prefix_mixed_candidate,
     _is_prior_pending_recent_final_mixed_candidate,
     _new_text_delta,
+    _next_revision_confirmation_count,
     _normalized_text,
     _pending_overrun_reason,
     _pending_text_diagnostic_flags,
@@ -38,6 +39,7 @@ from src.app.dictation_transcript_logic import (
     _sentences_are_revisions,
     _should_age_staged_sentence,
     _should_confirm_staged_sentence,
+    _should_defer_unconfirmed_replacement,
     _should_finalize_before_replacement,
     _should_finalize_replaced_sentence,
     _should_preserve_revision_confirmation_from_internal_stability,
@@ -155,11 +157,11 @@ def run_transcribe_loop(
             )
             promote_next_staged_sentence(detected)
             return []
-            recent_adjusted_sentence, echo_source = _recent_final_output_delta(
-                output_sentence,
-                tuple(recent_transcripts),
-                detected,
-            )
+        recent_adjusted_sentence, echo_source = _recent_final_output_delta(
+            output_sentence,
+            tuple(recent_transcripts),
+            detected,
+        )
         if echo_source is not None:
             if recent_adjusted_sentence:
                 count_metric("finalize_recent_delta_trimmed")
@@ -210,8 +212,8 @@ def run_transcribe_loop(
         final_quality_flags = _final_sentence_diagnostic_flags(output_sentence, detected)
         for flag in final_quality_flags:
             count_metric(f"final_quality_{flag}")
-            committed_text = _append_committed_text(committed_text, output_sentence)
-            remember_transcript(output_sentence)
+        committed_text = _append_committed_text(committed_text, output_sentence)
+        remember_transcript(output_sentence)
         worker._emit(
             "status",
             "받아쓰기 AI 문장 확정: "
@@ -431,6 +433,20 @@ def run_transcribe_loop(
                     count_metric("stage_finalize_before_replace")
                     reason = "next_completed"
                 return finalize_staged_sentence(detected, reason)
+            if not defer_for_later_extension and active_stage.age >= _sentence_max_age_chunks(active_stage.forced, sentence_finalize_age):
+                count_metric("stage_age_quality_blocked")
+                count_segment_state("suppressed")
+                flags = _final_sentence_diagnostic_flags(active_stage.sentence, detected)
+                worker._emit(
+                    "status",
+                    "받아쓰기 AI stage 리비전 품질 차단: "
+                    f"chunk={chunks} flags={','.join(flags) or 'none'} "
+                    f"staged_tail={_diagnostic_tail(active_stage.sentence)}",
+                    display=False,
+                )
+                active_stage.clear()
+                promote_next_staged_sentence(detected)
+                return []
             worker._emit("transcript", active_stage.sentence, log_text=f"[{detected}] {active_stage.sentence}", final=False)
             return []
         count_metric("stage_replace")
@@ -443,7 +459,7 @@ def run_transcribe_loop(
             sentence_finalize_age,
         )
         count_metric(f"stage_replace_decision_{replacement_reason}")
-        if replacement_reason == "unconfirmed_cjk":
+        if _should_defer_unconfirmed_replacement(replacement_reason):
             queue_staged_sentence(candidate, forced)
             count_metric("stage_replace_deferred")
             if active_stage.deferredAgeChunk != chunks:
@@ -468,6 +484,18 @@ def run_transcribe_loop(
             ):
                 count_metric("stage_age_finalize")
                 return finalize_staged_sentence(detected, "aged")
+            if active_stage.age >= _sentence_max_age_chunks(active_stage.forced, sentence_finalize_age):
+                count_metric("stage_age_quality_blocked")
+                count_segment_state("suppressed")
+                worker._emit(
+                    "status",
+                    "받아쓰기 AI stage 보류 후보 품질 차단: "
+                    f"chunk={chunks} decision={replacement_reason} staged_confirmations={active_stage.confirmations} "
+                    f"staged_age={active_stage.age} staged_tail={_diagnostic_tail(active_stage.sentence)}",
+                    display=False,
+                )
+                active_stage.clear()
+                promote_next_staged_sentence(detected)
             return []
         worker._emit(
             "status",
