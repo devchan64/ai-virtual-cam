@@ -1910,6 +1910,8 @@ final_f1_avg=0.224
 - 신규 `future_portfolio_lifecycle` 케이스는 final F1 0.0으로, 앞 window의 `...` 포함 후보와 후속 완성 후보가 섞이는 실패를 재현한다. `pending_prefix_portfolio_build_question`은 final F1 0.5이며 첫 문장만 확정되고 `이걸 구축하려면 뭘 해야 되죠?`가 staged에 남았다.
 - 신규 `five_year_investment_war` 케이스는 final F1 1.0으로 기대 final 3개를 회수했지만, `끝났다. 5년을 놓고 봐요.` pending/staged 상태가 기대와 달라 case pass는 아니다. final 회수 자체보다 tail 상태가 남은 관찰 지점이다.
 - 남은 핵심 원인은 두 가지다. 첫째, append-only final 이후 더 정확한 STT revision이 들어오면 기존 final을 수정할 수 없다. 둘째, pending prefix와 recent final이 섞인 긴 후보는 단순 중복 억제로는 충분히 분리되지 않는다. 다음 반복은 regex나 문구별 예외가 아니라 revisionHash/순서 일관성 기반으로만 검토한다.
+- 이 벤치는 실패/의심 로그를 계속 누적하는 관측 세트이므로 exact `pass_rate`를 대표 지표로 출력하지 않도록 했다. 리포트 summary는 `final_precision_avg`, `final_recall_avg`, `final_f1_avg`, `finalized_per_stage_start`를 중심으로 보고, exact 일치 개수는 `case_exact_match` 보조 지표로만 남긴다.
+- 리포트 기준 변경 후 같은 105케이스 CUDA/SaT 출력은 `finalized=256`, `stage_start=462`, `finalized_per_stage_start=0.554`, `final_precision_avg=0.324`, `final_recall_avg=0.268`, `final_f1_avg=0.284`, `case_exact_match=14`이다.
 
 ## 남은 실험 과제
 

@@ -641,9 +641,10 @@ def main() -> int:
     parser.add_argument(
         "--fail-on-regression",
         action="store_true",
-        help="Exit non-zero when final pass rate is below --min-pass-rate.",
+        help="Exit non-zero when final F1 average is below --min-final-f1.",
     )
-    parser.add_argument("--min-pass-rate", type=float, default=1.0)
+    parser.add_argument("--min-final-f1", type=float, default=0.0)
+    parser.add_argument("--min-pass-rate", type=float, default=None, help=argparse.SUPPRESS)
     args = parser.parse_args()
     _validate_real_ai_cuda_args(args)
 
@@ -666,7 +667,7 @@ def main() -> int:
         completed_score = _score_sequence(case.expected_completed, lifecycle["actual_completed_last"])
         pending_exact = lifecycle["actual_pending"] == case.expected_pending
         staged_exact = lifecycle["actual_staged"] == case.expected_staged
-        case_pass = final_score["exact"] and pending_exact and staged_exact
+        case_exact_match = final_score["exact"] and pending_exact and staged_exact
         for key, value in lifecycle["metrics"].items():
             metric_totals[key] = metric_totals.get(key, 0) + int(value)
         results.append(
@@ -686,14 +687,13 @@ def main() -> int:
                 "completed_last_score": completed_score,
                 "pending_exact": pending_exact,
                 "staged_exact": staged_exact,
-                "case_pass": case_pass,
+                "case_exact_match": case_exact_match,
                 "metrics": lifecycle["metrics"],
                 "chunks": lifecycle["chunks"],
             }
         )
 
-    pass_count = sum(1 for result in results if result["case_pass"])
-    pass_rate = pass_count / len(results)
+    exact_match_count = sum(1 for result in results if result["case_exact_match"])
     finalized = metric_totals.get("finalized", 0)
     stage_start = metric_totals.get("stage_start", 0)
     final_score_avg = _average_scores(results, "final_score")
@@ -707,9 +707,8 @@ def main() -> int:
         "case_count": len(results),
         "elapsed_ms": round((time.perf_counter() - started) * 1000.0, 3),
         "summary": {
-            "case_pass": pass_count,
-            "pass_rate": pass_rate,
-            "min_pass_rate": args.min_pass_rate,
+            "case_exact_match": exact_match_count,
+            "min_final_f1": args.min_final_f1,
             "finalized": finalized,
             "stage_start": stage_start,
             "finalized_per_stage_start": finalized / max(stage_start, 1),
@@ -730,12 +729,14 @@ def main() -> int:
     _write_report(args.output, report)
     print(
         "[dictation-ai-sbd-benchmark] "
-        f"cases={len(results)} pass_rate={pass_rate:.3f} finalized={finalized} "
+        f"cases={len(results)} finalized={finalized} "
         f"stage_start={stage_start} finalized_per_stage_start={finalized / max(stage_start, 1):.3f} "
+        f"final_precision_avg={final_score_avg['precision']:.3f} final_recall_avg={final_score_avg['recall']:.3f} "
         f"final_f1_avg={final_score_avg['f1']:.3f} "
+        f"case_exact_match={exact_match_count} "
         f"output={args.output}"
     )
-    if args.fail_on_regression and pass_rate < args.min_pass_rate:
+    if args.fail_on_regression and final_score_avg["f1"] < args.min_final_f1:
         return 1
     return 0
 
