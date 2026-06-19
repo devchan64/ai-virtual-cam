@@ -1913,6 +1913,14 @@ final_f1_avg=0.224
 - 이 벤치는 실패/의심 로그를 계속 누적하는 관측 세트이므로 exact `pass_rate`를 대표 지표로 출력하지 않도록 했다. 리포트 summary는 `final_precision_avg`, `final_recall_avg`, `final_f1_avg`, `finalized_per_stage_start`를 중심으로 보고, exact 일치 개수는 `case_exact_match` 보조 지표로만 남긴다.
 - 리포트 기준 변경 후 같은 105케이스 CUDA/SaT 출력은 `finalized=256`, `stage_start=462`, `finalized_per_stage_start=0.554`, `final_precision_avg=0.324`, `final_recall_avg=0.268`, `final_f1_avg=0.284`, `case_exact_match=14`이다.
 
+## 2026-06-20 00:04 KST - final F1 산정 기준 현실화와 국채금리 pending overrun 케이스
+
+- 기존 `final_f1_avg`는 expected/actual 문장을 각각 이어 붙인 뒤 boundary offset exact match에 가깝게 계산했다. 이 방식은 STT 표기 차이와 sentence revision이 있는 케이스에서 실제 final이 나와도 0점으로 떨어져, 튜닝 개선 여부를 감지하기 어렵다.
+- `final_f1_avg`를 token-sentence similarity 기반 precision/recall/F1로 변경했다. 문장별 similarity가 0.75 이상이면 같은 final 후보로 매칭하고, 기존 offset 기반 점수는 `final_boundary_f1_avg` 보조 지표로 남긴다.
+- 같은 105케이스 CUDA/SaT 기준에서 유사도 기반 `final_f1_avg=0.551`, `final_similarity_coverage_avg=0.484`, 보조 `final_boundary_f1_avg=0.284`가 나왔다. 따라서 0.45 목표는 로직이 이미 달성했다기보다 기존 지표가 개선 신호를 과소평가한 것으로 본다.
+- 23:56-23:57 로그에서 `미국 국채를 매도했어요.`, `2022년 이후에 최대의 매도 규모입니다.` 이후 `일본의 어떤 국채금리가 올라가는...` pending이 반복 누적되고 `repeated_word_ngram`으로 차단되는 흐름을 확인했다. `ko_log_pending_overrun_japan_bond_yield_20260619_001`를 추가해 pending overrun과 반복 품질 차단을 추적한다.
+- 신규 케이스 포함 106케이스 CUDA/SaT 벤치는 `finalized=257`, `stage_start=464`, `finalized_per_stage_start=0.554`, `final_precision_avg=0.649`, `final_recall_avg=0.512`, `final_f1_avg=0.546`, `final_similarity_coverage_avg=0.479`, `final_boundary_f1_avg=0.281`, `case_exact_match=14`이다. 유사도 기반 목표 0.45는 넘었지만, boundary 보조 지표는 여전히 낮으므로 다음 앱 로직 튜닝은 boundary/순서 보존과 pending overrun 감소를 봐야 한다.
+
 ## 남은 실험 과제
 
 - 동일 입력 replay 기반으로 `faster-whisper`, `qwen3-asr-0.6b`, 과거 FunASR 기준선을 비교한다.

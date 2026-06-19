@@ -388,7 +388,7 @@ python3 tests/eval/dictation_ai/sbd_benchmark.py \
 ```
 
 - SBD 품질 평가는 wav/STT 품질과 분리해 텍스트 케이스로 수행합니다. 케이스는 JSON Lines 형식이며 `chunks`, `language`, `expected_final`, `expected_pending`, `expected_staged`, `tags`를 기록합니다. 단일 입력만 검증할 때는 `chunks` 대신 `text`를 사용할 수 있습니다.
-- 벤치마크는 실제 문장 경계 백엔드(`sat`)를 직접 호출한 뒤 운영 파이프라인의 핵심 흐름인 `pending -> completed -> staged -> revision/confirmation/age -> final` 생명주기를 시뮬레이션합니다. 리포트에는 케이스별 chunk 상태, final precision/recall/F1, staged/pending 상태, `stage_start`, `stage_revision`, `stage_replace`, `finalized`, `finalized_per_stage_start` 같은 안정성 지표가 저장됩니다. 누적 케이스는 실패/의심 로그를 포함하므로 exact pass rate를 대표 품질 지표로 사용하지 않습니다.
+- 벤치마크는 실제 문장 경계 백엔드(`sat`)를 직접 호출한 뒤 운영 파이프라인의 핵심 흐름인 `pending -> completed -> staged -> revision/confirmation/age -> final` 생명주기를 시뮬레이션합니다. 리포트에는 케이스별 chunk 상태, token-sentence similarity 기반 final precision/recall/F1, staged/pending 상태, `stage_start`, `stage_revision`, `stage_replace`, `finalized`, `finalized_per_stage_start` 같은 안정성 지표가 저장됩니다. 누적 케이스는 실패/의심 로그를 포함하므로 exact pass rate를 대표 품질 지표로 사용하지 않습니다. 기존 boundary-offset 기준은 `final_boundary_f1_avg` 보조 지표로 확인합니다.
 - 새 로그에서 중복/누락/잘못된 revision 사례가 보이면 `tests/eval/dictation_ai/sbd_text_cases.sample.jsonl`에 추가하고, 이후 알고리즘 변경 전후의 SBD 벤치 리포트를 비교합니다. 실험 기록은 [`docs/2026-06-16-dictation-ai-experiment-log.md`](docs/2026-06-16-dictation-ai-experiment-log.md), 현재 기준은 [`docs/2026-06-16-dictation-ai-realtime-pipeline.md`](docs/2026-06-16-dictation-ai-realtime-pipeline.md)를 따릅니다.
 - `--fail-on-regression --min-final-f1 <score>`는 GPU 벤치 전용 회귀 확인이 필요할 때만 사용합니다. 일반 unit test 대신 누적 텍스트 코퍼스에서 경계 판단이 안정적으로 final까지 이어지는지 추세와 회귀를 확인하는 용도입니다.
 

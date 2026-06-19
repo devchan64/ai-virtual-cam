@@ -7,6 +7,7 @@ import sys
 import time
 from collections import deque
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,7 @@ from src.app.dictation_transcript_logic import (
     _sentence_output_delta,
     _sentence_required_confirmations,
     _sentences_are_revisions,
+    _word_units,
     _should_age_staged_sentence,
     _should_confirm_staged_sentence,
     _should_defer_unconfirmed_replacement,
@@ -46,6 +48,7 @@ from src.app.transcript_revision import append_context as _append_committed_text
 from src.app.transcript_revision import consume_committed_prefix as _consume_committed_prefix
 
 MAX_STAGED_SENTENCE_QUEUE = 12
+FINAL_SENTENCE_MATCH_MIN_SIMILARITY = 0.75
 
 
 @dataclass(frozen=True)
@@ -189,7 +192,7 @@ def _boundary_offsets(sentences: list[str]) -> set[int]:
     return offsets
 
 
-def _score_sequence(expected: list[str], actual: list[str]) -> dict[str, Any]:
+def _score_boundary_offsets(expected: list[str], actual: list[str]) -> dict[str, Any]:
     expected_normalized = [normalized_text(item) for item in expected if normalized_text(item)]
     actual_normalized = [normalized_text(item) for item in actual if normalized_text(item)]
     expected_offsets = _boundary_offsets(expected_normalized)
@@ -211,13 +214,63 @@ def _score_sequence(expected: list[str], actual: list[str]) -> dict[str, Any]:
     }
 
 
+def _sentence_similarity(left: str, right: str) -> float:
+    left_words = _word_units(left)
+    right_words = _word_units(right)
+    if left_words and right_words:
+        return SequenceMatcher(None, left_words, right_words, autojunk=False).ratio()
+    return SequenceMatcher(None, normalized_text(left), normalized_text(right), autojunk=False).ratio()
+
+
+def _score_sequence(expected: list[str], actual: list[str]) -> dict[str, Any]:
+    expected_normalized = [normalized_text(item) for item in expected if normalized_text(item)]
+    actual_normalized = [normalized_text(item) for item in actual if normalized_text(item)]
+    used_actual: set[int] = set()
+    matched_similarities: list[float] = []
+    for expected_sentence in expected_normalized:
+        best_index = -1
+        best_similarity = 0.0
+        for actual_index, actual_sentence in enumerate(actual_normalized):
+            if actual_index in used_actual:
+                continue
+            similarity = _sentence_similarity(expected_sentence, actual_sentence)
+            if similarity > best_similarity:
+                best_index = actual_index
+                best_similarity = similarity
+        if best_index >= 0 and best_similarity >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY:
+            used_actual.add(best_index)
+            matched_similarities.append(best_similarity)
+    true_positive = len(matched_similarities)
+    false_positive = len(actual_normalized) - len(used_actual)
+    false_negative = len(expected_normalized) - true_positive
+    precision = true_positive / max(true_positive + false_positive, 1)
+    recall = true_positive / max(true_positive + false_negative, 1)
+    f1 = (2 * precision * recall / (precision + recall)) if precision + recall else 0.0
+    similarity_avg = sum(matched_similarities) / max(true_positive, 1)
+    similarity_coverage = sum(matched_similarities) / max(len(expected_normalized), len(actual_normalized), 1)
+    return {
+        "true_positive": true_positive,
+        "false_positive": false_positive,
+        "false_negative": false_negative,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "similarity_avg": similarity_avg,
+        "similarity_coverage": similarity_coverage,
+        "match_min_similarity": FINAL_SENTENCE_MATCH_MIN_SIMILARITY,
+        "exact": actual_normalized == expected_normalized,
+    }
+
+
 def _average_scores(results: list[dict[str, Any]], key: str) -> dict[str, float]:
     if not results:
-        return {"precision": 0.0, "recall": 0.0, "f1": 0.0}
+        return {"precision": 0.0, "recall": 0.0, "f1": 0.0, "similarity_coverage": 0.0}
     return {
         "precision": sum(float(result[key]["precision"]) for result in results) / len(results),
         "recall": sum(float(result[key]["recall"]) for result in results) / len(results),
         "f1": sum(float(result[key]["f1"]) for result in results) / len(results),
+        "similarity_coverage": sum(float(result[key].get("similarity_coverage", 0.0)) for result in results)
+        / len(results),
     }
 
 
@@ -664,6 +717,7 @@ def main() -> int:
         lifecycle = _run_lifecycle_case(case, detector)
         elapsed_ms = (time.perf_counter() - case_started) * 1000.0
         final_score = _score_sequence(case.expected_final, lifecycle["actual_final"])
+        final_boundary_score = _score_boundary_offsets(case.expected_final, lifecycle["actual_final"])
         completed_score = _score_sequence(case.expected_completed, lifecycle["actual_completed_last"])
         pending_exact = lifecycle["actual_pending"] == case.expected_pending
         staged_exact = lifecycle["actual_staged"] == case.expected_staged
@@ -684,6 +738,7 @@ def main() -> int:
                 "actual_staged": lifecycle["actual_staged"],
                 "actual_staged_queue": lifecycle["actual_staged_queue"],
                 "final_score": final_score,
+                "final_boundary_score": final_boundary_score,
                 "completed_last_score": completed_score,
                 "pending_exact": pending_exact,
                 "staged_exact": staged_exact,
@@ -697,6 +752,7 @@ def main() -> int:
     finalized = metric_totals.get("finalized", 0)
     stage_start = metric_totals.get("stage_start", 0)
     final_score_avg = _average_scores(results, "final_score")
+    final_boundary_score_avg = _average_scores(results, "final_boundary_score")
     completed_last_score_avg = _average_scores(results, "completed_last_score")
     report = {
         "backend": BENCHMARK_BACKEND,
@@ -715,6 +771,10 @@ def main() -> int:
             "final_precision_avg": final_score_avg["precision"],
             "final_recall_avg": final_score_avg["recall"],
             "final_f1_avg": final_score_avg["f1"],
+            "final_similarity_coverage_avg": final_score_avg["similarity_coverage"],
+            "final_boundary_precision_avg": final_boundary_score_avg["precision"],
+            "final_boundary_recall_avg": final_boundary_score_avg["recall"],
+            "final_boundary_f1_avg": final_boundary_score_avg["f1"],
             "completed_last_precision_avg": completed_last_score_avg["precision"],
             "completed_last_recall_avg": completed_last_score_avg["recall"],
             "completed_last_f1_avg": completed_last_score_avg["f1"],
@@ -733,6 +793,8 @@ def main() -> int:
         f"stage_start={stage_start} finalized_per_stage_start={finalized / max(stage_start, 1):.3f} "
         f"final_precision_avg={final_score_avg['precision']:.3f} final_recall_avg={final_score_avg['recall']:.3f} "
         f"final_f1_avg={final_score_avg['f1']:.3f} "
+        f"final_similarity_coverage_avg={final_score_avg['similarity_coverage']:.3f} "
+        f"final_boundary_f1_avg={final_boundary_score_avg['f1']:.3f} "
         f"case_exact_match={exact_match_count} "
         f"output={args.output}"
     )
