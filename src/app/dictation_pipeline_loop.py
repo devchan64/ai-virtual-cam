@@ -46,7 +46,7 @@ from src.app.dictation_transcript_logic import (
     _should_reset_revision_age,
     _should_split_terminal_tail_revision,
     _should_stage_boundary_candidate,
-    _should_suppress_short_delta_final,
+    _should_suppress_delta_final,
     _should_translate_final_sentence,
     _stable_window_text,
 )
@@ -195,12 +195,12 @@ def run_transcribe_loop(
             )
             promote_next_staged_sentence(detected)
             return []
-        if _should_suppress_short_delta_final(staged_before, output_sentence, detected, reason):
-            count_metric("finalize_short_delta_suppressed")
+        if _should_suppress_delta_final(staged_before, output_sentence, detected, reason):
+            count_metric("finalize_delta_suppressed")
             count_segment_state("suppressed")
             worker._emit(
                 "status",
-                "받아쓰기 AI 짧은 delta 확정 보류: "
+                "받아쓰기 AI delta 확정 보류: "
                 f"chunk={chunks} reason={reason} staged_tail={_diagnostic_tail(staged_before)} "
                 f"output={output_sentence!r}",
                 display=False,
@@ -618,6 +618,10 @@ def run_transcribe_loop(
         )
         audio = audio_window.concatenate(np).astype(np.float32, copy=False)
         chunk_audio_seconds = float(audio.shape[0]) / float(SAMPLE_RATE)
+        audio_rms = float(np.sqrt(np.mean(np.square(audio)))) if audio.size else 0.0
+        audio_peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+        audio_rms_db = 20.0 * float(np.log10(max(audio_rms, 1e-12)))
+        audio_peak_db = 20.0 * float(np.log10(max(audio_peak, 1e-12)))
         chunk_started_at = time.perf_counter()
         translation_elapsed = 0.0
         translation_attempted = False
@@ -1012,6 +1016,7 @@ def run_transcribe_loop(
                 f"total={total_elapsed:.2f}s total_rtf={total_elapsed / max(chunk_audio_seconds, 0.001):.2f} "
                 f"total_step_load={total_elapsed / max(step_seconds, 0.001):.2f} "
                 f"effective_latency_estimate={window_seconds + total_elapsed:.2f}s "
+                f"audio_rms_db={audio_rms_db:.1f} audio_peak_db={audio_peak_db:.1f} "
                 f"input_queue_drops={chunk_audio_queue_drops} input_queue_drops_total={current_audio_queue_drops} "
                 f"queue_size={current_queue_size} queue_peak={input_queue_size_peak} "
                 f"beam={worker._cfg.beamSize} max_tokens={worker._cfg.maxNewTokens} text_chars={len(text)}",

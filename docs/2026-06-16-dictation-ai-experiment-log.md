@@ -1857,6 +1857,16 @@ final_f1_avg=0.224
 - revision 경로에서도 age 한계에 도달했지만 final 품질을 만족하지 못하는 후보는 suppress 후 queue 후보를 승격하도록 운영 루프와 벤치 모델을 맞췄다. 이는 age-only 경로에 이미 있던 품질 차단을 completed/revision 후보가 계속 들어오는 경로에도 동일하게 적용한 것이다.
 - 91케이스 CUDA/SaT 벤치는 `pass_rate=0.143`, `finalized=271`, `finalized_per_stage_start=0.585`, `final_f1_avg=0.347`이다. 신규 두 케이스는 아직 case pass가 아니며, 각각 `stage_age_quality_blocked=2`, `raw_without_final=0`을 기록했다. 현재 목적은 성공 케이스로 만들기보다 중복 확정/확정 누락 의심 흐름을 수치화해 후속 튜닝 기준으로 고정하는 것이다.
 
+## 2026-06-19 22:58 KST - 짧은 no-end 조각과 오디오 잔류 의심 로그
+
+- 2026-06-19 22:47-22:52 로그에서 `여러분 안녕하십니까 오늘 주식시장을...`, `기상캐스터 배혜지`, `이 시각 세계였습니다.`, `SBS 비즈 신성우입니다.` 같은 짧은 진행/클로징 조각이 raw STT에 반복 등장했다.
+- `기상캐스터 배혜지` 반복 구간은 `stt_raw`에는 나오지만 `text_chars=0`, `completed=0`, `pending=0`으로 downstream 문장 후보에는 반영되지 않은 경우가 있었다. 이는 문장 lifecycle 오염이라기보다 10초 슬라이딩 윈도우에 직전 오디오가 남아 같은 짧은 구간이 반복 전사되는 현상으로 추정한다.
+- 입력 음성이 없었다는 관측이 있어, 해당 케이스는 확정 누락/중복 벤치의 정답 샘플로 확대하지 않는다. 다만 `ko_log_weathercaster_stock_prefix_corruption_fragment_20260619_001`는 짧은 no-end 조각이 다음 문장 prefix로 결합될 때의 lifecycle 오염 관찰 샘플로 둔다.
+- 짧은 no-end 조각이 stage/final 후보로 올라가지 않도록 `short_no_end_fragment` 품질 플래그를 추가했다. 이 규칙은 특정 문구나 언어별 예외가 아니라 종결표지 없는 4 token 이하 조각을 stage/final 품질에서 제외하는 일반 안전장치다.
+- `trailing_ellipsis` 후보도 stage 시작 대상에서 제외했다. `...`가 붙은 후보는 이미 final/translation 품질에서 제외되므로 stage 진입도 같은 기준으로 맞춘다.
+- 운영 로그에 `audio_rms_db`, `audio_peak_db`를 추가했다. 이 지표는 VAD/silence 기반 final 판단에 쓰지 않고, STT raw 반복이 실제 잔류 오디오인지 무음 hallucination인지 사후 분석하기 위한 관측값으로만 사용한다.
+- 변경 후 94케이스 CUDA/SaT 벤치는 `pass_rate=0.181`, `finalized=269`, `stage_start=432`, `finalized_per_stage_start=0.623`, `final_f1_avg=0.386`이다. 직전 94케이스 기준 `stage_start`가 줄고 `finalized_per_stage_start`, `final_f1_avg`가 개선됐다.
+
 판단:
 
 - `들죠`처럼 committed prefix 제거 뒤 남는 짧은 no-end-marker 조각 final은 억제할 수 있는 근거가 생겼다.

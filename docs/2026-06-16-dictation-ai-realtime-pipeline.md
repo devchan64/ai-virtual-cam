@@ -100,7 +100,7 @@
 
 | 관측 대상 | 지표 | 판단 기준 |
 | --- | --- | --- |
-| `AudioEvidence` 처리량 | `input_queue_drops`, `input_queue_size_peak`, `stt_step_load`, `total_step_load` | drop이 발생하거나 step load가 1.0을 넘으면 실시간 처리량 초과로 본다. |
+| `AudioEvidence` 처리량 | `input_queue_drops`, `input_queue_size_peak`, `stt_step_load`, `total_step_load`, `audio_rms_db`, `audio_peak_db` | drop이 발생하거나 step load가 1.0을 넘으면 실시간 처리량 초과로 본다. 오디오 레벨은 STT raw 반복 원인 분석용 관측값이며 final 판단 기준으로 쓰지 않는다. |
 | `RecognitionHypothesis` 안정성 | `stable_token_ratio`, `stable_internal_chars`, `raw_without_final` | raw 가설이 계속 나오는데 final이 없으면 인식/후보/커밋 경계 중 병목을 추적한다. |
 | `SentenceCandidateSet` 경계 품질 | `boundary_end_marks`, `boundary_right_context_starts`, `segment_state_pending`, `pending_quality_*` | completed/pending 분포와 경계 신호가 후보 생성 계약을 만족하는지 본다. |
 | `candidateBuffer` 동작 | `stage_queue_enqueue`, `stage_queue_promote`, `stage_queue_revision`, `stage_queue_drop_oldest`, `stage_replace_deferred`, `stage_replaced_unconfirmed` | 생성순서 보존, revision 갱신, 미확정 replacement 보류, 버퍼 폐기 흐름이 의도대로 발생하는지 본다. `stage_replaced_unconfirmed`가 많이 발생하면 확정 전 후보 삭제로 인한 누락 가능성을 우선 검토한다. |

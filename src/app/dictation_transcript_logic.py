@@ -39,6 +39,7 @@ FORCED_SENTENCE_CONFIRM_CHUNKS = 4
 SENTENCE_CONFIRM_MAX_AGE_CHUNKS = 3
 FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS = 4
 SHORT_CJK_FINAL_UNITS = 10
+SHORT_NO_END_FRAGMENT_UNITS = 4
 CJK_REVISION_INTERNAL_STABILITY_MIN_RATIO = 0.60
 CJK_REVISION_INTERNAL_STABILITY_MIN_CHARS = 40
 SHORT_CJK_REPLACEMENT_HOLD_CHUNKS = 2
@@ -760,6 +761,8 @@ def _final_sentence_diagnostic_flags(sentence: str, language: str) -> tuple[str,
         flags.append("mixed_latin_zh")
     if _boundary_sentence_end_count(normalized) == 0:
         flags.append("no_end_marker")
+        if len(words) <= SHORT_NO_END_FRAGMENT_UNITS:
+            flags.append("short_no_end_fragment")
     return tuple(flags)
 
 
@@ -784,7 +787,6 @@ def _is_pending_prefix_mixed_candidate(candidate: str, pending_text: str) -> boo
     if (
         not normalized_candidate
         or not normalized_pending
-        or _boundary_sentence_end_count(normalized_candidate) == 0
     ):
         return False
     candidate_units = _word_units(normalized_candidate)
@@ -986,6 +988,7 @@ def _should_translate_final_sentence(sentence: str, language: str) -> bool:
             "mixed_latin_zh",
             "short_cjk",
             "no_end_marker",
+            "short_no_end_fragment",
             "trailing_ellipsis",
             "empty",
             "spaced_cjk",
@@ -1006,6 +1009,8 @@ def _should_stage_boundary_candidate(sentence: str, language: str) -> bool:
             "repeated_word_ngram",
             "latin_only_for_zh",
             "low_value_cjk_fragment",
+            "short_no_end_fragment",
+            "trailing_ellipsis",
         }
     )
 
@@ -1030,7 +1035,16 @@ def _should_finalize_before_replacement(
     staged_forced: bool = False,
 ) -> bool:
     flags = set(_final_sentence_diagnostic_flags(sentence, language))
-    if flags.intersection({"empty", "spaced_cjk", "cjk_repeated_ngram", "repeated_word_ngram", "latin_only_for_zh"}):
+    if flags.intersection(
+        {
+            "empty",
+            "spaced_cjk",
+            "cjk_repeated_ngram",
+            "repeated_word_ngram",
+            "latin_only_for_zh",
+            "short_no_end_fragment",
+        }
+    ):
         return False
     if "no_end_marker" in flags and staged_confirmations < _sentence_required_confirmations(staged_forced):
         return False
@@ -1052,20 +1066,22 @@ def _should_finalize_before_replacement(
     return True
 
 
-def _should_suppress_short_delta_final(staged_sentence: str, output_sentence: str, language: str, reason: str) -> bool:
+def _should_suppress_delta_final(staged_sentence: str, output_sentence: str, language: str, reason: str) -> bool:
     if reason not in {"next_completed", "confirmed", "confirmed_forced"}:
         return False
     staged = _normalized_text(staged_sentence)
     output = _normalized_text(output_sentence)
     if not staged or not output or staged == output:
         return False
+    flags = set(_final_sentence_diagnostic_flags(output, language))
+    if "no_end_marker" in flags and _boundary_sentence_end_count(staged) > _boundary_sentence_end_count(output):
+        return True
     output_words = _word_units(output)
     staged_words = _word_units(staged)
     if len(output_words) > 7 or len(output) > 32:
         return False
     if len(staged_words) < len(output_words) + 3:
         return False
-    flags = set(_final_sentence_diagnostic_flags(output, language))
     return "no_end_marker" in flags
 
 

@@ -39,7 +39,7 @@ from src.app.dictation_transcript_logic import (
     _should_reset_revision_age,
     _should_split_terminal_tail_revision,
     _should_stage_boundary_candidate,
-    _should_suppress_short_delta_final,
+    _should_suppress_delta_final,
 )
 from src.app.transcript_revision import append_context as _append_committed_text
 from src.app.transcript_revision import consume_committed_prefix as _consume_committed_prefix
@@ -241,8 +241,8 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
         state.count("segment_state_suppressed")
         _promote_next_staged_sentence(state, chunk_index)
         return []
-    if _should_suppress_short_delta_final(staged_before, output_sentence, language, reason):
-        state.count("finalize_short_delta_suppressed")
+    if _should_suppress_delta_final(staged_before, output_sentence, language, reason):
+        state.count("finalize_delta_suppressed")
         state.count("segment_state_suppressed")
         _promote_next_staged_sentence(state, chunk_index)
         return []
