@@ -494,12 +494,12 @@ def run_transcribe_loop(
             if (
                 active_stage.age >= _sentence_max_age_chunks(active_stage.forced, sentence_finalize_age)
                 and _should_finalize_before_replacement(
-                active_stage.sentence,
-                detected,
-                active_stage.confirmations,
-                active_stage.age,
-                sentence_finalize_age,
-                active_stage.forced,
+                    active_stage.sentence,
+                    detected,
+                    active_stage.confirmations,
+                    active_stage.age,
+                    sentence_finalize_age,
+                    active_stage.forced,
                 )
             ):
                 count_metric("stage_unconfirmed_replacement_suppressed")
@@ -596,7 +596,6 @@ def run_transcribe_loop(
             return []
         if not _should_age_staged_sentence(active_stage.sentence, pending_text):
             count_metric("stage_age_hold")
-            active_stage.age = 0
             worker._emit(
                 "status",
                 "받아쓰기 AI staged aging 보류: "

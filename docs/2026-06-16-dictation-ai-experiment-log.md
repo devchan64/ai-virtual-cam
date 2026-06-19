@@ -1894,6 +1894,22 @@ final_f1_avg=0.224
 - `ko_log_sliding_window_us_investment_questions_20260619_001`를 추가해 질문 시퀀스가 순서대로 final 후보에 반영되는지 추적한다.
 - 변경 후 100케이스 CUDA/SaT 벤치는 `pass_rate=0.140`, `finalized=241`, `stage_start=441`, `finalized_per_stage_start=0.546`, `final_f1_avg=0.266`이다. 직전 99케이스 `final_f1_avg=0.204`, `finalized_per_stage_start=0.424` 대비 final 소비율은 개선됐다.
 - `ko_log_sliding_window_gas_facility_force_majeure_20260619_001`는 final이 0개에서 6개로 늘어 누락이 줄었다. `ko_log_sliding_window_us_investment_questions_20260619_001`는 뒤쪽 문장 3개만 final되어 앞 질문 2개 누락이 남았다. 다음 후보는 age 한계에 도달한 미확정 후보를 suppress할지 final할지 판단하는 기준을 더 좁히는 것이다.
+- 23:20 이후 로그에서 final status 기준의 근접 중복 확정은 두드러지지 않았다. 대신 한 window에 여러 completed 후보가 들어온 `엄청나죠. 버블 아닙니까... 동일본 대지진...` 구간에서 candidate queue churn과 age 0 suppress 로그가 관측됐다. 현재 코드에는 age 한계 전 suppress 제한이 반영되어 있으므로, 해당 로그는 앱 재시작 전 실행 코드일 가능성을 함께 본다.
+- `ko_log_multi_completed_japan_earthquake_queue_churn_20260619_001`를 추가해 짧은 감탄/질문/서술이 같은 window에 섞일 때 생성순서 보존과 누락 여부를 추적한다.
+- 변경 후 101케이스 CUDA/SaT 벤치는 `pass_rate=0.139`, `finalized=246`, `stage_start=447`, `finalized_per_stage_start=0.550`, `final_f1_avg=0.273`이다.
+- 신규 일본 queue churn 케이스는 `final_f1=0.909`로 대부분 복구됐고, `지수가 8000포인트였거든요.`가 아직 final되지 않았다. 미국 투자 질문 케이스는 앞 질문 2개 누락이 계속 남아 별도 튜닝 대상으로 둔다.
+
+## 2026-06-19 23:34 KST - stage age hold와 pending 확장 구간 재검토
+
+- 23:27 로그에서 `여러분들은 1년만 사업하고 끝내려고 하시나요?`, `모든 비즈니스는 영속기업을 가정해요.`, `장기시기열로 봐야죠.` 이후 pending 확장이 들어오며 staged 후보의 age가 보류되는 흐름을 확인했다.
+- `stage_age_hold`는 pending tail이 staged 후보의 revision/확장으로 보일 때 age 증가를 멈추기 위한 지표다. 하지만 기존 구현은 이미 누적된 age도 0으로 되돌려, 여러 window에서 관측된 후보 근거가 pending 확장만으로 사라질 수 있었다.
+- `stage_age_hold`에서는 age 증가만 보류하고 기존 age는 유지하도록 운영 루프와 벤치 모델을 맞췄다. 이는 확정 조건을 즉시 완화하는 것이 아니라, candidateAge를 “관측 누적”으로 해석해 pending 확장이 기존 증거를 지우지 않게 하는 변경이다.
+- 23:27-23:28 로그 기반으로 `ko_log_stage_age_hold_war_business_lifecycle_20260619_001`, `ko_log_stage_age_hold_future_portfolio_lifecycle_20260619_001`, `ko_log_pending_prefix_portfolio_build_question_20260619_001`, `ko_log_multi_completed_five_year_investment_war_20260619_001`를 추가했다.
+- 변경 후 105케이스 CUDA/SaT 벤치는 `pass_rate=0.133`, `finalized=256`, `stage_start=462`, `finalized_per_stage_start=0.554`, `final_f1_avg=0.284`이다. 케이스 수가 101개에서 105개로 늘어 pass rate는 직접 비교하지 않고, final F1과 케이스별 실패 양상을 본다.
+- 신규 `war_business_lifecycle` 케이스는 final F1 0.800이다. 앞 4문장은 회수했지만 마지막 문장이 `전쟁이 언제 끝날지 점치는 게 좋습니다.`로 먼저 확정된 뒤 후속 window의 `중요할까요?` revision을 append-only final에 반영할 수 없었다.
+- 신규 `future_portfolio_lifecycle` 케이스는 final F1 0.0으로, 앞 window의 `...` 포함 후보와 후속 완성 후보가 섞이는 실패를 재현한다. `pending_prefix_portfolio_build_question`은 final F1 0.5이며 첫 문장만 확정되고 `이걸 구축하려면 뭘 해야 되죠?`가 staged에 남았다.
+- 신규 `five_year_investment_war` 케이스는 final F1 1.0으로 기대 final 3개를 회수했지만, `끝났다. 5년을 놓고 봐요.` pending/staged 상태가 기대와 달라 case pass는 아니다. final 회수 자체보다 tail 상태가 남은 관찰 지점이다.
+- 남은 핵심 원인은 두 가지다. 첫째, append-only final 이후 더 정확한 STT revision이 들어오면 기존 final을 수정할 수 없다. 둘째, pending prefix와 recent final이 섞인 긴 후보는 단순 중복 억제로는 충분히 분리되지 않는다. 다음 반복은 regex나 문구별 예외가 아니라 revisionHash/순서 일관성 기반으로만 검토한다.
 
 ## 남은 실험 과제
 

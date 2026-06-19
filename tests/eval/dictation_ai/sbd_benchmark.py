@@ -425,12 +425,12 @@ def _stage_completed_sentence(
         if (
             state.staged_age >= _sentence_max_age_chunks(state.staged_forced, sentence_finalize_age)
             and _should_finalize_before_replacement(
-            state.staged_sentence,
-            language,
-            state.staged_confirmations,
-            state.staged_age,
-            sentence_finalize_age,
-            state.staged_forced,
+                state.staged_sentence,
+                language,
+                state.staged_confirmations,
+                state.staged_age,
+                sentence_finalize_age,
+                state.staged_forced,
             )
         ):
             state.count("stage_unconfirmed_replacement_suppressed")
@@ -504,7 +504,6 @@ def _age_staged_sentence(state: LifecycleState, language: str, sentence_finalize
         return []
     if not _should_age_staged_sentence(state.staged_sentence, state.pending_text):
         state.count("stage_age_hold")
-        state.staged_age = 0
         return []
     state.staged_age += 1
     state.staged_deferred_age_chunk = chunk_index
