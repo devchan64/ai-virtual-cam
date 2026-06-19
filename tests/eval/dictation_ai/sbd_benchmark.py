@@ -40,6 +40,7 @@ from src.app.dictation_transcript_logic import (
     _should_split_terminal_tail_revision,
     _should_stage_boundary_candidate,
     _should_suppress_delta_final,
+    _strip_prior_pending_prefix_revision,
 )
 from src.app.transcript_revision import append_context as _append_committed_text
 from src.app.transcript_revision import consume_committed_prefix as _consume_committed_prefix
@@ -269,6 +270,15 @@ def _stage_completed_sentence(
 ) -> list[str]:
     normalized_sentence = normalized_text(sentence)
     candidate = _sentence_output_delta(state.committed_text, normalized_sentence)
+    if state.staged_sentence and prior_pending_text and candidate:
+        stripped_candidate = _strip_prior_pending_prefix_revision(
+            state.staged_sentence,
+            candidate,
+            prior_pending_text,
+        )
+        if stripped_candidate != candidate:
+            candidate = stripped_candidate
+            state.count("candidate_prior_pending_prefix_trimmed")
     if candidate and candidate != normalized_sentence:
         assert state.final_sentences is not None
         recent_candidate, recent_source = _recent_final_output_delta(
@@ -412,16 +422,26 @@ def _stage_completed_sentence(
             state.staged_age += 1
             state.staged_deferred_age_chunk = chunk_index
             state.count("stage_age_tick")
-        if _should_finalize_before_replacement(
+        if (
+            state.staged_age >= _sentence_max_age_chunks(state.staged_forced, sentence_finalize_age)
+            and _should_finalize_before_replacement(
             state.staged_sentence,
             language,
             state.staged_confirmations,
             state.staged_age,
             sentence_finalize_age,
             state.staged_forced,
+            )
         ):
-            state.count("stage_age_finalize")
-            return _finalize_staged_sentence(state, language, "aged", chunk_index)
+            state.count("stage_unconfirmed_replacement_suppressed")
+            state.count("segment_state_suppressed")
+            state.staged_sentence = ""
+            state.staged_confirmations = 0
+            state.staged_age = 0
+            state.staged_forced = False
+            state.staged_deferred_age_chunk = -1
+            _promote_next_staged_sentence(state, chunk_index)
+            return []
         if state.staged_age >= _sentence_max_age_chunks(state.staged_forced, sentence_finalize_age):
             state.count("stage_age_quality_blocked")
             state.count("segment_state_suppressed")
@@ -551,7 +571,7 @@ def _run_lifecycle_case(case: SbdCase, detector: Any) -> dict[str, Any]:
             produced.extend(_age_staged_sentence(state, case.language, case.sentence_finalize_age, chunk_index))
         if state.pending_text and completed:
             state.count("segment_state_pending")
-        if not completed:
+        if not completed and (state.pending_text or normalized_text(chunk)):
             produced.extend(_age_staged_sentence(state, case.language, case.sentence_finalize_age, chunk_index))
         pending_overrun = _pending_overrun_reason(state.pending_text, state.pending_chunks)
         if pending_overrun:

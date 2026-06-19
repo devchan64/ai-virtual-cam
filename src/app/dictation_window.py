@@ -50,6 +50,8 @@ from src.domain.contracts.window_geometry import (
 
 
 DEFAULT_CHUNK_SECONDS = float(dictation_ai_default("chunkSeconds"))
+STARTUP_AUDIO_DRAIN_SECONDS = 1.0
+PULSE_CAPTURE_LATENCY_MSEC = 20
 FINAL_TEXT_TAG = "final_text"
 PARTIAL_TEXT_TAG = "partial_text"
 ERROR_TEXT_TAG = "error_text"
@@ -189,6 +191,15 @@ def _is_exact_pulse_source(configured: str) -> bool:
     if not value or value == "default":
         return False
     return value.startswith("alsa_input.") or value.endswith(".monitor") or value == "ai-virtual-cam"
+
+
+def _pulse_source_kind(configured: str) -> str:
+    value = str(configured).strip().lower()
+    if value.endswith(".monitor"):
+        return "monitor"
+    if value.startswith("alsa_input.") or value == "ai-virtual-cam":
+        return "source"
+    return "runtime"
 
 
 class WhisperTranscriptWorker:
@@ -392,7 +403,13 @@ class WhisperTranscriptWorker:
 
             if _is_exact_pulse_source(self._cfg.inputDevice):
                 self._start_pulse_capture(np)
-                self._emit("status", f"Pulse source 직접 캡처 시작: {self._cfg.inputDevice}")
+                self._emit(
+                    "status",
+                    "Pulse source 직접 캡처 시작: "
+                    f"{self._cfg.inputDevice} kind={_pulse_source_kind(self._cfg.inputDevice)} "
+                    f"latency_msec={PULSE_CAPTURE_LATENCY_MSEC}",
+                )
+                self._drain_startup_audio()
                 self._transcribe_loop(model, np, text_translator)
                 return
 
@@ -419,6 +436,7 @@ class WhisperTranscriptWorker:
                 device=device,
                 callback=callback,
             ):
+                self._drain_startup_audio()
                 self._emit("status", "받아쓰기 AI 전사 시작")
                 self._transcribe_loop(model, np, text_translator)
         except Exception as exc:
@@ -437,6 +455,8 @@ class WhisperTranscriptWorker:
             str(SAMPLE_RATE),
             "--channels",
             "1",
+            "--latency-msec",
+            str(PULSE_CAPTURE_LATENCY_MSEC),
             "--raw",
         ]
         self._emit("status", "Pulse recorder spawn: " + " ".join(cmd))
@@ -472,6 +492,38 @@ class WhisperTranscriptWorker:
 
         self._capture_thread = threading.Thread(target=read_loop, daemon=True)
         self._capture_thread.start()
+
+    def _drain_startup_audio(self) -> None:
+        deadline = time.monotonic() + STARTUP_AUDIO_DRAIN_SECONDS
+        drained_blocks = 0
+        drained_samples = 0
+        while time.monotonic() < deadline and not self._stop.is_set():
+            timeout = max(0.01, min(INPUT_AUDIO_QUEUE_TIMEOUT_SECONDS, deadline - time.monotonic()))
+            try:
+                block = self._audio_queue.get(timeout=timeout)
+            except queue.Empty:
+                continue
+            drained_blocks += 1
+            try:
+                drained_samples += int(block.shape[0])
+            except Exception:
+                pass
+        while True:
+            try:
+                block = self._audio_queue.get_nowait()
+            except queue.Empty:
+                break
+            drained_blocks += 1
+            try:
+                drained_samples += int(block.shape[0])
+            except Exception:
+                pass
+        self._emit(
+            "status",
+            "받아쓰기 AI 시작 오디오 drain 완료: "
+            f"seconds={STARTUP_AUDIO_DRAIN_SECONDS:.1f} blocks={drained_blocks} samples={drained_samples}",
+            display=False,
+        )
 
     def _transcribe_loop(self, model, np, text_translator=None) -> None:
         run_transcribe_loop(

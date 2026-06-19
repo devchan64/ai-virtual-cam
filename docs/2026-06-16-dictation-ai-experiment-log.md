@@ -1874,6 +1874,27 @@ final_f1_avg=0.224
 - 남은 주요 실패는 짧은 조각이 아니라 문맥이 섞인 긴 후보가 `next_completed`로 final되는 경우다. 예: `디스플레이 크기... 후진할 때 보면... 들죠`처럼 앞뒤 window 문맥이 한 문장으로 합쳐지는 경우.
 - 다음 개선은 문맥이 섞인 긴 후보를 케이스별 문구로 보정하지 않고, staged와 output delta의 순서 일관성, 최근 final suffix 결합, age/confirmation 누적을 함께 이용해 `next_completed`를 더 보수화하는 방향으로 검토한다.
 
+## 2026-06-19 23:18 KST - 미확정 replacement와 오디오 잔류 후보의 age 확정 차단
+
+- 2026-06-19 22:59-23:01 로그에서 `과연 적절한 탈모 지원을 확대할 수 있을지.`, `탈모지원 확대를 두고 감론을 받았습니다.`가 먼저 staged 된 뒤, 같은 시작부를 가진 더 긴 후보가 이어서 관측됐다.
+- 기존 로직은 미확정 replacement를 queue에 보류하면서 active staged의 age를 증가시켰고, age 한계에 도달하면 이전 후보를 final로 확정했다. 그 결과 `과연 적절한 탈모 지원을 확대할 수 있을지.`와 `과연 적절한 지원야를 두고 찬반 논란이 커지고 있습니다.`가 함께 final로 나가는 문장 파괴/중복이 발생했다.
+- `ko_log_unconfirmed_replacement_sentence_destruction_hair_support_20260619_001`, `ko_log_unconfirmed_replacement_sentence_destruction_public_hearing_20260619_001`를 벤치 샘플에 추가했다.
+- 미확정 replacement와 충돌 중인 active staged는 age만으로 final 승격하지 않고 suppress 후 queue 후보를 승격하도록 조정했다. 이는 특정 문구 보정이 아니라, final append-only 계약에서 불확실한 앞 후보를 확정하지 않는 보수적 생명주기 규칙이다.
+- 프로그램 재시작 뒤 `SBS 비즈 우형준입니다.`, `MBC 뉴스 우형준입니다.`, `다음 영상에서 만나요.`, `지금까지 생생지구촌이었습니다.` 같은 이전/무관 클로징 문구가 raw 또는 no_speech 후보로 관측됐다. `audio_rms_db`는 약 -26 dB, `audio_peak_db`는 약 -6 dB로 완전 무음이 아니라 입력 source 또는 장치 버퍼의 잔류 오디오 가능성이 크다.
+- Python worker의 `_audio_queue`는 worker 생성마다 새 queue라 프로세스 내부 큐 재사용으로 보기는 어렵다. 캡처 시작 직후 Pulse/sounddevice 장치 버퍼를 1초 drain하고, drain block/sample 수를 status 로그에 기록하도록 했다.
+- no_speech/empty STT chunk는 문장 후보 검증 근거가 아니므로 staged age를 증가시키지 않도록 했다. `ko_log_no_text_should_not_age_residual_reporter_20260619_001`를 추가해 `MBC 뉴스 우형준입니다.`가 empty chunk만으로 final되지 않는지 관측한다.
+- 변경 후 97케이스 CUDA/SaT 벤치는 `pass_rate=0.144`, `finalized=214`, `stage_start=495`, `finalized_per_stage_start=0.432`, `final_f1_avg=0.208`이다.
+- 신규 `no_text_should_not_age_residual_reporter` 케이스는 final 없이 staged 유지로 동작했다. 반면 미확정 replacement suppress는 파괴 final을 줄이는 대신 일부 케이스에서 확정 누락과 staged 잔류를 늘렸다. 다음 튜닝은 `stage_unconfirmed_replacement_suppressed`, `stage_age_no_text_skipped`, `finalized_per_stage_start`를 함께 보며 suppress 이후 queue 후보가 언제 final로 승격되어야 하는지에 집중한다.
+- `기상캐스터 배혜지`가 입력되지 않았는데 반복 관측된 사례는 입력 장치가 `alsa_output...monitor`인 출력 monitor 캡처 경로에서 발생했다. 이는 문장 lifecycle만의 문제가 아니라 앱이 접근한 Pulse monitor source 또는 sink 버퍼/재생 상태의 영향일 수 있다. Pulse 직접 캡처 명령에 low-latency 요청을 추가하고, source kind/latency와 시작 drain 결과를 로그로 남겨 재현 시 캡처 계층과 문장 계층을 분리해 본다.
+- 23:12:55-23:13:01 로그에서 `노동부는 올 하반기에도 기획 조사를 진행할 예정입니다.`가 staged 된 뒤 `기상캐스터 배혜지`, `노은지 기상캐스터`가 pending으로 누적됐고, 다음 completed 후보가 `기상캐스터 배혜지 노동부는...` 형태로 들어오며 staged revision으로 선호되어 prefix 오염 final이 발생했다.
+- 이전 pending tail이 기존 staged 문장 앞에 붙은 revision으로 보이면 pending prefix를 제거한 뒤 staged 본문 기준으로 비교하도록 했다. `ko_log_prior_pending_prefix_weathercaster_labor_revision_20260619_001`를 벤치 샘플에 추가하고 `candidate_prior_pending_prefix_trimmed` 지표를 추가했다.
+- 사용자가 관측한 `박살났다는 얘기 나와있죠` / `가스 시설이 많이 파괴...` / `불가항력 선언...` sliding-window 반복 케이스를 `ko_log_sliding_window_gas_facility_force_majeure_20260619_001`로 추가했다. 이 케이스는 문장 앞부분이 계속 밀리면서 뒤쪽 안정 문장이 누락/중복되는지 보는 성능 관측 샘플이다.
+- 23:13 로그와 사용자가 추가 관측한 미국 투자 질문 구간에서, 한 window에 여러 completed 후보가 들어올 때 미확정 replacement suppress가 age 0에서도 즉시 발생해 staged가 계속 교체되고 final이 부족해지는 흐름을 확인했다.
+- 미확정 replacement 충돌 후보는 age 한계에 도달했을 때만 suppress하도록 완화했다. 이는 과거처럼 age만으로 final하는 것이 아니라, 불확실한 앞 후보를 너무 일찍 폐기하지 않기 위한 보류 규칙이다.
+- `ko_log_sliding_window_us_investment_questions_20260619_001`를 추가해 질문 시퀀스가 순서대로 final 후보에 반영되는지 추적한다.
+- 변경 후 100케이스 CUDA/SaT 벤치는 `pass_rate=0.140`, `finalized=241`, `stage_start=441`, `finalized_per_stage_start=0.546`, `final_f1_avg=0.266`이다. 직전 99케이스 `final_f1_avg=0.204`, `finalized_per_stage_start=0.424` 대비 final 소비율은 개선됐다.
+- `ko_log_sliding_window_gas_facility_force_majeure_20260619_001`는 final이 0개에서 6개로 늘어 누락이 줄었다. `ko_log_sliding_window_us_investment_questions_20260619_001`는 뒤쪽 문장 3개만 final되어 앞 질문 2개 누락이 남았다. 다음 후보는 age 한계에 도달한 미확정 후보를 suppress할지 final할지 판단하는 기준을 더 좁히는 것이다.
+
 ## 남은 실험 과제
 
 - 동일 입력 replay 기반으로 `faster-whisper`, `qwen3-asr-0.6b`, 과거 FunASR 기준선을 비교한다.

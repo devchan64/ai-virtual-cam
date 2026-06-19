@@ -49,6 +49,7 @@ from src.app.dictation_transcript_logic import (
     _should_suppress_delta_final,
     _should_translate_final_sentence,
     _stable_window_text,
+    _strip_prior_pending_prefix_revision,
 )
 from src.app.transcript_revision import (
     append_context as _append_committed_text,
@@ -236,6 +237,22 @@ def run_transcribe_loop(
     ) -> list[str]:
         normalized_sentence = _normalized_text(sentence)
         candidate = _sentence_output_delta(committed_text, sentence)
+        if active_stage.sentence and prior_pending_text and candidate:
+            stripped_candidate = _strip_prior_pending_prefix_revision(
+                active_stage.sentence,
+                candidate,
+                prior_pending_text,
+            )
+            if stripped_candidate != candidate:
+                count_metric("candidate_prior_pending_prefix_trimmed")
+                worker._emit(
+                    "status",
+                    "받아쓰기 AI prior pending prefix 후보 정리: "
+                    f"chunk={chunks} prior_pending={_diagnostic_tail(prior_pending_text)} "
+                    f"before={_diagnostic_tail(candidate)} after={_diagnostic_tail(stripped_candidate)}",
+                    display=False,
+                )
+                candidate = stripped_candidate
         if candidate and candidate != normalized_sentence:
             count_metric("candidate_delta_trimmed")
             if _is_cjk_text(normalized_sentence):
@@ -474,16 +491,30 @@ def run_transcribe_loop(
                 f"candidate_tail={_diagnostic_tail(candidate)}",
                 display=False,
             )
-            if _should_finalize_before_replacement(
+            if (
+                active_stage.age >= _sentence_max_age_chunks(active_stage.forced, sentence_finalize_age)
+                and _should_finalize_before_replacement(
                 active_stage.sentence,
                 detected,
                 active_stage.confirmations,
                 active_stage.age,
                 sentence_finalize_age,
                 active_stage.forced,
+                )
             ):
-                count_metric("stage_age_finalize")
-                return finalize_staged_sentence(detected, "aged")
+                count_metric("stage_unconfirmed_replacement_suppressed")
+                count_segment_state("suppressed")
+                worker._emit(
+                    "status",
+                    "받아쓰기 AI stage 보류 후보 미확정 폐기: "
+                    f"chunk={chunks} decision={replacement_reason} staged_confirmations={active_stage.confirmations} "
+                    f"staged_age={active_stage.age} staged_tail={_diagnostic_tail(active_stage.sentence)} "
+                    f"candidate_tail={_diagnostic_tail(candidate)}",
+                    display=False,
+                )
+                active_stage.clear()
+                promote_next_staged_sentence(detected)
+                return []
             if active_stage.age >= _sentence_max_age_chunks(active_stage.forced, sentence_finalize_age):
                 count_metric("stage_age_quality_blocked")
                 count_segment_state("suppressed")
@@ -748,9 +779,7 @@ def run_transcribe_loop(
                 if pending_transcript_text:
                     count_segment_state("pending")
                     pending_chunks += 1
-                    final_sentences.extend(age_staged_sentence(detected, pending_transcript_text))
-                else:
-                    final_sentences.extend(age_staged_sentence(detected, pending_transcript_text))
+                count_metric("stage_age_no_text_skipped")
             pending_overrun_reason = _pending_overrun_reason(pending_transcript_text, pending_chunks)
             if pending_overrun_reason:
                 count_metric("pending_overrun")
@@ -920,9 +949,15 @@ def run_transcribe_loop(
             stage_finalize_before_replace_count = chunk_lifecycle_metrics.get("stage_finalize_before_replace", 0)
             stage_age_finalize_count = chunk_lifecycle_metrics.get("stage_age_finalize", 0)
             stage_age_quality_blocked_count = chunk_lifecycle_metrics.get("stage_age_quality_blocked", 0)
+            stage_age_no_text_skipped_count = chunk_lifecycle_metrics.get("stage_age_no_text_skipped", 0)
+            stage_unconfirmed_replacement_suppressed_count = chunk_lifecycle_metrics.get(
+                "stage_unconfirmed_replacement_suppressed",
+                0,
+            )
             stage_start_count = chunk_lifecycle_metrics.get("stage_start", 0)
             finalize_count = chunk_lifecycle_metrics.get("finalized", 0)
             duplicate_suppressed_count = chunk_lifecycle_metrics.get("candidate_duplicate_suppressed", 0)
+            prior_pending_prefix_trimmed_count = chunk_lifecycle_metrics.get("candidate_prior_pending_prefix_trimmed", 0)
             recent_echo_suppressed_count = chunk_lifecycle_metrics.get("finalize_recent_echo_suppressed", 0)
             delta_trimmed_count = chunk_lifecycle_metrics.get("candidate_delta_trimmed", 0)
             stable_prefix_chars = chunk_lifecycle_metrics.get("stable_prefix_chars", 0)
@@ -979,8 +1014,12 @@ def run_transcribe_loop(
                 f"finalize_before_replace={stage_finalize_before_replace_count} "
                 f"age_finalize={stage_age_finalize_count} "
                 f"age_quality_blocked={stage_age_quality_blocked_count} "
+                f"age_no_text_skipped={stage_age_no_text_skipped_count} "
+                f"unconfirmed_replacement_suppressed={stage_unconfirmed_replacement_suppressed_count} "
                 f"stage_start={stage_start_count} "
-                f"duplicate_suppressed={duplicate_suppressed_count} recent_echo_suppressed={recent_echo_suppressed_count} "
+                f"duplicate_suppressed={duplicate_suppressed_count} "
+                f"prior_pending_prefix_trimmed={prior_pending_prefix_trimmed_count} "
+                f"recent_echo_suppressed={recent_echo_suppressed_count} "
                 f"delta_trimmed={delta_trimmed_count} "
                 f"stable_prefix_chars={stable_prefix_chars} unstable_tail_chars={unstable_tail_chars} "
                 f"stable_internal_chars={stable_internal_chars} "
