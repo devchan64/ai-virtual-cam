@@ -371,6 +371,62 @@ def _average_scores(results: list[dict[str, Any]], key: str) -> dict[str, float]
     }
 
 
+def _summarize_results_by_language(results: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for result in results:
+        language = str(result.get("language") or "unknown")
+        grouped.setdefault(language, []).append(result)
+
+    summary: dict[str, dict[str, Any]] = {}
+    for language in sorted(grouped):
+        language_results = grouped[language]
+        final_score_avg = _average_scores(language_results, "final_score")
+        final_boundary_score_avg = _average_scores(language_results, "final_boundary_score")
+        completed_last_score_avg = _average_scores(language_results, "completed_last_score")
+        metrics_total: dict[str, int] = {}
+        for result in language_results:
+            for key, value in dict(result.get("metrics", {})).items():
+                metrics_total[key] = metrics_total.get(key, 0) + int(value)
+        stage_start = metrics_total.get("stage_start", 0)
+        finalized = metrics_total.get("finalized", 0)
+        summary[language] = {
+            "case_count": len(language_results),
+            "case_exact_match": sum(1 for result in language_results if result["case_exact_match"]),
+            "pending_exact_match": sum(1 for result in language_results if result["pending_exact"]),
+            "staged_exact_match": sum(1 for result in language_results if result["staged_exact"]),
+            "finalized": finalized,
+            "stage_start": stage_start,
+            "finalized_per_stage_start": finalized / max(stage_start, 1),
+            "final_precision_avg": final_score_avg["precision"],
+            "final_recall_avg": final_score_avg["recall"],
+            "final_f1_avg": final_score_avg["f1"],
+            "final_similarity_coverage_avg": final_score_avg["similarity_coverage"],
+            "final_boundary_precision_avg": final_boundary_score_avg["precision"],
+            "final_boundary_recall_avg": final_boundary_score_avg["recall"],
+            "final_boundary_f1_avg": final_boundary_score_avg["f1"],
+            "completed_last_precision_avg": completed_last_score_avg["precision"],
+            "completed_last_recall_avg": completed_last_score_avg["recall"],
+            "completed_last_f1_avg": completed_last_score_avg["f1"],
+            "staged_residue_count": sum(
+                1
+                for result in language_results
+                if result["actual_staged"] or result["actual_staged_queue"]
+            ),
+            "empty_final_count": sum(
+                1
+                for result in language_results
+                if result["expected_final"] and not result["actual_final"]
+            ),
+            "expected_boundary_zero_count": sum(
+                1
+                for result in language_results
+                if result["expected_final"] and float(result["final_boundary_score"]["f1"]) == 0.0
+            ),
+            "metrics": metrics_total,
+        }
+    return summary
+
+
 def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str, chunk_index: int) -> list[str]:
     if not state.staged_sentence:
         return []
@@ -888,6 +944,7 @@ def main() -> int:
     final_score_avg = _average_scores(results, "final_score")
     final_boundary_score_avg = _average_scores(results, "final_boundary_score")
     completed_last_score_avg = _average_scores(results, "completed_last_score")
+    language_summary = _summarize_results_by_language(results)
     report = {
         "backend": SBD_BENCHMARK_BACKEND,
         "model": args.model,
@@ -924,6 +981,7 @@ def main() -> int:
             "stage_replaced_unconfirmed": metric_totals.get("stage_replaced_unconfirmed", 0),
             "pending_overrun": metric_totals.get("pending_overrun", 0),
         },
+        "language_summary": language_summary,
         "metrics": metric_totals,
         "cases": results,
     }
