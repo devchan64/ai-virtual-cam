@@ -46,6 +46,8 @@ Whisper 계열 모델은 강력한 오프라인 전사 성능을 보이지만, �
 
 원문 논문을 기준으로 본 연구에 직접 연결되는 근거는 다음과 같다.
 
+아래 표는 논문 초안에서 직접 인용 가능한 최소 근거만 둔다. 운영 로그에서 관측한 중복 확정, 확정 누락, age/window 기본값, 벤치 수치는 외부 논문이 아니라 프로젝트 실험일지를 근거로 해석한다. reference index의 다른 항목은 비교군 또는 후속 후보이며, 원문 확인 없이 본 논문의 핵심 주장 근거로 승격하지 않는다.
+
 | 근거 축 | 원문 요약 | 본 연구에서의 사용 |
 | --- | --- | --- |
 | [Whisper](https://arxiv.org/abs/2212.04356) | Whisper 원 논문은 대규모 다국어/멀티태스크 약지도 학습으로 zero-shot 전사와 번역 일반화가 가능함을 보인다. 다만 이 논문은 실시간 partial revision 문제를 해결하는 시스템 논문은 아니다. | `faster-whisper + large-v3`를 영어/한국어 운영 후보로 쓰되, raw window 결과를 바로 final로 쓰지 않는 전제다. |
@@ -54,7 +56,6 @@ Whisper 계열 모델은 강력한 오프라인 전사 성능을 보이지만, �
 | [Segment Any Text](https://arxiv.org/abs/2406.16678) | SaT는 punctuation 의존도를 낮추고 여러 도메인/언어에서 문장 분절을 수행하도록 설계되었다. | regex/ad-hoc 문장 분할을 운영 경로에서 제외하고 SaT를 completed/pending 후보 생성기로 쓰는 근거다. |
 | [Streaming punctuation](https://arxiv.org/abs/2210.05756) | 긴 받아쓰기에서는 WER가 좋아도 pause, 느린 발화, punctuation/segmentation 문제가 남으며, bounded right context와 dynamic window가 필요하다고 보고한다. | punctuation/right-context를 final trigger가 아니라 SBD 후보와 boundary confidence의 보조 신호로 쓰는 근거다. |
 | [Qwen3-ASR](https://arxiv.org/abs/2601.21337) | Qwen3-ASR 보고서는 0.6B/1.7B 모델이 52개 언어/방언 ASR을 지원하고, 공개 벤치 외 실제 사용 시나리오 품질 차이를 별도로 평가해야 한다고 강조한다. | 중국어에서 `qwen3-asr-transformers + qwen3-asr-0.6b`를 운영 후보로 두고, STT 품질과 final lifecycle 품질을 분리 평가하는 근거다. |
-| [WeNet](https://arxiv.org/abs/2102.01547) | WeNet은 streaming/non-streaming E2E ASR을 통합하고 chunk size로 latency를 제어하는 구조를 제시한다. | Whisper식 sliding window 후처리와 native streaming ASR 접근을 구분하는 비교군이다. |
 | [NLLB](https://arxiv.org/abs/2207.04672) | NLLB는 다국어 번역을 200개 언어 규모로 확장하고 FLORES-200, human evaluation, toxicity benchmark로 평가한다. | 번역 품질은 STT/SBD/finalization과 다른 축이므로 final event만 번역 sink로 넘기는 계약의 배경이다. |
 
 ## 4. 시스템 설계
@@ -153,7 +154,7 @@ Whisper 계열 모델은 강력한 오프라인 전사 성능을 보이지만, �
 
 ## 참고 문헌
 
-상세 참고 문헌은 [받아쓰기 AI 참조 레퍼런스 모음](../2026-06-16-dictation-ai-reference-index.md)에 통합한다. 실시간 처리 파이프라인 기준은 [받아쓰기 AI 실시간 처리 파이프라인 기준](../2026-06-16-dictation-ai-realtime-pipeline.md)을 따른다. 핵심 근거는 다음과 같다.
+상세 참고 문헌 분류와 원문 확인 결과는 [받아쓰기 AI 논문 레퍼런스 원문 확인 컨텍스트](../2026-06-20-dictation-ai-reference-context.md)에 둔다. 실시간 처리 파이프라인 기준은 [받아쓰기 AI 실시간 처리 파이프라인 기준](../2026-06-16-dictation-ai-realtime-pipeline.md)을 따른다. 핵심 근거는 다음과 같다.
 
 - Radford et al., [Robust Speech Recognition via Large-Scale Weak Supervision](https://arxiv.org/abs/2212.04356). Whisper 계열 모델을 로컬 다국어 ASR backend로 쓰는 배경 근거다.
 - Macháček et al., [Turning Whisper into Real-Time Transcription System](https://arxiv.org/abs/2307.14743) 및 Whisper-Streaming demo paper. Whisper가 본래 실시간 모델은 아니며, local agreement와 adaptive latency가 필요하다는 비교 기준이다.
@@ -161,5 +162,4 @@ Whisper 계열 모델은 강력한 오프라인 전사 성능을 보이지만, �
 - Frohmann et al., [Segment Any Text](https://arxiv.org/abs/2406.16678). punctuation 의존도가 낮은 다국어 문장 분절 모델을 SBD 후보 생성기로 쓰는 근거다.
 - Behre et al., [Streaming Punctuation for Long-form Dictation with Transformers](https://arxiv.org/abs/2210.05756). 긴 받아쓰기에서 bounded right context와 punctuation/segmentation 품질을 분리해 보는 근거다.
 - Shi et al., [Qwen3-ASR Technical Report](https://arxiv.org/abs/2601.21337). 중국어 STT 후보로 Qwen3-ASR 0.6B/1.7B 계열을 비교하는 근거다.
-- Yao et al., [WeNet: Production oriented Streaming and Non-streaming End-to-End Speech Recognition Toolkit](https://arxiv.org/abs/2102.01547). native streaming/non-streaming E2E ASR 비교군이다.
 - NLLB Team et al., [No Language Left Behind](https://arxiv.org/abs/2207.04672). final-only 번역 sink에서 사용하는 NLLB 계열 번역 backend의 배경 근거다.

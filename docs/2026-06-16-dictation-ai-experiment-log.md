@@ -838,7 +838,7 @@ final-only 번역
 | `2026-06-16-dictation-ai-realtime-pipeline.md` | 현재 실시간 파이프라인 기준 |
 | `2026-06-16-dictation-ai-experiment-log.md` | 실험 관측, 폐기 판단, 벤치 이력 |
 | `2026-06-16-dictation-ai-contract-defaults.md` | 설정 계약, 허용값, 기본값 |
-| `2026-06-16-dictation-ai-reference-index.md` | 외부 레퍼런스 인덱스 |
+| `2026-06-20-dictation-ai-reference-context.md` | 논문 레퍼런스 원문 확인, 직접 인용/비교군/제외 분류 |
 
 ## 현재 기준선
 
@@ -2523,3 +2523,41 @@ final_f1_avg=0.224
 - 신규 케이스 metrics는 `stage_replace_decision_unconfirmed=11`, `stage_replace_decision_open_latin_clause=10`, `stage_queue_enqueue=16`, `stage_queue_promote=14`, `stage_queue_revision=7`, `candidate_duplicate_suppressed=32`, `stage_candidate_quality_no_end_marker=2`, `finalize_reason_next_completed=1`, `finalize_reason_replaced_duplicate_or_suffix=1`이다.
 - 변경 후 164케이스 CUDA/SaT 벤치는 `finalized=809`, `stage_start=1183`, `finalized_per_stage_start=0.684`, `final_precision_avg=0.775`, `final_recall_avg=0.688`, `final_f1_avg=0.705`, `final_similarity_coverage_avg=0.617`, `final_boundary_f1_avg=0.280`, `case_exact_match=13`, `pending_exact_match=125`, `staged_exact_match=57`이다.
 - 이번 케이스는 active staged가 짧거나 불완전한 후보에 묶이면 후반의 완성 질문이 staged로 잔류하는 유형이다. queue를 공격적으로 비우는 변경은 중복/오확정 위험이 있으므로, 이번 정리에서는 로직 변경 없이 벤치 근거만 추가한다.
+
+## 2026-06-20 16:35 KST - 벤치 샘플 sentence_finalize_age=3 통일
+
+- 운영 기본값을 `sentenceFinalizeAgeEn/Ko/Zh=3`으로 통일했지만, `tests/eval/dictation_ai/sbd_text_cases.sample.jsonl`에는 과거 샘플 조건인 `sentence_finalize_age=2`가 남아 있었다.
+- 벤치 샘플이 기본 계약과 다른 age를 고정하면 기본값 변경의 영향을 확인할 수 없으므로, 모든 샘플의 `sentence_finalize_age`를 3으로 정리했다.
+- 변경 후 분포는 `en={3: 56}`, `ko={3: 79}`, `zh={3: 29}`다.
+- 이전 비교에서 중국어 29건만 age 2/3으로 바꾸면 `final_f1_avg=0.614 -> 0.578`, `final_recall_avg=0.661 -> 0.606`, `final_boundary_f1_avg=0.258 -> 0.258`이었다. 손실은 `zh_log_missing_beef_soup_taste_fragment_20260617_001`, `zh_log_duplicate_temperature_fragment_20260617_001`, `zh_log_missing_artist_portrait_fragment_20260617_001` 등 일부 장문/누락 케이스에 집중됐다.
+- 전체 164건에서 중국어만 age 3으로 바꾼 비교는 `final_f1_avg=0.705 -> 0.699`였다.
+- 이번에 한국어/중국어 샘플 전체를 age 3으로 통일한 뒤 CUDA/SaT 벤치를 다시 실행했다.
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/latest-age3-sample.json
+
+cases=164
+finalized=791
+stage_start=1143
+finalized_per_stage_start=0.692
+final_precision_avg=0.754
+final_recall_avg=0.656
+final_f1_avg=0.676
+final_similarity_coverage_avg=0.591
+final_boundary_f1_avg=0.268
+case_exact_match=12
+pending_exact_match=124
+staged_exact_match=53
+```
+
+판단:
+
+- age 3 통일은 벤치 성능을 낮춘다. 기존 혼합 age 샘플의 `final_f1_avg=0.705` 대비 `0.676`으로 약 `-0.029`다.
+- 하락은 주로 recall 감소다. `final_recall_avg=0.688 -> 0.656`, `final_precision_avg=0.775 -> 0.754`다.
+- 반면 `finalized_per_stage_start`는 `0.684 -> 0.692`로 올라가, stage 수 자체가 줄고 더 보수적으로 소비되는 경향이 있다.
+- age 3은 즉시 운영 불가 수준의 장애는 아니지만, 누락/recall 측면에서는 비용이 있다.
+- 기본값 통일 목적은 언어별 예외 축소와 보수적인 확정 기준 유지다. 성능 개선은 age를 다시 낮추기보다 queue 소비, staged residue, no-end fragment 정책을 일반 로직으로 개선하는 방향에서 판단한다.

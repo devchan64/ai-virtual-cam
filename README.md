@@ -375,7 +375,7 @@ Linux Docker 정책:
 - GUI에서는 현재 선택한 STT 언어의 파라미터만 표시합니다. 언어를 바꾸면 이전 언어의 값은 메모리에 보존되고, `JSON 저장` 시 `setting.json`의 언어별 키로 함께 저장됩니다.
 - 속도는 충분하지만 고유명사나 짧은 발화 인식이 흔들리면 `beamSize`를 `3` 또는 `5`로 올려 비교합니다. 문장이 실제로 잘릴 때만 `maxNewTokens`를 `128` 또는 `192`로 올립니다. 짧은 청크에서는 이 값이 응답속도에 거의 영향을 주지 않을 수 있습니다.
 - 번역까지 포함한 지연은 NLLB `translationBeamSize`와 `translationMaxNewTokens`의 영향을 받습니다. 실시간 응답성은 `translationBeamSize=1`, `translationMaxNewTokens=128`에서 시작하고, 번역 품질이나 긴 문장 완성도가 부족하면 각각 `3` 또는 `256`으로 올려 비교합니다.
-- 실시간 번역은 기본적으로 확정된 final 전사 문장만 대상으로 합니다. staged/partial 문장은 뒤 청크에서 수정될 가능성이 높아 중복 번역과 premature translation을 만들 수 있으므로 기본값에서 번역하지 않습니다. 실시간 파이프라인 기준은 [`docs/2026-06-16-dictation-ai-realtime-pipeline.md`](docs/2026-06-16-dictation-ai-realtime-pipeline.md)를 확인하고, 설정 계약과 기본값은 [`docs/2026-06-16-dictation-ai-contract-defaults.md`](docs/2026-06-16-dictation-ai-contract-defaults.md)를 따릅니다. 관련 레퍼런스 목록은 [`docs/2026-06-16-dictation-ai-reference-index.md`](docs/2026-06-16-dictation-ai-reference-index.md)에 통합합니다.
+- 실시간 번역은 기본적으로 확정된 final 전사 문장만 대상으로 합니다. staged/partial 문장은 뒤 청크에서 수정될 가능성이 높아 중복 번역과 premature translation을 만들 수 있으므로 기본값에서 번역하지 않습니다. 실시간 파이프라인 기준은 [`docs/2026-06-16-dictation-ai-realtime-pipeline.md`](docs/2026-06-16-dictation-ai-realtime-pipeline.md)를 확인하고, 설정 계약과 기본값은 [`docs/2026-06-16-dictation-ai-contract-defaults.md`](docs/2026-06-16-dictation-ai-contract-defaults.md)를 따릅니다. 논문 레퍼런스 분류와 원문 확인 결과는 [`docs/2026-06-20-dictation-ai-reference-context.md`](docs/2026-06-20-dictation-ai-reference-context.md)에 둡니다.
 
 문장 경계 처리 텍스트 벤치마크:
 
