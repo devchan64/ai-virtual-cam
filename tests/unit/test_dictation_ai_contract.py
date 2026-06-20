@@ -42,7 +42,7 @@ class WhisperContractTest(unittest.TestCase):
         self.assertEqual(defaults["sentenceFinalizeAge"], 3)
         self.assertEqual(defaults["sentenceFinalizeAgeEn"], 3)
         self.assertEqual(defaults["sentenceFinalizeAgeKo"], 3)
-        self.assertEqual(defaults["sentenceFinalizeAgeZh"], 2)
+        self.assertEqual(defaults["sentenceFinalizeAgeZh"], 3)
         self.assertEqual(defaults["maxNewTokens"], 192)
         self.assertEqual(defaults["postProcessingProfile"], "manual")
         self.assertEqual(dictation_ai_default("sentenceBoundaryBackendZh"), "sat")

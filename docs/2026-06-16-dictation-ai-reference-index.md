@@ -11,9 +11,24 @@
 - [받아쓰기 AI 계약과 기본값](2026-06-16-dictation-ai-contract-defaults.md)
 - [다국어 실시간 음성 전사 리비전 인지 확정 계층 초안](paper/ko-revision-aware-realtime-stt.md)
 
+## 논문 초안 직접 근거로 확인한 원문 요약
+
+아래 항목은 reference index의 전체 후보 중 `docs/paper/ko-revision-aware-realtime-stt.md` 초안에 직접 근거로 사용한 원문이다. 나머지 항목은 후속 비교군, 모델 후보, 또는 폐기 판단의 보조 문헌으로 둔다.
+
+| 원문 | 확인한 핵심 내용 | 논문 초안에서의 근거 역할 |
+| --- | --- | --- |
+| [Whisper: Robust Speech Recognition via Large-Scale Weak Supervision](https://arxiv.org/abs/2212.04356) | 680,000시간 규모의 다국어/멀티태스크 약지도 학습으로 zero-shot 전사와 번역 일반화가 가능함을 제시한다. | 영어/한국어 STT backend로 Whisper 계열을 쓰는 배경이다. 단, 실시간 partial revision 문제를 해결하는 근거는 아니므로 finalization 계층을 별도로 둔다. |
+| [Turning Whisper into Real-Time Transcription System](https://arxiv.org/abs/2307.14743) | Whisper가 실시간 전사용으로 설계되지 않았고, local agreement policy와 self-adaptive latency로 streaming-like 전사를 구성한다. | raw hypothesis와 final transcript를 분리하고 여러 window에서 재관측된 후보만 확정하는 설계의 직접 비교 기준이다. |
+| [Evaluating Automatic Speech Recognition in an Incremental Setting](https://arxiv.org/abs/2302.12049) | incremental ASR은 WER뿐 아니라 latency와 이미 인식된 단어의 update/revoke를 함께 평가해야 한다고 제안한다. | `final_f1`, `final_boundary_f1`, replacement churn, staged residue, recent final echo를 별도 지표로 두는 근거다. |
+| [Segment Any Text](https://arxiv.org/abs/2406.16678) | punctuation 의존도를 낮추고 도메인/언어 적응성을 갖춘 sentence segmentation 모델을 제안한다. | regex/ad-hoc 분할을 운영 경로에서 제외하고 SaT를 completed/pending 후보 생성기로 사용하는 근거다. |
+| [Streaming Punctuation for Long-form Dictation with Transformers](https://arxiv.org/abs/2210.05756) | 긴 받아쓰기에서는 WER가 높아도 punctuation/segmentation 문제가 남고, real-time 제약 안에서 right context를 제한적으로 써야 함을 보인다. | punctuation/right-context를 final trigger가 아니라 경계 후보 보조 신호로 사용하는 근거다. |
+| [Qwen3-ASR Technical Report](https://arxiv.org/abs/2601.21337) | Qwen3-ASR 0.6B/1.7B가 52개 언어/방언 ASR을 지원하며, 공개 벤치 외 실제 시나리오 품질 차이를 별도로 봐야 한다고 강조한다. | 중국어 STT 후보로 Qwen3-ASR 0.6B를 두고 STT 품질과 final lifecycle 품질을 분리 평가하는 근거다. |
+| [WeNet](https://arxiv.org/abs/2102.01547) | streaming/non-streaming E2E ASR을 통합하고 chunk size로 latency를 제어하는 native streaming 구조를 제시한다. | Whisper sliding-window 후처리와 native streaming ASR 접근을 구분하는 비교군이다. |
+| [No Language Left Behind](https://arxiv.org/abs/2207.04672) | 200개 언어 규모의 다국어 번역 모델과 FLORES-200, human evaluation, toxicity benchmark 기반 평가를 제시한다. | 번역 품질은 STT/SBD/finalization과 별도 축이므로 final event만 번역 sink에 전달한다는 계약의 배경이다. |
+
 ## 실시간 Whisper / Streaming ASR
 
-이 묶음은 Whisper 계열 오프라인 ASR을 실시간 또는 준실시간 전사 경로로 쓰기 위한 근거다. 받아쓰기 AI에서는 raw ASR 결과를 바로 final로 내보내지 않고, 여러 윈도우에서 안정적으로 재관측된 구간만 확정하는 `confirmed`/`hypothesis` 분리와 local agreement 정책의 근거로 사용한다.
+이 묶음은 Whisper 계열 오프라인 ASR을 실시간 또는 준실시간 전사 경로로 쓰기 위한 근거다. 받아쓰기 AI에서는 raw ASR 결과를 바로 final로 내보내지 않고, 여러 윈도우에서 안정적으로 재관측된 구간만 확정하는 `raw`/`final` 분리와 local agreement 정책의 근거로 사용한다.
 
 - [Turning Whisper into Real-Time Transcription System](https://arxiv.org/abs/2307.14743): Whisper에 local agreement와 self-adaptive latency를 얹어 실시간 전사처럼 동작시키는 대표 기준선이다.
 - [Whisper-Streaming: Turning Whisper into Real-Time Transcription System](https://aclanthology.org/2023.ijcnlp-demo.3/): 위 접근의 데모/시스템 관점 자료이며, 확정 prefix와 미확정 hypothesis 분리의 운영 근거로 본다.
@@ -45,7 +60,7 @@
 
 이 묶음은 중국어 raw STT 품질, 고유명사/동음어 오류 검토용이다. 운영 판단에서는 STT 모델 품질과 revision lifecycle 품질을 분리해 보고, 언어별 정규식/접합 보정이 아니라 모델/백엔드 비교와 오류 계측을 우선한다.
 
-Qwen3-ASR vLLM streaming, Dolphin-CN-Dialect, WeNet의 프로젝트 내 세부검증 판단은 [받아쓰기 AI 중국어 STT 후보 세부검증 리포트](2026-06-16-dictation-ai-chinese-stt-candidate-validation.md)에 둔다.
+Qwen3-ASR vLLM streaming, Dolphin-CN-Dialect, WeNet의 프로젝트 내 세부검증 판단은 [받아쓰기 AI 실험일지](2026-06-16-dictation-ai-experiment-log.md)의 2026-06-14 중국어 STT 후보 섹션에 둔다.
 
 - [Qwen3-ASR Technical Report](https://arxiv.org/abs/2601.21337): 중국어 품질 우선 후보인 Qwen3-ASR 계열의 주요 기술 배경이다.
 - [Qwen3-ASR-0.6B Hugging Face Model Card](https://huggingface.co/Qwen/Qwen3-ASR-0.6B): 현재 중국어 시작점 후보의 모델 카드다.
@@ -100,7 +115,7 @@ Qwen3-ASR vLLM streaming, Dolphin-CN-Dialect, WeNet의 프로젝트 내 세부�
 
 ## 평가 지표 / Latency / Scoring
 
-이 묶음은 받아쓰기 AI의 품질을 unittest 성공/실패가 아니라 STT 품질, finalization latency, revision instability, duplicate insertion, translation quality로 분리 계측하는 근거다. 현재 추적 테스트의 `revision`, `distinct`, `collapse`, `runtime_metrics`, `translation_quality` 같은 지표를 해석할 때 참고한다.
+이 묶음은 받아쓰기 AI의 품질을 unittest 성공/실패가 아니라 STT 품질, finalization latency, revision instability, duplicate insertion, boundary quality, final-only sink 계약으로 분리 계측하는 근거다. 현재 벤치의 `final_f1`, `final_boundary_f1`, `replacement`, `runtime_metrics`, `sink_contract` 같은 지표를 해석할 때 참고한다.
 
 - [NIST SCTK, the NIST Scoring Toolkit](https://github.com/usnistgov/SCTK): WER 등 표준 ASR scoring 도구 참고용이다.
 - [Assessing Latency in ASR Systems: A Methodological Perspective for Real-Time Use](https://arxiv.org/abs/2409.05674): 실시간 ASR latency 측정 방법론을 정리할 때 본다.

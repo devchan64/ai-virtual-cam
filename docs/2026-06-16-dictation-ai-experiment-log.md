@@ -2,7 +2,7 @@
 
 ## 문서 상태
 
-이 문서는 폐기된 원본 문서 `docs/2026-06-13-dictation-ai-feature-design.md`의 Git 커밋 기록을 기준으로 재구성한 실험일지다. 이 파일은 이전에 다른 이름의 설계 문서로 존재했으므로 rename 이전 문서의 변경 이력까지 추적 대상에 포함한다. 또한 받아쓰기 AI의 실험 판단이 README, 논문 초안, 발표용 세그먼트 레퍼런스 문서에 분산되어 기록된 경우 해당 문서 업데이트 히스토리도 보조 근거로 포함한다. 실시간 파이프라인 기준은 [받아쓰기 AI 실시간 처리 파이프라인 기준](2026-06-16-dictation-ai-realtime-pipeline.md), 설정 계약과 기본값은 [받아쓰기 AI 계약과 기본값](2026-06-16-dictation-ai-contract-defaults.md)을 따른다. Qwen3-ASR vLLM streaming, Dolphin-CN-Dialect, WeNet의 세부검증 판단은 [받아쓰기 AI 중국어 STT 후보 세부검증 리포트](2026-06-16-dictation-ai-chinese-stt-candidate-validation.md)에 둔다.
+이 문서는 폐기된 원본 문서 `docs/2026-06-13-dictation-ai-feature-design.md`의 Git 커밋 기록을 기준으로 재구성한 실험일지다. 이 파일은 이전에 다른 이름의 설계 문서로 존재했으므로 rename 이전 문서의 변경 이력까지 추적 대상에 포함한다. 또한 받아쓰기 AI의 실험 판단이 README, 논문 초안, 발표용 세그먼트 레퍼런스 문서에 분산되어 기록된 경우 해당 문서 업데이트 히스토리도 보조 근거로 포함한다. 실시간 파이프라인 기준은 [받아쓰기 AI 실시간 처리 파이프라인 기준](2026-06-16-dictation-ai-realtime-pipeline.md), 설정 계약과 기본값은 [받아쓰기 AI 계약과 기본값](2026-06-16-dictation-ai-contract-defaults.md)을 따른다.
 
 작성 기준:
 
@@ -322,6 +322,25 @@ funasr-paraformer, window=15: replace/chunk=0.25 discard/chunk=0.25 finalized/ch
 | 모델 다운로드 | config GUI 다운로드 모달과 Serve 전 캐시 검사로 분리 | STT/번역/문장 경계 모델 준비 상태를 실행 전 명확히 보여주기 위해서다. |
 | FunASR | FunASR 모델 관리 경로를 기본 운영 후보에서 제거 | 빠르지만 의미 보존, 폐기율, 확정률이 운영 기준에 못 미쳤기 때문이다. |
 
+### 중국어 STT 후속 후보 세부검증 판단
+
+Qwen3-ASR vLLM streaming, Dolphin-CN-Dialect, WeNet은 별도 기본값이 아니라 중국어 raw STT 품질, streaming latency, 방언/코드스위칭 대응, 별도 ASR service 구조를 검토하기 위한 후속 후보로 분류했다. 후보를 평가할 때는 raw STT 품질과 받아쓰기 AI 후처리 품질을 분리한다. 좋은 raw STT가 있어도 sliding window, staged confirmation, final 확정 정책이 불안정하면 사용자 출력은 흔들리고, 반대로 후처리가 좋아도 raw STT가 의미를 잃으면 final 품질은 회복하기 어렵다.
+
+후속 후보 판단:
+
+| 후보 | 검증 관점 | 현재 판단 |
+| --- | --- | --- |
+| `qwen3-asr-vllm-streaming` | Qwen3-ASR 계열의 지연 개선 후보. raw partial, raw final, stream reset, session id, backpressure를 구분하는 별도 service 계약이 필요하다. | 공유 `.venv`에서 vLLM 의존성이 `mediapipe`/`protobuf`와 충돌하므로 in-process backend로 넣지 않는다. 격리 런타임과 ASR service 계약이 준비된 뒤 비교한다. |
+| Dolphin-CN-Dialect | 표준 중국어 외 방언, 대만 만다린, 코드스위칭, 음식명/지명/가격 표현 비교 후보. | 실행 경로, 모델 캐시, 라이선스, CUDA 추론, adapter가 미정이므로 설정 계약/다운로드 대상/GUI 선택지에 넣지 않는다. 2차 품질 후보로 보류한다. |
+| WeNet | dynamic chunk와 CTC/attention rescoring 기반 native streaming/non-streaming E2E ASR 구조 비교군. | 현재 프로젝트에는 의존성, 모델 다운로드, adapter, GPU 실행 경로가 없다. Qwen3-ASR vLLM streaming이 막히거나 streaming 이벤트 계약 비교가 필요할 때 검토한다. |
+
+운영 반영 기준:
+
+- 세 후보 모두 바로 기본값으로 승격하지 않는다.
+- 더 빠르다는 이유만으로 채택하지 않는다. 의미 보존, 문장 구조, final 생성률, stage churn, 번역 입력 안정성이 함께 좋아야 한다.
+- 후보가 도입되더라도 자동 fallback은 허용하지 않는다. 설정한 backend가 실행 불가능하면 실패 원인, 설정값, 권장 조치를 출력하고 중지한다.
+- pending 접합 보정은 학술적 근거가 부족하므로 STT 후보 평가 기준으로 사용하지 않는다.
+
 ## 2026-06-15: 중국어 pending 접합, 원문창 의미, 언어별 기본값 정리
 
 ### 관련 커밋
@@ -393,7 +412,7 @@ old_result=...喷枪 条，然后把这米再切断了...
 - staged/partial 후보는 final 확정 전 내부 상태이므로 원문창에 표시하지 않는다.
 - 영어 기본 시작점은 `windowSeconds=20`, `stepSeconds=1`, `sentenceFinalizeAge=3`이다.
 - 한국어 기본 시작점은 `windowSeconds=10`, `stepSeconds=1`, `sentenceFinalizeAge=3`이다.
-- 중국어/Qwen3-ASR 기본 시작점은 `windowSeconds=15`, `stepSeconds=1`, `sentenceFinalizeAge=2`이다.
+- 중국어/Qwen3-ASR 기본 시작점은 `windowSeconds=15`, `stepSeconds=1`, `sentenceFinalizeAge=3`이다.
 - 30초 window는 장문 안정성에는 유리할 수 있지만 final script 갱신 지연과 긴 문장 확정 비용이 커질 수 있다.
 
 ### 주요 기본값 변경
@@ -405,7 +424,7 @@ old_result=...喷枪 条，然后把这米再切断了...
 | 한국어 window | `windowSecondsKo=10` | 한국어 기본 문맥을 10초로 조정했다. |
 | 중국어 window | `windowSecondsZh=15` | `windowSecondsZh=15.0` 관측에서 STT 안정성과 확정 지연의 균형점으로 판단했다. |
 | step | `stepSecondsEn/Ko/Zh=1` | 화면 갱신성과 STT 처리량이 모두 감당 가능한 범위로 관측됐다. |
-| 확정 age | `sentenceFinalizeAgeEn/Ko=3`, `sentenceFinalizeAgeZh=2` | 2026-06-17 SaT 벤치에서 중국어 age 2가 `no_end_marker` final을 0으로 유지하면서 age 3보다 확정 수와 `finalized_per_stage_start`를 개선했다. |
+| 확정 age | `sentenceFinalizeAgeEn/Ko/Zh=3` | 현재는 queue/recent-final/no-text/staged 후보 관리가 정리된 뒤의 기준이므로 언어별 예외를 줄이고 보수적인 공통 확정 기준을 기본값으로 둔다. |
 | STT 디코딩 | `beamSize=3`, `maxNewTokens=192`, `temperature=0.0`를 언어별 시작점으로 정리 | 빠른 발화와 긴 문장 절단을 줄이되 실시간 지연을 통제하기 위한 기준선이다. |
 
 ## 2026-06-16: 확정 절차 단순화, 계약 문서화, 문서 체계 분리
@@ -585,7 +604,7 @@ stable token 지표를 추가한 뒤 중국어 실시간 경로를 약 5분 더 
 튜닝 판단:
 
 - 계산 처리량은 병목이 아니므로 `stepSecondsZh=1.0`, `beamSizeZh=3`, `maxNewTokensZh=192`는 유지한다.
-- 2026-06-17 SaT 벤치 기준 `sentenceFinalizeAgeZh=2`가 현재 기본 후보 중 가장 낫다. `no_end_marker` final은 0으로 유지하면서 `finalized=20`, `stage_start=34`, `finalized_per_stage_start=0.588`로 age 3의 `finalized=19`, `stage_start=35`, `finalized_per_stage_start=0.543`보다 확정 지표가 개선됐다. 4 이상은 `finalized=18`, `finalized_per_stage_start=0.514`로 누락 쪽으로 기울었다.
+- 당시 2026-06-17 SaT 벤치에서는 `sentenceFinalizeAgeZh=2`가 `no_end_marker` final을 0으로 유지하면서 `finalized=20`, `stage_start=34`, `finalized_per_stage_start=0.588`로 age 3의 `finalized=19`, `stage_start=35`, `finalized_per_stage_start=0.543`보다 확정 지표가 좋았다. 다만 이 결론은 이후 queue/recent-final/no-text/staged 후보 관리가 정리되기 전 로직 수준의 결과이므로 현재 기본값 판단 근거로는 폐기한다. 현재 기본값은 언어별 예외를 줄이고 보수적인 확정 기준을 유지하기 위해 `sentenceFinalizeAgeZh=3`으로 통일한다.
 - `windowSecondsZh=15.0`은 현재 STT 안정성과 확정 지연의 균형점으로 유지한다. 이번 구간에서 queue drop이 없으므로 처리량 때문에 줄일 근거는 없다.
 - 로직 변경은 보류한다. 이번 구간의 주된 보강은 성능 추적 케이스 누적이며, `stable_token_ratio`가 높은 단일 관측 후보를 곧바로 final로 올리는 정책은 과확정 위험이 있어 다음 로그 비교 뒤 판단한다.
 
@@ -595,6 +614,103 @@ stable token 지표를 추가한 뒤 중국어 실시간 경로를 약 5분 더 
 - `finalization` tracking에는 stage 품질 차단, short/no-end 관측 후보, age final, 단일 관측 교체 보류 케이스를 추가했다.
 - 순수 비중국어/라틴 단독 후보는 중국어 성능 추적 케이스에서 제거했다.
 - runtime aggregate에는 `finalized_per_stage_start`, `stage_replaced_unconfirmed_per_stage_start`, `finalization_rate_per_1000`, `stage_candidate_quality_*`, `translation_skip`을 비교할 수 있도록 이번 30분 스냅샷을 추가했다.
+
+### 2026-06-17 확정 미처리 케이스 수집
+
+분석 범위는 `.tmp/logs/avc-whisper.log.2`, `.tmp/logs/avc-whisper.log.1`, `.tmp/logs/avc-whisper.log`의 `2026-06-16 23:57:00`부터 `2026-06-17 00:27:00`까지 약 30분이다. 실행 조건은 중국어 실시간 경로, `window=15.0`, `step=1.0`, `beam=3`, `maxNewTokens=192`였다.
+
+집계 요약:
+
+| 항목 | 관측 수 | 해석 |
+| --- | ---: | --- |
+| `completed=1 final=0` 후보 중 문장 경계/안정성 신호가 있는 케이스 | 1363 | 모두 결함은 아니며 stage 보류, 교체, 품질 차단이 섞여 있다. |
+| `staged_age>=2`인 revision | 194 | age가 쌓인 뒤에도 표현 변화로 confirmation이 `1/3`에 머무르는 대표 미처리 후보군이다. |
+| stage 미확정 교체 | 164 | 이전 staged 후보가 final로 가지 못하고 다음 후보로 교체된 케이스다. |
+| stage 후보 품질 차단 | 229 | `spaced_cjk`, `cjk_internal_gap`, `no_end_marker` 등으로 의도적으로 final 처리하지 않은 케이스다. |
+| 품질 위험 final | 12 | short/spaced/internal-gap CJK가 final로 들어간 케이스다. 미처리보다 품질 게이트 누락 문제로 분류한다. |
+
+대표 관측:
+
+- `远方忽远忽近` 계열 후보는 `staged_age`가 `1 -> 4`까지 누적됐지만 STT 재표현으로 confirmation이 계속 reset되어 final이 지연됐다.
+- 같은 구간 보완이 과해지면 `远 方 忽 远 忽`처럼 글자 단위 공백 조각이 `replaced_aged` final로 들어갈 수 있어 age/replacement final에도 품질 게이트가 필요했다.
+- chunk 341의 `对啊这个很棒好推荐大家一定要来`는 `stable_token_ratio=0.852`, `boundary_end_marks=7`, `boundary_right_context=6`, `staged_age=2`였지만 `confirmations=1/3`이라 final이 보류됐다.
+- 단일 관측 교체는 계속 보류하는 것이 맞지만, 같은 패턴이 반복될 때 age가 누적될 수 있어야 한다.
+- 글자 단위 공백 CJK는 확정 미처리가 아니라 의도적 품질 차단으로 유지한다.
+
+반영:
+
+- revision으로 같은 staged lifecycle이 유지될 때 `staged_age`를 누적한다.
+- CJK 후보는 첫 관측 확정을 계속 막되, 2회 이상 관측되거나 age 기준을 채우면 `stable_cjk` 또는 `aged` 사유로 final 승격할 수 있게 한다.
+- age/replacement final에도 `short_cjk`, `spaced_cjk`, `cjk_internal_gap`, `cjk_repeated_ngram`, `latin_only_for_zh` 품질 게이트를 적용한다.
+- `stage_age_quality_blocked`를 추가해 age 기준 확정 후보가 품질 게이트에서 차단되는지 추적한다.
+- 이 케이스들은 hard 품질 게이트가 아니라 성능 추적 벤치 입력으로 관리한다.
+
+### 2026-06-17 6시간 로그 분석
+
+분석 범위는 `.tmp/logs/avc-whisper.log*`의 `2026-06-17 00:25:27`부터 `2026-06-17 06:25:27`까지 6시간이다. 대상은 `Dictation AI` 로그이며 총 로그 라인 152,868개, 문장 진단 라인 20,943개, 성능 라인 20,943개를 확인했다.
+
+핵심 결론:
+
+- 계산 처리량은 주 병목이 아니다. 6시간 동안 `input_queue_drops_total=0`이 유지됐고 평균 `total_step_load≈0.458`이었다.
+- 순간 queue peak는 최대 75까지 관측되어 짧은 STT 지연 spike는 존재하지만, 누적 drop은 없었다.
+- 품질 병목은 확정 생명주기와 품질 차단에 있다. completed 후보 18,763개 중 final은 1,177개로 약 6.3%였다.
+- `completed=1 final=0` 진단은 17,589회였고, 대부분은 stage 후보 품질 차단, 미확정 교체, revision reset, 중복 억제 상태가 섞여 있다.
+
+주요 지표:
+
+| 항목 | 값 |
+| --- | ---: |
+| `stt_raw` | 19,920 |
+| `diag` | 20,943 |
+| completed 후보 총합 | 18,763 |
+| final 총합 | 1,177 |
+| completed 대비 final 비율 | 0.063 |
+| `completed=1 final=0` | 17,589 |
+| `stage_quality_blocked` | 10,586 |
+| `stage_unconfirmed_replace` | 1,763 |
+| `stage_revision` | 3,404 |
+| `stage_revision_reset` | 2,610 |
+| `candidate_duplicate` | 1,783 |
+| `final_quality_skip` | 754 |
+| `age_quality_blocked` | 41 |
+
+성능 지표:
+
+| 지표 | 평균 | p50 | p95 | p99 | 최대 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `total_step_load` | 0.458 | 0.47 | 0.80 | 0.94 | 3.07 |
+| `stt_step_load` | 0.447 | 0.46 | 0.77 | 0.92 | 3.06 |
+| `total_rtf` | 0.030 | 0.03 | 0.05 | 0.06 | 0.20 |
+| `queue_peak` | 2.843 | 5 | 5 | 15 | 75 |
+| `text_chars` | 91.546 | 84 | 216 | 257 | 366 |
+
+판단:
+
+- `windowSecondsZh=15.0`, `stepSecondsZh=1.0`, `beamSizeZh=3`, `maxNewTokensZh=192`은 유지한다.
+- 당시 SaT 벤치 결과에서는 `sentenceFinalizeAgeZh=2`를 기본 후보로 낮추는 판단을 했지만, 이후 커밋 버퍼와 중복 억제 로직이 바뀌었으므로 현재 기본값 판단에서는 폐기한다. 현재는 `sentenceFinalizeAgeZh=3`으로 통일한다.
+- 순수 비중국어/라틴 단독 후보는 중국어 문장 추출 성능 산정에서 제거한다.
+- `no_end_marker`, `mixed_latin_zh`, `short_cjk` final 품질 플래그는 많지만 즉시 전부 final 차단으로 올리면 누락이 늘 수 있어 tracking 대상으로 유지한다.
+- 기존 hard unit test 중 stage churn/finalization tuning 성격 케이스는 performance tracking으로 이관한다.
+
+### 2026-06-17 테스트 분류 감사
+
+문제는 운영 로그에서 수집한 케이스와 결정적 계약 테스트가 섞인 것이다. 일부는 hard regression이지만, 일부는 모델 출력 분포와 파라미터 튜닝에 따라 성공률을 봐야 하는 성능 추적 케이스다. 이 둘이 섞이면 성능 테스트가 품질 게이트처럼 동작하고, 반대로 실제 안전 회귀를 느슨하게 만들 위험이 있다.
+
+분류 기준:
+
+| 분류 | 기준 |
+| --- | --- |
+| hard 품질 게이트 | 설정 계약, default, validation, UI 저장/복원처럼 결정적인 입출력이다. final-only 번역, 중복 final/echo 억제, 명백한 품질 오염 차단처럼 사용자 출력 오염을 막는 안전 정책이다. |
+| 성능 추적 벤치마크 | 5분/30분 로그 집계, rate, gap, per-stage-start 같은 추세 지표다. raw STT 흔들림, stage churn, replacement churn, finalization latency를 관측한다. 현재 실패할 수 있고 다음 개선으로 matched rate가 오르는지 봐야 한다. |
+
+정리 결과:
+
+- `tests/eval/dictation_ai/performance_tracking.py`는 SBD 생명주기와 별도 rate/gap을 관리해 운영 파이프라인 개선 근거로 보기 어려워 폐기했다.
+- `tests/eval/dictation_ai/sentence_revision_tracking.py`는 helper assertion 모음에 가까워 벤치로서 의미가 낮아 폐기했다.
+- `test_dictation_ai_sentence_revision.py`의 로그 기반 revision/age/finalization 샘플은 한때 tracking 파일로 옮겼으나 이후 폐기했다.
+- `test_dictation_ai_sentence_boundary.py`, `test_dictation_ai_sentence_forcing.py`, `test_dictation_ai_stable_token_detection.py`, `test_dictation_ai_transcript_delta.py`, `test_dictation_ai_window_geometry.py`의 soft boundary/helper/GUI 상태 중심 샘플은 중요도가 낮은 품질 게이트로 판단해 제거했다.
+- 유지한 hard gate 범위는 설정/계약/default 검증, final-only 번역, 중복 final/echo 억제, 명백한 품질 오염 차단, 결정적 helper의 최소 계약, CJK repeated n-gram/spaced CJK/recent echo처럼 사용자 출력 오염을 직접 막는 안전 정책이다.
+- 이후 로그에서 발견하는 stage churn, finalization latency, soft boundary, collapse 튜닝 케이스는 일반 unit test가 아니라 SBD JSONL 케이스에 추가한다.
 
 ### 2026-06-17 실제 SaT 벤치 기반 CJK replacement 튜닝
 
