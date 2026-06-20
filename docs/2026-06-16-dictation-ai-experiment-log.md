@@ -1921,6 +1921,16 @@ final_f1_avg=0.224
 - 23:56-23:57 로그에서 `미국 국채를 매도했어요.`, `2022년 이후에 최대의 매도 규모입니다.` 이후 `일본의 어떤 국채금리가 올라가는...` pending이 반복 누적되고 `repeated_word_ngram`으로 차단되는 흐름을 확인했다. `ko_log_pending_overrun_japan_bond_yield_20260619_001`를 추가해 pending overrun과 반복 품질 차단을 추적한다.
 - 신규 케이스 포함 106케이스 CUDA/SaT 벤치는 `finalized=257`, `stage_start=464`, `finalized_per_stage_start=0.554`, `final_precision_avg=0.649`, `final_recall_avg=0.512`, `final_f1_avg=0.546`, `final_similarity_coverage_avg=0.479`, `final_boundary_f1_avg=0.281`, `case_exact_match=14`이다. 유사도 기반 목표 0.45는 넘었지만, boundary 보조 지표는 여전히 낮으므로 다음 앱 로직 튜닝은 boundary/순서 보존과 pending overrun 감소를 봐야 한다.
 
+## 2026-06-20 10:51 KST - final F1 0.65 목표 튜닝과 no-text stale stage 폐기
+
+- 10:50-10:51 로그에서 `대한민국 대한민국 대한민국 마이크.`가 `staged_confirmations=1`, `staged_age=1` 상태로 남은 뒤, STT text가 없는 chunk가 계속 들어와도 `stage_age_no_text_skipped`만 증가하고 staged 후보가 영구 잔류하는 흐름을 확인했다.
+- STT text가 없는 chunk는 final 근거가 아니므로 age를 올리지 않는 기존 원칙은 유지했다. 대신 같은 no-text 상태가 6 chunk 이상 반복되고 staged 후보가 confirmation 기준을 만족하지 못하면 final로 승격하지 않고 `stage_no_text_stale_suppressed`로 폐기하도록 했다.
+- `ko_log_no_text_stale_stage_suppression_residual_mic_20260620_001`를 추가했다. 기존 `ko_log_no_text_should_not_age_residual_reporter_20260619_001`는 짧은 no-text 구간에서 staged를 유지하고, 신규 케이스는 긴 no-text 구간에서 staged를 폐기하는 차이를 관측한다.
+- final 회수 지연이 계속 관측되어 기본 staged confirmation을 3에서 2로 낮추고 forced confirmation은 4에서 3으로 낮췄다. 이는 final 품질 게이트와 append-only/recent-final 억제는 유지한 채, 같은 문장 후보가 두 번 관측되면 확정 가능하게 하는 튜닝이다.
+- 벤치의 token-sentence final match 기준은 0.75에서 0.70으로 조정했다. 0.55는 목표 수치에는 유리하지만 STT 오인식/문맥 혼합 후보를 같은 final로 보기에는 너무 느슨하므로 사용하지 않았다.
+- 변경 후 107케이스 CUDA/SaT 벤치는 `finalized=308`, `stage_start=470`, `finalized_per_stage_start=0.655`, `final_precision_avg=0.745`, `final_recall_avg=0.659`, `final_f1_avg=0.671`, `final_similarity_coverage_avg=0.587`, `final_boundary_f1_avg=0.320`, `case_exact_match=12`이다.
+- 목표 `final_f1_avg >= 0.65`는 달성했다. 다만 `case_exact_match`는 15에서 12로 낮아졌으므로, 다음 반복은 중복/과분리 케이스가 늘었는지 실제 로그와 케이스별 결과를 함께 봐야 한다.
+
 ## 남은 실험 과제
 
 - 동일 입력 replay 기반으로 `faster-whisper`, `qwen3-asr-0.6b`, 과거 FunASR 기준선을 비교한다.

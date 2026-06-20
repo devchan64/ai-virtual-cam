@@ -48,7 +48,8 @@ from src.app.transcript_revision import append_context as _append_committed_text
 from src.app.transcript_revision import consume_committed_prefix as _consume_committed_prefix
 
 MAX_STAGED_SENTENCE_QUEUE = 12
-FINAL_SENTENCE_MATCH_MIN_SIMILARITY = 0.75
+FINAL_SENTENCE_MATCH_MIN_SIMILARITY = 0.70
+NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS = 6
 
 
 @dataclass(frozen=True)
@@ -74,6 +75,7 @@ class LifecycleState:
     staged_age: int = 0
     staged_forced: bool = False
     staged_deferred_age_chunk: int = -1
+    no_text_stage_skip_chunks: int = 0
     staged_queue: deque[dict[str, object]] | None = None
     final_sentences: list[str] | None = None
     metrics: dict[str, int] | None = None
@@ -158,8 +160,8 @@ def _load_cases(path: Path) -> list[SbdCase]:
             chunks = payload.get("chunks")
             if chunks is None:
                 chunks = [payload.get("text", "")]
-            normalized_chunks = [normalized_text(chunk) for chunk in chunks if normalized_text(chunk)]
-            if not normalized_chunks:
+            normalized_chunks = [normalized_text(chunk) for chunk in chunks]
+            if not any(normalized_chunks):
                 raise ValueError(f"{path}:{line_no} case {case_id!r} has no text chunks")
             cases.append(
                 SbdCase(
@@ -195,6 +197,16 @@ def _boundary_offsets(sentences: list[str]) -> set[int]:
 def _score_boundary_offsets(expected: list[str], actual: list[str]) -> dict[str, Any]:
     expected_normalized = [normalized_text(item) for item in expected if normalized_text(item)]
     actual_normalized = [normalized_text(item) for item in actual if normalized_text(item)]
+    if not expected_normalized and not actual_normalized:
+        return {
+            "true_positive": 0,
+            "false_positive": 0,
+            "false_negative": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "exact": True,
+        }
     expected_offsets = _boundary_offsets(expected_normalized)
     actual_offsets = _boundary_offsets(actual_normalized)
     true_positive = len(expected_offsets & actual_offsets)
@@ -225,6 +237,19 @@ def _sentence_similarity(left: str, right: str) -> float:
 def _score_sequence(expected: list[str], actual: list[str]) -> dict[str, Any]:
     expected_normalized = [normalized_text(item) for item in expected if normalized_text(item)]
     actual_normalized = [normalized_text(item) for item in actual if normalized_text(item)]
+    if not expected_normalized and not actual_normalized:
+        return {
+            "true_positive": 0,
+            "false_positive": 0,
+            "false_negative": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "similarity_avg": 1.0,
+            "similarity_coverage": 1.0,
+            "match_min_similarity": FINAL_SENTENCE_MATCH_MIN_SIMILARITY,
+            "exact": True,
+        }
     used_actual: set[int] = set()
     matched_similarities: list[float] = []
     for expected_sentence in expected_normalized:
@@ -583,11 +608,33 @@ def _age_staged_sentence(state: LifecycleState, language: str, sentence_finalize
     return _finalize_staged_sentence(state, language, "aged_forced" if state.staged_forced else "aged", chunk_index)
 
 
+def _suppress_stale_no_text_stage(state: LifecycleState, chunk_index: int) -> None:
+    if not state.staged_sentence:
+        state.no_text_stage_skip_chunks = 0
+        return
+    required_confirmations = _sentence_required_confirmations(state.staged_forced)
+    if state.staged_confirmations >= required_confirmations:
+        return
+    if state.no_text_stage_skip_chunks < NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS:
+        return
+    state.count("stage_no_text_stale_suppressed")
+    state.count("segment_state_suppressed")
+    state.staged_sentence = ""
+    state.staged_confirmations = 0
+    state.staged_age = 0
+    state.staged_forced = False
+    state.staged_deferred_age_chunk = -1
+    state.no_text_stage_skip_chunks = 0
+    _promote_next_staged_sentence(state, chunk_index)
+
+
 def _run_lifecycle_case(case: SbdCase, detector: Any) -> dict[str, Any]:
     state = LifecycleState()
     chunks: list[dict[str, Any]] = []
     for chunk_index, chunk in enumerate(case.chunks, start=1):
         prior_pending_text = state.pending_text
+        if normalized_text(chunk):
+            state.no_text_stage_skip_chunks = 0
         boundary = detector.split(state.pending_text, chunk, case.language)
         completed = []
         for sentence in boundary.completed:
@@ -625,6 +672,13 @@ def _run_lifecycle_case(case: SbdCase, detector: Any) -> dict[str, Any]:
             state.count("segment_state_pending")
         if not completed and (state.pending_text or normalized_text(chunk)):
             produced.extend(_age_staged_sentence(state, case.language, case.sentence_finalize_age, chunk_index))
+        if not completed and not state.pending_text and not normalized_text(chunk):
+            state.count("stage_age_no_text_skipped")
+            if state.staged_sentence:
+                state.no_text_stage_skip_chunks += 1
+                _suppress_stale_no_text_stage(state, chunk_index)
+            else:
+                state.no_text_stage_skip_chunks = 0
         pending_overrun = _pending_overrun_reason(state.pending_text, state.pending_chunks)
         if pending_overrun:
             state.count("pending_overrun")

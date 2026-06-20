@@ -12,6 +12,7 @@ from src.app.dictation_pipeline_settings import (
     INPUT_AUDIO_QUEUE_TIMEOUT_SECONDS,
     MAX_RECENT_SHORT_TEXT_REPEATS,
     MAX_STAGED_SENTENCE_QUEUE,
+    NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS,
     RECENT_TRANSCRIPT_WINDOW,
     SAMPLE_RATE,
 )
@@ -84,6 +85,7 @@ def run_transcribe_loop(
     candidate_node = SttHypothesisToSentenceCandidateNode(worker._sentence_boundary_detector_for)
     commit_buffer_node = SentenceCandidateCommitBufferNode(MAX_STAGED_SENTENCE_QUEUE)
     active_stage = commit_buffer_node.active
+    no_text_stage_skip_chunks = 0
     def count_metric(name: str, amount: int = 1) -> None:
         lifecycle_metrics[name] = lifecycle_metrics.get(name, 0) + amount
         chunk_lifecycle_metrics[name] = chunk_lifecycle_metrics.get(name, 0) + amount
@@ -632,6 +634,29 @@ def run_transcribe_loop(
             count_metric("stage_age_finalize")
             return finalize_staged_sentence(detected, "aged_forced" if active_stage.forced else "aged")
         return []
+    def suppress_stale_no_text_stage(detected: str) -> None:
+        nonlocal no_text_stage_skip_chunks
+        if not active_stage.sentence:
+            no_text_stage_skip_chunks = 0
+            return
+        required_confirmations = _sentence_required_confirmations(active_stage.forced)
+        if active_stage.confirmations >= required_confirmations:
+            return
+        if no_text_stage_skip_chunks < NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS:
+            return
+        count_metric("stage_no_text_stale_suppressed")
+        count_segment_state("suppressed")
+        worker._emit(
+            "status",
+            "받아쓰기 AI 무텍스트 stale stage 폐기: "
+            f"chunk={chunks} no_text_chunks={no_text_stage_skip_chunks} "
+            f"staged_confirmations={active_stage.confirmations}/{required_confirmations} "
+            f"staged_tail={_diagnostic_tail(active_stage.sentence)}",
+            display=False,
+        )
+        active_stage.clear()
+        no_text_stage_skip_chunks = 0
+        promote_next_staged_sentence(detected)
     while not worker._stop.is_set():
         try:
             block = worker._audio_queue.get(timeout=INPUT_AUDIO_QUEUE_TIMEOUT_SECONDS)
@@ -720,6 +745,7 @@ def run_transcribe_loop(
                 worker._emit("status", f"받아쓰기 AI 반복 전사 무시: chunk={chunks} text={text!r}", display=False)
                 text = ""
             if text:
+                no_text_stage_skip_chunks = 0
                 prior_pending_transcript_text = pending_transcript_text
                 candidate_set = candidate_node.interpret(
                     hypothesis=hypothesis,
@@ -779,6 +805,11 @@ def run_transcribe_loop(
                     count_segment_state("pending")
                     pending_chunks += 1
                 count_metric("stage_age_no_text_skipped")
+                if active_stage.sentence and not pending_transcript_text:
+                    no_text_stage_skip_chunks += 1
+                    suppress_stale_no_text_stage(detected)
+                else:
+                    no_text_stage_skip_chunks = 0
             pending_overrun_reason = _pending_overrun_reason(pending_transcript_text, pending_chunks)
             if pending_overrun_reason:
                 count_metric("pending_overrun")
@@ -949,6 +980,7 @@ def run_transcribe_loop(
             stage_age_finalize_count = chunk_lifecycle_metrics.get("stage_age_finalize", 0)
             stage_age_quality_blocked_count = chunk_lifecycle_metrics.get("stage_age_quality_blocked", 0)
             stage_age_no_text_skipped_count = chunk_lifecycle_metrics.get("stage_age_no_text_skipped", 0)
+            stage_no_text_stale_suppressed_count = chunk_lifecycle_metrics.get("stage_no_text_stale_suppressed", 0)
             stage_unconfirmed_replacement_suppressed_count = chunk_lifecycle_metrics.get(
                 "stage_unconfirmed_replacement_suppressed",
                 0,
@@ -1014,6 +1046,7 @@ def run_transcribe_loop(
                 f"age_finalize={stage_age_finalize_count} "
                 f"age_quality_blocked={stage_age_quality_blocked_count} "
                 f"age_no_text_skipped={stage_age_no_text_skipped_count} "
+                f"no_text_stale_suppressed={stage_no_text_stale_suppressed_count} "
                 f"unconfirmed_replacement_suppressed={stage_unconfirmed_replacement_suppressed_count} "
                 f"stage_start={stage_start_count} "
                 f"duplicate_suppressed={duplicate_suppressed_count} "
