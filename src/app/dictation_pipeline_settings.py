@@ -398,6 +398,7 @@ def dictation_tuning_protocol() -> dict[str, object]:
             "stage_replaced_unconfirmed",
             "pending_overrun",
             "language_summary residual counters",
+            "tag_summary symptom counters",
             "duplicate suppression counters",
         ),
     }

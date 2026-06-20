@@ -44,6 +44,8 @@ LANGUAGE_MARKDOWN_KEYS = (
     "staged_residue_count",
     "empty_final_count",
 )
+TAG_MARKDOWN_KEYS = LANGUAGE_MARKDOWN_KEYS
+TAG_MARKDOWN_MAX_ROWS = 40
 
 
 @dataclass(frozen=True)
@@ -174,6 +176,7 @@ def _load_report_summary(job: SweepJob) -> dict[str, Any]:
         "env_overrides": job.env_overrides,
         "metrics": {key: summary.get(key) for key in METRIC_KEYS},
         "language_summary": report.get("language_summary", {}),
+        "tag_summary": report.get("tag_summary", {}),
     }
 
 
@@ -191,6 +194,7 @@ def _attach_baseline_deltas(results: list[dict[str, Any]]) -> list[dict[str, Any
         return results
     baseline_metrics = dict(baseline.get("metrics", {}))
     baseline_languages = dict(baseline.get("language_summary", {}))
+    baseline_tags = dict(baseline.get("tag_summary", {}))
     updated: list[dict[str, Any]] = []
     for result in results:
         item = dict(result)
@@ -212,6 +216,18 @@ def _attach_baseline_deltas(results: list[dict[str, Any]]) -> list[dict[str, Any
             language_deltas[language] = deltas
         item["metric_deltas"] = metric_deltas
         item["language_deltas"] = language_deltas
+        tag_deltas: dict[str, dict[str, float]] = {}
+        for tag, tag_summary in dict(result.get("tag_summary", {})).items():
+            baseline_summary = baseline_tags.get(tag, {})
+            if not isinstance(tag_summary, dict) or not isinstance(baseline_summary, dict):
+                continue
+            deltas = {}
+            for key, value in tag_summary.items():
+                delta = _numeric_delta(value, baseline_summary.get(key))
+                if delta is not None:
+                    deltas[key] = delta
+            tag_deltas[tag] = deltas
+        item["tag_deltas"] = tag_deltas
         updated.append(item)
     return updated
 
@@ -281,6 +297,32 @@ def render_markdown_summary(payload: dict[str, Any]) -> str:
                 delta = _format_markdown_delta(deltas.get(key))
                 cells.append(f"{value} ({delta})" if delta else value)
             lines.append(f"| {result.get('label', '')} | {language} | " + " | ".join(cells) + " |")
+
+    lines.extend(
+        [
+            "",
+            "## Tag Metrics",
+            "",
+            "| label | tag | " + " | ".join(TAG_MARKDOWN_KEYS) + " |",
+            "| --- | --- | " + " | ".join("---:" for _ in TAG_MARKDOWN_KEYS) + " |",
+        ]
+    )
+    for result in results:
+        tag_summary = dict(result.get("tag_summary", {}))
+        tag_deltas = dict(result.get("tag_deltas", {}))
+        ordered_tags = sorted(
+            tag_summary,
+            key=lambda tag: (-int(dict(tag_summary.get(tag, {})).get("case_count", 0)), tag),
+        )[:TAG_MARKDOWN_MAX_ROWS]
+        for tag in ordered_tags:
+            summary = dict(tag_summary.get(tag, {}))
+            deltas = dict(tag_deltas.get(tag, {}))
+            cells = []
+            for key in TAG_MARKDOWN_KEYS:
+                value = _format_markdown_number(summary.get(key))
+                delta = _format_markdown_delta(deltas.get(key))
+                cells.append(f"{value} ({delta})" if delta else value)
+            lines.append(f"| {result.get('label', '')} | {tag} | " + " | ".join(cells) + " |")
     lines.append("")
     return "\n".join(lines)
 

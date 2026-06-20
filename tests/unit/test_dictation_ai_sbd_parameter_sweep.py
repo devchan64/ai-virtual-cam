@@ -71,6 +71,7 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
                         "case_count": 2,
                         "summary": {"final_f1_avg": 0.5},
                         "language_summary": {"ko": {"case_count": 2, "final_f1_avg": 0.5}},
+                        "tag_summary": {"missing-final": {"case_count": 2, "final_f1_avg": 0.5}},
                     },
                     ensure_ascii=False,
                 ),
@@ -86,6 +87,10 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
             summary = _load_report_summary(job)
 
             self.assertEqual(summary["language_summary"], {"ko": {"case_count": 2, "final_f1_avg": 0.5}})
+            self.assertEqual(
+                summary["tag_summary"],
+                {"missing-final": {"case_count": 2, "final_f1_avg": 0.5}},
+            )
 
     def test_attach_baseline_deltas_to_metrics_and_languages(self) -> None:
         results = [
@@ -96,6 +101,9 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
                 "language_summary": {
                     "ko": {"case_count": 2, "final_f1_avg": 0.5, "staged_residue_count": 3}
                 },
+                "tag_summary": {
+                    "missing-final": {"case_count": 2, "final_f1_avg": 0.5, "staged_residue_count": 3}
+                },
             },
             {
                 "label": "sentence_confirm_chunks-1",
@@ -103,6 +111,9 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
                 "metrics": {"final_f1_avg": 0.6, "finalized_per_stage_start": 0.8},
                 "language_summary": {
                     "ko": {"case_count": 2, "final_f1_avg": 0.4, "staged_residue_count": 1}
+                },
+                "tag_summary": {
+                    "missing-final": {"case_count": 2, "final_f1_avg": 0.6, "staged_residue_count": 2}
                 },
             },
         ]
@@ -118,6 +129,8 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
         self.assertAlmostEqual(updated[1]["metric_deltas"]["finalized_per_stage_start"], 0.1)
         self.assertAlmostEqual(updated[1]["language_deltas"]["ko"]["final_f1_avg"], -0.1)
         self.assertEqual(updated[1]["language_deltas"]["ko"]["staged_residue_count"], -2.0)
+        self.assertAlmostEqual(updated[1]["tag_deltas"]["missing-final"]["final_f1_avg"], 0.1)
+        self.assertEqual(updated[1]["tag_deltas"]["missing-final"]["staged_residue_count"], -1.0)
 
     def test_render_markdown_summary_includes_metric_and_language_deltas(self) -> None:
         payload = {
@@ -131,6 +144,8 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
                     "metric_deltas": {"final_f1_avg": 0.0},
                     "language_summary": {"ko": {"final_f1_avg": 0.5, "staged_residue_count": 3}},
                     "language_deltas": {"ko": {"final_f1_avg": 0.0, "staged_residue_count": 0.0}},
+                    "tag_summary": {"missing-final": {"case_count": 3, "final_f1_avg": 0.5}},
+                    "tag_deltas": {"missing-final": {"case_count": 0.0, "final_f1_avg": 0.0}},
                 },
                 {
                     "label": "sentence_confirm_chunks-1",
@@ -139,6 +154,8 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
                     "metric_deltas": {"final_f1_avg": 0.1},
                     "language_summary": {"ko": {"final_f1_avg": 0.4, "staged_residue_count": 1}},
                     "language_deltas": {"ko": {"final_f1_avg": -0.1, "staged_residue_count": -2.0}},
+                    "tag_summary": {"missing-final": {"case_count": 3, "final_f1_avg": 0.7}},
+                    "tag_deltas": {"missing-final": {"case_count": 0.0, "final_f1_avg": 0.2}},
                 },
             ],
         }
@@ -150,6 +167,9 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
         self.assertIn("0.6000 (+0.1000)", markdown)
         self.assertIn("0.4000 (-0.1000)", markdown)
         self.assertIn("1 (-2.0000)", markdown)
+        self.assertIn("## Tag Metrics", markdown)
+        self.assertIn("missing-final", markdown)
+        self.assertIn("0.7000 (+0.2000)", markdown)
 
     def test_paper_evidence_mode_requires_reviewed_finalization_case_target(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

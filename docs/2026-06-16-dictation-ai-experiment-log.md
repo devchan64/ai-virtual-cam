@@ -4813,3 +4813,275 @@ checked-in 기본값으로 채택된 `REVISION_FALLBACK_COVERAGE_MIN=0.55`의 �
 - 0.50은 boundary F1과 finalized/stage를 소폭 올리지만 precision과 final F1 손실이 더 크다.
 - 0.60/0.70은 final F1, recall, staged residue 측면에서 0.55보다 불리하다.
 - `REVISION_FALLBACK_COVERAGE_MIN=0.55`는 현재 corpus에서 가장 균형적인 checked-in 기본값으로 유지한다.
+
+### 2026-06-21 `REVISION_FALLBACK_COVERAGE_MIN` tag delta 재검증
+
+`tag_summary`와 `tag_deltas`가 추가된 뒤, checked-in 기본값 0.55의 근거를 실패 증상 태그별로 다시 확인했다. 비교 조건은 기존과 동일하게 0.50/0.60/0.70이며, 같은 1113건 paper-evidence case set에서 실제 `sat + cuda + float16`으로 실행했다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --paper-evidence \
+  --param REVISION_FALLBACK_COVERAGE_MIN=0.50 \
+  --param REVISION_FALLBACK_COVERAGE_MIN=0.60 \
+  --param REVISION_FALLBACK_COVERAGE_MIN=0.70 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-revision-fallback-tag-summary \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-revision-fallback-tag-summary/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-revision-fallback-tag-summary/summary.md
+```
+
+전체 delta:
+
+| 조건 | final F1 delta | precision delta | recall delta | boundary F1 delta | finalized/stage delta |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 0.50 | -0.0036 | -0.0071 | -0.0021 | +0.0017 | +0.0060 |
+| 0.60 | -0.0051 | -0.0045 | -0.0051 | +0.0015 | -0.0071 |
+| 0.70 | -0.0096 | -0.0077 | -0.0105 | +0.0017 | -0.0208 |
+
+주요 태그 delta:
+
+| 조건 | tag | final F1 delta | boundary F1 delta | staged residue delta | empty final delta |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 0.50 | `missing-final` | -0.0038 | +0.0018 | -4 | +3 |
+| 0.50 | `stage-queue` | -0.0042 | +0.0017 | -5 | +3 |
+| 0.50 | `cjk-internal-gap` | -0.0046 | +0.0017 | -4 | +3 |
+| 0.50 | `duplicate-final` | -0.0020 | -0.0012 | -2 | 0 |
+| 0.50 | `no-end-marker` | -0.0023 | +0.0000 | -2 | +1 |
+| 0.60 | `missing-final` | -0.0054 | +0.0016 | +9 | +8 |
+| 0.60 | `stage-queue` | -0.0059 | +0.0017 | +9 | +8 |
+| 0.60 | `cjk-internal-gap` | -0.0063 | +0.0018 | +9 | +8 |
+| 0.60 | `duplicate-final` | -0.0011 | +0.0003 | +8 | +1 |
+| 0.60 | `no-end-marker` | -0.0016 | +0.0000 | +4 | +1 |
+| 0.70 | `missing-final` | -0.0093 | +0.0020 | +18 | +9 |
+| 0.70 | `stage-queue` | -0.0093 | +0.0021 | +15 | +9 |
+| 0.70 | `cjk-internal-gap` | -0.0094 | +0.0021 | +16 | +9 |
+| 0.70 | `duplicate-final` | -0.0067 | -0.0003 | +15 | +1 |
+| 0.70 | `no-end-marker` | -0.0079 | -0.0008 | +8 | +2 |
+
+판단:
+
+- 0.50은 staged residue를 줄이지만 주요 실패군의 final F1을 모두 낮추고 empty final을 늘린다. boundary F1 소폭 상승만으로 기본값을 낮출 근거는 부족하다.
+- 0.60/0.70은 `stage-queue`, `cjk-internal-gap`, `duplicate-final`의 staged residue를 늘리고 final F1을 낮춘다. 특히 0.70은 missing/stage queue 계열에서 residue와 empty final이 모두 악화된다.
+- 따라서 tag delta 기준으로도 0.55 기본값 유지 판단은 유지된다. 이 결과는 “단일 final F1”뿐 아니라 실패 증상별 residual에서도 같은 결론을 지지한다.
+
+### 2026-06-21 `SENTENCE_CONFIRM_CHUNKS` tag delta 재검증
+
+`SENTENCE_CONFIRM_CHUNKS=1`은 전체 final F1만 보면 baseline보다 높지만 precision과 중국어 품질을 낮추는 문제가 있었다. `tag_summary` 기준으로 이 trade-off가 어떤 실패군에서 발생하는지 다시 확인했다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --paper-evidence \
+  --param SENTENCE_CONFIRM_CHUNKS=1 \
+  --param SENTENCE_CONFIRM_CHUNKS=3 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-sentence-confirm-tag-summary \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-sentence-confirm-tag-summary/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-sentence-confirm-tag-summary/summary.md
+```
+
+전체 delta:
+
+| 조건 | final F1 delta | precision delta | recall delta | boundary F1 delta | finalized/stage delta |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | +0.0119 | -0.0372 | +0.0438 | +0.0006 | +0.0751 |
+| 3 | -0.0124 | +0.0103 | -0.0235 | -0.0047 | -0.0299 |
+
+주요 태그 delta:
+
+| 조건 | tag | final F1 delta | precision delta | boundary F1 delta | staged residue delta | empty final delta |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | `missing-final` | +0.0110 | -0.0373 | -0.0006 | -104 | -21 |
+| 1 | `stage-queue` | +0.0042 | -0.0427 | -0.0049 | -89 | -17 |
+| 1 | `cjk-internal-gap` | +0.0038 | -0.0423 | -0.0060 | -83 | -17 |
+| 1 | `duplicate-final` | +0.0134 | -0.0304 | -0.0009 | -72 | -4 |
+| 1 | `no-end-marker` | +0.0221 | -0.0182 | -0.0056 | -33 | -2 |
+| 3 | `missing-final` | -0.0115 | +0.0117 | -0.0048 | +51 | +3 |
+| 3 | `stage-queue` | -0.0102 | +0.0114 | -0.0058 | +44 | +2 |
+| 3 | `cjk-internal-gap` | -0.0100 | +0.0115 | -0.0053 | +45 | +2 |
+| 3 | `duplicate-final` | -0.0128 | +0.0120 | -0.0024 | +36 | 0 |
+| 3 | `no-end-marker` | -0.0111 | +0.0148 | -0.0076 | +16 | +1 |
+
+언어별 핵심:
+
+- confirm=1은 영어/한국어 final F1을 올리지만 중국어 precision을 `-0.1524`, 중국어 final F1을 `-0.0286`, 중국어 boundary F1을 `-0.0278` 낮춘다.
+- confirm=3은 세 언어 모두에서 recall 또는 final F1을 낮추고 staged residue를 늘린다.
+
+판단:
+
+- confirm=1은 확정 누락과 queue 잔류를 줄이는 데 효과가 있지만, 주요 실패군 전반의 precision과 boundary F1을 낮춘다. final-only 번역 입력에서는 false final과 경계 오류가 번역 단위 오류로 전파되므로 기본값으로 채택하지 않는다.
+- confirm=3은 precision을 높이는 대신 확정 누락과 staged residue를 악화해 기본값으로 부적합하다.
+- 따라서 `SENTENCE_CONFIRM_CHUNKS=2` 유지 판단은 tag delta 기준으로도 유지된다. 이 축은 “더 빨리 확정할수록 좋아진다”가 아니라 “누락 감소와 false final/boundary 손실의 trade-off”로 해석해야 한다.
+
+### 2026-06-21 `SHORT_NO_END_FRAGMENT_UNITS` tag delta 재검증
+
+`tag_summary` 기준선에서 `no-end-marker`, `stage-queue`, `cjk-internal-gap`의 boundary F1이 낮게 나타났다. `SHORT_NO_END_FRAGMENT_UNITS`가 이 실패군에 직접 영향을 줄 가능성이 있으므로 주변값 3/5를 기본값 4와 비교했다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --paper-evidence \
+  --param SHORT_NO_END_FRAGMENT_UNITS=3 \
+  --param SHORT_NO_END_FRAGMENT_UNITS=5 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-short-no-end-tag-summary \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-short-no-end-tag-summary/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-short-no-end-tag-summary/summary.md
+```
+
+전체 delta:
+
+| 조건 | final F1 delta | precision delta | recall delta | boundary F1 delta | finalized/stage delta |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 3 | -0.0039 | -0.0073 | -0.0023 | +0.0012 | -0.0084 |
+| 5 | -0.0024 | -0.0006 | -0.0036 | -0.0008 | +0.0116 |
+
+주요 태그 delta:
+
+| 조건 | tag | final F1 delta | precision delta | boundary F1 delta | staged residue delta | empty final delta |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 3 | `missing-final` | -0.0041 | -0.0076 | +0.0013 | +12 | -1 |
+| 3 | `stage-queue` | -0.0054 | -0.0079 | -0.0001 | +12 | -1 |
+| 3 | `cjk-internal-gap` | -0.0053 | -0.0077 | +0.0000 | +12 | -1 |
+| 3 | `duplicate-final` | -0.0032 | -0.0056 | +0.0016 | +9 | 0 |
+| 3 | `no-end-marker` | -0.0030 | -0.0075 | -0.0007 | +4 | 0 |
+| 3 | `short-fragment` | +0.0436 | +0.0803 | +0.0565 | 0 | 0 |
+| 5 | `missing-final` | -0.0028 | -0.0011 | -0.0011 | -19 | 0 |
+| 5 | `stage-queue` | -0.0012 | -0.0005 | -0.0004 | -21 | -1 |
+| 5 | `cjk-internal-gap` | -0.0015 | -0.0006 | -0.0005 | -20 | -1 |
+| 5 | `duplicate-final` | -0.0025 | -0.0007 | -0.0010 | -11 | -1 |
+| 5 | `no-end-marker` | -0.0085 | -0.0099 | -0.0010 | -5 | +1 |
+| 5 | `short-fragment` | +0.0000 | +0.0000 | +0.0000 | 0 | 0 |
+
+판단:
+
+- units=3은 `short-fragment` 소수 태그에서 크게 개선되지만, `missing-final`, `stage-queue`, `cjk-internal-gap`, `duplicate-final`, `no-end-marker`처럼 큰 실패군의 final F1과 precision을 낮추고 staged residue를 늘린다.
+- units=5는 주요 실패군의 staged residue를 줄이는 장점이 있지만 final F1과 boundary F1을 낮춘다. 특히 직접 관찰 대상이었던 `no-end-marker`는 final F1, precision, boundary F1, empty final이 모두 악화한다.
+- 따라서 `SHORT_NO_END_FRAGMENT_UNITS=4` 기본값을 유지한다. no-end fragment 단일 게이트는 현재 corpus에서 주요 실패군을 안정적으로 개선하는 축이 아니다.
+
+### 2026-06-21 `MAX_STAGED_SENTENCE_QUEUE` tag delta 재검증
+
+staged queue 한도는 과거 152건 파일럿에서 긴 영어 케이스의 `stage_queue_drop_oldest`를 줄이는 데 의미가 있었다. 1113건 paper-evidence case set에서는 기본값 20이 충분한지, 12/30 주변값을 `tag_summary` 기준으로 다시 확인했다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --paper-evidence \
+  --param MAX_STAGED_SENTENCE_QUEUE=12 \
+  --param MAX_STAGED_SENTENCE_QUEUE=30 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-max-staged-queue-tag-summary \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-max-staged-queue-tag-summary/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-max-staged-queue-tag-summary/summary.md
+```
+
+전체 delta:
+
+| 조건 | final F1 delta | precision delta | recall delta | boundary F1 delta | finalized/stage delta |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 12 | -0.0005 | -0.0002 | -0.0006 | -0.0001 | -0.0008 |
+| 30 | +0.0000 | +0.0000 | +0.0000 | +0.0000 | +0.0000 |
+
+queue lifecycle counter:
+
+| 조건 | stage_queue_drop_oldest | stage_queue_enqueue | stage_queue_promote | stage_queue_revision |
+| --- | ---: | ---: | ---: | ---: |
+| 20 baseline | 0 | 4257 | 3434 | 3961 |
+| 12 | 19 | 4266 | 3420 | 3979 |
+| 30 | 0 | 4257 | 3434 | 3961 |
+
+주요 태그 delta:
+
+| 조건 | tag | final F1 delta | boundary F1 delta | staged residue delta | empty final delta |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 12 | `missing-final` | -0.0003 | -0.0002 | 0 | 0 |
+| 12 | `stage-queue` | -0.0006 | -0.0001 | 0 | 0 |
+| 12 | `cjk-internal-gap` | +0.0000 | +0.0000 | 0 | 0 |
+| 12 | `duplicate-final` | +0.0000 | +0.0000 | 0 | 0 |
+| 12 | `no-end-marker` | +0.0000 | +0.0000 | 0 | 0 |
+| 30 | `missing-final` | +0.0000 | +0.0000 | 0 | 0 |
+| 30 | `stage-queue` | +0.0000 | +0.0000 | 0 | 0 |
+| 30 | `cjk-internal-gap` | +0.0000 | +0.0000 | 0 | 0 |
+| 30 | `duplicate-final` | +0.0000 | +0.0000 | 0 | 0 |
+| 30 | `no-end-marker` | +0.0000 | +0.0000 | 0 | 0 |
+
+판단:
+
+- queue=12는 `stage_queue_drop_oldest=19`를 만들고 전체 final F1을 아주 소폭 낮춘다. 태그별 주요 실패군의 staged residue는 움직이지 않지만, 오래된 후보 drop이 다시 생기므로 기본값으로 낮출 근거가 없다.
+- queue=30은 baseline 20과 metric/counter가 동일하다. 현재 1113건 corpus에서는 20 이상에서 효과가 포화된다.
+- 따라서 `MAX_STAGED_SENTENCE_QUEUE=20`을 유지한다. 이 값은 공격적 성능 개선축이 아니라 긴 window에서 후보를 조기 폐기하지 않기 위한 보수적 하한으로 해석한다.
+
+### 2026-06-21 실패 증상 태그별 summary 추가
+
+현재 paper-evidence case set은 일반 발화 분포가 아니라 앱 로그에서 반복 관측된 확정 누락, 중복 확정, stage queue 잔류, no-end fragment 같은 실패 증상을 의도적으로 모은 replay corpus다. 따라서 전체 평균과 언어별 평균만으로는 파라미터 변경이 어떤 실패군을 개선했는지 해석하기 어렵다.
+
+변경:
+
+- `sbd_benchmark.py` report payload에 `tag_summary`를 추가했다.
+- `tag_summary`는 `language_summary`와 같은 지표를 case tag별로 집계한다.
+- 언어/로그/주제 태그는 제외하고 진단 키워드가 있는 태그만 집계한다.
+- `run_sbd_parameter_sweep.py` summary에 `tag_summary`와 baseline 대비 `tag_deltas`를 포함했다.
+- Markdown summary에는 case 수가 많은 상위 태그의 지표를 함께 출력한다.
+- `dictation_tuning_protocol`의 diagnostic metric에 `tag_summary symptom counters`를 추가했다.
+
+의도:
+
+- `missing-final`, `duplicate-final`, `stage-queue`, `no-end-marker` 같은 관측 증상별로 final F1, boundary F1, staged residue, empty final 변화를 추적한다.
+- 전체 final F1이 오르더라도 특정 실패군의 precision 또는 boundary 품질이 악화되면 기본값 채택을 보류할 수 있게 한다.
+- 논문에서는 이 값을 일반 성능 지표가 아니라 실패 중심 replay corpus의 해석 보조 지표로 사용한다.
+
+판단:
+
+- 이번 변경은 문장 확정 로직을 바꾸지 않는다.
+- 후속 sweep에서 `metric_deltas`, `language_deltas`, `tag_deltas`를 함께 비교하면 파라미터 채택/기각 사유를 더 짧게 재현할 수 있다.
+
+실제 검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --paper-evidence \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-tag-summary-baseline \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-tag-summary-baseline/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-tag-summary-baseline/summary.md
+```
+
+전체 기준선은 기존 1113건 paper-evidence 값과 동일하게 재현됐다.
+
+```text
+cases=1113
+finalized=4012
+stage_start=5638
+finalized_per_stage_start=0.712
+final_precision_avg=0.602
+final_recall_avg=0.440
+final_f1_avg=0.483
+final_boundary_f1_avg=0.108
+case_exact_match=17
+pending_exact_match=602
+staged_exact_match=406
+```
+
+주요 진단 태그 기준선:
+
+| tag | cases | final F1 | boundary F1 | staged residue | empty final |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `missing-final` | 1079 | 0.4759 | 0.1008 | 683 | 93 |
+| `stage-queue` | 974 | 0.4553 | 0.0767 | 620 | 85 |
+| `cjk-internal-gap` | 948 | 0.4475 | 0.0746 | 594 | 85 |
+| `duplicate-final` | 673 | 0.4883 | 0.0939 | 444 | 15 |
+| `no-end-marker` | 304 | 0.4317 | 0.0675 | 205 | 15 |
+| `boundary-mismatch` | 12 | 0.7489 | 0.1176 | 11 | 0 |
+| `duplicate-output` | 11 | 0.4250 | 0.1495 | 11 | 0 |
+| `staged-residue` | 19 | 0.7511 | 0.1441 | 18 | 0 |
+
+해석:
+
+- `stage-queue`, `cjk-internal-gap`, `no-end-marker` 태그는 전체 boundary F1보다 낮아, 다음 파라미터/로직 검토에서 우선 관찰할 실패군이다.
+- `missing-final`과 `stage-queue`는 케이스 수와 staged residue가 모두 커서 평균값을 크게 좌우한다.
+- 이 지표는 태그별 corpus가 겹칠 수 있으므로 독립 표본의 평균으로 해석하지 않는다. 같은 케이스가 여러 실패 증상을 가질 수 있고, 목적은 파라미터 변경 시 어떤 실패 증상군이 움직였는지 관찰하는 것이다.
