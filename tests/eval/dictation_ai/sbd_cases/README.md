@@ -6,9 +6,12 @@
 ## 운영 규칙
 
 - JSONL 파일만 benchmark 입력으로 사용한다.
-- 케이스 파일은 `manual-reviewed/`, `auto-groups/`처럼 하위 디렉터리로 나눌 수 있다.
+- 케이스 파일은 `en/`, `ko/`, `zh/` 언어별 하위 디렉터리에 둔다.
+- 각 언어 디렉터리의 파일은 case id 해시 prefix shard인 `reviewed-context-{language}-{hash}.jsonl` 형식을 따른다.
 - `tests/eval/dictation_ai/sbd_benchmark.py`는 이 디렉터리 아래 `*.jsonl`을 재귀적으로 읽는다.
 - `draft_expected_final_required=true`가 남은 draft 파일은 이 디렉터리에 넣지 않는다.
+- 정식 finalization benchmark case의 `chunks`는 실제 STT 컨텍스트 윈도우 처리 결과로 본다.
+- benchmark의 목표는 이 입력에서 문장 경계와 final lifecycle을 산출하고, 그 결과가 확정한 `expected_final`과 충분히 유사한지 평가하는 것이다.
 - 정식 finalization benchmark case는 앱 로그에서 관측된 lifecycle 실패 현상과 확정한 `expected_final`이 모두 있어야 한다.
 - 실패 현상은 확정 누락, 중복 확정, 문장 순서 파괴, premature fragment final, staged/pending 잔류, 최근 final echo처럼 final-only 번역 입력을 오염시키는 동작을 기준으로 본다.
 - raw STT 자체가 해석 불가능하거나 입력 음성과 무관한 경우, 연속 window 문맥이 부족한 경우, 사람이 봐도 하나의 `expected_final`을 정하기 어려운 경우, 같은 로그 구간의 거의 동일한 반복 후보는 정식 케이스로 승격하지 않는다.
@@ -16,8 +19,11 @@
 
 ## 현재 배치
 
-- `manual-reviewed/`: 기존 수동 reviewed 로그 케이스를 언어별로 분리한 파일.
-- `auto-groups/`: 이전 그룹 평가 결과로 생성된 reviewed case 파일. 수집/검토/승격 도구는 폐기되었으므로 새 케이스는 검토한 JSONL로 직접 추가한다.
+- `en/`: 영어 STT 컨텍스트 윈도우 reviewed case shard.
+- `ko/`: 한국어 STT 컨텍스트 윈도우 reviewed case shard.
+- `zh/`: 중국어 STT 컨텍스트 윈도우 reviewed case shard.
+
+파일명 해시는 케이스를 작은 JSONL shard로 나누기 위한 저장 단위일 뿐 실험 의미를 갖지 않는다. 수집/검토/승격 도구는 폐기되었으므로 새 케이스는 언어별 shard JSONL에 직접 추가한다.
 
 ## 검증 예
 

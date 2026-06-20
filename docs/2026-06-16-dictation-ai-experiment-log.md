@@ -3495,9 +3495,9 @@ iteration 3: .tmp/logs/avc-whisper.log=402, avc-whisper.log.18=61
 - `excluded` 또는 `rejected` 상태는 승격하지 않으며, 리포트의 `excluded_count`와 `skipped_status_counts`로만 집계한다.
 - 이 집계는 검토 운영 지표이며 논문 성능 수치가 아니다.
 
-### 2026-06-20 그룹 기반 후보 평가와 자동 정식 케이스 분리
+### 2026-06-20 그룹 기반 후보 평가 중간 실험
 
-후보 1000건을 개별 라벨링하면 검토 속도가 너무 느리다. 따라서 work item을 같은 근거를 가진 그룹으로 묶고, 그룹과 개별 항목이 모두 기준을 넘을 때 자동으로 정식 reviewed case로 분리하는 구조를 추가했다.
+후보 1000건을 개별 라벨링하면 검토 속도가 너무 느리다. 따라서 work item을 같은 근거를 가진 그룹으로 묶고, 그룹과 개별 항목이 모두 기준을 넘을 때 자동으로 정식 reviewed case로 분리하는 구조를 실험했다.
 
 그룹 기준:
 
@@ -3528,31 +3528,7 @@ observed status signal 있음: +1
 review_work_source=suggested_expected_final: +1
 ```
 
-검증 실행:
-
-```text
-./.venv/bin/python tests/eval/dictation_ai/run_sbd_case_workflow.py --group-review-work-items
-```
-
-동일 동작의 세부 명령:
-
-```text
-./.venv/bin/python tests/eval/dictation_ai/group_sbd_review_work_items.py \
-  '.tmp/eval/dictation-ai-sbd/review-work-items.part-*.jsonl' \
-  --output .tmp/eval/dictation-ai-sbd/review-work-item-groups.json \
-  --markdown-output .tmp/eval/dictation-ai-sbd/review-work-item-groups.md \
-  --auto-accept-output .tmp/eval/dictation-ai-sbd/auto-accepted-review-work-items.jsonl \
-  --promoted-group-dir tests/eval/dictation_ai/sbd_cases/auto-groups \
-  --existing tests/eval/dictation_ai/sbd_text_cases.sample.jsonl tests/eval/dictation_ai/sbd_cases \
-  --summary-output .tmp/eval/dictation-ai-sbd/review-work-item-groups-summary.json
-
-./.venv/bin/python tests/eval/dictation_ai/validate_sbd_case_files.py \
-  tests/eval/dictation_ai/sbd_text_cases.sample.jsonl \
-  tests/eval/dictation_ai/sbd_cases \
-  --min-expected-final-cases 1000 \
-  --max-drafts 0 \
-  --summary-output .tmp/eval/dictation-ai-sbd/reviewed-with-auto-groups-summary.json
-```
+검증 실행은 `run_sbd_case_workflow.py --group-review-work-items`와 관련 helper로 수행했다. 이 도구군은 이후 폐기했으므로 현재 유효한 케이스 관리 경로로 사용하지 않는다.
 
 결과:
 
@@ -3571,8 +3547,9 @@ language_counts: en=427, ko=461, zh=220
 
 판단:
 
-- 단일 reviewed 파일에 누적하는 대신 `tests/eval/dictation_ai/sbd_cases/auto-groups/`에 그룹별 JSONL을 생성했다.
+- 단일 reviewed 파일에 누적하는 대신 당시에는 임시 그룹 디렉터리에 JSONL을 생성했다. 이후 저장 기준을 언어별 디렉터리와 case id 해시 shard로 정리했다.
 - validator와 benchmark loader는 디렉터리 하위 JSONL을 재귀적으로 읽도록 변경했다.
+- 케이스의 `chunks`는 실제 STT 컨텍스트 윈도우 처리 결과로 해석한다. 이 데이터의 목표는 해당 입력에서 경계를 산출했을 때 `expected_final`과 유사한 final 문장이 도출되는지 실험하는 것이며, 자동 생성 정답으로 취급하지 않는다.
 - 자동 등록은 `suggested_expected_final`과 observed final reference가 있는 항목으로 제한된다. `empty_template` 51건과 그룹/항목 기준 미달 후보는 자동 등록되지 않았다.
 - 이 데이터셋은 1000건 이상의 finalization benchmark 입력을 제공하지만, 성능 수치 근거는 별도 `sat + cuda + float16` benchmark 실행 결과로만 기록한다.
 
@@ -3584,17 +3561,17 @@ language_counts: en=427, ko=461, zh=220
 
 - `sbd_text_cases.sample.jsonl`은 최소 seed 샘플만 유지한다.
 - 실제 로그 기반 reviewed case는 `tests/eval/dictation_ai/sbd_cases/` 아래에 둔다.
-- 기존 수동 reviewed 로그 케이스는 `tests/eval/dictation_ai/sbd_cases/manual-reviewed/`에 언어별 JSONL로 분리한다.
-- 자동 그룹 등록 케이스는 기존처럼 `tests/eval/dictation_ai/sbd_cases/auto-groups/`에 둔다.
+- 기존 수동 reviewed 로그 케이스와 그룹 기준으로 정리한 로그 케이스는 같은 의미의 STT 컨텍스트 윈도우 입력이므로 최종 저장 구조에서는 나누지 않는다.
+- 정식 케이스는 `tests/eval/dictation_ai/sbd_cases/{en,ko,zh}/` 아래 언어별, case id 해시 shard JSONL로 둔다.
 - benchmark와 validator는 sample 파일과 `sbd_cases/` 디렉터리를 함께 읽으므로 전체 케이스 수는 유지한다.
 
 분리 결과:
 
 ```text
 sbd_text_cases.sample.jsonl: 3
-sbd_cases/manual-reviewed/reviewed-log-en.jsonl: 55
-sbd_cases/manual-reviewed/reviewed-log-ko.jsonl: 78
-sbd_cases/manual-reviewed/reviewed-log-zh.jsonl: 28
+sbd_cases/en/*.jsonl
+sbd_cases/ko/*.jsonl
+sbd_cases/zh/*.jsonl
 ```
 
 검증 결과:
@@ -3609,7 +3586,7 @@ language_counts: en=427, ko=461, zh=220
 판단:
 
 - sample 파일은 더 이상 로그 기반 케이스 누적 대상이 아니다.
-- 정식 benchmark case 저장소는 `sbd_cases/`이며, 수동 reviewed와 자동 그룹 reviewed를 하위 디렉터리로 구분한다.
+- 정식 benchmark case 저장소는 `sbd_cases/`이며, 수동 reviewed와 그룹 정리 산출물을 별도 의미 그룹으로 나누지 않는다. 저장 그룹은 언어이고, 파일명 해시는 shard 용도다.
 - 이번 정리는 데이터 배치 정리이며 성능 수치 근거가 아니다. 성능 근거는 동일 케이스 집합을 실제 `sat + cuda + float16`으로 실행한 benchmark 결과로만 기록한다.
 
 ### 2026-06-20 수집/검토/승격 도구 폐기
@@ -3640,7 +3617,7 @@ report_sbd_monitor_history.py
 판단:
 
 - 자동화 도구로 후보를 승격하는 구조는 논문 목표를 흐릴 수 있으므로 폐기한다.
-- 기존 `sbd_cases/auto-groups/`의 JSONL은 이전 그룹 평가 산출물로 유지하되, 이후 새 케이스는 확인한 reviewed JSONL로 직접 추가한다.
+- 기존 그룹 산출 JSONL은 실제 STT 컨텍스트 윈도우 입력을 그룹화한 benchmark case로 유지하되, 최종 저장은 `sbd_cases/{en,ko,zh}/reviewed-context-{language}-{hash}.jsonl` 구조로 정리한다. 이후 새 케이스도 같은 언어별 shard JSONL로 직접 추가한다.
 - 성능 근거는 도구 수집량이 아니라 reviewed case 집합을 실제 AI/CUDA 벤치로 실행한 결과로만 기록한다.
 
 ### 2026-06-20 draft 후보 5건 수동 승격
@@ -3657,7 +3634,7 @@ report_sbd_monitor_history.py
 추가 파일:
 
 ```text
-tests/eval/dictation_ai/sbd_cases/manual-reviewed/reviewed-log-promoted-20260620.jsonl
+tests/eval/dictation_ai/sbd_cases/{en,ko,zh}/reviewed-context-{language}-{hash}.jsonl
 ```
 
 검증 결과:
@@ -3682,7 +3659,7 @@ manual_promoted_count=5
 이관 파일:
 
 ```text
-tests/eval/dictation_ai/sbd_cases/manual-reviewed/reviewed-lifecycle-seed.jsonl
+tests/eval/dictation_ai/sbd_cases/{en,ko,zh}/reviewed-context-{language}-{hash}.jsonl
 ```
 
 정리 기준:
@@ -3692,3 +3669,25 @@ tests/eval/dictation_ai/sbd_cases/manual-reviewed/reviewed-lifecycle-seed.jsonl
 - sample 파일을 함께 넘기던 검증/벤치 명령 예시는 폐기한다.
 
 검증 기준은 sample 폐기 전후 모두 동일하게 `sbd_cases/**/*.jsonl` 전체 로딩과 중복 id/draft marker 확인이다.
+
+### 2026-06-20 케이스 저장 구조 재정리
+
+수동 reviewed 파일과 그룹 기반 중간 산출물을 별도 디렉터리로 나누면 검토 방식이 데이터 의미처럼 보인다. 실제 의미는 모두 동일하게 "실제 STT 컨텍스트 윈도우 입력에서 문장 경계와 final lifecycle을 산출해 `expected_final`과 비교하는 benchmark case"다.
+
+최종 저장 기준:
+
+- 저장 그룹은 언어뿐이다.
+- `tests/eval/dictation_ai/sbd_cases/en/`, `ko/`, `zh/` 아래에 둔다.
+- 파일은 case id의 SHA-1 prefix 1글자로 나눈 `reviewed-context-{language}-{hash}.jsonl` shard다.
+- 파일명 해시는 저장 단위일 뿐 실험 의미를 갖지 않는다.
+- benchmark와 validator는 `sbd_cases/**/*.jsonl`을 재귀 로딩하므로 언어별 shard 구조를 그대로 사용한다.
+
+재정리 결과:
+
+```text
+jsonl_file_count=48
+case_count=1113
+expected_final_case_count=1109
+draft_count=0
+language_counts: en=429, ko=462, zh=222
+```

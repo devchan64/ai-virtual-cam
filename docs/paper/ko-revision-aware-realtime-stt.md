@@ -103,13 +103,13 @@ Whisper 계열 모델은 강력한 오프라인 전사 성능을 보이지만, �
 
 ## 7. 평가 설계와 지표
 
-본 연구의 실험 단위는 공개 코퍼스의 오프라인 ASR 점수가 아니라, 실제 애플리케이션에서 반복 관측된 실시간 실패 구간이다. 운영 로그에서 확정 누락, 중복 확정, 문장 파괴, staged queue 잔류, no-end fragment final, 최근 final echo가 보이는 구간을 수집하고, 각 구간의 연속 STT window 출력과 기대 final 문장을 `tests/eval/dictation_ai/sbd_cases/` 아래 그룹별 JSONL로 누적한다. 이 케이스 집합은 `tests/eval/dictation_ai/sbd_benchmark.py`가 replay하며, 실제 SaT 모델을 `cuda + float16`으로 실행해 문장 후보 생성과 revision lifecycle을 함께 평가한다. 런타임 임계값은 `src/app/dictation_pipeline_settings.py`에 모아 관리하고, 값 변경은 벤치 결과와 함께 실험일지에 기록한다.
+본 연구의 실험 단위는 공개 코퍼스의 오프라인 ASR 점수가 아니라, 실제 애플리케이션에서 반복 관측된 실시간 실패 구간이다. 운영 로그에서 확정 누락, 중복 확정, 문장 파괴, staged queue 잔류, no-end fragment final, 최근 final echo가 보이는 구간을 수집하고, 각 구간의 연속 STT window 출력과 기대 final 문장을 `tests/eval/dictation_ai/sbd_cases/{en,ko,zh}/` 아래 언어별 JSONL shard로 누적한다. 여기서 `chunks`는 실제 STT 컨텍스트 윈도우 처리 결과이며, 실험 목표는 이 입력으로부터 문장 경계와 final lifecycle을 산출해 확정한 `expected_final`과 유사한 final 문장이 도출되는지 평가하는 것이다. 이 케이스 집합은 `tests/eval/dictation_ai/sbd_benchmark.py`가 replay하며, 실제 SaT 모델을 `cuda + float16`으로 실행해 문장 후보 생성과 revision lifecycle을 함께 평가한다. 런타임 임계값은 `src/app/dictation_pipeline_settings.py`에 모아 관리하고, 값 변경은 벤치 결과와 함께 실험일지에 기록한다.
 
 실험 프로토콜은 다음 원칙을 따른다.
 
 - 벤치는 실제 `sat + cuda + float16` 경로로만 실행한다. mock, smoke, CPU 실행은 성능 근거로 쓰지 않는다.
 - 샘플은 성공해야 하는 단위 테스트가 아니라 로그에서 관측된 실패 현상을 재현하는 성능 추적 자료다.
-- 케이스는 앱 로그의 연속 STT window에서 수집하고, `expected_final`을 확정한 JSONL만 benchmark 입력으로 사용한다. 수집/검토/승격 자동화 도구는 현재 연구 범위에서 폐기하고, 케이스 데이터 자체만 `tests/eval/dictation_ai/sbd_cases/` 아래에 그룹별로 보관한다.
+- 케이스는 앱 로그의 연속 STT window에서 수집하고, `expected_final`을 확정한 JSONL만 benchmark 입력으로 사용한다. 케이스의 저장 그룹은 언어이며, 파일명 해시는 큰 컨텍스트 입력을 작은 shard로 나누기 위한 저장 단위다. 수집/검토/승격 자동화 도구는 현재 연구 범위에서 폐기하고, 케이스 데이터 자체만 `tests/eval/dictation_ai/sbd_cases/` 아래에 보관한다.
 - 케이스가 많아지면 JSONL 파일과 하위 디렉터리로 분할한다. 벤치는 단일 파일, 여러 파일, glob, 디렉터리를 입력받아 재귀적으로 로딩하고, 중복 case id와 draft marker는 실패로 처리한다.
 - pending/staged 전용 benchmark case는 `expected_final=[]`일 수 있으므로, finalization 목표 수량은 비어 있지 않은 `expected_final` 케이스 수로 별도 검증한다.
 - 성능 수치는 reviewed JSONL을 실제 `sat + cuda + float16` 벤치 또는 parameter sweep으로 실행한 결과만 사용한다. 수집 과정의 운영 편의 지표는 논문 성능 수치로 사용하지 않는다.
