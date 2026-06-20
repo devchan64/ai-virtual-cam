@@ -63,6 +63,7 @@ AVC_TENSORRT_ENGINE_URL="https://example.com/person-segmentation.engine" ./bin/a
 받아쓰기 AI 실행/번역 테스트 설정 GUI 샘플:
 
 - 샘플 파일: [`docs/images/whisper-config-runtime-sample.png`](docs/images/whisper-config-runtime-sample.png)
+- 시연 영상: [받아쓰기 AI 전사/번역 데모](https://youtu.be/ZO83ScviLk0)
 - 설명: `받아쓰기 AI` 탭에서 STT 입력 장치, 언어별 STT 백엔드/모델, 단일 인식 언어, NLLB 번역 백엔드, 번역 대상 언어, CUDA 장치/연산 타입, 청크 길이/Beam 크기를 함께 설정하고 실행 결과 창을 확인하는 예시입니다.
 - 테스트 설정 의도: STT와 번역 모두 로컬 모델로 처리하며, 실시간성 확보를 위해 GPU 실행(`cuda`)과 반정밀도 연산(`float16`)을 사용합니다.
 
