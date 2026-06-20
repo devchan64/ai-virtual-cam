@@ -3691,3 +3691,230 @@ expected_final_case_count=1109
 draft_count=0
 language_counts: en=429, ko=462, zh=222
 ```
+
+### 2026-06-20 언어별 shard 기준 paper-evidence baseline
+
+언어별 shard 구조가 benchmark loader에서 그대로 동작하는지 검증하고, 같은 case set을 실제 `sat + cuda + float16`으로 실행했다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_case_files.py \
+  tests/eval/dictation_ai/sbd_cases \
+  --min-expected-final-cases 1000 \
+  --max-drafts 0
+
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --dry-run \
+  --paper-evidence \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/language-shards-dry-run-summary.json
+```
+
+검증 결과:
+
+```text
+case_count=1113
+expected_final_case_count=1109
+draft_count=0
+language_counts: en=429, ko=462, zh=222
+default_loader_case_count=1113
+default_loader_source_count=48
+```
+
+실제 벤치:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --paper-evidence \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-language-shards-baseline \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-language-shards-baseline/summary.json
+```
+
+sandbox 내부 실행은 `wtpsplit/SaT` 초기화 중 `facebookAI/xlm-roberta-base` tokenizer 확인이 Hugging Face DNS 제한에 걸려 실패했다. CPU/mock fallback은 사용하지 않고, 동일 명령을 sandbox 밖에서 실행했다.
+
+결과:
+
+```text
+cases=1113
+finalized=3986
+stage_start=5658
+finalized_per_stage_start=0.704
+final_precision_avg=0.597
+final_recall_avg=0.435
+final_f1_avg=0.478
+final_similarity_coverage_avg=0.389
+final_boundary_f1_avg=0.109
+case_exact_match=17
+pending_exact_match=602
+staged_exact_match=397
+```
+
+판단:
+
+- 이 결과를 최신 paper-evidence baseline으로 둔다.
+- 164건 파일럿 기준선의 `final_f1_avg=0.688`, `final_boundary_f1_avg=0.298`보다 낮지만, case set 난도가 달라 직접 성능 하락으로 해석하지 않는다.
+- 1113건 기준선은 확정 누락과 boundary mismatch가 더 많이 포함된 실패 중심 corpus의 현재 상태를 보여준다.
+- 이후 파라미터/로직 개선은 반드시 같은 1113건 case set에서 baseline과 비교한다.
+
+### 2026-06-20 `SENTENCE_CONFIRM_CHUNKS` paper-evidence sweep
+
+같은 1113건 case set에서 일반 후보 확정 confirmation 수만 바꿔 비교했다. 기준선은 checked-in 기본값 `SENTENCE_CONFIRM_CHUNKS=2`다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --paper-evidence \
+  --param SENTENCE_CONFIRM_CHUNKS=1 \
+  --param SENTENCE_CONFIRM_CHUNKS=3 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-sentence-confirm-chunks \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-sentence-confirm-chunks/summary.json
+```
+
+결과:
+
+| 값 | finalized | stage_start | finalized/stage | precision | recall | final F1 | boundary F1 | case exact |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 4854 | 6202 | 0.783 | 0.563 | 0.482 | 0.493 | 0.110 | 21 |
+| 2 baseline | 3986 | 5658 | 0.704 | 0.597 | 0.435 | 0.478 | 0.109 | 17 |
+| 3 | 3695 | 5472 | 0.675 | 0.609 | 0.412 | 0.467 | 0.105 | 25 |
+
+판단:
+
+- `SENTENCE_CONFIRM_CHUNKS=1`은 recall과 final F1을 올리지만 precision을 낮추고 finalized 수를 크게 늘린다.
+- `SENTENCE_CONFIRM_CHUNKS=3`은 precision과 case exact는 오르지만 recall/final F1/boundary F1이 낮아진다.
+- 케이스별로는 `SENTENCE_CONFIRM_CHUNKS=1`에서 F1 개선 188건, 악화 188건, 동일 737건이었다. 평균 finalized는 케이스당 `+0.780`, no-end final marker는 `+0.185`, duplicate suppression counter는 `+3.664` 증가했다.
+- 대표 개선은 `ko_log_mixed_lost_decades_abe_fragment_20260618_001`, `ko_log_mixed_interest_parity_dollar_fragment_20260618_001`처럼 baseline에서 확정 누락되던 한국어 mixed-context 케이스다.
+- 대표 악화는 `zh_log_draft_20260620_avc_whisper_log_11_000947`, `zh_log_draft_20260620_avc_whisper_log_11_000950`, `ko_log_draft_20260620_avc_whisper_log_002947`처럼 기존에는 적은 final로 맞던 케이스에서 추가 final이 precision과 boundary를 낮춘 경우다.
+- 현재 논문 목적은 final-only 번역 입력 안정화이므로, 단순 final F1만 보고 `1`로 낮추면 중복 확정 또는 premature final 위험이 커질 수 있다.
+- 기본값 변경은 보류한다. 다음 비교는 `SENTENCE_CONFIRM_CHUNKS=1`에서 duplicate/final-quality counter와 대표 실패 케이스를 함께 확인한 뒤 판단한다.
+
+### 2026-06-20 `SHORT_NO_END_FRAGMENT_UNITS` paper-evidence sweep
+
+`SENTENCE_CONFIRM_CHUNKS=1`에서 no-end final marker가 증가했으므로, no-end fragment 품질축을 별도로 확인했다. 기준선은 checked-in 기본값 `SHORT_NO_END_FRAGMENT_UNITS=4`다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --paper-evidence \
+  --param SHORT_NO_END_FRAGMENT_UNITS=3 \
+  --param SHORT_NO_END_FRAGMENT_UNITS=5 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-short-no-end-fragment \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-short-no-end-fragment/summary.json
+```
+
+결과:
+
+| 값 | finalized | stage_start | finalized/stage | precision | recall | final F1 | boundary F1 | case exact |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3 | 4014 | 5754 | 0.698 | 0.591 | 0.433 | 0.475 | 0.110 | 19 |
+| 4 baseline | 3986 | 5658 | 0.704 | 0.597 | 0.435 | 0.478 | 0.109 | 17 |
+| 5 | 3956 | 5544 | 0.714 | 0.598 | 0.430 | 0.475 | 0.109 | 16 |
+
+판단:
+
+- `SHORT_NO_END_FRAGMENT_UNITS=3`과 `5` 모두 기본값 4보다 final F1이 낮다.
+- `5`는 finalized/stage와 precision이 아주 소폭 오르지만 recall, final F1, case exact가 낮아진다.
+- no-end threshold 단독 변경은 `SENTENCE_CONFIRM_CHUNKS=1`의 precision 손실을 상쇄할 근거가 되지 않는다.
+- 기본값 변경은 보류한다.
+
+### 2026-06-20 `SENTENCE_CONFIRM_CHUNKS=1` + no-end 조합 벤치
+
+단일 sweep에서 `SENTENCE_CONFIRM_CHUNKS=1`은 final F1을 올렸지만 precision을 낮췄다. 따라서 no-end fragment threshold와 조합해 precision 손실을 줄일 수 있는지 확인했다.
+
+실행:
+
+```text
+AVC_DICTATION_SENTENCE_CONFIRM_CHUNKS=1 \
+AVC_DICTATION_SHORT_NO_END_FRAGMENT_UNITS=3 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-confirm1-noend-combo/confirm1-noend3.json
+
+AVC_DICTATION_SENTENCE_CONFIRM_CHUNKS=1 \
+AVC_DICTATION_SHORT_NO_END_FRAGMENT_UNITS=5 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-confirm1-noend-combo/confirm1-noend5.json
+```
+
+결과:
+
+| 조건 | finalized | stage_start | finalized/stage | precision | recall | final F1 | boundary F1 | case exact |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| confirm=1 | 4854 | 6202 | 0.783 | 0.563 | 0.482 | 0.493 | 0.110 | 21 |
+| confirm=1, noend=3 | 4890 | 6353 | 0.770 | 0.559 | 0.481 | 0.490 | 0.110 | 22 |
+| confirm=1, noend=5 | 4840 | 6046 | 0.801 | 0.568 | 0.481 | 0.494 | 0.109 | 20 |
+| baseline | 3986 | 5658 | 0.704 | 0.597 | 0.435 | 0.478 | 0.109 | 17 |
+
+판단:
+
+- `confirm=1, noend=5`는 `confirm=1` 단독보다 final F1과 precision을 아주 소폭 올리지만, baseline 대비 precision 손실은 여전히 크다.
+- `confirm=1, noend=3`은 단독 `confirm=1`보다 악화된다.
+- 조합 변경은 확정 누락 완화 가능성을 보여주지만 final-only 번역 입력 안정화 기준에서는 false final 위험을 충분히 줄이지 못했다.
+- 기본값 변경은 보류한다. 향후에는 confirmation 수를 낮추기보다, 이미 늘어난 final 후보 중 어떤 후보를 recent final memory/no-end 품질 정책으로 억제할지 별도 로직 근거가 필요하다.
+
+### 2026-06-20 `MAX_STAGED_SENTENCE_QUEUE` paper-evidence sweep
+
+1113건 corpus에는 `stage-queue` 태그가 많으므로 queue 크기가 전체 성능에 영향을 주는지 확인했다. 기준선은 checked-in 기본값 `MAX_STAGED_SENTENCE_QUEUE=20`이다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --paper-evidence \
+  --param MAX_STAGED_SENTENCE_QUEUE=10 \
+  --param MAX_STAGED_SENTENCE_QUEUE=30 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-max-staged-queue \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-max-staged-queue/summary.json
+```
+
+결과:
+
+| 값 | finalized | stage_start | finalized/stage | precision | recall | final F1 | boundary F1 | case exact |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 10 | 3989 | 5654 | 0.706 | 0.597 | 0.435 | 0.478 | 0.109 | 17 |
+| 20 baseline | 3986 | 5658 | 0.704 | 0.597 | 0.435 | 0.478 | 0.109 | 17 |
+| 30 | 3986 | 5658 | 0.704 | 0.597 | 0.435 | 0.478 | 0.109 | 17 |
+
+판단:
+
+- 1113건 전체 기준에서는 queue 크기 10/20/30이 사실상 동일하다.
+- 이전 소규모 케이스에서 queue 20이 특정 장문 케이스를 개선했지만, 현재 전체 corpus 기준으로 30까지 늘릴 근거는 없다.
+- 기본값 20을 유지한다.
+
+### 2026-06-20 `SENTENCE_CONFIRM_MAX_AGE_CHUNKS` paper-evidence sweep
+
+일반 후보가 오래 머무를 때 age 상한이 확정 누락 또는 중복 확정에 영향을 주는지 확인했다. 기준선은 checked-in 기본값 `SENTENCE_CONFIRM_MAX_AGE_CHUNKS=3`이다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --paper-evidence \
+  --param SENTENCE_CONFIRM_MAX_AGE_CHUNKS=2 \
+  --param SENTENCE_CONFIRM_MAX_AGE_CHUNKS=4 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-sentence-confirm-max-age \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-sentence-confirm-max-age/summary.json
+```
+
+결과:
+
+| 값 | finalized | stage_start | finalized/stage | precision | recall | final F1 | boundary F1 | case exact |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2 | 3986 | 5658 | 0.704 | 0.597 | 0.435 | 0.478 | 0.109 | 17 |
+| 3 baseline | 3986 | 5658 | 0.704 | 0.597 | 0.435 | 0.478 | 0.109 | 17 |
+| 4 | 3986 | 5658 | 0.704 | 0.597 | 0.435 | 0.478 | 0.109 | 17 |
+
+판단:
+
+- 1113건 전체 기준에서는 age 상한 2/3/4가 동일하다.
+- 현재 실패의 주된 축은 age 상한이 아니라 후보 확정 조건, no-end 품질, recent final memory 쪽으로 보는 것이 타당하다.
+- 기본값 3을 유지한다.
