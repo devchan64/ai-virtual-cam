@@ -391,8 +391,9 @@ old_result=...喷枪 条，然后把这米再切断了...
 - 서로 다른 중국어 continuation은 인위적 공백 없이 이어붙인다.
 - 원문창은 `stt_raw` 이벤트만 표시한다.
 - staged/partial 후보는 final 확정 전 내부 상태이므로 원문창에 표시하지 않는다.
-- 영어/한국어 기본 시작점은 `windowSeconds=7`, `stepSeconds=1`, `sentenceFinalizeAge=3`이다.
-- 중국어/Qwen3-ASR 기본 시작점은 `windowSeconds=12`, `stepSeconds=1`, `sentenceFinalizeAge=2`이다.
+- 영어 기본 시작점은 `windowSeconds=20`, `stepSeconds=1`, `sentenceFinalizeAge=3`이다.
+- 한국어 기본 시작점은 `windowSeconds=10`, `stepSeconds=1`, `sentenceFinalizeAge=3`이다.
+- 중국어/Qwen3-ASR 기본 시작점은 `windowSeconds=15`, `stepSeconds=1`, `sentenceFinalizeAge=2`이다.
 - 30초 window는 장문 안정성에는 유리할 수 있지만 final script 갱신 지연과 긴 문장 확정 비용이 커질 수 있다.
 
 ### 주요 기본값 변경
@@ -400,8 +401,9 @@ old_result=...喷枪 条，然后把这米再切断了...
 | 축 | 기본값/정책 변화 | 사유 |
 | --- | --- | --- |
 | 언어별 runtime | active/global 값보다 `stepSeconds{Lang}`, `windowSeconds{Lang}`, `sentenceFinalizeAge{Lang}`를 기준으로 정리 | 영어/한국어와 중국어의 적정 window가 달라 단일 기본값으로 품질을 맞추기 어려웠기 때문이다. |
-| 영어/한국어 window | `windowSecondsEn=7`, `windowSecondsKo=7` | `faster-whisper + large-v3`에서 실시간성과 문장 안정성의 균형점으로 판단했다. |
-| 중국어 window | `windowSecondsZh=12`를 시작점으로 설정 | 30초 window의 안정성은 인정하되 final 갱신 지연이 커서 운영 시작점은 낮췄다. |
+| 영어 window | `windowSecondsEn=20` | 최근 영어 빠른 발화와 누락 관측을 기준으로 문맥을 늘렸다. |
+| 한국어 window | `windowSecondsKo=10` | 한국어 기본 문맥을 10초로 조정했다. |
+| 중국어 window | `windowSecondsZh=15` | `windowSecondsZh=15.0` 관측에서 STT 안정성과 확정 지연의 균형점으로 판단했다. |
 | step | `stepSecondsEn/Ko/Zh=1` | 화면 갱신성과 STT 처리량이 모두 감당 가능한 범위로 관측됐다. |
 | 확정 age | `sentenceFinalizeAgeEn/Ko=3`, `sentenceFinalizeAgeZh=2` | 2026-06-17 SaT 벤치에서 중국어 age 2가 `no_end_marker` final을 0으로 유지하면서 age 3보다 확정 수와 `finalized_per_stage_start`를 개선했다. |
 | STT 디코딩 | `beamSize=3`, `maxNewTokens=192`, `temperature=0.0`를 언어별 시작점으로 정리 | 빠른 발화와 긴 문장 절단을 줄이되 실시간 지연을 통제하기 위한 기준선이다. |
@@ -732,8 +734,9 @@ final-only 번역
 | 문장 경계 | SaT/wtpsplit, regex 운영 경로 폐기 |
 | 확정 정책 | staged confirmation + `sentenceFinalizeAge=3` |
 | 번역 | final transcript only |
-| 중국어 window 시작점 | `windowSecondsZh=12`, `stepSecondsZh=1` |
-| 영어/한국어 window 시작점 | `windowSecondsEn/Ko=7`, `stepSecondsEn/Ko=1` |
+| 영어 window 시작점 | `windowSecondsEn=20`, `stepSecondsEn=1` |
+| 한국어 window 시작점 | `windowSecondsKo=10`, `stepSecondsKo=1` |
+| 중국어 window 시작점 | `windowSecondsZh=15`, `stepSecondsZh=1` |
 
 ## 2026-06-17 재설계 기준 코드 정리
 
@@ -2404,12 +2407,3 @@ final_f1_avg=0.224
 - 신규 케이스 metrics는 `stage_replace_decision_unconfirmed=11`, `stage_replace_decision_open_latin_clause=10`, `stage_queue_enqueue=16`, `stage_queue_promote=14`, `stage_queue_revision=7`, `candidate_duplicate_suppressed=32`, `stage_candidate_quality_no_end_marker=2`, `finalize_reason_next_completed=1`, `finalize_reason_replaced_duplicate_or_suffix=1`이다.
 - 변경 후 164케이스 CUDA/SaT 벤치는 `finalized=809`, `stage_start=1183`, `finalized_per_stage_start=0.684`, `final_precision_avg=0.775`, `final_recall_avg=0.688`, `final_f1_avg=0.705`, `final_similarity_coverage_avg=0.617`, `final_boundary_f1_avg=0.280`, `case_exact_match=13`, `pending_exact_match=125`, `staged_exact_match=57`이다.
 - 이번 케이스는 active staged가 짧거나 불완전한 후보에 묶이면 후반의 완성 질문이 staged로 잔류하는 유형이다. queue를 공격적으로 비우는 변경은 중복/오확정 위험이 있으므로, 이번 정리에서는 로직 변경 없이 벤치 근거만 추가한다.
-
-## 남은 실험 과제
-
-- 동일 입력 replay 기반으로 `faster-whisper`, `qwen3-asr-0.6b`, 과거 FunASR 기준선을 비교한다.
-- 중국어 `windowSeconds=12/16/20/24/30`의 raw STT 안정성과 final 지연을 같은 입력에서 비교한다.
-- 중한 번역은 STT/확정 품질과 분리된 평가셋으로 NLLB, M2M100, 더 큰 NLLB 모델을 비교한다.
-- `translation_quality` 회귀 샘플을 늘려 고유명사, 서비스명, 구어체 오역을 추적한다.
-- 정답 전사 코퍼스가 준비되면 한국어/중국어는 CER, 영어는 WER를 추가한다.
-- Qwen3-ASR vLLM streaming은 공유 `.venv`가 아니라 격리 런타임 설계가 준비된 뒤 다시 검토한다.

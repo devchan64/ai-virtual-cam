@@ -188,13 +188,13 @@ class DictationAiConfigTest(unittest.TestCase):
                 "maxNewTokensEn": 128,
                 "temperatureEn": 0.2,
                 "stepSecondsKo": 1.0,
-                "windowSecondsKo": 7.0,
+                "windowSecondsKo": 10.0,
                 "sentenceFinalizeAgeKo": 3,
                 "beamSizeKo": 3,
                 "maxNewTokensKo": 192,
                 "temperatureKo": 0.0,
                 "stepSecondsZh": 1.0,
-                "windowSecondsZh": 12.0,
+                "windowSecondsZh": 15.0,
                 "sentenceFinalizeAgeZh": 2,
                 "beamSizeZh": 3,
                 "maxNewTokensZh": 192,
@@ -275,18 +275,18 @@ class DictationAiConfigTest(unittest.TestCase):
             audio_output_device="default",
             dictation_ai_backend="mock",
             dictation_ai_language="zh",
-            dictation_ai_window_seconds=12.0,
-            dictation_ai_window_seconds_en=7.0,
-            dictation_ai_window_seconds_ko=7.0,
-            dictation_ai_window_seconds_zh=12.0,
+            dictation_ai_window_seconds=15.0,
+            dictation_ai_window_seconds_en=20.0,
+            dictation_ai_window_seconds_ko=10.0,
+            dictation_ai_window_seconds_zh=15.0,
             dictation_ai_step_seconds_zh=1.0,
             dictation_ai_sentence_finalize_age_zh=4,
         )
 
-        self.assertEqual(config["dictationAi"]["windowSeconds"], 12.0)
-        self.assertEqual(config["dictationAi"]["windowSecondsEn"], 7.0)
-        self.assertEqual(config["dictationAi"]["windowSecondsKo"], 7.0)
-        self.assertEqual(config["dictationAi"]["windowSecondsZh"], 12.0)
+        self.assertEqual(config["dictationAi"]["windowSeconds"], 15.0)
+        self.assertEqual(config["dictationAi"]["windowSecondsEn"], 20.0)
+        self.assertEqual(config["dictationAi"]["windowSecondsKo"], 10.0)
+        self.assertEqual(config["dictationAi"]["windowSecondsZh"], 15.0)
         self.assertEqual(config["dictationAi"]["stepSecondsEn"], 1.0)
         self.assertEqual(config["dictationAi"]["stepSecondsKo"], 1.0)
         self.assertEqual(config["dictationAi"]["stepSecondsZh"], 1.0)
@@ -554,10 +554,10 @@ class DictationAiConfigTest(unittest.TestCase):
         ko = DictationAiConfig.from_dict({"language": "ko"})
 
         self.assertEqual(zh.stepSeconds, 1.0)
-        self.assertEqual(zh.windowSeconds, 12.0)
-        self.assertEqual(zh.chunkSeconds, 12.0)
-        self.assertEqual(en.windowSeconds, 7.0)
-        self.assertEqual(ko.windowSeconds, 7.0)
+        self.assertEqual(zh.windowSeconds, 15.0)
+        self.assertEqual(zh.chunkSeconds, 15.0)
+        self.assertEqual(en.windowSeconds, 20.0)
+        self.assertEqual(ko.windowSeconds, 10.0)
 
     def test_dictation_ai_selected_language_migrates_legacy_runtime_values(self) -> None:
         loaded = DictationAiConfig.from_dict({"language": "zh", "windowSeconds": 24.0, "stepSeconds": 1.0})
@@ -565,7 +565,7 @@ class DictationAiConfigTest(unittest.TestCase):
         self.assertEqual(loaded.windowSeconds, 24.0)
         self.assertEqual(loaded.windowSecondsZh, 24.0)
         self.assertEqual(loaded.stepSecondsZh, 1.0)
-        self.assertEqual(loaded.windowSecondsEn, 7.0)
+        self.assertEqual(loaded.windowSecondsEn, 20.0)
 
     def test_dictation_ai_rejects_invalid_speed_parameters(self) -> None:
         with self.assertRaisesRegex(ValueError, "dictationAi.chunkSeconds"):

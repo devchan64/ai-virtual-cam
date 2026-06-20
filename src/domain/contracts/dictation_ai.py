@@ -162,15 +162,15 @@ DICTATION_AI_CONTRACT: dict[str, ConfigFieldSpec] = {
     ),
     "device": ConfigFieldSpec("device", "cuda", str),
     "computeType": ConfigFieldSpec("computeType", "float16", str),
-    "chunkSeconds": ConfigFieldSpec("chunkSeconds", 7.0, float, min_value=1.0, max_value=30.0),
+    "chunkSeconds": ConfigFieldSpec("chunkSeconds", 20.0, float, min_value=1.0, max_value=30.0),
     "stepSeconds": ConfigFieldSpec("stepSeconds", 2.0, float, min_value=0.5, max_value=5.0),
-    "windowSeconds": ConfigFieldSpec("windowSeconds", 7.0, float, min_value=1.0, max_value=30.0),
+    "windowSeconds": ConfigFieldSpec("windowSeconds", 20.0, float, min_value=1.0, max_value=30.0),
     "sentenceFinalizeAge": ConfigFieldSpec("sentenceFinalizeAge", 3, int, min_value=1, max_value=8),
     "beamSize": ConfigFieldSpec("beamSize", 3, int, min_value=1, max_value=8),
     "maxNewTokens": ConfigFieldSpec("maxNewTokens", 192, int, min_value=16, max_value=512),
     "temperature": ConfigFieldSpec("temperature", 0.0, float, min_value=0.0, max_value=1.0),
     "stepSecondsEn": ConfigFieldSpec("stepSecondsEn", 1.0, float, min_value=0.5, max_value=5.0, ui_group="runtime.en"),
-    "windowSecondsEn": ConfigFieldSpec("windowSecondsEn", 7.0, float, min_value=1.0, max_value=30.0, ui_group="runtime.en"),
+    "windowSecondsEn": ConfigFieldSpec("windowSecondsEn", 20.0, float, min_value=1.0, max_value=30.0, ui_group="runtime.en"),
     "sentenceFinalizeAgeEn": ConfigFieldSpec(
         "sentenceFinalizeAgeEn", 3, int, min_value=1, max_value=8, ui_group="runtime.en"
     ),
@@ -178,7 +178,7 @@ DICTATION_AI_CONTRACT: dict[str, ConfigFieldSpec] = {
     "maxNewTokensEn": ConfigFieldSpec("maxNewTokensEn", 192, int, min_value=16, max_value=512, ui_group="runtime.en"),
     "temperatureEn": ConfigFieldSpec("temperatureEn", 0.0, float, min_value=0.0, max_value=1.0, ui_group="runtime.en"),
     "stepSecondsKo": ConfigFieldSpec("stepSecondsKo", 1.0, float, min_value=0.5, max_value=5.0, ui_group="runtime.ko"),
-    "windowSecondsKo": ConfigFieldSpec("windowSecondsKo", 7.0, float, min_value=1.0, max_value=30.0, ui_group="runtime.ko"),
+    "windowSecondsKo": ConfigFieldSpec("windowSecondsKo", 10.0, float, min_value=1.0, max_value=30.0, ui_group="runtime.ko"),
     "sentenceFinalizeAgeKo": ConfigFieldSpec(
         "sentenceFinalizeAgeKo", 3, int, min_value=1, max_value=8, ui_group="runtime.ko"
     ),
@@ -186,7 +186,7 @@ DICTATION_AI_CONTRACT: dict[str, ConfigFieldSpec] = {
     "maxNewTokensKo": ConfigFieldSpec("maxNewTokensKo", 192, int, min_value=16, max_value=512, ui_group="runtime.ko"),
     "temperatureKo": ConfigFieldSpec("temperatureKo", 0.0, float, min_value=0.0, max_value=1.0, ui_group="runtime.ko"),
     "stepSecondsZh": ConfigFieldSpec("stepSecondsZh", 1.0, float, min_value=0.5, max_value=5.0, ui_group="runtime.zh"),
-    "windowSecondsZh": ConfigFieldSpec("windowSecondsZh", 12.0, float, min_value=1.0, max_value=30.0, ui_group="runtime.zh"),
+    "windowSecondsZh": ConfigFieldSpec("windowSecondsZh", 15.0, float, min_value=1.0, max_value=30.0, ui_group="runtime.zh"),
     "sentenceFinalizeAgeZh": ConfigFieldSpec(
         "sentenceFinalizeAgeZh", 2, int, min_value=1, max_value=8, ui_group="runtime.zh"
     ),

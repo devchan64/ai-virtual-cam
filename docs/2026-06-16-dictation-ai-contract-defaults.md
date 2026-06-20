@@ -80,17 +80,17 @@ Qwen 모델 alias:
 
 | 언어 | `stepSeconds` | `windowSeconds` | `sentenceFinalizeAge` | `beamSize` | `maxNewTokens` | `temperature` |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `en` | `1.0` | `7.0` | `3` | `3` | `192` | `0.0` |
-| `ko` | `1.0` | `7.0` | `3` | `3` | `192` | `0.0` |
-| `zh` | `1.0` | `12.0` | `2` | `3` | `192` | `0.0` |
+| `en` | `1.0` | `20.0` | `3` | `3` | `192` | `0.0` |
+| `ko` | `1.0` | `10.0` | `3` | `3` | `192` | `0.0` |
+| `zh` | `1.0` | `15.0` | `2` | `3` | `192` | `0.0` |
 
 legacy/global 기본값:
 
 | 키 | 기본값 | 범위 |
 | --- | ---: | --- |
-| `chunkSeconds` | `7.0` | `1.0` - `30.0` |
+| `chunkSeconds` | `20.0` | `1.0` - `30.0` |
 | `stepSeconds` | `2.0` | `0.5` - `5.0` |
-| `windowSeconds` | `7.0` | `1.0` - `30.0` |
+| `windowSeconds` | `20.0` | `1.0` - `30.0` |
 | `sentenceFinalizeAge` | `3` | `1` - `8` |
 | `beamSize` | `3` | `1` - `8` |
 | `maxNewTokens` | `192` | `16` - `512` |
@@ -100,7 +100,9 @@ legacy/global 기본값:
 
 - `stepSeconds`는 `windowSeconds`보다 크면 안 된다.
 - 언어별 `stepSeconds{Lang}`도 `windowSeconds{Lang}`보다 크면 안 된다.
-- 중국어는 `windowSecondsZh=12.0`을 시작점으로 사용한다. 16, 20, 24, 30초는 실험값이다.
+- 영어는 `windowSecondsEn=20.0`을 기본값으로 사용한다.
+- 한국어는 `windowSecondsKo=10.0`을 기본값으로 사용한다.
+- 중국어는 `windowSecondsZh=15.0`을 기본값으로 사용한다.
 
 ## 실행 플랫폼/디바이스 계약
 
