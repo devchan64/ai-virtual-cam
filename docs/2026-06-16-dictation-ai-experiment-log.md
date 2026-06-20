@@ -3918,3 +3918,425 @@ AVC_DICTATION_SHORT_NO_END_FRAGMENT_UNITS=5 \
 - 1113건 전체 기준에서는 age 상한 2/3/4가 동일하다.
 - 현재 실패의 주된 축은 age 상한이 아니라 후보 확정 조건, no-end 품질, recent final memory 쪽으로 보는 것이 타당하다.
 - 기본값 3을 유지한다.
+
+### 2026-06-20 forced confirmation 계열 paper-evidence sweep
+
+forced 후보 확정 경로가 현재 1113건 corpus에서 확정 누락 또는 중복 확정에 영향을 주는지 확인했다. 기준선은 checked-in 기본값 `FORCED_SENTENCE_CONFIRM_CHUNKS=3`, `FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS=4`다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --paper-evidence \
+  --param FORCED_SENTENCE_CONFIRM_CHUNKS=2 \
+  --param FORCED_SENTENCE_CONFIRM_CHUNKS=4 \
+  --param FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS=3 \
+  --param FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS=5 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-forced-sentence-confirm \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-forced-sentence-confirm/summary.json
+```
+
+결과:
+
+| 조건 | finalized/stage | precision | recall | final F1 | boundary F1 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| forced confirm=2 | 0.704 | 0.597 | 0.435 | 0.478 | 0.109 |
+| forced confirm=4 | 0.704 | 0.597 | 0.435 | 0.478 | 0.109 |
+| forced max age=3 | 0.704 | 0.597 | 0.435 | 0.478 | 0.109 |
+| forced max age=5 | 0.704 | 0.597 | 0.435 | 0.478 | 0.109 |
+| baseline | 0.704 | 0.597 | 0.435 | 0.478 | 0.109 |
+
+판단:
+
+- forced confirmation 수와 forced age 상한은 1113건 전체 기준에서 기준선과 동일하다.
+- 현재 케이스 집합에서는 forced 경로가 전체 성능을 좌우하는 주요 원인이 아니다.
+- 기본값 변경은 보류한다.
+
+### 2026-06-20 `SHORT_CJK_FINAL_UNITS` paper-evidence sweep
+
+중국어/CJK 짧은 final 품질 게이트가 전체 확정 누락 또는 중복 확정에 영향을 주는지 확인했다. 기준선은 checked-in 기본값 `SHORT_CJK_FINAL_UNITS=10`이다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --paper-evidence \
+  --param SHORT_CJK_FINAL_UNITS=8 \
+  --param SHORT_CJK_FINAL_UNITS=12 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-short-cjk-final-units \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-short-cjk-final-units/summary.json
+```
+
+결과:
+
+| 값 | finalized | stage_start | finalized/stage | precision | recall | final F1 | boundary F1 | case exact |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 8 | 3995 | 5658 | 0.706 | 0.597 | 0.435 | 0.478 | 0.109 | 17 |
+| 10 baseline | 3986 | 5658 | 0.704 | 0.597 | 0.435 | 0.478 | 0.109 | 17 |
+| 12 | 3982 | 5658 | 0.704 | 0.598 | 0.434 | 0.478 | 0.109 | 17 |
+
+판단:
+
+- `SHORT_CJK_FINAL_UNITS=8`은 finalized 수를 9개 늘렸지만 평균 precision/recall/F1은 기준선과 사실상 동일하다.
+- `SHORT_CJK_FINAL_UNITS=12`는 precision을 아주 소폭 올리고 recall을 아주 소폭 낮추지만 final F1과 boundary F1은 동일하다.
+- CJK 짧은 final 게이트 단독 변경은 현재 1113건 corpus에서 기본값 변경 근거가 부족하다.
+
+### 2026-06-20 revision similarity paper-evidence sweep
+
+앞선 lifecycle/quality-gate 단일 파라미터는 대부분 기준선을 실질적으로 바꾸지 않았다. 따라서 문장 후보가 같은 발화 구간의 revision인지 판단하는 similarity 계열을 비교했다. 기준선은 당시 checked-in 기본값 `REVISION_FALLBACK_COVERAGE_MIN=0.60`이다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --paper-evidence \
+  --param CJK_REVISION_RATIO_MIN=0.70 \
+  --param CJK_REVISION_RATIO_MIN=0.85 \
+  --param CJK_CONFIRM_PRESERVE_RATIO_MIN=0.65 \
+  --param CJK_CONFIRM_PRESERVE_RATIO_MIN=0.80 \
+  --param REVISION_FALLBACK_COVERAGE_MIN=0.50 \
+  --param REVISION_FALLBACK_COVERAGE_MIN=0.70 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-revision-similarity \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-revision-similarity/summary.json
+```
+
+추가 중간값 확인:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --paper-evidence \
+  --param REVISION_FALLBACK_COVERAGE_MIN=0.55 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-revision-fallback-coverage-055 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-revision-fallback-coverage-055/summary.json
+```
+
+결과:
+
+| 조건 | finalized | stage_start | finalized/stage | precision | recall | final F1 | boundary F1 | staged exact |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| baseline fallback coverage=0.60 | 3986 | 5658 | 0.704 | 0.597 | 0.435 | 0.478 | 0.109 | 397 |
+| CJK revision ratio=0.70 | 3992 | 5659 | 0.705 | 0.598 | 0.436 | 0.479 | 0.109 | 400 |
+| CJK revision ratio=0.85 | 3986 | 5659 | 0.704 | 0.597 | 0.435 | 0.478 | 0.109 | 396 |
+| CJK confirm preserve=0.65 | 3987 | 5658 | 0.705 | 0.597 | 0.435 | 0.478 | 0.109 | 398 |
+| CJK confirm preserve=0.80 | 3986 | 5658 | 0.704 | 0.597 | 0.435 | 0.478 | 0.109 | 397 |
+| fallback coverage=0.50 | 4036 | 5624 | 0.718 | 0.595 | 0.438 | 0.480 | 0.109 | 412 |
+| fallback coverage=0.55 | 4012 | 5638 | 0.712 | 0.602 | 0.440 | 0.483 | 0.108 | 406 |
+| fallback coverage=0.70 | 3925 | 5682 | 0.691 | 0.594 | 0.429 | 0.474 | 0.109 | 387 |
+
+`fallback coverage=0.50`은 final F1을 조금 올렸지만 precision을 낮췄고, 케이스별로는 개선 39건, 악화 46건이었다. 반면 `fallback coverage=0.55`는 precision/recall/final F1이 함께 올랐고, 케이스별 final F1은 개선 30건, 악화 24건이었다. 언어별 평균 final F1 변화는 영어 `+0.0013`, 한국어 `+0.0082`, 중국어 `+0.0062`였고, boundary F1은 평균적으로 `0.109 -> 0.108`로 소폭 낮아졌다.
+
+checked-in 기본값 반영:
+
+- `REVISION_FALLBACK_COVERAGE_MIN`을 `0.60 -> 0.55`로 변경했다.
+- override 없이 변경된 기본값으로 다시 벤치를 실행해 같은 결과를 확인했다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --paper-evidence \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-revision-fallback-coverage-default055 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-revision-fallback-coverage-default055/summary.json
+
+./.venv/bin/python -m unittest \
+  tests.unit.test_dictation_pipeline_nodes \
+  tests.unit.test_dictation_ai_sbd_parameter_sweep
+```
+
+검증 결과:
+
+```text
+cases=1113
+finalized=4012
+stage_start=5638
+finalized_per_stage_start=0.712
+final_precision_avg=0.602
+final_recall_avg=0.440
+final_f1_avg=0.483
+final_similarity_coverage_avg=0.393
+final_boundary_f1_avg=0.108
+case_exact_match=17
+pending_exact_match=602
+staged_exact_match=406
+unit_tests=15 passed
+```
+
+판단:
+
+- 단일 confirmation 지연값보다 revision fallback coverage가 현재 corpus에서 더 직접적인 개선 축으로 보인다.
+- `0.55`는 precision과 recall을 함께 올리는 드문 파라미터 변경이므로 기본값으로 채택한다.
+- boundary F1은 소폭 낮아졌으므로 이후 개선은 final F1만이 아니라 boundary F1과 false final 케이스도 함께 관찰해야 한다.
+
+### 2026-06-20 `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS` 새 기준선 sweep
+
+`REVISION_FALLBACK_COVERAGE_MIN=0.55`를 checked-in 기본값으로 바꾼 뒤, 짧은 CJK replacement 후보를 보류하는 값이 새 기준선에서 영향을 주는지 확인했다. 기준선은 checked-in 기본값 `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=2`다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --paper-evidence \
+  --param SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=0 \
+  --param SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=4 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-short-cjk-replacement-hold-default055 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-short-cjk-replacement-hold-default055/summary.json
+```
+
+결과:
+
+| 값 | finalized | stage_start | finalized/stage | precision | recall | final F1 | boundary F1 | staged exact |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0 | 4012 | 5638 | 0.712 | 0.602 | 0.440 | 0.483 | 0.108 | 406 |
+| 2 baseline | 4012 | 5638 | 0.712 | 0.602 | 0.440 | 0.483 | 0.108 | 406 |
+| 4 | 4012 | 5638 | 0.712 | 0.602 | 0.440 | 0.483 | 0.108 | 406 |
+
+판단:
+
+- 새 기준선에서도 `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS` 0/2/4는 결과가 동일하다.
+- 현재 corpus에서는 짧은 CJK replacement hold가 주요 병목이 아니다.
+- 기본값 변경은 보류한다.
+
+### 2026-06-20 `SENTENCE_CONFIRM_CHUNKS` 새 기준선 재검증
+
+`REVISION_FALLBACK_COVERAGE_MIN=0.55`가 checked-in 기본값이 된 뒤에도 confirmation 수를 낮추는 결론이 유지되는지 재검증했다. 기준선은 `SENTENCE_CONFIRM_CHUNKS=2`, `SHORT_NO_END_FRAGMENT_UNITS=4`다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --paper-evidence \
+  --param SENTENCE_CONFIRM_CHUNKS=1 \
+  --param SENTENCE_CONFIRM_CHUNKS=3 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-sentence-confirm-chunks-default055 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-sentence-confirm-chunks-default055/summary.json
+
+AVC_DICTATION_SENTENCE_CONFIRM_CHUNKS=1 \
+AVC_DICTATION_SHORT_NO_END_FRAGMENT_UNITS=5 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-confirm1-noend5-default055/confirm1-noend5.json
+```
+
+결과:
+
+| 조건 | finalized | stage_start | finalized/stage | precision | recall | final F1 | boundary F1 | case exact | staged exact |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| confirm=2 baseline | 4012 | 5638 | 0.712 | 0.602 | 0.440 | 0.483 | 0.108 | 17 | 406 |
+| confirm=1 | 4855 | 6171 | 0.787 | 0.565 | 0.484 | 0.495 | 0.108 | 21 | 518 |
+| confirm=1, noend=5 | 4848 | 6018 | 0.806 | 0.569 | 0.483 | 0.496 | 0.107 | 20 | 554 |
+| confirm=3 | 3720 | 5457 | 0.682 | 0.612 | 0.416 | 0.471 | 0.103 | 25 | 357 |
+
+케이스별 `confirm=1` 비교:
+
+```text
+changed_cases=449
+improved=178
+worsened=199
+same_with_other_delta=72
+language_avg_final_f1_delta: en=+0.0203, ko=+0.0234, zh=-0.0286
+language_avg_precision_delta: en=-0.0013, ko=-0.0152, zh=-0.1524
+language_avg_recall_delta: en=+0.0383, ko=+0.0413, zh=+0.0599
+```
+
+판단:
+
+- `confirm=1`은 새 기준선에서도 final F1과 recall을 올리지만 precision을 크게 낮춘다.
+- 특히 중국어는 recall은 오르지만 평균 final F1과 precision이 크게 악화되어 final-only 번역 입력 안정화 기준에 맞지 않는다.
+- `confirm=1, noend=5`는 `confirm=1`보다 precision/F1을 아주 소폭 올리지만, 기준선 대비 precision 손실은 여전히 크고 boundary F1도 낮다.
+- `confirm=3`은 precision과 case exact는 높지만 recall/final F1/boundary F1을 낮춘다.
+- 따라서 `SENTENCE_CONFIRM_CHUNKS=2`를 유지한다. 확인 수를 단순히 낮추는 방식보다 revision lifecycle과 false final 억제를 별도 축으로 개선해야 한다.
+
+### 2026-06-20 `NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS` 새 기준선 sweep
+
+`REVISION_FALLBACK_COVERAGE_MIN=0.55` 기준에서 no-text chunk가 반복될 때 stale staged 후보를 억제하는 값이 결과에 영향을 주는지 확인했다. 이 값은 silence/VAD를 final 근거로 쓰는 정책이 아니라, 텍스트 없는 chunk가 반복된 뒤 미확정 staged 후보를 정리하는 lifecycle 임계값이다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --paper-evidence \
+  --param NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS=3 \
+  --param NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS=9 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-no-text-stale-stage-default055 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-no-text-stale-stage-default055/summary.json
+```
+
+결과:
+
+| 값 | finalized | stage_start | finalized/stage | precision | recall | final F1 | boundary F1 | case exact | staged exact |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3 | 4012 | 5638 | 0.712 | 0.602 | 0.440 | 0.483 | 0.108 | 16 | 405 |
+| 6 baseline | 4012 | 5638 | 0.712 | 0.602 | 0.440 | 0.483 | 0.108 | 17 | 406 |
+| 9 | 4012 | 5638 | 0.712 | 0.602 | 0.440 | 0.483 | 0.108 | 16 | 405 |
+
+판단:
+
+- 평균 precision/recall/final F1/boundary F1은 모두 동일하다.
+- 3과 9는 case exact와 staged exact가 기준선보다 각각 1 낮다.
+- no-text stale suppress 임계값은 현재 corpus의 주요 개선 축이 아니며 기본값 6을 유지한다.
+
+### 2026-06-20 새 기준선 residual failure 집계
+
+`REVISION_FALLBACK_COVERAGE_MIN=0.55` 기준선에서 남은 실패 양상을 집계했다. 이 집계는 새 파라미터 변경이 아니라, 이후 개선 축을 정하기 위한 현황 분석이다.
+
+입력 리포트:
+
+```text
+.tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-revision-fallback-coverage-default055/baseline.json
+```
+
+전체:
+
+```text
+cases=1113
+finalized=4012
+stage_start=5638
+finalized_per_stage_start=0.712
+final_precision_avg=0.602
+final_recall_avg=0.440
+final_f1_avg=0.483
+final_boundary_f1_avg=0.108
+case_exact_match=17
+pending_exact_match=602
+staged_exact_match=406
+```
+
+언어별:
+
+| 언어 | cases | precision | recall | final F1 | boundary F1 | staged residue | empty final | expected 있음+boundary F1=0 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| en | 429 | 0.427 | 0.406 | 0.406 | 0.046 | 307 | 7 | 366 |
+| ko | 462 | 0.713 | 0.451 | 0.528 | 0.131 | 268 | 67 | 372 |
+| zh | 222 | 0.708 | 0.483 | 0.540 | 0.179 | 132 | 24 | 149 |
+
+판단:
+
+- 잔여 병목은 전체 평균보다 언어별 편차가 크다.
+- 영어는 precision/recall/final F1/boundary F1이 모두 낮고, staged residue와 boundary F1=0 케이스가 많다.
+- 한국어/중국어는 precision이 상대적으로 높지만 recall과 boundary F1이 낮아 확정 누락과 문장 경계 품질이 여전히 병목이다.
+- 다음 개선은 단순 confirmation 수 변경보다 영어 long-context boundary/staged residue와 다국어 boundary F1 개선을 분리해 검토해야 한다.
+
+### 2026-06-20 영어 residual lifecycle counter 분석
+
+새 기준선 residual 집계에서 영어가 가장 낮은 성능을 보였으므로, 영어 케이스의 lifecycle counter를 추가로 확인했다.
+
+영어 전체 상위 counter:
+
+| counter | total | cases |
+| --- | ---: | ---: |
+| boundary_right_context_starts | 17623 | 428 |
+| boundary_end_marks | 15642 | 429 |
+| segment_state_suppressed | 12200 | 428 |
+| candidate_duplicate_suppressed | 9312 | 417 |
+| stage_age_tick | 6548 | 426 |
+| segment_state_staged | 5907 | 428 |
+| stage_replace | 5320 | 421 |
+| stage_replace_deferred | 4833 | 421 |
+| stage_start | 3244 | 428 |
+| stage_replace_decision_unconfirmed | 3213 | 353 |
+| finalize_attempt | 2737 | 422 |
+| stage_queue_enqueue | 2663 | 421 |
+| stage_queue_revision | 2635 | 287 |
+
+영어 low final F1 케이스에서도 같은 패턴이 반복됐다.
+
+| counter | low-F1 total |
+| --- | ---: |
+| boundary_right_context_starts | 3258 |
+| boundary_end_marks | 2388 |
+| segment_state_suppressed | 2247 |
+| candidate_duplicate_suppressed | 1510 |
+| stage_age_tick | 1299 |
+| segment_state_staged | 1152 |
+| stage_replace | 981 |
+| stage_replace_deferred | 894 |
+| stage_candidate_quality_blocked | 566 |
+| candidate_recent_final_delta_trimmed | 544 |
+| stage_queue_enqueue | 510 |
+
+판단:
+
+- 영어 residual은 단순히 `MAX_STAGED_SENTENCE_QUEUE`를 키우면 해결되는 형태가 아니다.
+- low-F1 케이스는 active staged replacement/deferred, age tick, queue revision, no-end marker가 함께 나타난다.
+- 따라서 다음 로직 개선 후보는 큐 한도보다, 영어 long-context에서 boundary 후보가 앞뒤 문맥을 섞어 만들 때 staged replacement를 어떻게 보류/확정/폐기할지에 대한 lifecycle 설계다.
+- 단어별 규칙이나 영어 전용 정규식 분기는 추가하지 않는다. 다국어 공통으로 적용 가능한 boundary confidence, no-end 품질, recent final memory, staged residue 정책을 중심으로 검토한다.
+
+추가로 replacement decision 사유를 언어별로 집계했다.
+
+| 언어 | 주요 replacement decision | low-F1 주요 decision |
+| --- | --- | --- |
+| en | `unconfirmed=3213`, `open_latin_clause=1620`, `confirmed=404` | `unconfirmed=469`, `open_latin_clause=425`, `confirmed=65` |
+| ko | `unconfirmed=826`, `open_korean_clause=365`, `confirmed=68` | `unconfirmed=130`, `open_korean_clause=67`, `confirmed=6` |
+| zh | `unconfirmed_cjk=1527`, `confirmed=143` | `unconfirmed_cjk=170`, `confirmed=9` |
+
+판단:
+
+- 영어 low-F1/residue/no-end 구간에는 `open_latin_clause`가 강하게 관여한다.
+- 현재 open latin clause 판정은 종결부호 없는 라틴 단어 4개 이상이면 성립하므로 넓다.
+- 다만 이 값을 좁히는 것은 영어 전용 규칙으로 흐를 위험이 있다. 바로 수정하지 않고, no-end 품질과 boundary 후보 confidence를 공통 정책으로 다루는 방향에서 다음 실험 후보로 유지한다.
+
+### 2026-06-20 open latin clause threshold 탐색과 폐기
+
+영어 residual에서 `open_latin_clause`가 크게 관여했으므로, 일시적으로 open latin clause 최소 단어 수를 실험 파라미터로 노출해 6/8을 비교했다. 이 패치는 운영 기본값 변경이 아니라 탐색용이었다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --paper-evidence \
+  --param OPEN_LATIN_CLAUSE_MIN_WORDS=6 \
+  --param OPEN_LATIN_CLAUSE_MIN_WORDS=8 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-open-latin-clause-default055 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260620-open-latin-clause-default055/summary.json
+```
+
+결과:
+
+| 조건 | finalized | stage_start | finalized/stage | precision | recall | final F1 | boundary F1 | case exact | staged exact |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| baseline min words=4 | 4012 | 5638 | 0.712 | 0.602 | 0.440 | 0.483 | 0.108 | 17 | 406 |
+| min words=6 | 4013 | 5638 | 0.712 | 0.602 | 0.440 | 0.483 | 0.108 | 17 | 406 |
+| min words=8 | 4015 | 5642 | 0.712 | 0.602 | 0.440 | 0.483 | 0.108 | 17 | 406 |
+
+판단:
+
+- open latin clause 최소 단어 수를 6/8로 높여도 평균 지표와 exact 지표가 사실상 변하지 않았다.
+- 이 값을 튜닝 파라미터로 유지할 근거가 없고, 영어/라틴 전용 설정 표면을 늘리는 것은 목표를 흐릴 수 있다.
+- 따라서 탐색용 파라미터화 패치는 폐기하고 checked-in 코드에는 반영하지 않는다.
+- 다음 개선은 open clause 단어 수보다, no-end 품질과 boundary confidence를 공통 lifecycle 정책으로 쓰는 방향에서 검토한다.
+
+### 2026-06-20 boundary 신호 residual 분석
+
+boundary confidence를 lifecycle 정책에 직접 쓰기 전에, 현재 replay case와 benchmark report에 어떤 boundary 신호가 보존되는지 확인했다.
+
+확인 결과:
+
+- `tests/eval/dictation_ai/sbd_cases/{en,ko,zh}`의 `chunks`는 실제 STT 컨텍스트 윈도우 텍스트만 저장한다.
+- STT hypothesis의 `boundaryConfidence`, `segmentBoundaryConfidence`, `stableBoundaryConfidence` 값은 replay case에 보존되지 않는다.
+- benchmark report의 chunk별 출력에는 SaT/SBD replay 결과인 `boundary_count`, `end_mark_count`, `right_context_start_count`가 저장된다.
+
+새 기준선에서 세 신호를 bucket으로 집계했다.
+
+| signal | 언어 | 주요 관찰 |
+| --- | --- | --- |
+| `boundary_count` | en | 대부분 `11+` bucket이며 `final_f1=0.409`, `boundary_f1=0.042` |
+| `boundary_count` | ko | `11+` bucket은 `final_f1=0.623`, `boundary_f1=0.110`; `6-10` bucket은 `final_f1=0.489`, `boundary_f1=0.174` |
+| `boundary_count` | zh | `11+` bucket은 `final_f1=0.534`, `boundary_f1=0.177` |
+| `right_context_start_count` | en | `11+` bucket이 대부분이며 `final_f1=0.408`, `boundary_f1=0.042` |
+| `right_context_start_count` | ko | `11+` bucket은 `final_f1=0.620`, `boundary_f1=0.099`; `6-10` bucket은 `boundary_f1=0.166` |
+| `right_context_start_count` | zh | `0` bucket은 `final_f1=0.704`, `boundary_f1=0.407`; `11+` bucket은 `final_f1=0.518`, `boundary_f1=0.164` |
+
+영어 예시:
+
+- low-F1 케이스 `en_log_draft_20260620_avc_whisper_log_000039`는 `boundary_count=44`, `end_mark_count=13`, `right_context_start_count=42`이지만 `final_f1=0.0`, `boundary_f1=0.0`이다.
+- high-F1 케이스 `en_log_culture_technical_talent_tail_fragment_20260620_001`는 `boundary_count=110`, `end_mark_count=117`, `right_context_start_count=94`이고 `final_f1=1.0`이다.
+
+판단:
+
+- 현재 replay corpus만으로는 STT 단계의 `boundaryConfidence`를 재현할 수 없다.
+- SaT/SBD count 신호는 보존되어 있지만, count가 많다는 사실만으로 좋은 boundary 품질을 뜻하지 않는다.
+- 따라서 `boundary_count`나 `right_context_start_count`의 단순 threshold를 lifecycle 정책으로 쓰는 것은 근거가 약하다.
+- 다음 개선에는 count가 아니라 후보별 boundary 품질 또는 “문장 후보가 final로 소비된 뒤 기대 final과 어떻게 어긋났는지”를 더 직접적으로 설명하는 계측이 필요하다.
