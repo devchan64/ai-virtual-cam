@@ -3,7 +3,21 @@ from __future__ import annotations
 import re
 from difflib import SequenceMatcher
 
-from src.app.dictation_revision_policy import (
+from src.app.dictation_pipeline_settings import (
+    CJK_REVISION_INTERNAL_STABILITY_MID_RATIO,
+    CJK_REVISION_INTERNAL_STABILITY_MIN_CHARS,
+    CJK_REVISION_INTERNAL_STABILITY_MIN_RATIO,
+    FAST_PENDING_OVERRUN_CHARS,
+    FAST_PENDING_OVERRUN_CHUNKS,
+    FORCED_SENTENCE_CONFIRM_CHUNKS,
+    FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS,
+    MAX_PENDING_SENTENCE_CHARS,
+    PENDING_OVERRUN_CHUNKS,
+    SENTENCE_CONFIRM_CHUNKS,
+    SENTENCE_CONFIRM_MAX_AGE_CHUNKS,
+    SHORT_CJK_FINAL_UNITS,
+    SHORT_CJK_REPLACEMENT_HOLD_CHUNKS,
+    SHORT_NO_END_FRAGMENT_UNITS,
     cjk_confirm_preserve_common_run_min as _cjk_confirm_preserve_common_run_min,
     cjk_confirm_preserve_coverage_min as _cjk_confirm_preserve_coverage_min,
     cjk_confirm_preserve_ratio_min as _cjk_confirm_preserve_ratio_min,
@@ -25,24 +39,6 @@ from src.app.sentence_boundary import (
     sentence_end_count as _boundary_sentence_end_count,
     split_completed_sentences as _boundary_split_completed_sentences,
 )
-
-MAX_PENDING_SENTENCE_CHARS = 180
-PENDING_OVERRUN_CHUNKS = 8
-FAST_PENDING_OVERRUN_CHARS = 240
-FAST_PENDING_OVERRUN_CHUNKS = 4
-SLOW_PENDING_SENTENCE_CHUNKS = 4
-SLOW_PENDING_SENTENCE_CHARS = 45
-SLOW_PENDING_MAX_SENTENCE_CHARS = 120
-SLOW_PENDING_MAX_CHARS_PER_CHUNK = 18.0
-SENTENCE_CONFIRM_CHUNKS = 2
-FORCED_SENTENCE_CONFIRM_CHUNKS = 3
-SENTENCE_CONFIRM_MAX_AGE_CHUNKS = 3
-FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS = 4
-SHORT_CJK_FINAL_UNITS = 10
-SHORT_NO_END_FRAGMENT_UNITS = 4
-CJK_REVISION_INTERNAL_STABILITY_MIN_RATIO = 0.60
-CJK_REVISION_INTERNAL_STABILITY_MIN_CHARS = 40
-SHORT_CJK_REPLACEMENT_HOLD_CHUNKS = 2
 
 
 def _normalized_text(text: str) -> str:
@@ -1489,9 +1485,15 @@ def _should_preserve_revision_confirmation_from_internal_stability(
 
 
 def _revision_internal_stability_bucket(stable_internal_ratio: float = 0.0, stable_internal_chars: int = 0) -> str:
-    if stable_internal_chars >= CJK_REVISION_INTERNAL_STABILITY_MIN_CHARS and stable_internal_ratio >= 0.60:
+    if (
+        stable_internal_chars >= CJK_REVISION_INTERNAL_STABILITY_MIN_CHARS
+        and stable_internal_ratio >= CJK_REVISION_INTERNAL_STABILITY_MIN_RATIO
+    ):
         return "high"
-    if stable_internal_chars >= CJK_REVISION_INTERNAL_STABILITY_MIN_CHARS and stable_internal_ratio >= 0.40:
+    if (
+        stable_internal_chars >= CJK_REVISION_INTERNAL_STABILITY_MIN_CHARS
+        and stable_internal_ratio >= CJK_REVISION_INTERNAL_STABILITY_MID_RATIO
+    ):
         return "mid"
     return "low"
 

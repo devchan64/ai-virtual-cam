@@ -16,6 +16,16 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.app.sentence_boundary import create_sentence_boundary_detector, normalized_text
+from src.app.dictation_pipeline_settings import (
+    FINAL_SENTENCE_MATCH_MIN_SIMILARITY,
+    MAX_STAGED_SENTENCE_QUEUE,
+    NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS,
+    SBD_BENCHMARK_BACKEND,
+    SBD_BENCHMARK_COMPUTE_TYPE,
+    SBD_BENCHMARK_DEVICE,
+    SBD_BENCHMARK_MODEL,
+    dictation_pipeline_policy,
+)
 from src.app.dictation_transcript_logic import (
     _final_sentence_diagnostic_flags,
     _has_later_completed_extension,
@@ -46,10 +56,6 @@ from src.app.dictation_transcript_logic import (
 )
 from src.app.transcript_revision import append_context as _append_committed_text
 from src.app.transcript_revision import consume_committed_prefix as _consume_committed_prefix
-
-MAX_STAGED_SENTENCE_QUEUE = 12
-FINAL_SENTENCE_MATCH_MIN_SIMILARITY = 0.70
-NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS = 6
 
 
 @dataclass(frozen=True)
@@ -720,9 +726,6 @@ def _write_report(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-BENCHMARK_BACKEND = "sat"
-
-
 def _validate_real_ai_cuda_args(args: argparse.Namespace) -> None:
     device = str(args.device or "").strip().lower()
     compute_type = str(args.compute_type or "").strip().lower()
@@ -741,9 +744,9 @@ def _validate_real_ai_cuda_args(args: argparse.Namespace) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run text-only Dictation AI SBD lifecycle benchmark cases.")
     parser.add_argument("--cases", type=Path, default=REPO_ROOT / "tests/eval/dictation_ai/sbd_text_cases.sample.jsonl")
-    parser.add_argument("--model", default="sat-3l-sm")
-    parser.add_argument("--device", default="cuda")
-    parser.add_argument("--compute-type", default="float16")
+    parser.add_argument("--model", default=SBD_BENCHMARK_MODEL)
+    parser.add_argument("--device", default=SBD_BENCHMARK_DEVICE)
+    parser.add_argument("--compute-type", default=SBD_BENCHMARK_COMPUTE_TYPE)
     parser.add_argument("--output", type=Path, default=REPO_ROOT / ".tmp/eval/dictation-ai-sbd/latest.json")
     parser.add_argument(
         "--fail-on-regression",
@@ -757,7 +760,7 @@ def main() -> int:
 
     cases = _load_cases(args.cases)
     detector = create_sentence_boundary_detector(
-        BENCHMARK_BACKEND,
+        SBD_BENCHMARK_BACKEND,
         model=args.model,
         device=args.device,
         compute_type=args.compute_type,
@@ -809,10 +812,11 @@ def main() -> int:
     final_boundary_score_avg = _average_scores(results, "final_boundary_score")
     completed_last_score_avg = _average_scores(results, "completed_last_score")
     report = {
-        "backend": BENCHMARK_BACKEND,
+        "backend": SBD_BENCHMARK_BACKEND,
         "model": args.model,
         "device": args.device,
         "compute_type": args.compute_type,
+        "dictation_pipeline_policy": dictation_pipeline_policy(),
         "revision_similarity_policy": _revision_similarity_policy(),
         "case_count": len(results),
         "elapsed_ms": round((time.perf_counter() - started) * 1000.0, 3),
