@@ -806,6 +806,8 @@ def main() -> int:
         )
 
     exact_match_count = sum(1 for result in results if result["case_exact_match"])
+    pending_exact_count = sum(1 for result in results if result["pending_exact"])
+    staged_exact_count = sum(1 for result in results if result["staged_exact"])
     finalized = metric_totals.get("finalized", 0)
     stage_start = metric_totals.get("stage_start", 0)
     final_score_avg = _average_scores(results, "final_score")
@@ -822,6 +824,8 @@ def main() -> int:
         "elapsed_ms": round((time.perf_counter() - started) * 1000.0, 3),
         "summary": {
             "case_exact_match": exact_match_count,
+            "pending_exact_match": pending_exact_count,
+            "staged_exact_match": staged_exact_count,
             "min_final_f1": args.min_final_f1,
             "finalized": finalized,
             "stage_start": stage_start,
@@ -854,6 +858,8 @@ def main() -> int:
         f"final_similarity_coverage_avg={final_score_avg['similarity_coverage']:.3f} "
         f"final_boundary_f1_avg={final_boundary_score_avg['f1']:.3f} "
         f"case_exact_match={exact_match_count} "
+        f"pending_exact_match={pending_exact_count} "
+        f"staged_exact_match={staged_exact_count} "
         f"output={args.output}"
     )
     if args.fail_on_regression and final_score_avg["f1"] < args.min_final_f1:

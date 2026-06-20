@@ -1931,6 +1931,480 @@ final_f1_avg=0.224
 - 변경 후 107케이스 CUDA/SaT 벤치는 `finalized=308`, `stage_start=470`, `finalized_per_stage_start=0.655`, `final_precision_avg=0.745`, `final_recall_avg=0.659`, `final_f1_avg=0.671`, `final_similarity_coverage_avg=0.587`, `final_boundary_f1_avg=0.320`, `case_exact_match=12`이다.
 - 목표 `final_f1_avg >= 0.65`는 달성했다. 다만 `case_exact_match`는 15에서 12로 낮아졌으므로, 다음 반복은 중복/과분리 케이스가 늘었는지 실제 로그와 케이스별 결과를 함께 봐야 한다.
 
+## 2026-06-20 12:51 KST - 영어 짧은 tail echo와 조각 확정 케이스
+
+- 12:51 로그에서 `War department. Budget.`처럼 최근 final의 마지막 단어가 독립 문장으로 다시 들어오고, 이어서 `Optimist.`, `Optimus is, I think, going to be the greatest product.`가 완성 전 조각으로 final되는 흐름을 확인했다.
+- `en_log_short_tail_budget_optimus_fragment_20260620_001`를 추가했다. 이 케이스는 한 단어 tail echo, trailing ellipsis 후보, 완성 전 fragment final, 후속 pending/staged 잔류를 함께 추적한다.
+- 최근 final short-tail echo 억제는 2-5 token 후보만 보던 상태였기 때문에 `Budget.` 같은 1 token echo를 놓쳤다. 6자 이상 한 단어 후보가 최근 final 마지막 단어와 충분히 유사하면 delta를 빈 문자열로 처리하도록 확장했다.
+- 변경 후 117케이스 CUDA/SaT 벤치는 `finalized=353`, `stage_start=533`, `finalized_per_stage_start=0.662`, `final_precision_avg=0.756`, `final_recall_avg=0.669`, `final_f1_avg=0.681`, `final_similarity_coverage_avg=0.596`, `final_boundary_f1_avg=0.328`, `case_exact_match=12`, `pending_exact_match=90`, `staged_exact_match=45`이다.
+- 신규 케이스에서는 `Budget.` false positive는 사라졌지만 `Optimist.`와 `Optimus is, I think, going to be the greatest product.` 조각 final은 남았다. 다음 개선은 한 단어 echo보다 staged revision이 trailing ellipsis/후속 확장 후보와 어떻게 연결되는지에 집중한다.
+
+## 2026-06-20 12:56 KST - 종결 경계가 사라지는 revision의 confirmation reset
+
+- 12:56 로그에서 `The hands are incredibly versatile instruments.`가 staged 된 뒤, 다음 window의 pending tail과 합쳐져 `The hands are incredibly versatile instruments and most of the muscles of the hands`라는 no-end 후보로 revision 됐다.
+- 기존 로직은 이 revision을 같은 문장 confirmation으로 누적해 즉시 final 처리했고, `final_quality=no_end_marker` 때문에 번역만 생략했다. append-only final 기준에서는 번역 생략만으로 충분하지 않고 final 자체가 보류되어야 한다.
+- `en_log_terminal_boundary_lost_hands_muscles_20260620_001`를 추가했다. 이 케이스는 종결된 staged 문장이 뒤 open tail과 합쳐지면서 문장 경계가 사라지는 유형을 추적한다.
+- 종결 경계가 있던 staged가 종결 경계 없는 preferred revision으로 바뀌면 confirmation을 1로 reset하고 age도 reset하도록 변경했다. 이는 언어별 문구 규칙이 아니라 revision lifecycle에서 경계 신뢰가 낮아진 후보를 같은 확정 근거로 보지 않는 일반 규칙이다.
+- 변경 후 118케이스 CUDA/SaT 벤치는 `finalized=355`, `stage_start=537`, `finalized_per_stage_start=0.661`, `final_precision_avg=0.756`, `final_recall_avg=0.665`, `final_f1_avg=0.679`, `final_similarity_coverage_avg=0.594`, `final_boundary_f1_avg=0.326`, `case_exact_match=12`, `pending_exact_match=91`, `staged_exact_match=44`이다.
+- 신규 케이스에서 no-end 조각 final은 사라지고 `The hands are incredibly versatile instruments and most of the muscles of the hand are actually in the forearm.`가 final로 회수됐다. 다만 `The hands are incredibly versatile instruments.`가 staged에 남아 중복/잔류 가능성이 있으므로, 다음 반복은 완성된 긴 final이 나간 뒤 staged prefix 후보를 어떻게 정리할지 관찰한다.
+
+## 2026-06-20 12:58 KST - prior pending prefix와 recent final tail 혼합 억제
+
+- 12:58 로그에서 `How much do you sort of get for free?`가 먼저 final된 뒤 후속 window에서 `...based on all the progress that's happening with LLMs?`까지 포함한 더 긴 질문이 관측됐다.
+- 같은 구간에서 pending prefix `Will consumer`와 최근 final tail `important.`가 붙은 `Will consumer important.` staged 후보가 생성됐다.
+- `en_log_recent_final_suffix_llm_question_20260620_001`를 추가했다. 이 케이스는 append-only premature final과 prior-pending/recent-final tail 혼합 후보를 함께 추적한다.
+- prior pending prefix가 2단어 이상이고, 그 뒤 1-3단어 suffix가 최근 final의 마지막 단어들과 유사하면 혼합 후보로 억제하도록 했다. 이는 문구별 예외가 아니라 pending prefix와 recent final tail이 결합된 후보를 제거하는 일반 규칙이다.
+- 변경 후 119케이스 CUDA/SaT 벤치는 `finalized=361`, `stage_start=542`, `finalized_per_stage_start=0.666`, `final_precision_avg=0.754`, `final_recall_avg=0.663`, `final_f1_avg=0.678`, `final_similarity_coverage_avg=0.593`, `final_boundary_f1_avg=0.326`, `case_exact_match=13`, `pending_exact_match=92`, `staged_exact_match=46`이다.
+- 신규 케이스에서 `Will consumer important.` staged 잔류는 사라졌고 `candidate_prior_pending_recent_final_mixed_suppressed=1`이 기록됐다. 다만 `How much do you sort of get for free?`가 append-only로 먼저 final된 뒤 더 긴 `...with LLMs?` revision을 회수하지 못하는 문제는 남았다.
+
+## 2026-06-20 13:16 KST - no-end final 번역 생략과 Starship V3 누락 케이스
+
+- 13:09 로그에서 `because that's got raptor three ... everything changes on the rocket with version three`처럼 종결 부호가 없는 긴 후보가 final로 확정되고 `final_quality=no_end_marker` 때문에 번역이 생략되는 흐름을 확인했다.
+- final-only 번역 계약에서는 final로 확정된 문장을 번역하지 않는 것이 사용자 관점의 누락으로 보인다. `en_log_no_end_final_starship_v3_translation_skip_20260620_001`를 추가해 Starship V3 구간의 no-end final, queue churn, 후속 완성 문장 회수를 추적한다.
+- no-end 후보를 confirmed/replaced/age final에서 전면 차단하는 시도를 했다. 120케이스 CUDA/SaT 벤치에서 `final_f1_avg`가 `0.679`에서 `0.605`로 떨어지고 `finalized_per_stage_start`도 `0.664`에서 `0.588`로 낮아져 폐기했다.
+- 최종 반영은 final 확정 정책을 유지하되, 이미 final로 확정된 긴 no-end 문장을 번역 생략하지 않는 최소 변경이다. `short_no_end_fragment`, `trailing_ellipsis`, 반복/빈 후보 등은 계속 번역 생략 대상이다.
+- 변경 후 120케이스 CUDA/SaT 벤치는 `finalized=367`, `stage_start=553`, `finalized_per_stage_start=0.664`, `final_precision_avg=0.755`, `final_recall_avg=0.665`, `final_f1_avg=0.679`, `final_similarity_coverage_avg=0.594`, `final_boundary_f1_avg=0.326`, `case_exact_match=13`, `pending_exact_match=93`, `staged_exact_match=47`이다.
+- 신규 케이스 자체는 `final_f1=0.833`이며 `final_quality_no_end_marker=1`이 남는다. 따라서 문장 경계 품질 문제는 계속 관찰하되, 이번 패치에서는 final된 문장이 번역 큐에서 빠지는 문제만 제거한다.
+
+## 2026-06-20 13:20 KST - 영어 짧은 조각과 queue 순서 churn 추가 관찰
+
+- 13:19 로그에서 `that we are aware of` 같은 짧은 no-end 조각이 staged/final 근거로 흔들리고, 이어서 `have AI smarter than any single human...`가 queue에서 뒤늦게 확정되는 흐름을 확인했다.
+- `en_log_short_no_end_awareness_fragment_20260620_001`를 추가해 짧은 no-end 조각, 이전 window terminal 후보의 false positive, queue churn, `Wow.` staged 잔류를 함께 추적한다.
+- `SHORT_NO_END_FRAGMENT_UNITS`를 4에서 5로 올리는 시도를 했다. 121케이스 CUDA/SaT 벤치에서 `final_f1_avg=0.667`, `finalized_per_stage_start=0.660`으로 나와, 기존 기준 대비 개선 근거가 없어 폐기했다.
+- 상수 변경을 되돌리고 케이스만 남긴 최종 121케이스 CUDA/SaT 벤치는 `finalized=371`, `stage_start=559`, `finalized_per_stage_start=0.664`, `final_precision_avg=0.755`, `final_recall_avg=0.667`, `final_f1_avg=0.681`, `final_similarity_coverage_avg=0.595`, `final_boundary_f1_avg=0.323`, `case_exact_match=13`, `pending_exact_match=94`, `staged_exact_match=47`이다.
+- 신규 케이스는 `final_f1=0.857`이고 false positive 1개와 `actual_staged='Wow.'`가 남는다. 다음 개선은 단순 token 수 임계값보다, 생성순서 queue에서 이전 window prefix 후보가 후속 완성 문장보다 먼저 final되는 구조를 봐야 한다.
+
+## 2026-06-20 13:24 KST - recent-final delta가 만든 짧은 final 조각 억제
+
+- 13:23 로그에서 `So it's, look, at least in America...`가 staged 된 뒤 aged final 경로로 들어가고, recent-final delta가 `so it s look` 같은 짧은 no-end 조각만 남겨 final로 내보내는 흐름을 확인했다.
+- 같은 구간에서 `So, I think we need to maybe give people...`가 먼저 짧게 final되고, 이후 `...belief that the future will be better... kids` 확장 후보가 recent final 중복으로 눌리는 누락도 함께 관측됐다.
+- `en_log_recent_delta_short_fragment_optimism_belief_20260620_001`를 추가해 recent-final delta 조각 확정, premature final, 후속 확장 누락, staged 잔류를 추적한다.
+- output delta가 원 staged 문장과 다르고 그 delta가 `short_no_end_fragment` 또는 `trailing_ellipsis`이면 final 확정을 억제하도록 `_should_suppress_delta_final()`를 확장했다. 이는 특정 단어나 언어 예외가 아니라 final 직전 output 품질 게이트다.
+- 변경 후 122케이스 CUDA/SaT 벤치는 `finalized=377`, `stage_start=566`, `finalized_per_stage_start=0.666`, `final_precision_avg=0.755`, `final_recall_avg=0.670`, `final_f1_avg=0.682`, `final_similarity_coverage_avg=0.597`, `final_boundary_f1_avg=0.328`, `case_exact_match=13`, `pending_exact_match=95`, `staged_exact_match=47`이다.
+- 신규 케이스에서는 짧은 delta 조각 final은 제거됐지만, `So, I think...`와 `about the future and a belief...`가 두 final로 과분리되고 `actual_staged='give people a sense of optimism'`가 남는다. 다음 반복은 recent-final delta가 긴 후속 확장을 premature final로 오판하는 조건을 더 좁게 봐야 한다.
+
+## 2026-06-20 13:27 KST - open Latin clause confirmation 차단 시도 폐기
+
+- 13:27 로그에서 `I don't know if I hope more people can get behind a`처럼 관사로 끝나는 열린 영어 절이 confirmation final로 확정되고 번역 생략되는 흐름을 확인했다.
+- 이어서 `I hope more people can get behind a philosophy of curiosity.`와 `Because I think it's very exciting.`가 후속 window에서 관측됐지만, 앞 open clause final과 staged queue churn 때문에 일부 문장이 누락/오염됐다.
+- `en_log_open_latin_clause_curiosity_philosophy_20260620_001`를 추가했다. 신규 케이스는 현재 기준 `final_f1=0.333`으로 낮고, `I don't know if I hope more people can get behind a philosophy of curiosity`가 staged에 남는다.
+- `_looks_like_open_latin_clause()`를 confirmed final에도 적용하는 시도를 했다. 123케이스 CUDA/SaT 벤치에서 `final_precision_avg=0.760`, `case_exact_match=14`로 일부 좋아졌지만 `final_recall_avg=0.664`, `finalized_per_stage_start=0.662`, `staged_exact_match=46`으로 낮아졌다.
+- 같은 123케이스에서 해당 변경을 되돌린 기준은 `finalized=379`, `stage_start=570`, `finalized_per_stage_start=0.665`, `final_precision_avg=0.753`, `final_recall_avg=0.667`, `final_f1_avg=0.680`, `final_similarity_coverage_avg=0.594`, `final_boundary_f1_avg=0.325`, `case_exact_match=13`, `pending_exact_match=96`, `staged_exact_match=47`이다.
+- precision 상승만으로는 확정 누락 위험을 감수할 근거가 부족하므로 open Latin clause confirmed 차단은 폐기했다. 케이스는 남겨 다음 반복에서 queue 생성순서와 recent-final delta 오판을 함께 본다.
+
+## 2026-06-20 13:30 KST - Mars governance fragment final 관찰
+
+- 13:30 로그에서 `than the form of governance on Mars...`가 앞 문맥 없이 leading fragment final로 나가고, `what really matters is that` no-end 후보가 final/translation-skip 경로에 걸리는 흐름을 확인했다.
+- `en_log_fragment_final_mars_governance_20260620_001`를 추가했다. 이 케이스는 선행 문맥이 잘린 fragment final, no-end 후보, 후속 trailing ellipsis, staged 잔류를 함께 추적한다.
+- 단순 open-clause/fragment 차단은 직전 실험에서 recall과 final 소비율을 낮춘 전력이 있어 이번에는 로직을 추가하지 않았다. 같은 계열의 문제는 문구별 차단보다 queue 생성순서와 revision lifecycle에서 다루는 편이 맞다.
+- 변경 후 124케이스 CUDA/SaT 벤치는 `finalized=382`, `stage_start=574`, `finalized_per_stage_start=0.666`, `final_precision_avg=0.755`, `final_recall_avg=0.667`, `final_f1_avg=0.681`, `final_similarity_coverage_avg=0.594`, `final_boundary_f1_avg=0.327`, `case_exact_match=13`, `pending_exact_match=97`, `staged_exact_match=47`이다.
+- 신규 케이스는 `final_f1=0.857`, `precision=1.0`, `recall=0.75`이다. `There's a point...`와 `It's more important...`가 하나의 긴 final로 합쳐져 회수되며, `actual_staged='authority of Mars, how do you run Mars?'`가 남는다. 다음 반복에서는 fragment 차단보다 staged 잔류 정리와 문장 분리 품질을 우선 관찰한다.
+
+## 2026-06-20 13:18 KST - scaling compute queue 오염 관찰
+
+- 13:18 로그에서 `maybe that's that might be in scaling hardware, do you think?`와 `compute will double the intelligence.`가 final로 나가고, 원래 문맥인 `natural logarithmic function...`, `10x more compute will double the intelligence`, `rough rule of thumb` 구간이 분리/누락되는 흐름을 확인했다.
+- `en_log_queue_contamination_scaling_compute_20260620_001`를 추가했다. 이 케이스는 staged queue에 남은 앞 질문 후보가 뒤 window의 pending/revision과 섞이며 false final 또는 누락을 만들 수 있는 유형을 추적한다.
+- 현재 코드 기준 신규 케이스는 `final_f1=0.769`, `precision=1.0`, `recall=0.625`이다. 실행 로그에서 보인 오염 final은 최신 로직에서는 직접 재현되지 않았지만, `Do you get a 100% better model?`, `So then...10x more compute...`, `Maybe that might be...`가 누락되고 `actual_staged='How much more juice is there left in scaling hardware, do you think?'`가 남는다.
+- 변경 후 125케이스 CUDA/SaT 벤치는 `finalized=387`, `stage_start=581`, `finalized_per_stage_start=0.666`, `final_precision_avg=0.757`, `final_recall_avg=0.667`, `final_f1_avg=0.682`, `final_similarity_coverage_avg=0.595`, `final_boundary_f1_avg=0.327`, `case_exact_match=13`, `pending_exact_match=98`, `staged_exact_match=47`이다.
+- 평균 지표를 해치지 않고 의심 구간이 벤치에 추가됐으므로 이번 반복에서는 로직을 바꾸지 않는다. 다음 개선 후보는 queued staged 후보가 후속 completed 문장과 중복될 때 staged 잔류를 정리하는 일반 규칙이다.
+
+## 2026-06-20 13:37 KST - public safety 질문 병합과 no-end 후보 관찰
+
+- 13:37 로그에서 `governments like ours should be doing...` 질문이 최근 final delta trimming 뒤 `should be doing...`로 잘려 final되고, 이어 `so um you know really for the vast majority of software the public safety is not` no-end 후보가 final/translation-skip 경로에 걸리는 흐름을 확인했다.
+- `en_log_recent_delta_no_end_public_safety_20260620_001`를 추가했다. 이 케이스는 recent-final delta가 질문 앞부분을 제거하는 상황, staged queue churn, no-end 후보, 후속 완성 문장 중복 억제를 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 실행 로그의 no-end final을 그대로 재현하지는 않는다. 대신 `that that happened today, but what's your view...` 병합 final, `Again, we don't know...governments...risks?` 병합 final, 마지막 `So, you know...public safety is not at risk.` 누락, `actual_staged='we don't know but you know what are the types of things'` 잔류를 재현한다.
+- 신규 케이스 점수는 `final_f1=0.727`, `precision=1.0`, `recall=0.571`이다. 변경 후 126케이스 CUDA/SaT 벤치는 `finalized=391`, `stage_start=589`, `finalized_per_stage_start=0.664`, `final_precision_avg=0.759`, `final_recall_avg=0.666`, `final_f1_avg=0.682`, `final_similarity_coverage_avg=0.594`, `final_boundary_f1_avg=0.324`, `case_exact_match=13`, `pending_exact_match=99`, `staged_exact_match=47`이다.
+- 평균 F1은 유지되고 실패 양상은 문장 분리/queue 잔류로 재현되므로 이번 반복에서는 로직을 추가하지 않는다. 다음 개선은 recent-final delta trimming이 완전한 질문을 앞부분 없는 질문으로 만드는 조건을 좁히는 쪽에서 본다.
+
+## 2026-06-20 13:39 KST - Demis/Safety Institute replaced suffix 관찰
+
+- 13:39 로그에서 `Well, I generally think that it is good for governments the models before they are released.`처럼 이전 문장 tail과 후속 후보가 섞인 false final이 관측됐다. 뒤쪽에서는 `Demis...marking their own homework`, `There needs to be someone independent...`가 회수되지만, queue churn과 후속 질문의 조기 final 가능성이 남는다.
+- `en_log_replaced_suffix_demis_safety_institute_20260620_001`를 추가했다. 이 케이스는 `replaced_duplicate_or_suffix` 계열 false final, 후속 정상 회수, pending 질문 조기 final을 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.941`, `precision=0.889`, `recall=1.0`이다. 기대 final 8개는 모두 회수하지만 `Do you think governments can develop the expertise?`가 pending이 아니라 final로 나가 false positive 1개가 남는다.
+- 변경 후 127케이스 CUDA/SaT 벤치는 `finalized=400`, `stage_start=599`, `finalized_per_stage_start=0.668`, `final_precision_avg=0.760`, `final_recall_avg=0.669`, `final_f1_avg=0.684`, `final_similarity_coverage_avg=0.596`, `final_boundary_f1_avg=0.323`, `case_exact_match=13`, `pending_exact_match=99`, `staged_exact_match=48`이다.
+- 평균 F1과 staged exact가 소폭 개선되어 로직 변경은 보류한다. 이 케이스는 후속 질문이 window 끝에 완성 문장으로 들어왔을 때 append-only final로 바로 소비되는 현상을 관찰하기 위한 샘플로 유지한다.
+
+## 2026-06-20 13:46 KST - China AI safety no-end final 회복 확인
+
+- 13:42 로그에서 `If China is not on board with AI safety,`가 `final_quality=no_end_marker`로 확정된 뒤, 후속 window의 `If China is not on board with AI safety, it's somewhat of a moot situation.`가 중복 문장으로 억제되는 흐름이 관측됐다.
+- `en_log_no_end_china_ai_safety_objection_20260620_001`를 추가했다. 이 케이스는 no-end 조기 final, 후속 완성 문장 중복 억제, 번역 생략 위험을 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=1.000`, `precision=1.0`, `recall=1.0`, `pending_exact=true`, `staged_exact=true`이다. 실제 로그에서 보인 조기 no-end 증상은 샘플로 보존하지만, 현재 로직은 최종 완성 문장을 회수한다.
+- 변경 후 128케이스 CUDA/SaT 벤치는 `finalized=411`, `stage_start=611`, `finalized_per_stage_start=0.673`, `final_precision_avg=0.762`, `final_recall_avg=0.671`, `final_f1_avg=0.687`, `final_similarity_coverage_avg=0.599`, `final_boundary_f1_avg=0.320`, `case_exact_match=13`, `pending_exact_match=100`, `staged_exact_match=49`이다.
+- 신규 케이스가 현재 로직에서 통과하고 전체 지표도 악화되지 않아 로직 변경은 하지 않는다. 같은 유형이 다시 실패하면 no-end final 이후 완성형 후보를 recent-final 중복으로만 보지 않는 revision 경로를 검토한다.
+
+## 2026-06-20 13:49 KST - human agents 조기 final과 agency revision 관찰
+
+- 13:47 로그에서 `You've talked a lot about human consciousness, human agents.`가 먼저 final된 뒤, 후속 window에서 `human agency...given that you are known...`로 확장되는 흐름을 확인했다.
+- `en_log_premature_human_agents_agency_revision_20260620_001`를 추가했다. 이 케이스는 STT 오인식 기반 premature final, 후속 revision, recent-final 중복 억제, 긴 문장 후반부 누락 가능성을 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=1.000`, `precision=1.0`, `recall=1.0`, `pending_exact=true`, `staged_exact=true`이다. 다만 actual final은 `You've talked...might strike people as strange.`까지만 별도 문장으로 잡고, 기대 문장의 `given that you are known...technologist` 후반부는 다음 문장으로 자연스럽게 합쳐지지 않는다.
+- 변경 후 129케이스 CUDA/SaT 벤치는 `finalized=415`, `stage_start=615`, `finalized_per_stage_start=0.675`, `final_precision_avg=0.764`, `final_recall_avg=0.674`, `final_f1_avg=0.689`, `final_similarity_coverage_avg=0.602`, `final_boundary_f1_avg=0.322`, `case_exact_match=13`, `pending_exact_match=101`, `staged_exact_match=50`이다.
+- 평균 지표는 악화되지 않았고 신규 케이스도 유사도 기준으로는 통과하므로 로직 변경은 보류한다. 이 케이스는 문장 유사도 F1이 놓칠 수 있는 후반부 내용 보존/경계 품질 관찰 샘플로 유지한다.
+
+## 2026-06-20 13:51 KST - tutor revision과 staged residue 관찰
+
+- 13:50 로그에서 `It'll be the best tutor you could.`가 staged된 뒤 `It'll be the best tutor and the most patient.`, `...most patient tutor.`로 흔들리고, 뒤쪽 `So they will they.`가 staged 잔류로 남는 흐름을 확인했다.
+- `en_log_tutor_revision_stage_residue_20260620_001`를 추가했다. 이 케이스는 tutor 문장 revision, 후속 `no shortage...`, `age of abundance` 누락, 짧은 비문 staged 잔류를 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.875`, `precision=1.0`, `recall=0.778`, `pending_exact=false`, `staged_exact=false`이다. actual final은 `It'll be the best tutor and the most patient.`까지만 잡고 `And there will be no shortage...`, `There will be an age of abundance.`를 회수하지 못하며 `actual_staged='So they will they.'`가 남는다.
+- 변경 후 130케이스 CUDA/SaT 벤치는 `finalized=422`, `stage_start=624`, `finalized_per_stage_start=0.676`, `final_precision_avg=0.766`, `final_recall_avg=0.675`, `final_f1_avg=0.690`, `final_similarity_coverage_avg=0.603`, `final_boundary_f1_avg=0.319`, `case_exact_match=13`, `pending_exact_match=101`, `staged_exact_match=50`이다.
+- `So they will they.`는 품질 게이트 후보지만, 문구/문법별 규칙으로 흐를 위험이 있어 이번 반복에서는 로직 변경을 보류한다. 같은 구조가 다른 케이스에서도 반복되면 짧은 비문 staged 잔류를 언어별 예외 없이 다루는 일반 품질 기준을 검토한다.
+
+## 2026-06-20 13:57 KST - AI friend STT revision false final과 no-end final 관찰
+
+- 13:55 로그에서 `an AI friend would actually be great for him` 구간이 `he and I would actually be grateful`로 흔들린 뒤 confirmed final로 나가고, 이어 `an ai friend would actually be great for him`이 no-end final로 확정되어 번역 생략되는 흐름을 확인했다.
+- `en_log_ai_friend_false_final_translation_skip_20260620_001`를 추가했다. 이 케이스는 STT revision 오인식 기반 false final, no-end final, 후속 문장 회수, translation-skip 위험을 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.800`, `precision=0.8`, `recall=0.8`, `pending_exact=true`, `staged_exact=true`이다. actual final에는 false positive `And I was like, well, you know, he and I would actually be grateful.`와 소문자 no-end `an ai friend would actually be great for him`이 남고, 기대 문장 `And I was like...an AI friend...` 및 마지막 `...psychotherapy anyway.`는 완전 회수되지 않는다.
+- 변경 후 131케이스 CUDA/SaT 벤치는 `finalized=432`, `stage_start=635`, `finalized_per_stage_start=0.680`, `final_precision_avg=0.766`, `final_recall_avg=0.676`, `final_f1_avg=0.691`, `final_similarity_coverage_avg=0.604`, `final_boundary_f1_avg=0.319`, `case_exact_match=13`, `pending_exact_match=102`, `staged_exact_match=51`이다.
+- 단일 영어 문법/문구 규칙으로 막으면 기존 open-clause 실험처럼 recall을 낮출 위험이 있어 이번 반복에서는 로직 변경을 보류한다. 같은 유형이 반복되면 no-end final 번역 생략 조건과 STT revision false final의 일반 품질 기준을 별도로 검토한다.
+
+## 2026-06-20 13:59 KST - Community Notes tail aged final과 과분리 관찰
+
+- 13:58 로그에서 `create that community note.`의 tail인 `note.`가 staged로 남은 뒤 `aged` 경로로 단독 final되고 번역까지 요청되는 흐름을 확인했다.
+- `en_log_community_note_tail_aged_final_20260620_001`를 추가했다. 이 케이스는 한 단어 tail aged final, trailing ellipsis 후보, `maximum transparency` 구간 과분리, 후속 `Community Notes` 문장 회수를 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.889`, `precision=0.8`, `recall=1.0`, `pending_exact=true`, `staged_exact=true`이다. fresh replay에서는 로그의 `note.` 단독 final은 직접 재현되지 않고, 대신 `So it's maximum transparency.`와 `Combined with...to get to a better answer.`가 기대한 단일 문장보다 과분리된다.
+- 변경 후 132케이스 CUDA/SaT 벤치는 `finalized=437`, `stage_start=641`, `finalized_per_stage_start=0.682`, `final_precision_avg=0.766`, `final_recall_avg=0.678`, `final_f1_avg=0.693`, `final_similarity_coverage_avg=0.605`, `final_boundary_f1_avg=0.317`, `case_exact_match=13`, `pending_exact_match=103`, `staged_exact_match=52`이다.
+- `note.` 같은 짧은 완성 문장을 전면 차단하면 실제 짧은 응답까지 놓칠 수 있으므로 이번 반복에서는 로직 변경을 하지 않는다. 같은 staged-age tail 단독 final이 더 누적되면 recent-final echo가 아닌 staged-age 후보 품질 기준으로 별도 검토한다.
+
+## 2026-06-20 14:02 KST - technical talent tail fragment와 open final 관찰
+
+- 14:00-14:01 로그에서 질의응답 전환 구간의 `most exceptional technical talent.`가 staged로 들어오고, 이후 `Well, you're right...culture should celebrate creating new companies.`가 앞부분 일부를 잃은 채 final되는 흐름을 확인했다.
+- `en_log_culture_technical_talent_tail_fragment_20260620_001`를 추가했다. 이 케이스는 앞 질문 tail fragment, speaker handoff, `culture should celebrate...` 문장의 조기 final, 후속 `small companies...nurturing` 회수를 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.952`, `precision=1.0`, `recall=0.909`, `pending_exact=true`, `staged_exact=true`이다. actual final은 false positive 없이 대체로 회수하지만 `We have the talent.`가 빠지고, `Well, you're right...creating.` 및 `And there should be a bias...because they're the ones that`처럼 열린 문장 final이 남는다.
+- 변경 후 133케이스 CUDA/SaT 벤치는 `finalized=447`, `stage_start=652`, `finalized_per_stage_start=0.686`, `final_precision_avg=0.768`, `final_recall_avg=0.680`, `final_f1_avg=0.695`, `final_similarity_coverage_avg=0.607`, `final_boundary_f1_avg=0.314`, `case_exact_match=13`, `pending_exact_match=104`, `staged_exact_match=53`이다.
+- 신규 케이스는 평균 지표를 해치지 않지만, open final과 tail fragment가 반복되는 흐름을 보존한다. open-clause 차단은 과거 실험에서 recall을 낮췄으므로 이번에도 로직 변경은 보류한다.
+
+## 2026-06-20 14:05 KST - transpose culture no-end final과 긴 문장 과분리 관찰
+
+- 14:04 로그에서 `It's how do you transpose that culture from places like Silicon Valley across the world where people are`가 no-end final로 확정되고, 이후 window에서 `...unafraid to give up the security of a regular paycheck...comfortable with failure.`로 완성되는 흐름을 확인했다.
+- `en_log_transpose_culture_no_end_final_20260620_001`를 추가했다. 이 케이스는 no-end final, translation-skip 위험, 긴 문장의 과분리, 후속 완성 문장 회수를 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.545`, `precision=0.5`, `recall=0.6`, `pending_exact=true`, `staged_exact=true`이다. actual final은 `...across the globe.`와 `world where people are unafraid to give up the security of a regular.`로 분리되어, 기대한 긴 culture 문장과 후반부 내용을 충분히 회수하지 못한다.
+- 변경 후 134케이스 CUDA/SaT 벤치는 `finalized=453`, `stage_start=660`, `finalized_per_stage_start=0.686`, `final_precision_avg=0.766`, `final_recall_avg=0.679`, `final_f1_avg=0.694`, `final_similarity_coverage_avg=0.606`, `final_boundary_f1_avg=0.312`, `case_exact_match=13`, `pending_exact_match=105`, `staged_exact_match=54`이다.
+- 신규 케이스는 평균 지표를 크게 흔들지 않지만 케이스 자체 점수가 낮아, no-end final이 후속 완성 문장을 recent-final 중복/과분리로 밀어내는 대표 실패 샘플로 유지한다. 이번 반복에서는 기존 open-clause 차단 폐기 결과를 존중해 로직 변경은 보류한다.
+
+## 2026-06-20 14:12 KST - gov.uk AI 배포 구간의 짧은 false final과 queue churn 관찰
+
+- 14:08-14:09 로그에서 `to make that possible.`이 먼저 staged/transcript로 보인 뒤, 후속 window의 `to make that whole process so much easier.`가 `stage_replace_decision=unconfirmed`로 반복 보류되고 일부 후보가 폐기되는 흐름을 확인했다.
+- 이어 `Because some people will be like...lost my passport...`, `At the moment...`, `Actually, when we deploy the AI...walk you through it.` 같은 완료 문장들이 반복적으로 `중복 문장 무시` 경로에 걸렸다. 이 구간은 짧은/오염 후보가 staged 순서를 점유하고 후속 정상 문장이 큐에서 밀리는 복합 실패로 본다.
+- `en_log_govuk_ai_deploy_short_final_20260620_001`를 추가했다. 이 케이스는 short false final, 후속 완성 문장 누락, duplicate suppression, staged queue churn을 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.333`, `precision=0.667`, `recall=0.222`, `pending_exact=true`, `staged_exact=false`이다. actual final은 `that I think several million people a day use, right?`, `So a large chunk...`, `every one...whole process platform.` 3개뿐이고, 기대 final 9개 중 7개가 누락된다.
+- 신규 케이스 metrics는 `stage_replace_decision_unconfirmed=26`, `stage_queue_enqueue=12`, `stage_replace_deferred=32`, `stage_unconfirmed_replacement_suppressed=2`, `finalize_delta_suppressed=1`이다. 이는 단순 임계값 하나보다 staged 후보 순서/교체 보류 정책과 recent duplicate 억제가 함께 작동한 실패로 해석한다.
+- 변경 후 135케이스 CUDA/SaT 벤치는 `finalized=456`, `stage_start=667`, `finalized_per_stage_start=0.684`, `final_precision_avg=0.765`, `final_recall_avg=0.676`, `final_f1_avg=0.691`, `final_similarity_coverage_avg=0.603`, `final_boundary_f1_avg=0.309`, `case_exact_match=13`, `pending_exact_match=106`, `staged_exact_match=54`이다.
+- 이번 반복에서는 로직을 추가하지 않는다. 후보 교체 보류와 중복 억제의 상호작용이 확정 누락을 만든다는 증거는 강해졌지만, 문구별 규칙이나 open-clause 전면 차단은 기존 실험에서 recall을 낮췄으므로 다음 반복에서 staged 후보 순서 보존과 후속 완성 후보의 재평가 조건을 최소 범위로 검토한다.
+
+## 2026-06-20 14:16 KST - endpoint actuator no-end final과 Hyundai 긴 문장 과분리 관찰
+
+- 14:12 로그에서 `Anything that's connected to the Internet is effectively an endpoint`가 `quality_flags=no_end_marker` final로 확정되고 번역 생략됐다. 바로 다음 window에는 `...endpoint actuator for artificial intelligence.` 완성형이 반복되지만 최근 final/중복 억제 경로에 걸렸다.
+- 같은 구간 후반부에서는 `So I guess Hyundai is probably going to make robots.`가 먼저 staged되고, 후속 `...humanoid and some rather interesting shapes...` 후보가 여러 차례 `stage_replace_decision=unconfirmed`로 보류됐다. 이후 `so i guess hyundai...wasn t anticipating like` no-end final과 `artificial intelligence.` tail transcript가 함께 나타났다.
+- `en_log_endpoint_actuator_hyundai_no_end_20260620_001`를 추가했다. 이 케이스는 no-end final, translation-skip, 후속 완성 문장 중복 억제, 긴 Hyundai 문장 과분리를 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.941`, `precision=0.889`, `recall=1.0`, `pending_exact=true`, `staged_exact=true`이다. fresh replay에서는 `endpoint actuator...artificial intelligence.`를 회수하지만, Hyundai 문장을 `...and some`과 `and buy hyundai...kangaroo`로 과분리해 false positive 1개가 남는다.
+- 신규 케이스 metrics는 `final_quality_no_end_marker=2`, `stage_replace_decision_unconfirmed=3`, `stage_queue_enqueue=4`, `stage_unconfirmed_replacement_suppressed=1`, `candidate_duplicate_suppressed=31`이다. 로그의 translation-skip 위험은 남기되, 현재 재생에서는 대부분 회수되므로 로직 변경 근거로는 아직 약하다.
+- 변경 후 136케이스 CUDA/SaT 벤치는 `finalized=465`, `stage_start=677`, `finalized_per_stage_start=0.687`, `final_precision_avg=0.766`, `final_recall_avg=0.678`, `final_f1_avg=0.693`, `final_similarity_coverage_avg=0.605`, `final_boundary_f1_avg=0.312`, `case_exact_match=13`, `pending_exact_match=107`, `staged_exact_match=55`이다.
+- 이번 반복에서도 로직 변경은 보류한다. 같은 유형이 낮은 F1로 반복되면 no-end final 이후 완성형 후보를 단순 duplicate로 억제하지 않고 revision/교체 후보로 재평가하는 최소 조건을 검토한다.
+
+## 2026-06-20 14:20 KST - local off switch safe state 과분리와 no-end final 관찰
+
+- 14:14 로그에서 `local sort of off switch`가 staged된 뒤 `local sort of off switch where you`가 `quality_flags=no_end_marker` final로 확정되고 번역 생략됐다. 이후 `But if you have a local sort of off switch where you have, say, a keyword...safe state...off switch.` 완성형이 여러 window에서 반복되지만 중복 억제와 pending/staged hold가 섞였다.
+- 후반부에서는 `Then we've got a James Cameron movie on our heads.`가 정상 staged되지만, 뒤이어 `It's funny you say that...exactly the same point...movies...James Cameron movies.` 구간이 반복 중복 억제로 흔들린다.
+- `en_log_local_off_switch_safe_state_20260620_001`를 추가했다. 이 케이스는 no-end final, translation-skip, 긴 안전스위치 문장의 과분리, 후속 James Cameron 문장 누락/중복 억제를 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.800`, `precision=0.727`, `recall=0.889`, `pending_exact=true`, `staged_exact=true`이다. actual final은 안전스위치 문장을 `...perhaps say a keyword`와 `or something and then...off switch.` 두 조각으로 나누고, 마지막 `...without mentioning James Cameron...` 문장은 `They're talking about movies.`까지만 회수한다.
+- 신규 케이스 metrics는 `final_quality_no_end_marker=1`, `stage_replace_decision_unconfirmed=6`, `stage_queue_enqueue=6`, `candidate_duplicate_suppressed=24`, `stage_revision_age_reset=2`이다. 실패는 단일 짧은 후보보다 long clause가 pending/staged에서 안정되기 전에 조각 final로 나뉘는 쪽에 가깝다.
+- 변경 후 137케이스 CUDA/SaT 벤치는 `finalized=476`, `stage_start=688`, `finalized_per_stage_start=0.692`, `final_precision_avg=0.766`, `final_recall_avg=0.680`, `final_f1_avg=0.694`, `final_similarity_coverage_avg=0.606`, `final_boundary_f1_avg=0.310`, `case_exact_match=13`, `pending_exact_match=108`, `staged_exact_match=56`이다.
+- 전체 지표는 악화되지 않았고 신규 케이스도 중간 수준으로 회수되므로 이번 반복에서는 로직 변경을 하지 않는다. 다만 no-end final 이후 완성형 후보가 반복되는 경우와 long clause 과분리 문제는 같은 계열로 계속 누적 관찰한다.
+
+## 2026-06-20 14:24 KST - CAPTCHA traffic lights stage queue 중복과 no-end final 관찰
+
+- 14:16-14:17 로그에서 `Identify all the traps.`가 먼저 staged된 뒤 `Identify all the traffic lights in this picture.`로 수정되는 STT revision 흐름을 확인했다. 이어 `You're like, OK.`가 final된 뒤 같은 문장이 다시 staged/promote되는 중복 위험도 같이 관측됐다.
+- 후반부에서는 `better passing human tests...` 계열 no-end 후보가 final/translation skip 위험을 만들고, `That is a real problem.`, `I don't actually have a good solution to it.`는 staged queue에 남는 흐름을 확인했다.
+- `en_log_captcha_traffic_lights_stage_duplicate_20260620_001`를 추가했다. 이 케이스는 STT revision, stage queue promote, 짧은 중복 final 위험, no-end final, 후속 문장 staged 잔류를 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.842`, `precision=0.889`, `recall=0.800`, `pending_exact=true`, `staged_exact=false`이다. actual final은 기대 문장 10개 중 8개를 유사도 기준으로 회수하지만, `actual_staged='it's gonna have a no problem doing that'`가 남고 staged queue에는 `That is a real problem.`, `I don't actually have a good solution to it.`가 남는다.
+- 신규 케이스 metrics는 `stage_replace_decision_unconfirmed=21`, `stage_queue_enqueue=12`, `stage_queue_promote=10`, `candidate_duplicate_suppressed=39`, `final_quality_no_end_marker=1`, `stage_unconfirmed_replacement_suppressed=3`이다. 이는 STT revision과 stage queue/promote 잔류가 같이 작동하는 실패 샘플로 본다.
+- 변경 후 138케이스 CUDA/SaT 벤치는 `finalized=485`, `stage_start=701`, `finalized_per_stage_start=0.692`, `final_precision_avg=0.767`, `final_recall_avg=0.681`, `final_f1_avg=0.695`, `final_similarity_coverage_avg=0.607`, `final_boundary_f1_avg=0.308`, `case_exact_match=13`, `pending_exact_match=109`, `staged_exact_match=56`이다.
+- 이번 반복에서는 로직 변경을 보류한다. fresh replay에서 주요 문장은 대부분 회수되지만 staged 잔류와 queue promote 중복 위험이 남으므로, 같은 유형이 더 누적되면 staged queue 소비/재평가 조건을 문구별 규칙 없이 검토한다.
+
+## 2026-06-20 14:31 KST - signed media no-end false final과 doctored image staged residue 관찰
+
+- 14:21-14:22 로그에서 `Some way of authenticating would be good.`가 먼저 확정된 뒤, 후속 window의 filler 포함 후보 `um digitally signed media to indicate uh`가 `quality_flags=no_end_marker` final로 확정되고 번역 생략되는 흐름을 확인했다.
+- 같은 구간에서 `Actually, on that point...`가 `later_completed_extension`으로 한 차례 보류됐지만, 이후 `Actually, on that point, I've already, and this is particularly pertinent.`가 먼저 final되고 `this is particularly pertinent for people in my job right`가 staged 잔류로 남았다. 뒤쪽 doctored image 문장도 `the damage is.`까지만 확정되어 완성형 `the damage is done.`을 놓쳤다.
+- `en_log_signed_media_no_end_false_final_20260620_001`를 추가했다. 이 케이스는 no-end false final, translation skip, duplicate suppression, staged queue promote, long-clause staged residue, 후반부 완성 문장 누락을 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.800`, `precision=0.750`, `recall=0.857`, `pending_exact=true`, `staged_exact=false`이다. actual final에는 `Okay.`, `um digitally signed media to indicate uh`, `Yeah.`, `By the time...the damage is.` 같은 false/불완전 final이 남고, actual staged는 `this is particularly pertinent for people in my job right`이다.
+- 신규 케이스 metrics는 `stage_replace_decision_unconfirmed=13`, `stage_queue_enqueue=12`, `stage_queue_promote=12`, `candidate_duplicate_suppressed=97`, `stage_candidate_quality_blocked=9`, `final_quality_no_end_marker=1`, `finalize_delta_suppressed=3`이다.
+- 변경 후 139케이스 CUDA/SaT 벤치는 `finalized=501`, `stage_start=722`, `finalized_per_stage_start=0.694`, `final_precision_avg=0.767`, `final_recall_avg=0.682`, `final_f1_avg=0.695`, `final_similarity_coverage_avg=0.608`, `final_boundary_f1_avg=0.308`, `case_exact_match=13`, `pending_exact_match=110`, `staged_exact_match=56`이다.
+- 이번 반복에서는 로직 변경을 보류한다. `um...uh` 같은 filler no-end final을 단어 규칙으로 차단하면 설계 기준과 맞지 않고, no-end final 전면 차단은 과거 실험에서 recall 저하 위험이 있었다. 이 케이스는 no-end false final과 staged residue의 결합 실패 근거로 유지한다.
+
+## 2026-06-20 14:35 KST - AI compute/three things 구간의 queue residue와 불완전 final 관찰
+
+- 14:25 로그에서 `it is coming and accelerating the transition will` 같은 오래된 staged tail이 남은 상태에서 `The transition will be bumpy.`, `Do you have a solution to this?`, `I don't make a bet here.`가 queue promote와 replaced-confirmed 경로로 연쇄 소비됐다.
+- 이후 `Do you imagine that the U.S.`가 불완전 final로 확정되고, `half or more of those jobs right now.` 같은 tail 조각도 aged final로 나왔다. 뒤쪽에서는 `every major...what do we do`가 no-end final로 나가고, `But AI is the US could make...`처럼 앞뒤 문장이 섞인 final도 재현됐다.
+- `en_log_ai_compute_three_things_queue_residue_20260620_001`를 추가했다. 이 케이스는 stage queue residue, unconfirmed replacement defer, no-speech segment drop, incomplete final, duplicate suppression, long-clause reorder를 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.829`, `precision=0.773`, `recall=0.895`, `pending_exact=true`, `staged_exact=false`이다. actual final은 기대 문장 대부분을 유사도 기준으로 회수하지만 `I mean, it's running circles around.`, `Do you imagine that the U.S. could make`, `Based on current trends, China will far exceed.`, `But AI is the US could make that level...` 같은 불완전/혼합 final 5개가 남는다.
+- actual staged는 `Now that's a moonshot, ladies and gentlemen.`로 남았다. 신규 케이스 metrics는 `stage_replace_decision_unconfirmed=9`, `stage_queue_enqueue=12`, `stage_queue_promote=12`, `candidate_duplicate_suppressed=144`, `stage_revision_age_reset=2`, `stage_confirm_deferred_later_extension=1`이다.
+- 변경 후 140케이스 CUDA/SaT 벤치는 `finalized=523`, `stage_start=745`, `finalized_per_stage_start=0.702`, `final_precision_avg=0.767`, `final_recall_avg=0.684`, `final_f1_avg=0.696`, `final_similarity_coverage_avg=0.609`, `final_boundary_f1_avg=0.309`, `case_exact_match=13`, `pending_exact_match=111`, `staged_exact_match=56`이다.
+- 이번 반복에서도 로직 변경은 보류한다. false final은 특정 문구 문제가 아니라 queue에 남은 후보와 최신 completed 후보의 소비 순서가 섞이는 문제로 보이며, 단일 임계값 조정보다는 추가 샘플 누적 후 최소한의 lifecycle 규칙을 검토하는 편이 맞다.
+
+## 2026-06-20 14:42 KST - Peter Diamandis/no-context image queue drop과 no-end false final 관찰
+
+- 14:29 로그에서 `and see what it is.`가 staged로 남은 상태에서 `This is Peter Diamandis.`, `No context whatsoever.`, `The host of the podcast Moonshots.` 등 후속 완료 문장이 반복적으로 queue에 쌓였다.
+- 같은 구간에서 `stage_queue_drop_oldest`가 발생했고, 이후 여러 문장이 한 chunk에서 연쇄 promote/final되는 흐름을 확인했다. 이는 오래된 staged 후보가 active 자리를 점유할 때 queue 압력이 높아지는 대표 샘플로 본다.
+- 후반부에서는 `there was`가 `quality_flags=no_end_marker,short_no_end_fragment`로 final 시도되어 번역 생략됐고, `I mean just it's like I tried to like update my Wikipedia page for like years`도 no-end final로 확정되어 번역 생략됐다.
+- `en_log_peter_diamandis_queue_drop_false_final_20260620_001`를 추가했다. 이 케이스는 queue drop, short/no-end false final, translation skip, duplicate suppression, 후속 완성 문장 누락 위험을 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.792`, `precision=0.950`, `recall=0.679`, `pending_exact=true`, `staged_exact=false`이다. actual final은 `This is Peter Diamandis.`가 후순위로 확정되고, 앞쪽 `Did you ask a question?`, `No, nothing.`, `I didn't say anything.`와 후반 `Not quite true.`, `It's my abundance logo.`, `It's a little wrinkled on the corner.`를 회수하지 못한다.
+- 신규 케이스 metrics는 `stage_queue_drop_oldest=6`, `stage_queue_enqueue=42`, `stage_queue_promote=28`, `stage_replace_decision_unconfirmed=92`, `candidate_duplicate_suppressed=92`, `stage_candidate_quality_blocked=16`이다.
+- 변경 후 141케이스 CUDA/SaT 벤치는 `finalized=543`, `stage_start=774`, `finalized_per_stage_start=0.702`, `final_precision_avg=0.768`, `final_recall_avg=0.684`, `final_f1_avg=0.697`, `final_similarity_coverage_avg=0.609`, `final_boundary_f1_avg=0.307`, `case_exact_match=13`, `pending_exact_match=112`, `staged_exact_match=56`이다.
+- 이번 추가는 샘플 보존이 목적이며 로직 변경은 하지 않는다. 증상은 특정 단어 문제가 아니라 오래된 staged 후보, queue 소비 순서, no-end final 품질 게이트가 함께 얽힌 lifecycle 문제로 보인다.
+
+## 2026-06-20 14:48 KST - future currency/wattage 구간의 staged queue 잔류와 조각 final 관찰
+
+- 14:36 로그에서 `Gravity well to escape.`, `...millionth of the sun's energy...`, `And energy is the inner loop...`, `future currency...wattage` 구간이 반복되며 staged/queue가 흔들리는 흐름을 확인했다.
+- 같은 구간에서 `whole of gravity`가 `quality_flags=no_end_marker,short_no_end_fragment` final로 확정되어 번역 생략됐고, 후반에는 `Just energy.`가 aged final로 확정됐다. 이어 `control energy and compute or just energy?`, `Intelligence or matter manipulation.`, `So that's your next big project...`가 queue와 duplicate suppression에 걸렸다.
+- `en_log_future_currency_wattage_energy_queue_20260620_001`를 추가했다. 이 케이스는 open-clause 보류, stage queue 잔류, short/no-end false final, aged short final, duplicate suppression을 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.583`, `precision=0.636`, `recall=0.538`, `pending_exact=true`, `staged_exact=false`이다. actual final에는 `yeah i think like i think the future currency`, `will essentially just be wattage`, `i was thinking...control energy and compute energy like now`, `Just energy.` 같은 과분리/조각 final이 남고, `So that's your next big project is going to be energy.`는 staged queue에 남는다.
+- 신규 케이스 metrics는 `stage_replace_decision_open_latin_clause=18`, `stage_replace_decision_unconfirmed=19`, `stage_queue_enqueue=18`, `stage_queue_promote=15`, `candidate_duplicate_suppressed=109`, `final_quality_no_end_marker=3`, `stage_candidate_quality_blocked=19`이다.
+- 변경 후 142케이스 CUDA/SaT 벤치는 `finalized=554`, `stage_start=795`, `finalized_per_stage_start=0.697`, `final_precision_avg=0.767`, `final_recall_avg=0.682`, `final_f1_avg=0.696`, `final_similarity_coverage_avg=0.608`, `final_boundary_f1_avg=0.306`, `case_exact_match=13`, `pending_exact_match=113`, `staged_exact_match=56`이다.
+- 신규 케이스 점수가 낮지만, 단일 구간만으로 open-clause 보류나 aged short final을 전면 조정하면 recall 손실 가능성이 크다. 같은 유형이 계속 누적되면 active staged가 낮은 품질/짧은 후보일 때 queue의 더 완성된 후보를 우선 재평가하는 최소 lifecycle 규칙을 검토한다.
+
+## 2026-06-20 14:54 KST - insecticide/nitrogen blanket 구간의 STT revision과 energy health queue 잔류 관찰
+
+- 14:40 로그에서 `insecticide/pesticide/exercise`가 같은 위치에서 흔들리고, `It's pretty hard...without oxygen.`, `nitrogen blanket`, `energy, health, education` 전환 구간이 queue와 duplicate suppression에 걸리는 흐름을 확인했다.
+- `Well, that's, it's an insecticide essentially.`가 먼저 final된 뒤, 후속 window의 `Well, that's, that's, it's an exercise essentially.` 계열 후보가 revision/duplicate로 흔들렸다. `Yep.`, `Oh, interesting.`, `Interesting.` 같은 짧은 응답도 queue promote와 replaced-confirmed 경로로 나왔다.
+- `en_log_insecticide_nitrogen_energy_health_queue_20260620_001`를 추가했다. 이 케이스는 STT revision, stage queue promote, 짧은 final, speaker transition 이후 완성 문장 queue 잔류를 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.588`, `precision=0.625`, `recall=0.556`, `pending_exact=false`, `staged_exact=false`이다. actual final에는 `of pure nitrogen gas under a slight positive pressure.`, `well that s that s it s an exercise`, `Yep.` 같은 기대 밖 조각이 남고, `I want to talk about energy health education...`은 pending, `I want to talk about, uh, energy, health, education, because those are people.`와 `...nitrogen blanket on plants.`는 staged queue에 남는다.
+- 신규 케이스 metrics는 `stage_replace_decision_unconfirmed=14`, `stage_queue_enqueue=11`, `stage_queue_promote=9`, `candidate_duplicate_suppressed=46`, `stage_candidate_quality_blocked=9`, `final_quality_no_end_marker=1`이다.
+- 변경 후 143케이스 CUDA/SaT 벤치는 `finalized=562`, `stage_start=805`, `finalized_per_stage_start=0.698`, `final_precision_avg=0.766`, `final_recall_avg=0.682`, `final_f1_avg=0.695`, `final_similarity_coverage_avg=0.608`, `final_boundary_f1_avg=0.304`, `case_exact_match=13`, `pending_exact_match=113`, `staged_exact_match=56`이다.
+- 이번 반복에서도 로직 변경은 보류한다. 낮은 점수 케이스가 누적되고 있으나, 원인은 특정 단어가 아니라 active staged와 queued completed 후보의 소비 순서 및 짧은 응답 처리의 결합 문제로 보인다.
+
+## 2026-06-20 15:03 KST - solar AI satellites 구간의 staged fragment와 후속 문장 queue 잔류 관찰
+
+- 14:45 로그에서 `so the the I mean I've said the stuff you know`가 active staged로 잡힌 뒤, `it's a solar powered AI satellites`, `yes 100 gigawatts a year of solar powered`, `I did the math on that.` 같은 후속 후보가 open-clause 보류와 queue 승격을 반복했다.
+- 이후 `yes 100 gigawatts a year of solar powered ai satellites`가 `quality_flags=no_end_marker` final로 확정되어 번역 생략됐고, `That's like 500,000 Starlink V3s...`, `That's one every hour.`, `For a year.`는 뒤늦게 회수됐다.
+- 후반부에서는 `v 3s launched over 8000 starship flights`가 staged로 남아 `It's amazing.`, `It's quite the scale.`, `What's the really rough timeline...` 후보가 queue에 남는 흐름을 확인했다.
+- `en_log_solar_ai_satellites_stage_fragment_20260620_001`를 추가했다. 이 케이스는 no-end false final, active staged fragment, stage queue promote, duplicate suppression, 후속 완료 문장 queue 잔류를 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.818`, `precision=1.000`, `recall=0.692`, `pending_exact=true`, `staged_exact=false`이다. actual final은 false positive 없이 9개 문장을 회수하지만, `100 gigawatts a year of solar-powered AI satellites.`, `It's amazing.`, `It's quite the scale.`, `What's the really rough timeline on that?`를 놓친다.
+- actual staged는 `v 3s launched over 8000 starship flights`이고, actual staged queue에는 `It's amazing.`, `It's quite the scale.`, `What's the really rough timeline`이 남는다. 신규 케이스 metrics는 `stage_replace_decision_open_latin_clause=46`, `stage_replace_decision_unconfirmed=12`, `stage_queue_enqueue=20`, `stage_queue_promote=17`, `candidate_duplicate_suppressed=78`, `stage_candidate_quality_blocked=21`, `stage_age_quality_blocked=7`이다.
+- 변경 후 144케이스 CUDA/SaT 벤치는 `finalized=571`, `stage_start=824`, `finalized_per_stage_start=0.693`, `final_precision_avg=0.768`, `final_recall_avg=0.682`, `final_f1_avg=0.696`, `final_similarity_coverage_avg=0.608`, `final_boundary_f1_avg=0.302`, `case_exact_match=13`, `pending_exact_match=114`, `staged_exact_match=56`이다.
+- 이번 반복에서는 로직 변경을 보류한다. precision이 높고 recall 누락이 staged/queue 잔류로 집중되어 있어, 단일 품질 임계값 조정보다는 active staged fragment가 오래 남을 때 queued completed 후보를 어떻게 재평가할지 추가 샘플과 함께 판단한다.
+
+## 2026-06-20 15:10 KST - resource level/low Earth orbit 구간의 short final 중복과 staged residue 관찰
+
+- 14:49 로그에서 `Like the intelligence we're quite interested in preserving itself.`, `Yes, that's true.`, `Interesting.`, `Good motivation.` 짧은 응답/전환 구간이 stage queue와 duplicate suppression을 반복했다.
+- `Interesting.`은 한 번 final된 뒤 다시 stage queue에서 승격되어 노출됐고, `Good motivation.`은 `Yeah, good motivation.`으로 확정되어 기대 문장과 유사하지만 짧은 응답 중복 위험을 남겼다.
+- 후반부에서는 `well, you can get you know, you don't have to get`가 `quality_flags=no_end_marker` final로 확정되어 번역 생략됐고, `you can be around 1200 kilometers unsynchronous will`이 staged로 남아 `But you could place them in multiple orbits.`가 queue에 잔류했다.
+- `en_log_resource_level_low_earth_orbit_queue_20260620_001`를 추가했다. 이 케이스는 short final 중복, no-end false final, low Earth orbit 설명 구간의 staged residue, constant sunlight 문장 과분리를 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.870`, `precision=0.833`, `recall=0.909`, `pending_exact=true`, `staged_exact=false`이다. actual final은 대부분 회수하지만 `well, you can get you know, you don't have to get`와 `You can be around 1,200 kilometers unsynchronous.`가 false/과분리 final로 남는다.
+- actual staged는 `you can be around 1200 kilometers unsynchronous will`이고, actual staged queue에는 `But you could place them in multiple orbits.`가 남는다. 신규 케이스 metrics는 `stage_replace_decision_unconfirmed=21`, `stage_queue_enqueue=10`, `stage_queue_promote=9`, `candidate_duplicate_suppressed=156`, `stage_candidate_quality_blocked=16`, `final_quality_no_end_marker=1`, `stage_unconfirmed_replacement_suppressed=2`이다.
+- 변경 후 145케이스 CUDA/SaT 벤치는 `finalized=583`, `stage_start=839`, `finalized_per_stage_start=0.695`, `final_precision_avg=0.768`, `final_recall_avg=0.683`, `final_f1_avg=0.697`, `final_similarity_coverage_avg=0.610`, `final_boundary_f1_avg=0.300`, `case_exact_match=13`, `pending_exact_match=115`, `staged_exact_match=56`이다.
+- 이번 반복에서도 로직 변경은 보류한다. 신규 케이스는 전체 F1을 소폭 올리지만 staged residue가 남아 있으므로, 짧은 응답 자체를 금지하기보다 active staged와 queue 후보의 소비 순서/재평가 문제로 계속 추적한다.
+
+## 2026-06-20 15:18 KST - Falcon 9 reuse/launch cost 구간의 false final과 staged residue 관찰
+
+- 14:54 로그에서 `And then I, yeah, it is.` 같은 오염된 staged가 남은 상태로 `Falcon 9 first reused its first stage`, `traditional aerospace industries did not believe...`, `Cape Canaveral`, `launch cost tipping point` 후보가 queue와 duplicate suppression을 반복했다.
+- `and then when falcon 9 first reused its first stage i mean all the traditional aerospace industries did not` 같은 no-end staged가 승격되어 transcript에 노출됐고, 이후 `um i mean all the traditional aerospace industries did not believe that even falcon 9 could re could`, `that the the leap...could fly and release` 같은 혼합/조각 final이 발생했다.
+- 후반부에서는 `Somewhere in that timeline, it went from speculative to no doubt.`가 staged로 남고, pending은 `No doubt and I don't know if that's a smooth line`으로 기대 pending과 어긋났다.
+- `en_log_falcon9_reuse_launch_cost_queue_20260620_001`를 추가했다. 이 케이스는 open-clause 보류, no-end false final, stage queue promote, terminal tail split, launch cost 문장 혼합을 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.690`, `precision=0.667`, `recall=0.714`, `pending_exact=false`, `staged_exact=false`이다. actual final은 기대 문장 10개를 유사도 기준으로 회수하지만, false positive 5개가 남고 `Somewhere in that timeline...`은 staged로 잔류한다.
+- 신규 케이스 metrics는 `stage_replace_decision_open_latin_clause=22`, `stage_replace_decision_unconfirmed=9`, `stage_queue_enqueue=21`, `stage_queue_promote=20`, `candidate_duplicate_suppressed=127`, `stage_candidate_quality_blocked=40`, `final_quality_no_end_marker=4`, `finalize_reason_terminal_tail_revision_split=2`이다.
+- 변경 후 146케이스 CUDA/SaT 벤치는 `finalized=598`, `stage_start=863`, `finalized_per_stage_start=0.693`, `final_precision_avg=0.768`, `final_recall_avg=0.683`, `final_f1_avg=0.697`, `final_similarity_coverage_avg=0.610`, `final_boundary_f1_avg=0.299`, `case_exact_match=13`, `pending_exact_match=115`, `staged_exact_match=56`이다.
+- 이번 케이스는 이전 샘플보다 false final 비중이 크다. 다만 원인은 특정 문구가 아니라 오래된 staged, open-clause 보류, no-end fragment final, terminal tail split이 함께 작동한 결과로 보이므로 즉시 로직 변경은 보류하고 같은 계열을 더 누적한다.
+
+## 2026-06-20 15:31 KST - abundant happiness/compute energy 구간의 no-end final과 staged queue 잔류 관찰
+
+- 15:00 로그에서 `so um i think we'll end up trying to capture`가 `quality_flags=no_end_marker` final로 먼저 확정되고 번역 생략됐다. 이후 `I don't know a millionth...thousandth of the sun's energy` 완성형 후보가 반복되지만 최근 final/중복 억제와 open-clause 보류가 섞였다.
+- 같은 구간에서 `a millionth of it likes a millionth`, `I don't know a millionth...the Sun's` 같은 STT 흔들림이 staged/pending에 노출됐고, 후반에는 `Fair enough.`, `Yeah.`, `I would guess that even.`가 staged queue에 남았다.
+- `en_log_abundant_happiness_compute_capture_20260620_001`를 추가했다. 이 케이스는 no-end false final, translation skip, duplicate suppression, open-clause defer, 후속 짧은 응답 staged queue 잔류를 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.556`, `precision=0.500`, `recall=0.625`, `pending_exact=false`, `staged_exact=false`이다. actual final에는 `because manufacturing...self-drive`, `I don't know a millionth...the Sun's`, `well the sun is just generating...for free` 같은 기대 밖 조각이 남는다.
+- 신규 케이스 metrics는 `stage_replace_decision_open_latin_clause=16`, `stage_queue_enqueue=12`, `stage_queue_promote=9`, `candidate_duplicate_suppressed=14`, `final_quality_no_end_marker=9`, `stage_candidate_quality_blocked=6`이다.
+- 변경 후 147케이스 CUDA/SaT 벤치는 `finalized=608`, `stage_start=878`, `finalized_per_stage_start=0.692`, `final_precision_avg=0.766`, `final_recall_avg=0.683`, `final_f1_avg=0.696`, `final_similarity_coverage_avg=0.608`, `final_boundary_f1_avg=0.297`, `case_exact_match=13`, `pending_exact_match=115`, `staged_exact_match=56`이다.
+- 이번 케이스는 낮은 F1과 boundary F1 0으로 실패 재현성이 강하다. 다만 실패 원인은 no-end final 전면 차단만으로 설명되지 않고, 최근 final 억제와 active staged/queue 소비 순서가 결합된 것으로 보여 로직 변경은 추가 누적 후 보수적으로 판단한다.
+
+## 2026-06-20 15:40 KST - ultracapacitor/PhDs 구간의 boundary mismatch와 staged residue 관찰
+
+- 15:04 로그에서 `capacitor with enough energy density that you get`가 `quality_flags=no_end_marker` final로 먼저 확정되고 번역 생략됐다. 이후 `The idea that I had...high range in an electric car`, `ultracapacitor company`, `It didn't go well` 구간은 반복 중복 억제와 queue promote를 거치며 회수됐다.
+- 후반부에서는 `Most PhDs...`, `turn into something useful`, `tree of knowledge`, `great entrepreneurs`, `don't waste your time going to grad school` 구간에서 실제 문장 경계보다 넓은 결합 final이 발생했다. `It's like, you know.`는 staged에 남았다.
+- `en_log_ultracapacitor_phds_grad_school_queue_20260620_001`를 추가했다. 이 케이스는 no-end false final, stage queue promote, duplicate suppression, 문장 경계 결합 오류, staged residue를 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.769`, `precision=0.833`, `recall=0.714`, `pending_exact=false`, `staged_exact=false`이다. boundary 지표는 `final_boundary_f1=0.077`로 낮아 문장 내용 회수보다 경계 품질이 더 약한 케이스다.
+- actual final에는 `most phds i mean hates it but most phds do not`, `Enormous fraction...but nowadays...`, `Yeah, because...grad school, start a company.`처럼 기대보다 경계가 넓거나 STT revision이 덜 정리된 문장이 남는다.
+- 신규 케이스 metrics는 `stage_replace_decision_unconfirmed=32`, `stage_replace_decision_open_latin_clause=16`, `stage_queue_enqueue=20`, `stage_queue_promote=20`, `candidate_duplicate_suppressed=17`, `stage_unconfirmed_replacement_suppressed=3`, `final_quality_no_end_marker=1`이다.
+- 변경 후 148케이스 CUDA/SaT 벤치는 `finalized=620`, `stage_start=900`, `finalized_per_stage_start=0.689`, `final_precision_avg=0.766`, `final_recall_avg=0.683`, `final_f1_avg=0.697`, `final_similarity_coverage_avg=0.609`, `final_boundary_f1_avg=0.296`, `case_exact_match=13`, `pending_exact_match=115`, `staged_exact_match=56`이다.
+- 이번 케이스는 final 내용 유사도는 중간 이상이지만 boundary와 staged residue가 약하다. 문장별 정규식이나 단어 규칙으로 해결하지 않고, active staged와 queue 후보의 생성순서/확정순서 검증 케이스로 유지한다.
+
+## 2026-06-20 15:49 KST - Stanford/Bill Nix deferment 구간의 staged residue와 boundary split 관찰
+
+- 15:07-15:08 로그에서 `And they've been doing the survey`가 `quality_flags=no_end_marker` final로 먼저 확정되고 번역 생략됐다. 이후 `I didn't know anyone who wanted to start`, `Even at Stanford at the time?`, `I actually...Bill Nix...deferment` 구간이 staged queue와 duplicate suppression을 반복했다.
+- `I actually, a few days into the semester, or I should say the quarter,`는 later completed extension으로 보류됐지만, 후속 `I Called Bill Nix who?` STT 흔들림과 결합되며 `I actually...Called Bill Nix` 조각 final이 남았다.
+- 후반부 `He said, was my class that bad?`, `No...put it on deferment`, `But he said...last conversation`, `And he was right`는 대부분 회수됐지만, latest replay에서는 `He said, is my class that bad?`와 후속 문장들이 staged/queue에 잔류했다.
+- `en_log_stanford_bill_nix_deferment_stage_20260620_001`를 추가했다. 이 케이스는 no-end final, aged duplicate suppression, trailing ellipsis 차단, active staged 교체 보류, 긴 문장의 boundary split을 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.944`, `precision=0.944`, `recall=0.944`, `pending_exact=false`, `staged_exact=false`이다. boundary 지표는 `final_boundary_f1=0.611`로 내용 회수 대비 낮다.
+- 신규 케이스 actual final에는 `I actually a few days into the semester or just say the quarter I Called Bill Nix`, `to the semester, or I should say the quarter...deferment.`처럼 같은 발화 구간의 split/overlap이 남는다.
+- 신규 케이스 metrics는 `stage_replace_decision_open_latin_clause=19`, `stage_replace_decision_unconfirmed=17`, `stage_queue_enqueue=26`, `stage_queue_promote=22`, `candidate_duplicate_suppressed=24`, `stage_candidate_quality_blocked=5`, `final_quality_no_end_marker=1`이다.
+- 변경 후 149케이스 CUDA/SaT 벤치는 `finalized=638`, `stage_start=923`, `finalized_per_stage_start=0.691`, `final_precision_avg=0.767`, `final_recall_avg=0.685`, `final_f1_avg=0.699`, `final_similarity_coverage_avg=0.611`, `final_boundary_f1_avg=0.298`, `case_exact_match=13`, `pending_exact_match=115`, `staged_exact_match=56`이다.
+- 이 케이스는 내용 회수율이 높으므로 즉시 로직 변경 근거로는 약하지만, boundary split과 staged residue가 남는다. active staged가 긴 미완성 후보일 때 후속 완성 후보와 생성순서대로 합리적으로 소비되는지 보는 회귀 샘플로 유지한다.
+
+## 2026-06-20 15:56 KST - El Salvador/Grok education 구간의 boundary mismatch와 staged residue 관찰
+
+- 15:11 로그에서 `but yeah what did you announce with with him in El Salvador`와 `i mean you have to be...take on...and win`이 active/staged queue를 오가며 후속 `It was just basically to use Grok for education` 후보가 open-clause 보류와 queue promote를 거쳤다.
+- 후반부에서는 `the kids friendly version of grok`가 `quality_flags=no_end_marker` final로 확정되어 번역 생략됐고, 완성형 `Yeah, we would have the kids-friendly version of Grok.`은 중복 억제 경로로 처리됐다.
+- `en_log_el_salvador_grok_education_queue_20260620_001`를 추가했다. 이 케이스는 stage queue promote, open-clause defer, no-end final, duplicate suppression, 문장 경계 mismatch, staged residue를 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.900`, `precision=0.900`, `recall=0.900`, `pending_exact=false`, `staged_exact=false`이다. boundary 지표는 `final_boundary_f1=0.000`으로, 내용 회수와 별개로 경계 품질을 거의 맞추지 못한다.
+- actual final은 주요 문장을 대부분 회수하지만 `It was just basically to use Grokt for education.`와 `Like personalized education.`으로 기대 문장 하나가 둘로 갈라지고, `And live.` 반복 중 하나가 누락된다.
+- actual staged는 `version of yeah we would have like you know the kids friendly version of rock but but obviously AI can be an individualized teacher`로 남고, queue에는 `Now you still need to be curious and you still need to want to learn.`이 잔류한다.
+- 신규 케이스 metrics는 `stage_replace_decision_unconfirmed=6`, `stage_replace_decision_open_latin_clause=3`, `stage_queue_enqueue=6`, `stage_queue_promote=5`, `candidate_duplicate_suppressed=39`, `stage_revision=10`이다.
+- 변경 후 150케이스 CUDA/SaT 벤치는 `finalized=648`, `stage_start=934`, `finalized_per_stage_start=0.694`, `final_precision_avg=0.768`, `final_recall_avg=0.686`, `final_f1_avg=0.700`, `final_similarity_coverage_avg=0.613`, `final_boundary_f1_avg=0.296`, `case_exact_match=13`, `pending_exact_match=115`, `staged_exact_match=56`이다.
+- 이번 케이스는 내용 유사도만 보면 성공처럼 보이지만 boundary F1이 0인 대표 샘플이다. final 품질 개선을 final F1만으로 판단하지 않고 boundary/staged residue를 같이 봐야 한다는 근거로 유지한다.
+
+## 2026-06-20 15:20 KST - exercise/donuts/longevity 구간의 stage queue 잔류와 boundary mismatch 관찰
+
+- 15:15-15:16 로그에서 `It's like if people get really fat...`, `Well, if you don't have any exercise...`, `Or if they eat donuts...`, `0.4 of a donut...` 구간이 반복 window로 들어오며 stage queue와 duplicate suppression을 반복했다.
+- 원 로그에서는 `well if you don't have any exercise health get bad or if they`가 `quality_flags=no_end_marker` final로 확정되고 번역 생략되는 흐름이 관측됐다. 현재 코드 벤치에서는 해당 no-end final은 재현되지 않았지만, 같은 구간의 boundary mismatch와 staged residue는 남았다.
+- `en_log_exercise_donuts_longevity_no_end_queue_20260620_001`를 추가했다. 이 케이스는 no-end final 관측 이력, stage queue promote, unconfirmed replacement, duplicate suppression, `donut/doughnut` STT 흔들림, 후반 `longevity` 문장 잔류를 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.880`, `precision=1.000`, `recall=0.786`, `pending_exact=true`, `staged_exact=false`이다. boundary 지표는 `final_boundary_f1=0.000`으로, 내용 회수 대비 문장 경계와 생명주기 소비가 약하다.
+- actual final에는 false positive 없이 11개 문장을 회수하지만 `Would you just run around?`, `Majara Cupid.`, `So you and I have had a disagreement on longevity.`가 누락되고, 첫 final이 `First of all, But I think that's a big reason.`처럼 앞뒤 문맥이 섞인다.
+- actual staged는 `So I figured anything below 0.44 of a donut rounds down to zero.`이고 staged queue에는 `So you and I have had a disagreement on longevity.`가 남는다. 신규 케이스 metrics는 `stage_replace_decision_unconfirmed=93`, `stage_queue_enqueue=21`, `stage_queue_promote=20`, `candidate_duplicate_suppressed=67`, `stage_unconfirmed_replacement_suppressed=9`, `stage_candidate_quality_blocked=8`이다.
+- 변경 후 151케이스 CUDA/SaT 벤치는 `finalized=659`, `stage_start=955`, `finalized_per_stage_start=0.690`, `final_precision_avg=0.770`, `final_recall_avg=0.687`, `final_f1_avg=0.701`, `final_similarity_coverage_avg=0.614`, `final_boundary_f1_avg=0.294`, `case_exact_match=13`, `pending_exact_match=116`, `staged_exact_match=56`이다.
+- 이번 반복에서는 로직 변경을 보류한다. no-end final은 최신 코드 기준으로 완화된 반면, 남은 문제는 unconfirmed replacement가 많은 queue 소비/경계 문제다. 단일 임계값을 낮추면 중복 확정 위험이 커지므로 같은 계열 샘플을 더 누적한 뒤 보수적으로 판단한다.
+
+## 2026-06-20 15:25 KST - replacement rate/North Korea/underpopulation 구간의 queue drop 관찰과 큐 한도 튜닝
+
+- 15:20-15:21 로그에서 `South Korea is like one-third replacement rate`, `North Korea won't need to invade`, `walkers or something`, `massive underpopulation` 구간이 stage queue에 장시간 쌓였다.
+- 원 로그에서는 `yeah one`, `127th so 3` 같은 짧은 no-end final이 번역 생략되고, `I mean, North Korea won't need to invade.`와 `So their current size...walk across.`가 유사 후보 억제/queue promote를 반복했다.
+- `en_log_replacement_rate_north_korea_underpopulation_queue_20260620_001`를 추가했다. 이 케이스는 stage queue overflow, duplicate suppression, no-end short fragment, 오래된 staged 후보 잔류를 함께 추적한다.
+- 기본 큐 한도 12 기준 신규 케이스는 `final_f1=0.500`, `precision=0.857`, `recall=0.353`, `pending_exact=true`, `staged_exact=false`, `stage_queue_drop_oldest=8`이었다. 전체 152케이스 벤치는 `final_f1_avg=0.700`, `final_recall_avg=0.685`, `final_boundary_f1_avg=0.293`이었다.
+- `MAX_STAGED_SENTENCE_QUEUE`를 12에서 20으로 올린 뒤 신규 케이스는 `final_f1=0.621`, `precision=0.750`, `recall=0.529`, `stage_queue_drop_oldest=0`으로 개선됐다. 전체 152케이스 벤치는 `finalized=675`, `stage_start=982`, `finalized_per_stage_start=0.687`, `final_precision_avg=0.770`, `final_recall_avg=0.687`, `final_f1_avg=0.701`, `final_similarity_coverage_avg=0.614`, `final_boundary_f1_avg=0.295`, `case_exact_match=13`, `pending_exact_match=117`, `staged_exact_match=56`이다.
+- 큐 한도 증가는 누락에는 도움이 되지만 stale 후보가 더 오래 남을 수 있다. 이번 결과는 작은 개선이므로 유지하되, 후속 로그에서 중복 final 또는 오래된 staged queue 잔류가 늘어나는지 계속 확인한다.
+
+## 2026-06-20 15:30 KST - UHI/digital intelligence 구간의 boundary mismatch와 staged residue 관찰
+
+- 15:25-15:26 로그에서 `So can you go through the rationale of UHI?`, `How does universal high income work?`, `digital intelligence...humanoid robots...`, `benign scenario...Star Trek` 구간이 반복 window로 들어왔다.
+- `en_log_uhi_digital_intelligence_benign_scenario_20260620_001`를 추가했다. 이 케이스는 짧은 감탄/응답, UHI 질문, 긴 설명 문장, 후반 staged residue를 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.875`, `precision=1.000`, `recall=0.778`, `pending_exact=true`, `staged_exact=false`, `final_boundary_f1=0.000`이다.
+- actual final은 false positive 없이 7개를 회수하지만, `God damn it.`/`Too late.`가 `god damn it too late`로 결합되고, `How does universal high income work?`가 `How does how does universal high-income work?`로 흔들리며, `not Cameron situation`은 staged에 남는다.
+- 신규 케이스 metrics는 `stage_replace_decision_unconfirmed=30`, `stage_replace_decision_open_latin_clause=12`, `stage_queue_enqueue=11`, `stage_queue_promote=11`, `candidate_duplicate_suppressed=27`, `stage_candidate_quality_blocked=15`, `final_quality_no_end_marker=1`이다.
+- 변경 후 153케이스 CUDA/SaT 벤치는 `finalized=682`, `stage_start=995`, `finalized_per_stage_start=0.685`, `final_precision_avg=0.771`, `final_recall_avg=0.688`, `final_f1_avg=0.702`, `final_similarity_coverage_avg=0.615`, `final_boundary_f1_avg=0.293`, `case_exact_match=13`, `pending_exact_match=118`, `staged_exact_match=56`이다.
+- 이번 반복에서는 로직 변경을 보류한다. 내용 F1은 높지만 boundary/staged residue가 약한 유형이라, active staged와 queue 후보의 소비 순서를 계속 관찰한다.
+
+## 2026-06-20 15:33 KST - economic doom/theme of talk 구간의 no-end fragment final 관찰
+
+- 15:32 로그에서 `but the the so this`가 `quality_flags=no_end_marker` final로 확정되고 번역 생략됐다. 이어 `So if we don't have AI and robots...economic doom`, `competitive pressure from China`, `theme of this talk`, `AI and exponential tech save America and the world` 구간이 반복 window로 들어왔다.
+- `en_log_economic_doom_theme_ai_save_world_fragment_20260620_001`를 추가했다. 이 케이스는 no-end fragment final, translation skip, open-clause defer, duplicate suppression, 후반 staged residue를 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.706`, `precision=0.667`, `recall=0.750`, `pending_exact=false`, `staged_exact=false`, `final_boundary_f1=0.471`이다.
+- actual final은 `Yes, and the deficit is growing.`, `So if we don't have AI and robots...economic doom.`, `There's also competitive pressure from China...`를 회수한다. 반면 `and and ultimately...look on the bright side talk, how can AI...`처럼 앞뒤 문맥이 섞인 false final과 `don't you think that`, `but i want to get`, `i want to hit this because...` 같은 no-end/open-clause 조각이 남는다.
+- actual staged는 `Always look on the bright side of life.`이고 staged queue에는 `Shut up.`이 남는다. 신규 케이스 metrics는 `stage_replace_decision_open_latin_clause=13`, `stage_queue_enqueue=10`, `stage_queue_promote=9`, `stage_queue_revision=8`, `stage_candidate_quality_blocked=6`, `final_quality_no_end_marker=3`, `stage_age_quality_blocked=1`이다.
+- 변경 후 154케이스 CUDA/SaT 벤치는 `finalized=691`, `stage_start=1006`, `finalized_per_stage_start=0.687`, `final_precision_avg=0.771`, `final_recall_avg=0.688`, `final_f1_avg=0.702`, `final_similarity_coverage_avg=0.615`, `final_boundary_f1_avg=0.294`, `case_exact_match=13`, `pending_exact_match=118`, `staged_exact_match=56`이다.
+- 이번 반복에서도 로직 변경은 보류한다. no-end final 전면 차단은 과거 벤치에서 recall 손실이 컸고, 여기서는 active staged/queue 소비와 open-clause 보류가 함께 작동하므로 추가 샘플 누적 후 보수적으로 판단한다.
+
+## 2026-06-20 15:36 KST - UHI tax redistribute/prices/money supply 구간의 경계 파괴 관찰
+
+- 15:35-15:36 로그에서 `When we say universal high income...tax and redistribute`, `prices will drop`, `Prices in dollar terms...money supply`, `deflation or vice versa` 구간이 반복 window로 들어왔다.
+- 원 로그에서는 `tax and redistribute but that's not the case`가 `quality_flags=no_end_marker` final로 확정되어 번역 생략됐고, `Prices in dollar terms are the ratio.`가 terminal tail split으로 조기 final됐다. 후반에는 `thing we're growing the money supply so quickly then`이 no-end final로 확정됐다.
+- `en_log_uhi_tax_redistribute_prices_money_supply_20260620_001`를 추가했다. 이 케이스는 no-end fragment final, terminal-tail split, stage queue promote/revision, prior-pending/recent-final 혼합 억제, money supply 문장 잔류를 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.667`, `precision=0.750`, `recall=0.600`, `pending_exact=true`, `staged_exact=false`, `final_boundary_f1=0.000`이다.
+- actual final은 주요 주제 일부를 회수하지만 `So you're able...electricity, right?`처럼 두 문장을 결합하고, `It's it's I think...Prices will become what prices will drop.`, `i mean you know prices in dollar terms are...` 같은 조각/혼합 final을 남긴다.
+- actual staged는 `up.`이고 staged queue에는 `It's a good thing we're growing the money supply so quickly then.`이 남는다. 신규 케이스 metrics는 `stage_replace_decision_unconfirmed=28`, `stage_queue_enqueue=10`, `stage_queue_promote=9`, `stage_queue_revision=23`, `candidate_duplicate_suppressed=17`, `final_quality_no_end_marker=2`, `stage_unconfirmed_replacement_suppressed=3`이다.
+- 변경 후 155케이스 CUDA/SaT 벤치는 `finalized=699`, `stage_start=1018`, `finalized_per_stage_start=0.687`, `final_precision_avg=0.770`, `final_recall_avg=0.687`, `final_f1_avg=0.702`, `final_similarity_coverage_avg=0.615`, `final_boundary_f1_avg=0.292`, `case_exact_match=13`, `pending_exact_match=119`, `staged_exact_match=56`이다.
+- 이번 케이스는 boundary F1이 0인 강한 실패 샘플이다. 다만 실패 원인은 특정 문구가 아니라 replacement unconfirmed, terminal tail split, stage queue revision이 함께 만든 생명주기 문제이므로 문구별 규칙은 추가하지 않는다.
+
+## 2026-06-20 15:39 KST - productivity/economists measurement 구간의 조각 final과 queue residue 관찰
+
+- 15:37 로그에서 `Productivity is going to improve dramatically`, `high double-digit output of goods and services`, `economists measure things`, `economists jokes` 구간이 반복 window로 들어왔다.
+- 원 로그에서는 `We have to be careful about how economists coming Argentina.`, `measure things.`, `hot like high double digit` 같은 조각/오인식 final이 발생했고, `hot like high double digit`은 `quality_flags=no_end_marker`로 번역 생략됐다.
+- `en_log_productivity_economists_measurement_joke_20260620_001`를 추가했다. 이 케이스는 no-end fragment final, terminal-tail split, duplicate suppression, economists joke 후속 문장 queue residue를 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.769`, `precision=0.833`, `recall=0.714`, `pending_exact=true`, `staged_exact=false`, `final_boundary_f1=0.000`이다.
+- actual final은 `Productivity is going to improve...`, `high double-digit output...`, `economists measure things`를 회수하지만, `Yeah.`와 `GDP stocks isn't measured.`가 결합되고 `I have a few economists jokes...forest.` 후속 문장은 staged queue에 남는다.
+- actual staged는 `I mean, it's like my favorite joke.`이고 staged queue에는 `i have a few economist jokes...two economists`, `but maybe my favorite one economist joke is two economists are going for a walk in the forest`, `Yes.`가 남는다. 신규 케이스 metrics는 `stage_replace_decision_unconfirmed=23`, `stage_queue_enqueue=13`, `stage_queue_promote=10`, `stage_queue_revision=15`, `candidate_duplicate_suppressed=25`, `stage_candidate_quality_blocked=6`, `candidate_recent_final_delta_trimmed=15`이다.
+- 변경 후 156케이스 CUDA/SaT 벤치는 `finalized=705`, `stage_start=1029`, `finalized_per_stage_start=0.685`, `final_precision_avg=0.771`, `final_recall_avg=0.688`, `final_f1_avg=0.703`, `final_similarity_coverage_avg=0.615`, `final_boundary_f1_avg=0.291`, `case_exact_match=13`, `pending_exact_match=120`, `staged_exact_match=56`이다.
+- 이번 케이스도 내용 유사도와 boundary 품질이 크게 갈라진다. 단어별 예외가 아니라 active staged/queue 후보가 후속 완성 문장을 소비하지 못하는 유형으로 유지한다.
+
+## 2026-06-20 15:45 KST - AI safety/axiom/HAL pod bay doors 구간의 no-end final과 stale staged 관찰
+
+- 15:44-15:45 로그에서 `AI safety`, `axiom A and axiom B`, `HAL wouldn't open the pod bay doors`, `pod bay door salesman`, `prompt engineering` 구간이 반복 window로 들어왔다.
+- 원 로그에서는 `doors but but why wouldn t hell open the pod bay doors`가 `quality_flags=no_end_marker` final로 확정되어 번역 생략됐고, 이후 `space odyssey was that the`, `odyssey clark was trying to convey in`, `it s just prompt engineering that hal wouldn t` 같은 오래된 staged 후보가 queue promote로 노출됐다.
+- `en_log_ai_safety_axiom_hal_pod_bay_queue_20260620_001`를 추가했다. 이 케이스는 no-end false final, translation skip, stale staged queue, duplicate suppression, boundary mismatch, 후속 완성 문장 staged residue를 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.741`, `precision=0.714`, `recall=0.769`, `pending_exact=true`, `staged_exact=false`, `final_boundary_f1=0.148`이다.
+- actual final은 `truth-seeking`, `false`, `axiom`, `pod bay doors`, `prompt engineering`, `monolith` 핵심 문장 일부를 회수하지만, `was that people always know the meme of that`, `hell wouldn't open...but but why...`, `that Odyssey Clark was trying...if you always know them`처럼 경계가 파괴된 조각 final이 남는다.
+- actual staged는 `Was that in code or was it in English?`로 남고, 신규 케이스 metrics는 `stage_replace_decision_open_latin_clause=24`, `stage_replace_decision_unconfirmed=8`, `stage_queue_enqueue=14`, `stage_queue_promote=14`, `stage_queue_revision=21`, `candidate_duplicate_suppressed=24`, `final_quality_no_end_marker=3`, `stage_candidate_quality_blocked=9`이다.
+- 변경 후 157케이스 CUDA/SaT 벤치는 `finalized=719`, `stage_start=1049`, `finalized_per_stage_start=0.685`, `final_precision_avg=0.770`, `final_recall_avg=0.688`, `final_f1_avg=0.703`, `final_similarity_coverage_avg=0.615`, `final_boundary_f1_avg=0.290`, `case_exact_match=13`, `pending_exact_match=121`, `staged_exact_match=56`이다.
+- 이번 케이스도 특정 단어나 문구 문제가 아니라 active staged와 queue 후보가 오래 유지되며 생성순서 소비, open-clause 보류, no-end 품질 차단이 충돌한 유형이다. 즉시 로직 변경은 보류하고, 같은 계열 샘플 누적 후 queue/staged 소비 정책을 보수적으로 판단한다.
+
+## 2026-06-20 15:49 KST - speed of light/many minds 구간의 내용 회수와 boundary 실패 관찰
+
+- 15:48-15:49 로그에서 `speed of light constraint`, `single mind`, `millisecond`, `fiber`, `multiple AIs`, `clusters of compute`, `many minds`, `mixture of experts` 구간이 반복 window로 들어왔다.
+- 원 로그에서는 `there s a lot of great science fiction books where the first asi basically`, `so there's a speed of light constraint that makes that difficult other`, `um a single mind from existing` 같은 no-end final이 확정되어 번역 생략됐다.
+- 후반부에서는 `So therefore, you will have earth`가 staged로 시작된 뒤 `So therefore you will have many minds because of the speed of light.`로 revision 확정됐다. 내용은 보존됐지만, 앞선 no-end 조각 final 때문에 경계 품질이 낮다.
+- `en_log_speed_of_light_many_minds_compute_clusters_20260620_001`를 추가했다. 이 케이스는 no-end false final, translation skip, stage revision, duplicate suppression, high final F1과 low boundary F1의 괴리를 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.963`, `precision=0.929`, `recall=1.000`, `pending_exact=true`, `staged_exact=true`, `final_boundary_f1=0.000`이다.
+- actual final은 기대 문장 13개를 모두 회수하지만 `Biological life they will compete with each other.`가 false positive로 남고, `Then the question...you know?`, `so there's a speed...`처럼 기대 경계와 다르게 출력된다.
+- 신규 케이스 metrics는 `stage_replace_decision_open_latin_clause=9`, `stage_replace_decision_unconfirmed=4`, `stage_queue_enqueue=9`, `stage_queue_promote=9`, `stage_queue_revision=5`, `stage_revision=13`, `candidate_duplicate_suppressed=51`, `final_quality_no_end_marker=2`, `stage_candidate_quality_blocked=8`이다.
+- 변경 후 158케이스 CUDA/SaT 벤치는 `finalized=733`, `stage_start=1065`, `finalized_per_stage_start=0.688`, `final_precision_avg=0.771`, `final_recall_avg=0.690`, `final_f1_avg=0.704`, `final_similarity_coverage_avg=0.617`, `final_boundary_f1_avg=0.288`, `case_exact_match=13`, `pending_exact_match=122`, `staged_exact_match=57`이다.
+- 이번 케이스는 final F1만으로 품질을 판단하면 안 된다는 근거다. 내용 회수는 좋지만 no-end false final이 먼저 누적되어 boundary F1이 0이므로, 향후 튜닝은 final F1과 boundary/staged 지표를 함께 본다.
+
+## 2026-06-20 15:53 KST - Optimus surgeons/Zimbabwe/gigafactory 구간의 queue 잔류 관찰
+
+- 15:51-15:53 로그에서 `shortage of doctors`, `great surgeons`, `Optimus`, `three years at scale`, `Zimbabwe`, `gigafactory`, `medicine` 구간이 반복 window로 들어왔다.
+- 원 로그에서는 `Yeah.`, `Sure.`, `Um, here at the, uh, giga factory.`, `Oh yeah.` 같은 짧은 응답/조각 staged가 queue에서 승격되며 긴 후속 후보를 unconfirmed replacement로 보류했다.
+- `en_log_optimus_surgeons_zimbabwe_gigafactory_queue_20260620_001`를 추가했다. 이 케이스는 short-response staged, 긴 후속 후보 보류, trailing ellipsis 차단, no-end final, staged queue 잔류를 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.609`, `precision=0.778`, `recall=0.500`, `pending_exact=false`, `staged_exact=false`, `final_boundary_f1=0.000`이다.
+- actual final은 초반 의사/외과의 부족 문맥 일부와 `Three years at scale.`을 회수하지만, `Optimus robots...all surgeons on Earth`, `Zimbabwe`, `gigafactory`, `medicine`, `four years`, `good for humanity` 후속 문장 다수가 staged/queue에 남는다.
+- actual staged는 `There will probably be more Optimus robots that are great surgeons than there are all surgeons on Earth.`이고 staged queue에는 `And the cost...Zimbabwe.`, `The best surgeon...planet.`, `Where do you think it will roll out first?`, `Here at the gigafactory.`, `But that's an important statement...`, `I mean, not like absolutely certain...`, `It's still an incredible statement...`, `All of a sudden you demonetize.` 등이 잔류한다.
+- 신규 케이스 metrics는 `stage_replace_decision_unconfirmed=85`, `stage_queue_enqueue=38`, `stage_queue_promote=22`, `stage_queue_revision=64`, `stage_replace=102`, `stage_candidate_quality_blocked=19`, `stage_candidate_quality_trailing_ellipsis=15`, `candidate_duplicate_suppressed=14`, `stage_unconfirmed_replacement_suppressed=4`이다.
+- 변경 후 159케이스 CUDA/SaT 벤치는 `finalized=751`, `stage_start=1088`, `finalized_per_stage_start=0.690`, `final_precision_avg=0.771`, `final_recall_avg=0.689`, `final_f1_avg=0.704`, `final_similarity_coverage_avg=0.616`, `final_boundary_f1_avg=0.286`, `case_exact_match=13`, `pending_exact_match=122`, `staged_exact_match=57`이다.
+- 이번 케이스는 active staged가 짧은 응답일 때 긴 후속 후보를 얼마나 빨리 소비할지에 대한 판단 근거다. 하지만 짧은 응답을 무조건 폐기하면 실제 반복 응답을 잃을 수 있으므로, 로직 변경은 유사 샘플을 더 누적한 뒤 보수적으로 검토한다.
+
+## 2026-06-20 16:00 KST - supply chain/recursive medicine 구간의 후반 queue 잔류 관찰
+
+- 15:56 전후 로그에서 `supply chain`, `rate limit`, `recursive, multiplicable, triple exponential`, `medicine is going to be effectively free`, `medical school` 구간이 반복 window로 들어왔다.
+- 원 로그에서는 `but you're you're i mean there's some right limit`, `you can't just manufacturing is very difficult`, `i mean unless you but i would`, `say that applies to any form of education` 같은 no-end 조각 final이 확인됐다.
+- `en_log_supply_chain_recursive_medicine_free_20260620_001`를 추가했다. 이 케이스는 no-end false final, translation skip, open-clause 보류, stage queue revision, 후반 medical school 문장 잔류를 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.571`, `precision=0.769`, `recall=0.455`, `pending_exact=true`, `staged_exact=false`, `final_boundary_f1=0.000`이다.
+- actual final은 `What's the constraint?`, `Metal.`, `It's just all supply chain stuff.`, `It's recursive, multiplicable, triple exponential...`, `medicine is going to be effectively free` 일부를 회수한다. 반면 `Everyone will have access to medical care...`, `So don't go into medical school.`, `I mean, unless you...`, `I do it for social reasons.`, `You're not going to medical school.`은 staged queue에 남는다.
+- actual staged는 `So you've got to – it's recursive, multiplicable, triple exponential.`이고, 신규 케이스 metrics는 `stage_replace_decision_unconfirmed=125`, `stage_queue_enqueue=34`, `stage_queue_promote=24`, `stage_queue_revision=143`, `stage_candidate_quality_blocked=44`, `stage_candidate_quality_no_end_marker=20`, `stage_candidate_quality_short_no_end_fragment=20`, `candidate_duplicate_suppressed=14`, `final_quality_no_end_marker=1`이다.
+- 변경 후 160케이스 CUDA/SaT 벤치는 `finalized=764`, `stage_start=1113`, `finalized_per_stage_start=0.686`, `final_precision_avg=0.771`, `final_recall_avg=0.687`, `final_f1_avg=0.703`, `final_similarity_coverage_avg=0.615`, `final_boundary_f1_avg=0.284`, `case_exact_match=13`, `pending_exact_match=123`, `staged_exact_match=57`이다.
+- 이번 케이스는 앞선 Optimus queue 잔류와 같은 계열이다. active staged가 중간 문장에 오래 묶이면 후반부 완성 문장이 queue에서 소비되지 못한다. 다만 no-end 차단과 queue 소비를 동시에 강하게 조이면 recall 손실 가능성이 있어, 즉시 로직 변경은 보류하고 같은 실패 유형을 더 누적한다.
+
+## 2026-06-20 16:05 KST - chimps/pyramids/Raptor 구간의 short staged와 후속 queue 잔류 관찰
+
+- 16:02 로그에서 `not bad for a bunch of monkeys`, `chimps make a raft`, `we celebrate the pyramids`, `Give them some peanuts`, `Raptor 3 goes when`, `best rocket engine` 구간이 반복 window로 들어왔다.
+- 원 로그에서는 `Give them some peanuts.`가 queue 승격 직후 replacement 확정되고, 이후 `The chimps are awesome.`, `These things become timeless, right?`, `Raptor three goes when?`이 순차로 queue에서 승격됐다. 후반에는 `I think it's worth noting`, `Raptor 3 is beautiful`, `best rocket engine` 후보가 queue에 남았다.
+- `en_log_chimps_pyramids_raptor_queue_20260620_001`를 추가했다. 이 케이스는 short staged 승격, duplicate suppression, 생성순서 queue 소비, 후속 Raptor 문장 잔류, 내용 F1과 boundary F1의 괴리를 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.769`, `precision=1.000`, `recall=0.625`, `pending_exact=true`, `staged_exact=false`, `final_boundary_f1=0.000`이다.
+- actual final은 false positive 없이 `Not bad for a human.`, `Rembrandt`, `accounting`, `chimps make a raft`, `pyramids`, `Give them some peanuts.`, `These things become timeless, right?`, `Raptor three goes when?`, `I think it's worth noting.`을 회수한다.
+- actual staged는 `for a bunch of monkeys you know it's like if you saw a bunch of chimps like make a raft and cross the river`이고, staged queue에는 `Look at that.`, `Give him some peanuts.`, `Raptor 3 goes when?`, `Raptor 3 is beautiful.`, `By far the best rocket engine ever.`, `It's amazing.`, `Is that AI?`, `Nothing's even close.`, `Nope.`가 남는다.
+- 신규 케이스 metrics는 `stage_replace_decision_unconfirmed=54`, `stage_queue_enqueue=29`, `stage_queue_promote=19`, `stage_queue_revision=37`, `stage_candidate_quality_blocked=11`, `stage_candidate_quality_no_end_marker=11`, `candidate_duplicate_suppressed=28`, `finalize_duplicate_suppressed=1`이다.
+- 변경 후 161케이스 CUDA/SaT 벤치는 `finalized=779`, `stage_start=1133`, `finalized_per_stage_start=0.688`, `final_precision_avg=0.773`, `final_recall_avg=0.687`, `final_f1_avg=0.703`, `final_similarity_coverage_avg=0.615`, `final_boundary_f1_avg=0.282`, `case_exact_match=13`, `pending_exact_match=124`, `staged_exact_match=57`이다.
+- 이 케이스는 precision이 높아도 recall과 boundary가 낮을 수 있음을 다시 보여준다. queue를 aggressive하게 비우면 후속 문장 recall은 오를 수 있지만 duplicate/short response 오확정 위험이 있으므로, 이번 반복에서도 로직 변경은 보류한다.
+
+## 2026-06-20 16:10 KST - booster re-entry/Falcon 9 reflights 구간의 no-end false final 관찰
+
+- 16:05-16:06 로그에서 `doesn't explode`, `engines on the test stand`, `wear and tear`, `booster re-entry`, `Falcon 9`, `over 500 reflights` 구간이 반복 window로 들어왔다.
+- 원 로그에서는 `of the or the falling`이 `quality_flags=no_end_marker`로 final 확정되어 번역 생략됐고, `that's not really like we also obviously just solved that you know with thousand nine so we could`가 no-end final로 확정됐다.
+- `en_log_booster_reentry_falcon9_reflights_20260620_001`를 추가했다. 이 케이스는 no-end false final, open-clause 보류, Falcon 9 오인식, staged queue 잔류, pending tail 잔류를 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.875`, `precision=1.000`, `recall=0.778`, `pending_exact=false`, `staged_exact=false`, `final_boundary_f1=0.250`이다.
+- actual final은 false positive 없이 `That's a lot.`, `The amazing thing is that it doesn't explode.`, `We've blown up a lot of engines on the test stand.`, `For the booster, the re-entry is not that bad.`, `Falcon 9...booster reuse`를 회수한다.
+- actual pending은 `we've had over 500 reflights of the Falcon 9 first stage`이고, actual staged는 `We also have obviously just solved that with Falcon 9.`이다. staged queue에는 `that's not really like...thousand nine`, `We've had over 500 reflights of the Falcon 9.`, `you know you know something`, `it's it's it's not like that`이 남는다.
+- 신규 케이스 metrics는 `stage_replace_decision_unconfirmed=14`, `stage_replace_decision_open_latin_clause=24`, `stage_queue_enqueue=18`, `stage_queue_promote=14`, `stage_queue_revision=26`, `stage_candidate_quality_blocked=30`, `stage_candidate_quality_no_end_marker=22`, `candidate_duplicate_suppressed=31`, `candidate_recent_final_delta_trimmed=20`이다.
+- 변경 후 162케이스 CUDA/SaT 벤치는 `finalized=786`, `stage_start=1148`, `finalized_per_stage_start=0.685`, `final_precision_avg=0.774`, `final_recall_avg=0.688`, `final_f1_avg=0.705`, `final_similarity_coverage_avg=0.616`, `final_boundary_f1_avg=0.282`, `case_exact_match=13`, `pending_exact_match=124`, `staged_exact_match=57`이다.
+- 이 케이스는 내용 final F1만 보면 양호하지만 pending/staged 잔류와 no-end false final이 동시에 남는다. 특정 단어 교정이나 Falcon 9 전용 규칙을 넣지 않고, queue 소비와 no-end 품질 정책의 일반적 실패 샘플로 유지한다.
+
+## 2026-06-20 16:15 KST - UFO/aliens/most viewed post 구간의 terminal tail split 관찰
+
+- 16:11-16:12 로그에서 `UFO`, `evidence of aliens`, `post that on X`, `most viewed post`, `sports scores the next day` 구간이 반복 window로 들어왔다.
+- 원 로그에서는 `But anyway, it's alright`가 `quality_flags=no_end_marker`로 final 확정되어 번역 생략됐고, 후반 `I actually wonder...sports scores the next day`는 terminal tail split과 staged queue 잔류로 남았다.
+- `en_log_ufo_aliens_most_viewed_post_20260620_001`를 추가했다. 이 케이스는 trailing ellipsis, short response staged, duplicate suppression, terminal tail split, 후반 긴 문장 staged residue를 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.828`, `precision=1.000`, `recall=0.706`, `pending_exact=true`, `staged_exact=false`, `final_boundary_f1=0.000`이다.
+- actual final은 false positive 없이 UFO/aliens 핵심 문장을 회수하지만 `Fuzzy blob.`, `I'm asked all the time if I've...`, `So the question is, are we the most viewed post of all time?`, `I actually wonder...sports scores the next day`가 final로 소비되지 못했다.
+- actual staged는 `It's gonna be the most viewed post of all time I know.`이고 staged queue에는 `It's good.`, `So the question is, are we the most viewed post of all time?`, `I actually wonder about the US public...sports scores the next day.`, `Yeah.`, `That's good.`이 남는다.
+- 신규 케이스 metrics는 `stage_replace_decision_unconfirmed=41`, `stage_replace_decision_open_latin_clause=13`, `stage_queue_enqueue=23`, `stage_queue_promote=18`, `stage_queue_revision=35`, `candidate_duplicate_suppressed=45`, `stage_candidate_quality_trailing_ellipsis=11`, `candidate_recent_final_delta_trimmed=3`이다.
+- 변경 후 163케이스 CUDA/SaT 벤치는 `finalized=798`, `stage_start=1167`, `finalized_per_stage_start=0.684`, `final_precision_avg=0.776`, `final_recall_avg=0.688`, `final_f1_avg=0.705`, `final_similarity_coverage_avg=0.617`, `final_boundary_f1_avg=0.281`, `case_exact_match=13`, `pending_exact_match=125`, `staged_exact_match=57`이다.
+- 이번 케이스도 내용 유사도는 높지만 boundary와 staged queue 소비가 약한 유형이다. 특정 문구 규칙을 추가하지 않고, queue 후보 소비와 terminal tail split의 일반 실패 샘플로 유지한다.
+
+## 2026-06-20 16:20 KST - accelerating launches/launched mass 구간의 open-clause queue 잔류 관찰
+
+- 16:13 로그에서 `10 megawatts of AI compute`, `accelerating launches`, `200 tons per launch`, `marginal cost per flight`, `launched mass is data centers in space` 구간이 반복 window로 들어왔다.
+- 원 로그에서는 `of AI compute.`가 active staged로 남은 상태에서 `four years of accelerating launches`, `So 200 tons per launch`, `So what fraction...` 후보가 unconfirmed/open-clause로 보류됐다. 이후 `but yeah it s the right order...in excess of` 같은 no-end 조각이 queue에서 승격됐다.
+- `en_log_accelerating_launches_mass_data_centers_20260620_001`를 추가했다. 이 케이스는 open-clause 보류, staged queue revision, duplicate suppression, 후반 질문 문장 staged residue를 함께 추적한다.
+- 최신 코드 기준 신규 케이스는 `final_f1=0.700`, `precision=0.636`, `recall=0.778`, `pending_exact=false`, `staged_exact=false`, `final_boundary_f1=0.200`이다.
+- actual final은 `People have...expectations`, `10 megawatts of AI compute`, `200 tons per launch`, `marginal cost per flight` 일부를 회수한다. 반면 `Yeah.`가 false positive로 남고, `So assuming...accelerating launches, to 200 tons.`, `So what fraction of all that of accelerating launches.`, `Yeah, that's where you're going.`처럼 경계와 문맥이 섞인 final이 나온다.
+- actual staged는 `launched mass is data centers in space as opposed to moon base as opposed to launch to mars as opposed to satellites`이고, staged queue에는 `Yeah, that's interesting.`, `That's interesting.`이 남는다.
+- 신규 케이스 metrics는 `stage_replace_decision_unconfirmed=11`, `stage_replace_decision_open_latin_clause=10`, `stage_queue_enqueue=16`, `stage_queue_promote=14`, `stage_queue_revision=7`, `candidate_duplicate_suppressed=32`, `stage_candidate_quality_no_end_marker=2`, `finalize_reason_next_completed=1`, `finalize_reason_replaced_duplicate_or_suffix=1`이다.
+- 변경 후 164케이스 CUDA/SaT 벤치는 `finalized=809`, `stage_start=1183`, `finalized_per_stage_start=0.684`, `final_precision_avg=0.775`, `final_recall_avg=0.688`, `final_f1_avg=0.705`, `final_similarity_coverage_avg=0.617`, `final_boundary_f1_avg=0.280`, `case_exact_match=13`, `pending_exact_match=125`, `staged_exact_match=57`이다.
+- 이번 케이스는 active staged가 짧거나 불완전한 후보에 묶이면 후반의 완성 질문이 staged로 잔류하는 유형이다. queue를 공격적으로 비우는 변경은 중복/오확정 위험이 있으므로, 이번 정리에서는 로직 변경 없이 벤치 근거만 추가한다.
+
 ## 남은 실험 과제
 
 - 동일 입력 replay 기반으로 `faster-whisper`, `qwen3-asr-0.6b`, 과거 FunASR 기준선을 비교한다.

@@ -4,15 +4,25 @@ import time
 from typing import Any
 
 from src.app.dictation_pipeline_contracts import AudioEvidence, RecognitionHypothesis
+from src.app.dictation_pipeline_settings import (
+    CJK_CHAR_RANGES,
+    MAX_SEGMENT_NO_SPEECH_CJK_OVERRIDE_PROB,
+    MAX_SEGMENT_NO_SPEECH_PROB,
+    MIN_CJK_CHARS_FOR_NO_SPEECH_OVERRIDE,
+    MIN_SEGMENT_AVG_LOGPROB,
+    SEGMENT_HIGH_NO_SPEECH_OVERRIDE_LANGUAGES,
+    SEGMENT_LOGPROB_CONFIDENCE_WEIGHT,
+    SEGMENT_LOGPROB_SCORE_OFFSET,
+    SEGMENT_LOGPROB_SCORE_SCALE,
+    SEGMENT_NO_SPEECH_CONFIDENCE_WEIGHT,
+    STT_CONDITION_ON_PREVIOUS_TEXT,
+    STT_STREAM_AUDIO_DTYPE,
+    STT_TRANSCRIBE_TASK,
+    STT_WITHOUT_TIMESTAMPS,
+)
 from src.app.dictation_transcript_logic import _new_text_delta, _normalized_text, _stable_window_text
 from src.app.stable_token_detection import analyze_stable_window, combine_boundary_confidence
 from src.app.transcript_revision import append_context as _append_committed_text
-
-
-MIN_SEGMENT_AVG_LOGPROB = -1.0
-MAX_SEGMENT_NO_SPEECH_PROB = 0.75
-MAX_SEGMENT_NO_SPEECH_CJK_OVERRIDE_PROB = 0.90
-MIN_CJK_CHARS_FOR_NO_SPEECH_OVERRIDE = 12
 
 
 class SpeechEvidenceToSttHypothesisNode:
@@ -32,15 +42,15 @@ class SpeechEvidenceToSttHypothesisNode:
         started_at = time.perf_counter()
         transcribe_kwargs = {
             "language": self._cfg.language,
-            "task": "transcribe",
+            "task": STT_TRANSCRIBE_TASK,
             "beam_size": self._cfg.beamSize,
             "temperature": self._cfg.temperature,
             "max_new_tokens": self._cfg.maxNewTokens,
-            "without_timestamps": True,
-            "condition_on_previous_text": False,
+            "without_timestamps": STT_WITHOUT_TIMESTAMPS,
+            "condition_on_previous_text": STT_CONDITION_ON_PREVIOUS_TEXT,
         }
         if getattr(model, "streaming", False):
-            transcribe_kwargs["stream_audio"] = stream_block.astype("float32", copy=False)
+            transcribe_kwargs["stream_audio"] = stream_block.astype(STT_STREAM_AUDIO_DTYPE, copy=False)
             transcribe_kwargs["stream_chunk_seconds"] = self._cfg.stepSeconds
             transcribe_kwargs["stream_context_seconds"] = self._cfg.windowSeconds
 
@@ -101,14 +111,17 @@ class SpeechEvidenceToSttHypothesisNode:
 
         avg_logprob = sum(score for score, _ in accepted_scores) / len(accepted_scores)
         avg_no_speech = sum(no_speech for _, no_speech in accepted_scores) / len(accepted_scores)
-        logprob_score = max(0.0, min(1.0, (avg_logprob + 1.5) / 1.4))
+        logprob_score = max(0.0, min(1.0, (avg_logprob + SEGMENT_LOGPROB_SCORE_OFFSET) / SEGMENT_LOGPROB_SCORE_SCALE))
         no_speech_score = max(0.0, min(1.0, 1.0 - (avg_no_speech / MAX_SEGMENT_NO_SPEECH_PROB)))
-        confidence = 0.7 * logprob_score + 0.3 * no_speech_score
+        confidence = (
+            SEGMENT_LOGPROB_CONFIDENCE_WEIGHT * logprob_score
+            + SEGMENT_NO_SPEECH_CONFIDENCE_WEIGHT * no_speech_score
+        )
         return texts, rejected, confidence
 
     def _should_accept_high_no_speech_segment(self, text: str, avg_logprob: float, no_speech_prob: float) -> bool:
         language = str(getattr(self._cfg, "language", "en") or "en").strip().lower()
-        if language != "zh":
+        if language not in SEGMENT_HIGH_NO_SPEECH_OVERRIDE_LANGUAGES:
             return False
         if no_speech_prob >= MAX_SEGMENT_NO_SPEECH_CJK_OVERRIDE_PROB:
             return False
@@ -117,4 +130,4 @@ class SpeechEvidenceToSttHypothesisNode:
         return self._cjk_char_count(text) >= MIN_CJK_CHARS_FOR_NO_SPEECH_OVERRIDE
 
     def _cjk_char_count(self, text: str) -> int:
-        return sum(1 for char in str(text or "") if "\u3400" <= char <= "\u9fff" or "\uf900" <= char <= "\ufaff")
+        return sum(1 for char in str(text or "") if any(start <= char <= end for start, end in CJK_CHAR_RANGES))

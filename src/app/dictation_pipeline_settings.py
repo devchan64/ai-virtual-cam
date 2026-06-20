@@ -24,6 +24,34 @@ INPUT_AUDIO_QUEUE_TIMEOUT_SECONDS = 0.2
 PULSE_CAPTURE_BLOCK_SECONDS = 0.2
 
 
+# STT backend 호출 계약
+#
+# serve 실행에서 Whisper 계열 STT는 항상 전사만 수행한다. 번역은 final 문장만
+# 별도 번역 큐에서 처리하므로 backend 호출 task를 암묵적으로 바꾸지 않는다.
+STT_TRANSCRIBE_TASK = "transcribe"
+STT_WITHOUT_TIMESTAMPS = True
+STT_CONDITION_ON_PREVIOUS_TEXT = False
+STT_STREAM_AUDIO_DTYPE = "float32"
+
+
+# STT segment 품질 게이트
+#
+# faster-whisper류 backend가 반환하는 segment 단위 신뢰도 필터다. 낮추면
+# 잔류 오디오/환청성 텍스트가 들어올 위험이 커지고, 높이면 실제 발화의
+# 일부가 누락될 수 있다. no_speech override는 CJK 긴 발화에서 no_speech
+# 확률이 높게 붙는 경우를 보수적으로 살리기 위한 구조적 예외다.
+SEGMENT_HIGH_NO_SPEECH_OVERRIDE_LANGUAGES = frozenset({"zh"})
+MIN_SEGMENT_AVG_LOGPROB = -1.0
+MAX_SEGMENT_NO_SPEECH_PROB = 0.75
+MAX_SEGMENT_NO_SPEECH_CJK_OVERRIDE_PROB = 0.90
+MIN_CJK_CHARS_FOR_NO_SPEECH_OVERRIDE = 12
+SEGMENT_LOGPROB_SCORE_OFFSET = 1.5
+SEGMENT_LOGPROB_SCORE_SCALE = 1.4
+SEGMENT_LOGPROB_CONFIDENCE_WEIGHT = 0.7
+SEGMENT_NO_SPEECH_CONFIDENCE_WEIGHT = 0.3
+CJK_CHAR_RANGES = (("\u3400", "\u9fff"), ("\uf900", "\ufaff"))
+
+
 # 커밋 버퍼와 최근 final 메모리
 #
 # RECENT_TRANSCRIPT_WINDOW는 echo/delta 억제를 위해 final 텍스트를 얼마나
@@ -35,7 +63,7 @@ MAX_RECENT_SHORT_TEXT_REPEATS = 2
 # MAX_STAGED_SENTENCE_QUEUE는 현재 active staged 문장을 아직 소비할 수 없을
 # 때 생성순서 후보를 보존한다. 값을 키우면 SBD 출력이 몰릴 때 final 누락은
 # 줄 수 있지만 stale 후보 churn은 늘어난다.
-MAX_STAGED_SENTENCE_QUEUE = 12
+MAX_STAGED_SENTENCE_QUEUE = 20
 
 # empty/no-speech STT chunk는 final 확정 근거가 아니다. 이 임계값은 no-text
 # chunk가 반복될 때 미확정 staged 후보를 폐기하는 데만 쓰며, 이 값만으로
@@ -215,9 +243,23 @@ def revision_fallback_coverage_min() -> float:
     return _dictation_env_float("REVISION_FALLBACK_COVERAGE_MIN", REVISION_FALLBACK_COVERAGE_MIN)
 
 
-def dictation_pipeline_policy() -> dict[str, int | float]:
+def dictation_pipeline_policy() -> dict[str, object]:
     return {
+        "stt_transcribe_task": STT_TRANSCRIBE_TASK,
+        "stt_without_timestamps": STT_WITHOUT_TIMESTAMPS,
+        "stt_condition_on_previous_text": STT_CONDITION_ON_PREVIOUS_TEXT,
+        "stt_stream_audio_dtype": STT_STREAM_AUDIO_DTYPE,
         "recent_transcript_window": RECENT_TRANSCRIPT_WINDOW,
+        "segment_high_no_speech_override_languages": sorted(SEGMENT_HIGH_NO_SPEECH_OVERRIDE_LANGUAGES),
+        "min_segment_avg_logprob": MIN_SEGMENT_AVG_LOGPROB,
+        "max_segment_no_speech_prob": MAX_SEGMENT_NO_SPEECH_PROB,
+        "max_segment_no_speech_cjk_override_prob": MAX_SEGMENT_NO_SPEECH_CJK_OVERRIDE_PROB,
+        "min_cjk_chars_for_no_speech_override": MIN_CJK_CHARS_FOR_NO_SPEECH_OVERRIDE,
+        "segment_logprob_score_offset": SEGMENT_LOGPROB_SCORE_OFFSET,
+        "segment_logprob_score_scale": SEGMENT_LOGPROB_SCORE_SCALE,
+        "segment_logprob_confidence_weight": SEGMENT_LOGPROB_CONFIDENCE_WEIGHT,
+        "segment_no_speech_confidence_weight": SEGMENT_NO_SPEECH_CONFIDENCE_WEIGHT,
+        "cjk_char_ranges": CJK_CHAR_RANGES,
         "max_staged_sentence_queue": MAX_STAGED_SENTENCE_QUEUE,
         "no_text_stale_stage_suppress_chunks": NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS,
         "sentence_confirm_chunks": SENTENCE_CONFIRM_CHUNKS,

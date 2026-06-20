@@ -10,14 +10,33 @@ from src.app.dictation_pipeline_contracts import (
 from src.app.dictation_node_sentence_candidate_commit_buffer import SentenceCandidateCommitBufferNode
 from src.app.dictation_node_speech_evidence_to_stt_hypothesis import SpeechEvidenceToSttHypothesisNode
 from src.app.dictation_node_stt_hypothesis_to_sentence_candidate import SttHypothesisToSentenceCandidateNode
+from src.app.dictation_pipeline_settings import (
+    CJK_CHAR_RANGES,
+    MAX_SEGMENT_NO_SPEECH_CJK_OVERRIDE_PROB,
+    MAX_SEGMENT_NO_SPEECH_PROB,
+    MIN_CJK_CHARS_FOR_NO_SPEECH_OVERRIDE,
+    MIN_SEGMENT_AVG_LOGPROB,
+    SEGMENT_HIGH_NO_SPEECH_OVERRIDE_LANGUAGES,
+    SEGMENT_LOGPROB_CONFIDENCE_WEIGHT,
+    SEGMENT_LOGPROB_SCORE_OFFSET,
+    SEGMENT_LOGPROB_SCORE_SCALE,
+    SEGMENT_NO_SPEECH_CONFIDENCE_WEIGHT,
+    STT_CONDITION_ON_PREVIOUS_TEXT,
+    STT_STREAM_AUDIO_DTYPE,
+    STT_TRANSCRIBE_TASK,
+    STT_WITHOUT_TIMESTAMPS,
+    dictation_pipeline_policy,
+)
 from src.app.sentence_boundary import SentenceBoundaryResult
 
 
 class FakeSttModel:
     streaming = False
+    last_kwargs = None
 
     def transcribe(self, audio_window, **kwargs):
-        del audio_window, kwargs
+        del audio_window
+        self.last_kwargs = kwargs
         return [SimpleNamespace(text="Hello world.", avg_logprob=-0.2, no_speech_prob=0.1)], SimpleNamespace(
             language="en"
         )
@@ -87,6 +106,8 @@ class DictationPipelineNodeTest(unittest.TestCase):
             )
         )
 
+        model = FakeSttModel()
+
         hypothesis = node.recognize(
             evidence=AudioEvidence(
                 chunkIndex=7,
@@ -96,7 +117,7 @@ class DictationPipelineNodeTest(unittest.TestCase):
                 stepSeconds=1.0,
                 audioWindow=object(),
             ),
-            model=FakeSttModel(),
+            model=model,
             stream_block=object(),
             committed_text="",
             pending_text="",
@@ -109,6 +130,30 @@ class DictationPipelineNodeTest(unittest.TestCase):
         self.assertEqual(hypothesis.deltaText, "Hello world.")
         self.assertAlmostEqual(hypothesis.segmentBoundaryConfidence, 0.91)
         self.assertIsNotNone(hypothesis.stability)
+        self.assertEqual(model.last_kwargs["task"], STT_TRANSCRIBE_TASK)
+        self.assertEqual(model.last_kwargs["without_timestamps"], STT_WITHOUT_TIMESTAMPS)
+        self.assertEqual(model.last_kwargs["condition_on_previous_text"], STT_CONDITION_ON_PREVIOUS_TEXT)
+
+    def test_speech_evidence_node_segment_policy_is_exported_from_pipeline_settings(self) -> None:
+        policy = dictation_pipeline_policy()
+
+        self.assertEqual(policy["stt_transcribe_task"], STT_TRANSCRIBE_TASK)
+        self.assertEqual(policy["stt_without_timestamps"], STT_WITHOUT_TIMESTAMPS)
+        self.assertEqual(policy["stt_condition_on_previous_text"], STT_CONDITION_ON_PREVIOUS_TEXT)
+        self.assertEqual(policy["stt_stream_audio_dtype"], STT_STREAM_AUDIO_DTYPE)
+        self.assertEqual(policy["min_segment_avg_logprob"], MIN_SEGMENT_AVG_LOGPROB)
+        self.assertEqual(policy["max_segment_no_speech_prob"], MAX_SEGMENT_NO_SPEECH_PROB)
+        self.assertEqual(policy["max_segment_no_speech_cjk_override_prob"], MAX_SEGMENT_NO_SPEECH_CJK_OVERRIDE_PROB)
+        self.assertEqual(policy["min_cjk_chars_for_no_speech_override"], MIN_CJK_CHARS_FOR_NO_SPEECH_OVERRIDE)
+        self.assertEqual(policy["segment_logprob_score_offset"], SEGMENT_LOGPROB_SCORE_OFFSET)
+        self.assertEqual(policy["segment_logprob_score_scale"], SEGMENT_LOGPROB_SCORE_SCALE)
+        self.assertEqual(policy["segment_logprob_confidence_weight"], SEGMENT_LOGPROB_CONFIDENCE_WEIGHT)
+        self.assertEqual(policy["segment_no_speech_confidence_weight"], SEGMENT_NO_SPEECH_CONFIDENCE_WEIGHT)
+        self.assertEqual(policy["cjk_char_ranges"], CJK_CHAR_RANGES)
+        self.assertEqual(
+            policy["segment_high_no_speech_override_languages"],
+            sorted(SEGMENT_HIGH_NO_SPEECH_OVERRIDE_LANGUAGES),
+        )
 
     def test_hypothesis_candidate_node_preserves_boundary_contract(self) -> None:
         detector = FakeBoundaryDetector()

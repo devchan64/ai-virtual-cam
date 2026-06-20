@@ -813,12 +813,22 @@ def _is_prior_pending_recent_final_mixed_candidate(
         return False
     candidate_words = _word_units(normalized_candidate)
     pending_words = _word_units(normalized_pending)
-    if len(pending_words) < 3 or len(candidate_words) < len(pending_words) + 4:
-        return False
     if candidate_words[: len(pending_words)] != pending_words:
         return False
     suffix_words = candidate_words[len(pending_words) :]
-    if len(suffix_words) < 4:
+    if len(pending_words) >= 2 and 1 <= len(suffix_words) <= 3:
+        suffix_key = "".join(suffix_words).lower()
+        if len(suffix_key) < 6:
+            return False
+        for recent in reversed(recent_sentences):
+            recent_words = _word_units(recent)
+            if len(recent_words) < len(suffix_words) + 2:
+                continue
+            recent_suffix_key = "".join(recent_words[-len(suffix_words) :]).lower()
+            if SequenceMatcher(None, recent_suffix_key, suffix_key, autojunk=False).ratio() >= 0.86:
+                return True
+        return False
+    if len(pending_words) < 3 or len(suffix_words) < 4:
         return False
     suffix_text = _sentence_delta_from_words(suffix_words)
     for recent in reversed(recent_sentences):
@@ -983,7 +993,6 @@ def _should_translate_final_sentence(sentence: str, language: str) -> bool:
             "latin_only_for_zh",
             "mixed_latin_zh",
             "short_cjk",
-            "no_end_marker",
             "short_no_end_fragment",
             "trailing_ellipsis",
             "empty",
@@ -1063,13 +1072,15 @@ def _should_finalize_before_replacement(
 
 
 def _should_suppress_delta_final(staged_sentence: str, output_sentence: str, language: str, reason: str) -> bool:
-    if reason not in {"next_completed", "confirmed", "confirmed_forced"}:
-        return False
     staged = _normalized_text(staged_sentence)
     output = _normalized_text(output_sentence)
     if not staged or not output or staged == output:
         return False
     flags = set(_final_sentence_diagnostic_flags(output, language))
+    if flags.intersection({"short_no_end_fragment", "trailing_ellipsis"}):
+        return True
+    if reason not in {"next_completed", "confirmed", "confirmed_forced"}:
+        return False
     if "no_end_marker" in flags and _boundary_sentence_end_count(staged) > _boundary_sentence_end_count(output):
         return True
     output_words = _word_units(output)
@@ -1225,6 +1236,14 @@ def _recent_final_sentence_delta(candidate: str, recent_sentence: str, language:
 
 
 def _recent_final_short_tail_echo_delta(candidate_words: list[str], recent_words: list[str]) -> str | None:
+    if len(candidate_words) == 1:
+        if len(recent_words) < 4:
+            return None
+        candidate_key = "".join(candidate_words).lower()
+        recent_key = recent_words[-1].lower()
+        if len(candidate_key) >= 6 and SequenceMatcher(None, recent_key, candidate_key, autojunk=False).ratio() >= 0.86:
+            return ""
+        return None
     if len(candidate_words) < 2 or len(candidate_words) > 5:
         return None
     if len(recent_words) < len(candidate_words) + 2:
@@ -1506,6 +1525,11 @@ def _next_revision_confirmation_count(
     stable_internal_chars: int = 0,
     stable_overlap_source: str = "",
 ) -> int:
+    normalized_previous = _normalized_text(previous)
+    normalized_preferred = _normalized_text(preferred)
+    if normalized_preferred != normalized_previous and _boundary_sentence_end_count(normalized_previous) > 0:
+        if _boundary_sentence_end_count(normalized_preferred) == 0:
+            return 1
     if preferred != _normalized_text(previous) and (_is_cjk_text(previous) or _is_cjk_text(preferred)):
         if _should_preserve_cjk_confirmation_by_similarity(previous, preferred):
             return current_confirmations + 1
@@ -1528,8 +1552,12 @@ def _should_reset_revision_age(
     stable_internal_chars: int = 0,
     stable_overlap_source: str = "",
 ) -> bool:
-    if preferred == _normalized_text(previous):
+    normalized_previous = _normalized_text(previous)
+    normalized_preferred = _normalized_text(preferred)
+    if normalized_preferred == normalized_previous:
         return False
+    if _boundary_sentence_end_count(normalized_previous) > 0 and _boundary_sentence_end_count(normalized_preferred) == 0:
+        return True
     if not (_is_cjk_text(previous) or _is_cjk_text(preferred)):
         return False
     if _should_preserve_cjk_confirmation_by_similarity(previous, preferred):
