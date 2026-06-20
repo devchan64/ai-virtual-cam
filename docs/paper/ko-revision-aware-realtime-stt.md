@@ -103,15 +103,25 @@ Whisper 계열 모델은 강력한 오프라인 전사 성능을 보이지만, �
 
 ## 7. 평가 설계와 지표
 
-본 연구의 실험 단위는 공개 코퍼스의 오프라인 ASR 점수가 아니라, 실제 애플리케이션에서 반복 관측된 실시간 실패 구간이다. 운영 로그에서 확정 누락, 중복 확정, 문장 파괴, staged queue 잔류, no-end fragment final, 최근 final echo가 보이는 구간을 수집하고, 각 구간의 연속 STT window 출력과 기대 final 문장을 `tests/eval/dictation_ai/sbd_text_cases.sample.jsonl`에 누적한다. 이 샘플은 `tests/eval/dictation_ai/sbd_benchmark.py`가 replay하며, 실제 SaT 모델을 `cuda + float16`으로 실행해 문장 후보 생성과 revision lifecycle을 함께 평가한다. 런타임 임계값은 `src/app/dictation_pipeline_settings.py`에 모아 관리하고, 값 변경은 벤치 결과와 함께 실험일지에 기록한다.
+본 연구의 실험 단위는 공개 코퍼스의 오프라인 ASR 점수가 아니라, 실제 애플리케이션에서 반복 관측된 실시간 실패 구간이다. 운영 로그에서 확정 누락, 중복 확정, 문장 파괴, staged queue 잔류, no-end fragment final, 최근 final echo가 보이는 구간을 수집하고, 각 구간의 연속 STT window 출력과 기대 final 문장을 `tests/eval/dictation_ai/sbd_cases/` 아래 그룹별 JSONL로 누적한다. 이 케이스 집합은 `tests/eval/dictation_ai/sbd_benchmark.py`가 replay하며, 실제 SaT 모델을 `cuda + float16`으로 실행해 문장 후보 생성과 revision lifecycle을 함께 평가한다. 런타임 임계값은 `src/app/dictation_pipeline_settings.py`에 모아 관리하고, 값 변경은 벤치 결과와 함께 실험일지에 기록한다.
 
 실험 프로토콜은 다음 원칙을 따른다.
 
 - 벤치는 실제 `sat + cuda + float16` 경로로만 실행한다. mock, smoke, CPU 실행은 성능 근거로 쓰지 않는다.
 - 샘플은 성공해야 하는 단위 테스트가 아니라 로그에서 관측된 실패 현상을 재현하는 성능 추적 자료다.
+- 케이스는 앱 로그의 연속 STT window에서 수집하고, `expected_final`을 확정한 JSONL만 benchmark 입력으로 사용한다. 수집/검토/승격 자동화 도구는 현재 연구 범위에서 폐기하고, 케이스 데이터 자체만 `tests/eval/dictation_ai/sbd_cases/` 아래에 그룹별로 보관한다.
+- 케이스가 많아지면 JSONL 파일과 하위 디렉터리로 분할한다. 벤치는 단일 파일, 여러 파일, glob, 디렉터리를 입력받아 재귀적으로 로딩하고, 중복 case id와 draft marker는 실패로 처리한다.
+- pending/staged 전용 benchmark case는 `expected_final=[]`일 수 있으므로, finalization 목표 수량은 비어 있지 않은 `expected_final` 케이스 수로 별도 검증한다.
+- 성능 수치는 reviewed JSONL을 실제 `sat + cuda + float16` 벤치 또는 parameter sweep으로 실행한 결과만 사용한다. 수집 과정의 운영 편의 지표는 논문 성능 수치로 사용하지 않는다.
 - 케이스를 추가하면 평균 점수가 낮아질 수 있으므로, `pass_rate`나 단일 평균값만으로 개선 여부를 판단하지 않는다.
-- 파라미터 변경은 같은 샘플 집합에서 비교하고, 변경 전후의 lifecycle metric을 함께 기록한다.
+- 파라미터 변경은 같은 reviewed 샘플 집합에서 한 번에 한 축만 비교하고, 변경 전후의 lifecycle metric을 함께 기록한다. 논문 근거로 채택하려면 변경값, 영향을 받는 실패 유형, 개선 지표, 악화 지표를 함께 남긴다.
 - 모델/STT 품질, SBD 후보 품질, final lifecycle 품질, 번역 sink 계약을 서로 다른 실패 축으로 본다.
+
+파라미터 sweep은 `AVC_DICTATION_*` 환경변수로 수행한다. 실험 가능한 값은 `MAX_STAGED_SENTENCE_QUEUE`, `SENTENCE_CONFIRM_CHUNKS`, `FORCED_SENTENCE_CONFIRM_CHUNKS`, `SENTENCE_CONFIRM_MAX_AGE_CHUNKS`, `FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS`, `SHORT_CJK_FINAL_UNITS`, `SHORT_NO_END_FRAGMENT_UNITS`, revision similarity 계열처럼 final lifecycle에 직접 관련된 값으로 제한한다. STT 모델을 바꾸거나 언어별 문구 규칙을 추가하는 것은 이 논문의 lifecycle 튜닝 실험으로 보지 않는다. 운영 기본값은 단일 벤치 수치가 아니라 다수 로그 케이스에서 같은 방향의 개선이 반복될 때만 checked-in 상수로 반영한다. 외부 문헌은 partial hypothesis/final 분리, incremental ASR 안정성 평가, SBD 후보 생성의 근거로 쓰고, 개별 임계값 자체는 앱 로그 replay 실험으로만 정당화한다. 벤치 리포트에는 `dictation_tuning_protocol`과 `dictation_tuning_manifest`를 함께 저장해 실험 규칙, 각 파라미터의 env 이름, 기본값, 현재값, scope, 의도, 근거 분류를 결과와 함께 추적한다.
+
+따라서 케이스 수집과 파라미터 채택은 별도 단계다. 앱 로그에서 관측한 실패 구간은 `expected_final`을 확인한 뒤 reviewed benchmark case로만 보관한다. 그 뒤 같은 reviewed case 집합에서 `AVC_DICTATION_*` override를 사용해 값을 바꿔 실행하고, `final_f1_avg`, `final_precision_avg`, `final_recall_avg`, `final_boundary_f1_avg`, `finalized_per_stage_start`와 주요 lifecycle counter를 함께 비교한다. draft 상태의 케이스는 논문 성능 수치에 포함하지 않는다.
+
+파라미터 비교 실행은 `run_sbd_parameter_sweep.py`로 표준화한다. 이 도구는 `dictation_tuning_manifest`에 등록된 파라미터만 `NAME=VALUE` 형식으로 받아 `AVC_DICTATION_*` 환경변수로 전달하고, manifest의 `min_value`/`max_value` 범위를 벗어난 값은 실행 전에 거부한다. 항상 같은 `--cases` 입력을 사용해 `sbd_benchmark.py --device cuda --compute-type float16`을 반복 실행한다. 탐색 sweep은 현재 reviewed case 집합에서 수행할 수 있지만, 논문 근거용 sweep은 `--paper-evidence` 모드로 실행한다. 이 모드는 실행 전에 draft marker가 남은 케이스를 거부하고, 검토한 `expected_final` 케이스가 1000건에 도달했는지 확인한다. 실행 요약에는 `dictation_tuning_protocol`, manifest, 각 job의 env override, 출력 리포트 경로, 핵심 metric이 함께 남는다. 따라서 sweep 결과는 논문에서 "임계값 자체가 문헌에서 왔다"는 근거가 아니라, 문헌으로 정한 문제 설정 안에서 앱 로그 replay가 어떤 값을 지지했는지 보여주는 실험 기록으로 해석한다.
 
 최신 샘플 164건의 언어 분포는 한국어 79건, 영어 56건, 중국어 29건이다. 태그 기준으로는 `missing-final` 130건, `duplicate-final` 56건, `mixed-context-final` 45건, `no-end-final` 38건, `translation-skip` 34건, `stage-queue` 26건이 포함된다. 이 분포는 일반 발화 전체의 무작위 표본이 아니라, 실시간 전사에서 문제가 반복된 구간을 의도적으로 모은 회귀 벤치다.
 

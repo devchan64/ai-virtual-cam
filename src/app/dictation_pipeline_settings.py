@@ -13,8 +13,12 @@ from src.domain.dictation_ai_defaults import dictation_ai_default
 # 튜닝 규칙:
 # - 벤치 한 번에는 가능하면 값 하나만 바꾼다.
 # - 언어별 문구 규칙을 여기에 추가하지 않는다.
+# - 케이스는 앱 로그에서 수집한 실패 replay를 사람이 검토해 승격한다.
+# - 파라미터 비교는 같은 reviewed case 집합에서 수행한다.
 # - final 확정, revision 매칭, 중복 억제에 영향을 주는 값을 바꾸면
-#   CUDA/AI 벤치 결과를 실험일지에 남긴다.
+#   CUDA/AI 벤치 결과와 precision/recall trade-off를 실험일지에 남긴다.
+# - AVC_DICTATION_* override는 로컬 sweep 용도다. 운영 기본값은 벤치 근거가
+#   실험일지에 기록된 뒤 이 파일의 checked-in 상수로 반영한다.
 
 
 # 오디오/입력 런타임
@@ -144,6 +148,8 @@ REVISION_FALLBACK_COVERAGE_MIN = 0.60
 # SBD 벤치 기본값은 받아쓰기 AI 계약 기본값을 참조한다. 운영 기본값이
 # 바뀌면 벤치도 같은 기준을 따라가야 하며, CPU/mock/smoke 경로의 벤치
 # 데이터는 받아쓰기 AI 품질 튜닝 근거로 유효하지 않다.
+PAPER_EVIDENCE_REVIEWED_FINALIZATION_CASE_TARGET = 1000
+PAPER_EVIDENCE_CASE_SOURCE = "app-log-reviewed-finalization-cases"
 SBD_BENCHMARK_BACKEND = str(dictation_ai_default("sentenceBoundaryBackend")).strip()
 SBD_BENCHMARK_MODEL = str(dictation_ai_default("sentenceBoundaryModel")).strip()
 SBD_BENCHMARK_DEVICE = str(dictation_ai_default("sentenceBoundaryDevice")).strip()
@@ -243,6 +249,42 @@ def revision_fallback_coverage_min() -> float:
     return _dictation_env_float("REVISION_FALLBACK_COVERAGE_MIN", REVISION_FALLBACK_COVERAGE_MIN)
 
 
+def max_staged_sentence_queue() -> int:
+    return _dictation_env_int("MAX_STAGED_SENTENCE_QUEUE", MAX_STAGED_SENTENCE_QUEUE)
+
+
+def no_text_stale_stage_suppress_chunks() -> int:
+    return _dictation_env_int("NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS", NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS)
+
+
+def sentence_confirm_chunks() -> int:
+    return max(1, _dictation_env_int("SENTENCE_CONFIRM_CHUNKS", SENTENCE_CONFIRM_CHUNKS))
+
+
+def forced_sentence_confirm_chunks() -> int:
+    return max(1, _dictation_env_int("FORCED_SENTENCE_CONFIRM_CHUNKS", FORCED_SENTENCE_CONFIRM_CHUNKS))
+
+
+def sentence_confirm_max_age_chunks() -> int:
+    return max(1, _dictation_env_int("SENTENCE_CONFIRM_MAX_AGE_CHUNKS", SENTENCE_CONFIRM_MAX_AGE_CHUNKS))
+
+
+def forced_sentence_confirm_max_age_chunks() -> int:
+    return max(1, _dictation_env_int("FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS", FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS))
+
+
+def short_cjk_final_units() -> int:
+    return _dictation_env_int("SHORT_CJK_FINAL_UNITS", SHORT_CJK_FINAL_UNITS)
+
+
+def short_no_end_fragment_units() -> int:
+    return _dictation_env_int("SHORT_NO_END_FRAGMENT_UNITS", SHORT_NO_END_FRAGMENT_UNITS)
+
+
+def short_cjk_replacement_hold_chunks() -> int:
+    return _dictation_env_int("SHORT_CJK_REPLACEMENT_HOLD_CHUNKS", SHORT_CJK_REPLACEMENT_HOLD_CHUNKS)
+
+
 def dictation_pipeline_policy() -> dict[str, object]:
     return {
         "stt_transcribe_task": STT_TRANSCRIBE_TASK,
@@ -260,12 +302,12 @@ def dictation_pipeline_policy() -> dict[str, object]:
         "segment_logprob_confidence_weight": SEGMENT_LOGPROB_CONFIDENCE_WEIGHT,
         "segment_no_speech_confidence_weight": SEGMENT_NO_SPEECH_CONFIDENCE_WEIGHT,
         "cjk_char_ranges": CJK_CHAR_RANGES,
-        "max_staged_sentence_queue": MAX_STAGED_SENTENCE_QUEUE,
-        "no_text_stale_stage_suppress_chunks": NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS,
-        "sentence_confirm_chunks": SENTENCE_CONFIRM_CHUNKS,
-        "forced_sentence_confirm_chunks": FORCED_SENTENCE_CONFIRM_CHUNKS,
-        "sentence_confirm_max_age_chunks": SENTENCE_CONFIRM_MAX_AGE_CHUNKS,
-        "forced_sentence_confirm_max_age_chunks": FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS,
+        "max_staged_sentence_queue": max_staged_sentence_queue(),
+        "no_text_stale_stage_suppress_chunks": no_text_stale_stage_suppress_chunks(),
+        "sentence_confirm_chunks": sentence_confirm_chunks(),
+        "forced_sentence_confirm_chunks": forced_sentence_confirm_chunks(),
+        "sentence_confirm_max_age_chunks": sentence_confirm_max_age_chunks(),
+        "forced_sentence_confirm_max_age_chunks": forced_sentence_confirm_max_age_chunks(),
         "max_pending_sentence_chars": MAX_PENDING_SENTENCE_CHARS,
         "pending_overrun_chunks": PENDING_OVERRUN_CHUNKS,
         "fast_pending_overrun_chars": FAST_PENDING_OVERRUN_CHARS,
@@ -274,9 +316,9 @@ def dictation_pipeline_policy() -> dict[str, object]:
         "slow_pending_sentence_chars": SLOW_PENDING_SENTENCE_CHARS,
         "slow_pending_max_sentence_chars": SLOW_PENDING_MAX_SENTENCE_CHARS,
         "slow_pending_max_chars_per_chunk": SLOW_PENDING_MAX_CHARS_PER_CHUNK,
-        "short_cjk_final_units": SHORT_CJK_FINAL_UNITS,
-        "short_no_end_fragment_units": SHORT_NO_END_FRAGMENT_UNITS,
-        "short_cjk_replacement_hold_chunks": SHORT_CJK_REPLACEMENT_HOLD_CHUNKS,
+        "short_cjk_final_units": short_cjk_final_units(),
+        "short_no_end_fragment_units": short_no_end_fragment_units(),
+        "short_cjk_replacement_hold_chunks": short_cjk_replacement_hold_chunks(),
         "cjk_revision_internal_stability_min_ratio": CJK_REVISION_INTERNAL_STABILITY_MIN_RATIO,
         "cjk_revision_internal_stability_mid_ratio": CJK_REVISION_INTERNAL_STABILITY_MID_RATIO,
         "cjk_revision_internal_stability_min_chars": CJK_REVISION_INTERNAL_STABILITY_MIN_CHARS,
@@ -306,3 +348,209 @@ def revision_similarity_policy() -> dict[str, int | float]:
         "revision_fallback_common_run_min": revision_fallback_common_run_min(),
         "revision_fallback_coverage_min": revision_fallback_coverage_min(),
     }
+
+
+def lifecycle_tuning_policy() -> dict[str, int]:
+    return {
+        "max_staged_sentence_queue": max_staged_sentence_queue(),
+        "no_text_stale_stage_suppress_chunks": no_text_stale_stage_suppress_chunks(),
+        "sentence_confirm_chunks": sentence_confirm_chunks(),
+        "forced_sentence_confirm_chunks": forced_sentence_confirm_chunks(),
+        "sentence_confirm_max_age_chunks": sentence_confirm_max_age_chunks(),
+        "forced_sentence_confirm_max_age_chunks": forced_sentence_confirm_max_age_chunks(),
+        "short_cjk_final_units": short_cjk_final_units(),
+        "short_no_end_fragment_units": short_no_end_fragment_units(),
+        "short_cjk_replacement_hold_chunks": short_cjk_replacement_hold_chunks(),
+    }
+
+
+def dictation_tuning_protocol() -> dict[str, object]:
+    return {
+        "case_source": "app logs only",
+        "draft_rule": "auto-collected drafts require human expected_final review before benchmark use",
+        "benchmark_runtime": "sat + cuda + float16 only",
+        "parameter_change_source": "dictation_tuning_manifest only",
+        "parameter_range_rule": "sweep values must stay inside each manifest min_value/max_value range",
+        "exploratory_sweep_rule": "may run on current reviewed cases, but is not paper evidence",
+        "paper_evidence_case_source": PAPER_EVIDENCE_CASE_SOURCE,
+        "paper_evidence_reviewed_finalization_case_target": PAPER_EVIDENCE_REVIEWED_FINALIZATION_CASE_TARGET,
+        "paper_evidence_rule": (
+            "run with --paper-evidence only after reviewed expected_final cases reach the target "
+            "and all draft markers are removed"
+        ),
+        "comparison_rule": "compare one parameter at a time on the same reviewed case set",
+        "promotion_rule": "checked-in defaults require repeated improvement across log-derived reviewed cases",
+        "forbidden_changes": (
+            "language-specific phrase rules",
+            "regex sentence split baselines",
+            "mock/smoke/CPU benchmark evidence",
+        ),
+        "primary_metrics": (
+            "final_f1_avg",
+            "final_precision_avg",
+            "final_recall_avg",
+            "final_boundary_f1_avg",
+            "finalized_per_stage_start",
+        ),
+        "diagnostic_metrics": (
+            "stage_revision",
+            "stage_replace",
+            "stage_replaced_unconfirmed",
+            "pending_overrun",
+            "duplicate suppression counters",
+        ),
+    }
+
+
+def _tuning_manifest_entry(
+    name: str,
+    *,
+    default: int | float,
+    current: int | float,
+    value_type: str,
+    min_value: int | float,
+    max_value: int | float,
+    scope: str,
+    intent: str,
+) -> dict[str, int | float | str]:
+    return {
+        "name": name,
+        "env": f"AVC_DICTATION_{name.upper()}",
+        "default": default,
+        "current": current,
+        "value_type": value_type,
+        "min_value": min_value,
+        "max_value": max_value,
+        "scope": scope,
+        "intent": intent,
+        "evidence_basis": "app-log replay benchmark",
+        "external_reference_role": "problem framing and metric design, not direct threshold source",
+        "change_rule": "sweep with AVC_DICTATION_* override; compare on unchanged reviewed case set",
+        "default_promotion_rule": "update checked-in default only after recording CUDA benchmark evidence",
+        "primary_comparison_metrics": "final_f1_avg, final_precision_avg, final_recall_avg, final_boundary_f1_avg",
+    }
+
+
+def dictation_tuning_manifest() -> list[dict[str, int | float | str]]:
+    return [
+        _tuning_manifest_entry(
+            "MAX_STAGED_SENTENCE_QUEUE",
+            default=MAX_STAGED_SENTENCE_QUEUE,
+            current=max_staged_sentence_queue(),
+            value_type="int",
+            min_value=1,
+            max_value=50,
+            scope="lifecycle",
+            intent="preserve created-order staged candidates when SBD emits multiple completed candidates before active finalization",
+        ),
+        _tuning_manifest_entry(
+            "NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS",
+            default=NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS,
+            current=no_text_stale_stage_suppress_chunks(),
+            value_type="int",
+            min_value=1,
+            max_value=30,
+            scope="lifecycle",
+            intent="suppress stale unconfirmed staged candidates after repeated no-text chunks without treating silence as final evidence",
+        ),
+        _tuning_manifest_entry(
+            "SENTENCE_CONFIRM_CHUNKS",
+            default=SENTENCE_CONFIRM_CHUNKS,
+            current=sentence_confirm_chunks(),
+            value_type="int",
+            min_value=1,
+            max_value=6,
+            scope="lifecycle",
+            intent="balance finalization latency against duplicate and premature final risk for ordinary candidates",
+        ),
+        _tuning_manifest_entry(
+            "FORCED_SENTENCE_CONFIRM_CHUNKS",
+            default=FORCED_SENTENCE_CONFIRM_CHUNKS,
+            current=forced_sentence_confirm_chunks(),
+            value_type="int",
+            min_value=1,
+            max_value=8,
+            scope="lifecycle",
+            intent="require stronger observation for forced boundary candidates",
+        ),
+        _tuning_manifest_entry(
+            "SENTENCE_CONFIRM_MAX_AGE_CHUNKS",
+            default=SENTENCE_CONFIRM_MAX_AGE_CHUNKS,
+            current=sentence_confirm_max_age_chunks(),
+            value_type="int",
+            min_value=1,
+            max_value=10,
+            scope="lifecycle",
+            intent="allow aged staged candidates to finalize when repeated exact confirmations are not preserved",
+        ),
+        _tuning_manifest_entry(
+            "FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS",
+            default=FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS,
+            current=forced_sentence_confirm_max_age_chunks(),
+            value_type="int",
+            min_value=1,
+            max_value=12,
+            scope="lifecycle",
+            intent="age cap for forced boundary candidates",
+        ),
+        _tuning_manifest_entry(
+            "SHORT_CJK_FINAL_UNITS",
+            default=SHORT_CJK_FINAL_UNITS,
+            current=short_cjk_final_units(),
+            value_type="int",
+            min_value=1,
+            max_value=40,
+            scope="quality-gate",
+            intent="flag short CJK final candidates for false-final and fragment analysis",
+        ),
+        _tuning_manifest_entry(
+            "SHORT_NO_END_FRAGMENT_UNITS",
+            default=SHORT_NO_END_FRAGMENT_UNITS,
+            current=short_no_end_fragment_units(),
+            value_type="int",
+            min_value=1,
+            max_value=20,
+            scope="quality-gate",
+            intent="flag short candidates without sentence-end markers before final-only translation",
+        ),
+        _tuning_manifest_entry(
+            "SHORT_CJK_REPLACEMENT_HOLD_CHUNKS",
+            default=SHORT_CJK_REPLACEMENT_HOLD_CHUNKS,
+            current=short_cjk_replacement_hold_chunks(),
+            value_type="int",
+            min_value=0,
+            max_value=10,
+            scope="quality-gate",
+            intent="hold short CJK replacement candidates briefly before replacing existing staged content",
+        ),
+        _tuning_manifest_entry(
+            "CJK_REVISION_RATIO_MIN",
+            default=CJK_REVISION_RATIO_MIN,
+            current=cjk_revision_ratio_min(),
+            value_type="float",
+            min_value=0.50,
+            max_value=0.95,
+            scope="revision-similarity",
+            intent="classify CJK candidate revisions without language-specific phrase rules",
+        ),
+        _tuning_manifest_entry(
+            "CJK_CONFIRM_PRESERVE_RATIO_MIN",
+            default=CJK_CONFIRM_PRESERVE_RATIO_MIN,
+            current=cjk_confirm_preserve_ratio_min(),
+            value_type="float",
+            min_value=0.50,
+            max_value=0.95,
+            scope="revision-similarity",
+            intent="preserve confirmation count when a revised CJK candidate remains close enough to prior staged text",
+        ),
+        _tuning_manifest_entry(
+            "REVISION_FALLBACK_COVERAGE_MIN",
+            default=REVISION_FALLBACK_COVERAGE_MIN,
+            current=revision_fallback_coverage_min(),
+            value_type="float",
+            min_value=0.40,
+            max_value=0.90,
+            scope="revision-similarity",
+            intent="fallback coverage threshold for multilingual revision matching",
+        ),
+    ]

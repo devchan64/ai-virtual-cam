@@ -59,6 +59,6 @@
 - 가상 비디오/오디오 장치 동작 계약(생성/상태/삭제)을 변경하는 패치에는 반드시 스펙 테스트를 포함한다.
 - `scripts/bin/avc-device`, `scripts/bin/avc-docker`, `scripts/config/create-config-gui.py` 변경 시 `./bin/avc test` 실행 결과를 확인한다.
 - 테스트 없이 가상장치 생성/검증 로직의 분기, 기본값, 권한/릴레이 경로를 변경하지 않는다.
-- 받아쓰기 AI 로그 기반 관측 케이스는 `tests/eval/dictation_ai/sbd_text_cases.sample.jsonl`에 누적하고 `tests/eval/dictation_ai/sbd_benchmark.py`로 검증한다.
+- 받아쓰기 AI 로그 기반 관측 케이스는 `tests/eval/dictation_ai/sbd_cases/` 아래에 그룹별 JSONL로 누적하고 `tests/eval/dictation_ai/sbd_benchmark.py`로 검증한다.
 - 받아쓰기 AI SBD 벤치마크는 반드시 실제 `sat + cuda + float16`로만 실행한다. mock/smoke/CPU 벤치는 성능 근거로 사용하지 않는다.
 - Codex sandbox에서 CUDA 장치가 보이지 않을 수 있으므로, 벤치 실행은 필요 시 승인된 sandbox 밖 실행으로 수행하고 결과 수치를 기록한다.

@@ -11,10 +11,10 @@ from src.app.dictation_pipeline_contracts import AudioEvidence, UncommittedConte
 from src.app.dictation_pipeline_settings import (
     INPUT_AUDIO_QUEUE_TIMEOUT_SECONDS,
     MAX_RECENT_SHORT_TEXT_REPEATS,
-    MAX_STAGED_SENTENCE_QUEUE,
-    NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS,
     RECENT_TRANSCRIPT_WINDOW,
     SAMPLE_RATE,
+    max_staged_sentence_queue,
+    no_text_stale_stage_suppress_chunks,
 )
 from src.app.dictation_transcript_logic import (
     _diagnostic_tail,
@@ -83,7 +83,7 @@ def run_transcribe_loop(
     last_audio_queue_drops = worker._audio_queue_drop_count()
     recognition_node = SpeechEvidenceToSttHypothesisNode(worker._cfg)
     candidate_node = SttHypothesisToSentenceCandidateNode(worker._sentence_boundary_detector_for)
-    commit_buffer_node = SentenceCandidateCommitBufferNode(MAX_STAGED_SENTENCE_QUEUE)
+    commit_buffer_node = SentenceCandidateCommitBufferNode(max_staged_sentence_queue())
     active_stage = commit_buffer_node.active
     no_text_stage_skip_chunks = 0
     def count_metric(name: str, amount: int = 1) -> None:
@@ -641,7 +641,7 @@ def run_transcribe_loop(
         required_confirmations = _sentence_required_confirmations(active_stage.forced)
         if active_stage.confirmations >= required_confirmations:
             return
-        if no_text_stage_skip_chunks < NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS:
+        if no_text_stage_skip_chunks < no_text_stale_stage_suppress_chunks():
             return
         count_metric("stage_no_text_stale_suppressed")
         count_segment_state("suppressed")

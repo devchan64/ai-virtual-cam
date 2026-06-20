@@ -9,15 +9,8 @@ from src.app.dictation_pipeline_settings import (
     CJK_REVISION_INTERNAL_STABILITY_MIN_RATIO,
     FAST_PENDING_OVERRUN_CHARS,
     FAST_PENDING_OVERRUN_CHUNKS,
-    FORCED_SENTENCE_CONFIRM_CHUNKS,
-    FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS,
     MAX_PENDING_SENTENCE_CHARS,
     PENDING_OVERRUN_CHUNKS,
-    SENTENCE_CONFIRM_CHUNKS,
-    SENTENCE_CONFIRM_MAX_AGE_CHUNKS,
-    SHORT_CJK_FINAL_UNITS,
-    SHORT_CJK_REPLACEMENT_HOLD_CHUNKS,
-    SHORT_NO_END_FRAGMENT_UNITS,
     cjk_confirm_preserve_common_run_min as _cjk_confirm_preserve_common_run_min,
     cjk_confirm_preserve_coverage_min as _cjk_confirm_preserve_coverage_min,
     cjk_confirm_preserve_ratio_min as _cjk_confirm_preserve_ratio_min,
@@ -27,6 +20,8 @@ from src.app.dictation_pipeline_settings import (
     cjk_revision_max_length_delta as _cjk_revision_max_length_delta,
     cjk_revision_ratio_min as _cjk_revision_ratio_min,
     cjk_revision_short_max_units as _cjk_revision_short_max_units,
+    forced_sentence_confirm_chunks as _forced_sentence_confirm_chunks,
+    forced_sentence_confirm_max_age_chunks as _forced_sentence_confirm_max_age_chunks,
     revision_fallback_common_run_min as _revision_fallback_common_run_min,
     revision_fallback_coverage_min as _revision_fallback_coverage_min,
     revision_prefix_common_run_min as _revision_prefix_common_run_min,
@@ -34,6 +29,11 @@ from src.app.dictation_pipeline_settings import (
     revision_similarity_policy as _revision_similarity_policy,
     revision_tail_best_j_max as _revision_tail_best_j_max,
     revision_tail_common_run_min as _revision_tail_common_run_min,
+    sentence_confirm_chunks as _sentence_confirm_chunks,
+    sentence_confirm_max_age_chunks as _sentence_confirm_max_age_chunks,
+    short_cjk_final_units as _short_cjk_final_units,
+    short_cjk_replacement_hold_chunks as _short_cjk_replacement_hold_chunks,
+    short_no_end_fragment_units as _short_no_end_fragment_units,
 )
 from src.app.sentence_boundary import (
     sentence_end_count as _boundary_sentence_end_count,
@@ -621,12 +621,12 @@ def _sentences_are_revisions(left: str, right: str) -> bool:
 
 
 def _sentence_required_confirmations(forced: bool) -> int:
-    return FORCED_SENTENCE_CONFIRM_CHUNKS if forced else SENTENCE_CONFIRM_CHUNKS
+    return _forced_sentence_confirm_chunks() if forced else _sentence_confirm_chunks()
 
 
 def _sentence_max_age_chunks(forced: bool, base_age: int | None = None) -> int:
     if base_age is None:
-        return FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS if forced else SENTENCE_CONFIRM_MAX_AGE_CHUNKS
+        return _forced_sentence_confirm_max_age_chunks() if forced else _sentence_confirm_max_age_chunks()
     normalized_base_age = max(1, int(base_age))
     return normalized_base_age + 1 if forced else normalized_base_age
 
@@ -738,7 +738,7 @@ def _final_sentence_diagnostic_flags(sentence: str, language: str) -> tuple[str,
         flags.append("repeated_word_ngram")
     if normalized_language == "zh" or has_cjk:
         cjk_units = [word for word in words if _has_cjk_words([word])]
-        if 0 < len(cjk_units) <= SHORT_CJK_FINAL_UNITS:
+        if 0 < len(cjk_units) <= _short_cjk_final_units():
             flags.append("short_cjk")
         if 0 < len(cjk_units) <= 3 and _boundary_sentence_end_count(normalized) == 0:
             flags.append("low_value_cjk_fragment")
@@ -757,7 +757,7 @@ def _final_sentence_diagnostic_flags(sentence: str, language: str) -> tuple[str,
         flags.append("mixed_latin_zh")
     if _boundary_sentence_end_count(normalized) == 0:
         flags.append("no_end_marker")
-        if len(words) <= SHORT_NO_END_FRAGMENT_UNITS:
+        if len(words) <= _short_no_end_fragment_units():
             flags.append("short_no_end_fragment")
     return tuple(flags)
 
@@ -922,7 +922,7 @@ def _replacement_decision_reason(
         if (
             "short_cjk" in flags
             and "no_end_marker" not in flags
-            and staged_age < _sentence_max_age_chunks(staged_forced, sentence_finalize_age) + SHORT_CJK_REPLACEMENT_HOLD_CHUNKS
+            and staged_age < _sentence_max_age_chunks(staged_forced, sentence_finalize_age) + _short_cjk_replacement_hold_chunks()
         ):
             return "unconfirmed_cjk"
     if staged_age >= _sentence_max_age_chunks(staged_forced, sentence_finalize_age):

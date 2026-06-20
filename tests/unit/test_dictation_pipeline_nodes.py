@@ -1,5 +1,6 @@
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from src.app.dictation_pipeline_contracts import (
     ActiveSentenceCandidate,
@@ -26,6 +27,8 @@ from src.app.dictation_pipeline_settings import (
     STT_TRANSCRIBE_TASK,
     STT_WITHOUT_TIMESTAMPS,
     dictation_pipeline_policy,
+    dictation_tuning_manifest,
+    dictation_tuning_protocol,
 )
 from src.app.sentence_boundary import SentenceBoundaryResult
 
@@ -154,6 +157,47 @@ class DictationPipelineNodeTest(unittest.TestCase):
             policy["segment_high_no_speech_override_languages"],
             sorted(SEGMENT_HIGH_NO_SPEECH_OVERRIDE_LANGUAGES),
         )
+
+    def test_lifecycle_policy_supports_benchmark_env_overrides(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "AVC_DICTATION_MAX_STAGED_SENTENCE_QUEUE": "33",
+                "AVC_DICTATION_SENTENCE_CONFIRM_CHUNKS": "4",
+                "AVC_DICTATION_SHORT_NO_END_FRAGMENT_UNITS": "6",
+            },
+        ):
+            policy = dictation_pipeline_policy()
+
+        self.assertEqual(policy["max_staged_sentence_queue"], 33)
+        self.assertEqual(policy["sentence_confirm_chunks"], 4)
+        self.assertEqual(policy["short_no_end_fragment_units"], 6)
+
+    def test_tuning_manifest_documents_env_overrides_and_evidence_scope(self) -> None:
+        with patch.dict("os.environ", {"AVC_DICTATION_SENTENCE_CONFIRM_CHUNKS": "5"}):
+            manifest = dictation_tuning_manifest()
+
+        by_name = {entry["name"]: entry for entry in manifest}
+        self.assertEqual(by_name["SENTENCE_CONFIRM_CHUNKS"]["env"], "AVC_DICTATION_SENTENCE_CONFIRM_CHUNKS")
+        self.assertEqual(by_name["SENTENCE_CONFIRM_CHUNKS"]["current"], 5)
+        self.assertEqual(by_name["SENTENCE_CONFIRM_CHUNKS"]["evidence_basis"], "app-log replay benchmark")
+        self.assertIn("not direct threshold source", by_name["SENTENCE_CONFIRM_CHUNKS"]["external_reference_role"])
+        self.assertIn("AVC_DICTATION_*", by_name["SENTENCE_CONFIRM_CHUNKS"]["change_rule"])
+        self.assertIn("CUDA benchmark evidence", by_name["SENTENCE_CONFIRM_CHUNKS"]["default_promotion_rule"])
+
+    def test_tuning_protocol_keeps_paper_experiment_scope_explicit(self) -> None:
+        protocol = dictation_tuning_protocol()
+
+        self.assertEqual(protocol["case_source"], "app logs only")
+        self.assertIn("human expected_final review", protocol["draft_rule"])
+        self.assertEqual(protocol["benchmark_runtime"], "sat + cuda + float16 only")
+        self.assertIn("not paper evidence", protocol["exploratory_sweep_rule"])
+        self.assertEqual(protocol["paper_evidence_case_source"], "app-log-reviewed-finalization-cases")
+        self.assertEqual(protocol["paper_evidence_reviewed_finalization_case_target"], 1000)
+        self.assertIn("--paper-evidence", protocol["paper_evidence_rule"])
+        self.assertIn("same reviewed case set", protocol["comparison_rule"])
+        self.assertIn("language-specific phrase rules", protocol["forbidden_changes"])
+        self.assertIn("final_f1_avg", protocol["primary_metrics"])
 
     def test_hypothesis_candidate_node_preserves_boundary_contract(self) -> None:
         detector = FakeBoundaryDetector()

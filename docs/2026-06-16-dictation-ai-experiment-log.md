@@ -2624,3 +2624,1071 @@ staged_exact_match=52
 - `final_precision_avg`는 `0.754 -> 0.744`로 하락했다. 확정 누락을 줄이는 대신 false final 위험이 일부 증가한 것으로 보며, recent final memory와 no-end fragment 품질 게이트를 계속 함께 관찰해야 한다.
 - 케이스별 비교에서 개선은 한국어/영어의 `missing-final`, `stage-queue`, `mixed-context-final` 태그에 주로 나타났고, 악화는 short/no-end fragment 또는 기존 false-final 위험이 있던 케이스의 precision 하락으로 나타났다.
 - 이 변경은 논문의 주제인 “불안정 STT 스트림을 final-only 번역 입력으로 안정화하는 lifecycle”에 직접 해당한다. raw STT 정확도 개선 또는 언어별 문자열 보정으로 해석하지 않는다.
+
+## 2026-06-20 18:20 KST - 파라미터 sweep 규칙과 로그 기반 케이스 수집 보강
+
+- 논문 근거를 보강하려면 raw STT 정확도보다, 불안정한 STT 가설을 final-only 번역 입력으로 안정화하는 lifecycle 파라미터의 효과를 반복 검증해야 한다.
+- 파라미터 변경은 앱 로그에서 수집한 다수 실패 케이스를 benchmark에 누적한 뒤, 같은 샘플 집합에서 변경 전후를 비교한다.
+- 실험 가능한 파라미터는 lifecycle에 직접 영향을 주는 값으로 제한한다. 예: `MAX_STAGED_SENTENCE_QUEUE`, `SENTENCE_CONFIRM_CHUNKS`, `FORCED_SENTENCE_CONFIRM_CHUNKS`, `SENTENCE_CONFIRM_MAX_AGE_CHUNKS`, `FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS`, `SHORT_CJK_FINAL_UNITS`, `SHORT_NO_END_FRAGMENT_UNITS`, revision similarity 계열.
+- STT 모델, CUDA 장치, backend, 언어별 문구 규칙, 케이스별 문자열 보정은 이 논문의 lifecycle 파라미터 실험으로 취급하지 않는다.
+- `AVC_DICTATION_*` 환경변수 override는 로컬 sweep용이다. 운영 기본값은 벤치 결과와 실험일지 판단을 거쳐 `dictation_pipeline_settings.py` checked-in 상수로 반영한다.
+- 문헌 근거 검토 결과, Whisper-Streaming과 incremental ASR 평가는 partial hypothesis와 final transcript 분리, latency/revoke/안정성 지표 분리의 근거로 쓸 수 있다. 다만 `SENTENCE_CONFIRM_CHUNKS` 같은 개별 상수값을 외부 논문에서 직접 정당화하지는 않는다. 상수 채택은 앱 로그 replay와 CUDA/AI 벤치 결과로만 판단한다.
+- `dictation_tuning_manifest()`를 추가해 sweep 가능한 lifecycle/revision 파라미터의 env 이름, 현재값, 기본값, scope, intent, 근거 분류를 벤치 리포트에 함께 남긴다. manifest의 `external_reference_role`은 외부 문헌이 threshold source가 아니라 문제 정의와 지표 설계 근거임을 명시한다.
+- 앱 로그에서 의심 구간을 빠르게 모으기 위해 `tests/eval/dictation_ai/collect_sbd_case_drafts_from_logs.py`를 추가했다.
+- 수집 도구는 `stage 교체 보류`, `stage 후보 품질 차단`, `중복 문장 무시`, `번역 생략`, `raw_without_final`, `stage_queue_*`, `no_end_marker` 같은 지표가 보이는 chunk 주변의 raw STT window를 draft JSONL로 만든다.
+- draft에는 `expected_final`을 자동 생성하지 않는다. 사람이 원 로그와 화면 관측을 검토해 기대 final을 채운 뒤에만 `tests/eval/dictation_ai/sbd_text_cases.sample.jsonl`로 승격한다.
+- 수집 도구는 같은 context window 안의 실제 `받아쓰기 AI 문장 확정` 로그를 `observed_final_texts`와 `observed_final_references`로 함께 저장한다. review queue는 이를 중복 제거해 `suggested_expected_final` 검토 초안으로 보여준다. 이 값은 reviewer가 기대 final을 판단할 때 보는 참고값이며, 자동으로 `expected_final`로 승격하지 않는다.
+- review queue와 검토 워크시트는 `review_priority_tag`/`review_priority_rank`를 보존한다. 이는 `missing-final`, `duplicate-final`, `stage-queue`처럼 먼저 확인해야 할 실패 유형을 추적하기 위한 검토 운영 메타데이터이며, 성능 점수로 해석하지 않는다.
+- `tests/eval/dictation_ai/prepare_sbd_review_work_items.py`를 추가해 `suggested_expected_final`이 있는 queue 항목을 사람이 편집하기 쉬운 워크시트 JSONL로 변환한다. 워크시트는 `expected_final`을 제안값으로 미리 채우지만 `review_status=needs_human_confirmation`과 `draft_expected_final_required=true`를 유지하므로, benchmark 입력이나 자동 승격 대상으로 쓰이지 않는다. `--markdown-dir`를 주면 같은 항목을 사람이 검토하기 쉬운 Markdown batch와 배치별 언어/소스 분포를 담은 `index.md`로도 출력한다. `--balance-review-order`는 특정 언어/로그가 앞 배치에 몰리는 검토 편향을 줄이기 위해 언어와 source log bucket을 round-robin으로 섞는다.
+- `tests/eval/dictation_ai/validate_sbd_review_work_items.py`를 추가해 편집한 워크시트의 중복 id, chunk 유무, marker, reviewed status와 `expected_final` 유무를 promotion 전에 검증한다. `ready_count`는 승격 가능 후보 수이며, 승격 전까지 reviewed benchmark case 수로 계산하지 않는다.
+- 케이스가 많아지면 `tests/eval/dictation_ai/sbd_cases/*.jsonl`처럼 분할한다. 수집 도구는 `--split-size`로 draft part 파일을 만들 수 있고, `sbd_benchmark.py --cases`는 단일 파일, 여러 파일, glob, 디렉터리를 모두 받을 수 있으며, 중복 case id는 fail-fast로 거부한다. `sbd_cases` 디렉터리에 reviewed JSONL이 있으면 benchmark 기본 입력에 sample file과 함께 자동 포함한다.
+- benchmark는 `draft_expected_final_required=true`가 남아 있는 파일을 거부한다. pending/staged 전용 benchmark case는 `expected_final=[]`일 수 있으므로, finalization 목표 검증에는 `validate_sbd_case_files.py --min-expected-final-cases`를 명시해 비어 있지 않은 `expected_final` 케이스 수를 별도로 센다. draft 1000건은 후보 풀이고, 논문/벤치에 쓰는 reviewed finalization case 1000건은 `expected_final` 검토와 draft marker 제거가 끝난 파일만 의미한다.
+- `tests/eval/dictation_ai/report_sbd_review_progress.py`는 review queue, 검토 워크시트, reviewed case를 분리 집계한다. 워크시트에서 `review_status=reviewed|accepted`와 `expected_final`을 가진 항목은 `ready_to_promote_from_work_items`로 보지만, 승격 전에는 benchmark case 수로 계산하지 않는다.
+- `tests/eval/dictation_ai/run_sbd_case_workflow.py`를 추가해 로그 수집, draft 검증, 전체 review queue, source-gap diverse queue, 검토 워크시트 생성, 진행률 집계, queue/work-item 승격 dry-run, 목표 검증 명령, 실제 승격 명령, CUDA benchmark 명령을 같은 기본값으로 생성한다. `--execute`는 비-CUDA 준비 단계만 실행한다. reviewed 목표 검증은 `--check-target`, `expected_final`이 있는 finalization 목표 검증은 `--check-finalization-target`, 검토한 work item의 실제 승격은 `--promote-reviewed-work-items`, 실제 성능 벤치는 `--run-cuda-benchmark`를 명시했을 때만 실행한다.
+- `tests/eval/dictation_ai/monitor_sbd_case_workflow.py`를 추가해 반복 실행 중인 앱 로그를 주기적으로 다시 읽고 같은 비-CUDA 준비 단계를 반복할 수 있게 했다. 이 모니터는 `monitor-summary.json`에 최신 실행 summary를 남기고, `monitor-history.jsonl`에 run id, UTC 관측 시각, iteration별 draft 수, review queue 수, work item 수, 태그 분포, source log 분포, suggested expected final 수, reviewed/finalization 진행률을 append-only로 누적한다. `tests/eval/dictation_ai/report_sbd_monitor_history.py`는 이 history를 요약해 최신 진행률, reviewed finalization 증가량, source log/태그 편향을 확인한다. 성능 수치가 아니라 케이스 수집 운영 기록이며, 논문 근거 성능값은 reviewed case 승격 뒤 CUDA/AI 벤치 또는 parameter sweep으로만 기록한다.
+
+워크플로 명령 확인 예:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_case_workflow.py
+```
+
+비-CUDA 준비 단계 실행 예:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_case_workflow.py --execute
+```
+
+검토 워크시트 단독 생성 예:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/prepare_sbd_review_work_items.py \
+  .tmp/eval/dictation-ai-sbd/review-queue.jsonl \
+  --output .tmp/eval/dictation-ai-sbd/review-work-items.jsonl \
+  --split-size 250 \
+  --markdown-dir .tmp/eval/dictation-ai-sbd/review-work-item-batches \
+  --balance-review-order \
+  --summary-output .tmp/eval/dictation-ai-sbd/review-work-items-summary.json
+```
+
+검토 워크시트 승격 dry-run 예:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_review_work_items.py \
+  '.tmp/eval/dictation-ai-sbd/review-work-items.part-*.jsonl'
+
+./.venv/bin/python tests/eval/dictation_ai/promote_sbd_reviewed_cases.py \
+  '.tmp/eval/dictation-ai-sbd/review-work-items.part-*.jsonl' \
+  --existing tests/eval/dictation_ai/sbd_text_cases.sample.jsonl tests/eval/dictation_ai/sbd_cases \
+  --output .tmp/eval/dictation-ai-sbd/reviewed-promoted-from-work-items-dry-run.jsonl \
+  --split-size 250 \
+  --allow-empty \
+  --summary-output .tmp/eval/dictation-ai-sbd/promoted-from-work-items-summary.json
+```
+
+검토 완료 work item 실제 승격 예:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_case_workflow.py \
+  --promote-reviewed-work-items
+```
+
+reviewed 1000건 목표 검증 포함 실행 예:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_case_workflow.py \
+  --execute \
+  --check-target
+```
+
+finalization 1000건 목표 검증 포함 실행 예:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_case_workflow.py \
+  --execute \
+  --check-finalization-target
+```
+
+CUDA/AI benchmark 포함 실행 예:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_case_workflow.py \
+  --execute \
+  --run-cuda-benchmark
+```
+
+반복 로그 모니터링 예:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/monitor_sbd_case_workflow.py \
+  --iterations 12 \
+  --interval-seconds 300
+```
+
+모니터 history 요약 예:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/report_sbd_monitor_history.py \
+  .tmp/eval/dictation-ai-sbd/monitor-history.jsonl \
+  --summary-output .tmp/eval/dictation-ai-sbd/monitor-history-summary.json
+```
+
+수집 예:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/collect_sbd_case_drafts_from_logs.py \
+  .tmp/logs \
+  --context 4 \
+  --limit 80 \
+  --output .tmp/eval/dictation-ai-sbd/case-drafts.jsonl
+```
+
+대량 draft 수집 예:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/collect_sbd_case_drafts_from_logs.py \
+  .tmp/logs \
+  --context 4 \
+  --limit 1000 \
+  --per-language-limit 400 \
+  --split-size 250 \
+  --output .tmp/eval/dictation-ai-sbd/case-drafts-balanced.jsonl \
+  --summary-output .tmp/eval/dictation-ai-sbd/case-drafts-balanced-summary.json
+```
+
+승격 전 검증 예:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_case_files.py \
+  tests/eval/dictation_ai/sbd_text_cases.sample.jsonl \
+  tests/eval/dictation_ai/sbd_cases
+```
+
+draft 후보 풀 규모 확인 예:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_case_files.py \
+  '.tmp/eval/dictation-ai-sbd/case-drafts-balanced.part-*.jsonl' \
+  --allow-drafts
+```
+
+검토 큐 생성 예:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/build_sbd_review_queue.py \
+  '.tmp/eval/dictation-ai-sbd/case-drafts-balanced.part-*.jsonl' \
+  --reviewed tests/eval/dictation_ai/sbd_text_cases.sample.jsonl tests/eval/dictation_ai/sbd_cases \
+  --limit 1000 \
+  --output .tmp/eval/dictation-ai-sbd/review-queue.jsonl \
+  --markdown-dir .tmp/eval/dictation-ai-sbd/review-batches \
+  --markdown-batch-size 25 \
+  --summary-output .tmp/eval/dictation-ai-sbd/review-queue-summary.json
+```
+
+중복 인접 구간을 줄인 1차 검토 큐 생성 예:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/build_sbd_review_queue.py \
+  '.tmp/eval/dictation-ai-sbd/case-drafts-balanced.part-*.jsonl' \
+  --reviewed tests/eval/dictation_ai/sbd_text_cases.sample.jsonl tests/eval/dictation_ai/sbd_cases \
+  --source-gap 5 \
+  --limit 1000 \
+  --output .tmp/eval/dictation-ai-sbd/review-queue-diverse.jsonl \
+  --markdown-dir .tmp/eval/dictation-ai-sbd/review-batches-diverse \
+  --markdown-batch-size 25 \
+  --summary-output .tmp/eval/dictation-ai-sbd/review-queue-diverse-summary.json
+```
+
+reviewed 1000건 목표 검증 예:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_case_files.py \
+  tests/eval/dictation_ai/sbd_text_cases.sample.jsonl \
+  tests/eval/dictation_ai/sbd_cases \
+  --min-cases 1000 \
+  --max-drafts 0
+```
+
+검토 진행률 집계 예:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/report_sbd_review_progress.py \
+  .tmp/eval/dictation-ai-sbd/review-queue.jsonl \
+  --reviewed-cases tests/eval/dictation_ai/sbd_text_cases.sample.jsonl tests/eval/dictation_ai/sbd_cases \
+  --review-work-items '.tmp/eval/dictation-ai-sbd/review-work-items.part-*.jsonl' \
+  --target-cases 1000 \
+  --summary-output .tmp/eval/dictation-ai-sbd/review-progress-summary.json
+```
+
+검토 완료 항목 승격 예:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/promote_sbd_reviewed_cases.py \
+  .tmp/eval/dictation-ai-sbd/review-queue.jsonl \
+  --existing tests/eval/dictation_ai/sbd_text_cases.sample.jsonl tests/eval/dictation_ai/sbd_cases \
+  --output tests/eval/dictation_ai/sbd_cases/reviewed-promoted.jsonl \
+  --split-size 250
+```
+
+현재 누적 로그 기준 draft 수집 결과:
+
+```text
+draft_count=1000
+language_counts: en=400, ko=200, zh=400
+top tags: missing-final=1000, stage-queue=999, cjk-internal-gap=999,
+          duplicate-final=768, no-end-marker=297, spaced-cjk-blocked=34,
+          translation-skip=42
+source_log_counts: avc-whisper.log=351, avc-whisper.log.1=49,
+                   avc-whisper.log.14=400, avc-whisper.log.35=198,
+                   avc-whisper.log.36=2
+```
+
+판단:
+
+- 테스트 케이스 수를 늘리는 기준은 “성공률을 높이기 쉬운 케이스”가 아니라 “확정 누락, 중복 확정, 문장 파괴, staged queue 잔류가 실제 로그에서 반복 관측된 케이스”다.
+- 1000개 draft는 수집 목표 달성을 위한 후보 풀일 뿐, 아직 논문 벤치 케이스 1000건이 완성됐다는 의미는 아니다. `expected_final` 검토와 편향 조정 뒤 승격한다.
+- `--per-language-limit` 없이 최신 로그만 훑으면 특정 언어가 draft 대부분을 차지할 수 있다. 논문 벤치 후보 풀은 수집 편향을 줄이기 위해 언어별 상한을 둔 balanced batch를 우선 검토한다.
+- `validate_sbd_case_files.py` 기준 현재 reviewed benchmark case는 `164`건, 이 중 `expected_final`이 있는 finalization case는 `160`건이며, draft 후보 풀은 `1000`건이다. benchmark는 draft marker가 남은 파일을 거부하므로 두 수치를 분리해 관리한다.
+- `build_sbd_review_queue.py` 기준 현재 검토 대기열은 `1000`건이며, 25건 단위 Markdown review batch `40`개를 생성했다. reviewed 1000건 목표 검증은 현재 `case_count=164`로 실패하는 것이 정상이다.
+- `--source-gap 5`를 적용한 1차 검토 큐는 최신 workflow 기준 `168`건이며, 25건 단위 Markdown review batch `7`개를 생성했다. 이는 전체 후보 수를 줄이는 기준이 아니라, 같은 로그의 인접 chunk를 반복 검토하지 않기 위한 우선 검토 목록이다.
+- source log 분포는 최신 workflow 기준 전체 queue에서 `351/49/400/198/2`, diverse queue에서 `59/9/67/33/1`로 나타난다. 이 분포는 현재 로그 모니터링 구간의 편향이며, 논문에서 일반 발화 분포로 해석하지 않는다.
+- `promote_sbd_reviewed_cases.py --allow-empty` dry-run 기준 현재 queue 승격은 `promoted_count=0`, `skipped_count=1000`, `existing_case_count=164`이고, work item 승격은 `promoted_count=0`, `skipped_count=880`, `existing_case_count=164`이다. 이는 아직 `expected_final`을 채우고 `review_status`를 확정한 새 항목이 없다는 뜻이며, 실제 승격 명령은 `review_status=reviewed` 또는 `accepted` 항목이 생긴 뒤 실행한다.
+- `report_sbd_review_progress.py` 기준 현재 `reviewed_case_count=164`, `reviewed_expected_final_case_count=160`, `ready_in_queue=0`, `total_ready_or_reviewed=164`, `remaining_to_target=836`, `target_met=false`다. finalization 목표 기준은 `finalization_ready_or_reviewed=160`, `remaining_finalization_to_target=840`, `finalization_target_met=false`다.
+- 최신 workflow 실행 기준 전체 review queue `1000`건 중 `suggested_expected_final_count=880`건, source-gap diverse queue `169`건 중 `suggested_expected_final_count=149`건에 실제 final 로그 기반 검토 초안이 있다. 이는 검토 효율을 높이는 힌트이며, reviewed case 수로 계산하지 않는다.
+- 검토 워크시트는 `880`건 생성됐고 전부 `needs_human_confirmation` 상태다. Markdown work item batch는 25건 단위 `36`개와 `index.md`가 생성됐으며, `balanced_review_order=true`로 언어/source log가 섞인 순서다. `validate_sbd_review_work_items.py` 기준 `ready_count=0`, `missing_expected_final_for_reviewed=0`, `missing_draft_marker=0`, `missing_work_item_marker=0`이다. 따라서 `ready_to_promote_from_work_items=0`, `total_reviewed_or_ready_to_promote=164`이며, 사람이 확인하기 전까지 benchmark case 수는 늘지 않는다.
+- review priority 기준 전체 queue와 work item은 현재 모두 `missing-final` 우선순위로 분류된다. 이는 이번 로그 draft 1000건 모두에 `missing-final` 태그가 포함됐기 때문이며, 중복/문장 파괴 등 다른 태그는 보조 태그로 함께 남아 있다.
+- 새 케이스를 추가하면 평균 점수가 낮아질 수 있다. 이는 회귀가 아니라 벤치 난도가 높아진 결과일 수 있으므로, 같은 샘플 집합에서의 변경 전후 비교를 우선한다.
+- 논문에는 raw STT 모델 성능 개선으로 쓰지 않고, 불안정 STT 스트림을 final-only 번역 입력으로 안정화하는 생명주기 실험 근거로만 사용한다.
+
+기준 벤치:
+
+```text
+cases=164
+finalized=840
+stage_start=1143
+finalized_per_stage_start=0.735
+final_precision_avg=0.744
+final_recall_avg=0.678
+final_f1_avg=0.688
+final_similarity_coverage_avg=0.607
+final_boundary_f1_avg=0.298
+```
+
+`AVC_DICTATION_SENTENCE_CONFIRM_CHUNKS=3` sweep:
+
+```text
+cases=164
+finalized=754
+stage_start=1067
+finalized_per_stage_start=0.707
+final_precision_avg=0.750
+final_recall_avg=0.629
+final_f1_avg=0.663
+final_similarity_coverage_avg=0.580
+final_boundary_f1_avg=0.297
+```
+
+판단:
+
+- confirmation을 2에서 3으로 올리면 precision은 `0.744 -> 0.750`으로 소폭 개선되지만, recall은 `0.678 -> 0.629`, final F1은 `0.688 -> 0.663`으로 하락한다.
+- 이 논문의 목적은 불안정 STT 가설을 final-only 번역 입력으로 안정화하는 것이므로, 중복 억제만을 위해 recall을 크게 잃는 변경은 현재 근거로 채택하지 않는다.
+- 기본값은 유지하고, 다음 반복은 confirm 수치보다 앱 로그에서 더 많은 `missing-final`, `duplicate-final`, `stage-queue`, `no-end-marker` 케이스를 수집한 뒤 비교한다.
+
+### 2026-06-20 파라미터 sweep 실행 규칙 보강
+
+논문 근거용 파라미터 변경은 임의 환경변수 실행이 아니라 `tests/eval/dictation_ai/run_sbd_parameter_sweep.py`로 표준화한다.
+
+규칙:
+
+- sweep 대상은 `src/app/dictation_pipeline_settings.py`의 `dictation_tuning_manifest()`에 등록된 파라미터만 허용한다.
+- sweep 값은 manifest의 `min_value`/`max_value` 범위 안에 있어야 하며, 범위를 벗어나면 benchmark 실행 전에 실패한다.
+- 실행기는 `--param NAME=VALUE`를 `AVC_DICTATION_NAME=VALUE`로 변환해 `sbd_benchmark.py`에 전달한다.
+- 모든 job은 같은 `--cases` 입력을 사용하며, 내부 benchmark 명령은 `--device cuda --compute-type float16`으로 고정한다.
+- summary에는 `dictation_tuning_protocol`, tuning manifest, 각 job의 env override, benchmark report 경로와 핵심 metric을 남긴다.
+- dry-run은 명령 검토용일 뿐 성능 근거가 아니다. 논문 수치로 쓰려면 실제 CUDA/AI benchmark report가 있어야 한다.
+- 탐색 sweep은 현재 reviewed case 집합에서 실행할 수 있지만, 논문 근거용 sweep은 `--paper-evidence`를 붙인다. 이 모드는 benchmark 실행 전에 draft marker를 거부하고, 검토한 `expected_final` case 1000건 목표를 검증한다.
+- `--min-expected-final-cases`는 중간 점검용 수량 gate다. 이 값을 낮춰 실행한 결과는 탐색/운영 점검으로만 기록하고, 논문 근거 표에는 `--paper-evidence` 기준을 통과한 결과만 사용한다.
+
+dry-run 예:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --param SENTENCE_CONFIRM_CHUNKS=3 \
+  --dry-run
+```
+
+논문 근거용 sweep 예:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --param SENTENCE_CONFIRM_CHUNKS=3 \
+  --paper-evidence
+```
+
+판단:
+
+- 파라미터 값 자체는 외부 논문에서 직접 가져오지 않는다.
+- 외부 문헌은 partial/final 분리, incremental stability, SBD 후보 생성, evaluation framing의 근거로만 쓰고, checked-in 기본값은 앱 로그 replay에서 반복적으로 확인된 수치만 반영한다.
+- 현재 `SENTENCE_CONFIRM_CHUNKS=3` sweep은 recall과 final F1 하락이 확인되어 기본값 승격 근거가 부족하다.
+
+### 2026-06-20 앱 로그 케이스 수집 재확인과 파라미터 범위 gate
+
+논문 근거를 보강하기 위한 파라미터 변경은 `dictation_tuning_manifest()`에 등록된 값으로만 제한하고, 각 값은 manifest의 `min_value`/`max_value` 범위 안에서만 sweep할 수 있게 했다. 범위 밖 값은 `run_sbd_parameter_sweep.py`가 benchmark 실행 전에 실패시킨다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.unit.test_dictation_ai_sbd_parameter_sweep \
+  tests.unit.test_dictation_ai_log_case_draft_collector
+
+Ran 12 tests in 0.003s
+OK
+
+./.venv/bin/python -m py_compile \
+  tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  tests/eval/dictation_ai/collect_sbd_case_drafts_from_logs.py \
+  src/app/dictation_pipeline_settings.py
+```
+
+범위 gate 확인:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --param SENTENCE_CONFIRM_CHUNKS=3 \
+  --dry-run
+
+case_count=164 expected_final_case_count=160 paper_evidence=False
+
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --param SENTENCE_CONFIRM_CHUNKS=99 \
+  --dry-run
+
+ValueError: SENTENCE_CONFIRM_CHUNKS must be <= 6, got '99'
+```
+
+앱 로그 기반 케이스 수집 재실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_case_workflow.py --execute
+
+draft_count=1000
+draft_language_counts: en=200, ko=400, zh=400
+draft_tags: missing-final=999, stage-queue=998, cjk-internal-gap=998, duplicate-final=652
+review_queue_count=1000
+review_queue_suggested_expected_final_count=864
+review_work_item_count=864
+ready_to_promote_from_work_items=0
+reviewed_case_count=164
+reviewed_expected_final_case_count=160
+remaining_finalization_to_target=840
+```
+
+해석:
+
+- 1000개 draft는 앱 로그에서 수집한 후보 풀이다. `expected_final`을 확인하고 draft marker를 제거하기 전에는 논문 성능 근거가 아니다.
+- 현재 논문 근거용 finalization case는 160건이며, 목표 1000건까지 840건이 남았다.
+- 파라미터 sweep은 현재 reviewed case에서 탐색용으로 실행할 수 있지만, 논문 표에는 `--paper-evidence` 조건을 통과한 실행만 포함한다.
+
+### 2026-06-20 로그 모니터링 재실행과 다음 검토 배치 표시
+
+반복 실행 중인 앱 로그를 다시 읽어 case workflow를 1회 실행했다.
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/monitor_sbd_case_workflow.py \
+  --iterations 1 \
+  --interval-seconds 0 \
+  --run-id codex-goal-20260620
+```
+
+관측값:
+
+```text
+draft_count=1000
+draft_language_counts: en=200, ko=400, zh=400
+draft_tags: missing-final=999, stage-queue=998, cjk-internal-gap=998,
+            duplicate-final=639, no-end-marker=257
+review_queue_count=1000
+suggested_expected_final_count=866
+review_work_item_count=866
+reviewed_case_count=164
+reviewed_expected_final_case_count=160
+remaining_finalization_to_target=840
+ready_to_promote_from_work_items=0
+```
+
+`report_sbd_review_progress.py`에 `pending_review_work_item_count`와 `next_review_work_item_files`를 추가했다. 이 값은 다음에 사람이 확인할 work item part 파일, line 범위, 언어 분포, 우선순위 태그 분포를 보여준다. 성능 지표가 아니라 1000건 reviewed case 목표를 채우기 위한 검토 운영 지표다.
+
+같은 리포트에 `--markdown-output`을 추가해 사람이 바로 읽는 진행표도 생성한다. 최신 생성 파일은 `.tmp/eval/dictation-ai-sbd/review-progress-summary.md`이며, target 진행률, 언어별 부족분, 추천 검토 파일 순서를 함께 담는다.
+
+최신 리포트 기준 다음 검토 파일 3개:
+
+```text
+.tmp/eval/dictation-ai-sbd/review-work-items.part-0001.jsonl
+  pending_count=250 lines=1-250 languages=en:52, ko:104, zh:94
+  priority=missing-final:249, duplicate-final:1
+
+.tmp/eval/dictation-ai-sbd/review-work-items.part-0002.jsonl
+  pending_count=250 lines=1-250 languages=en:63, ko:125, zh:62
+  priority=missing-final:250
+
+.tmp/eval/dictation-ai-sbd/review-work-items.part-0003.jsonl
+  pending_count=250 lines=1-250 languages=en:67, ko:111, zh:72
+  priority=missing-final:250
+```
+
+현재 review queue 언어 분포를 1000건 목표에 비례 배분한 정보성 목표와 부족분:
+
+```text
+suggested_finalization_language_targets: en=200, ko=400, zh=400
+finalization_progress_language_counts: en=55, ko=76, zh=29
+remaining_finalization_by_language: en=145, ko=324, zh=371
+```
+
+언어 부족분으로 가중 정렬한 work item 추천 순서:
+
+```text
+.tmp/eval/dictation-ai-sbd/review-work-items.part-0001.jsonl
+  score=76110 shortage_languages=en:52, ko:104, zh:94
+
+.tmp/eval/dictation-ai-sbd/review-work-items.part-0002.jsonl
+  score=72637 shortage_languages=en:63, ko:125, zh:62
+
+.tmp/eval/dictation-ai-sbd/review-work-items.part-0003.jsonl
+  score=72391 shortage_languages=en:67, ko:111, zh:72
+
+.tmp/eval/dictation-ai-sbd/review-work-items.part-0004.jsonl
+  score=42801 shortage_languages=ko:5, zh:111
+```
+
+판단:
+
+- 수집 후보는 계속 1000건을 유지하고 있으며, 새 로그 반영으로 work item 후보가 864건에서 866건으로 늘었다.
+- 논문 근거로 쓰기 위해서는 `review_status=reviewed|accepted`와 확인한 `expected_final`이 필요하다.
+- 언어별 목표/부족분은 현재 queue 분포를 기준으로 한 검토 운영 힌트이며, 강제 gate나 성능 지표가 아니다.
+- 추천 순서는 언어 부족분을 빨리 줄이기 위한 작업 순서 힌트이며, 최종 benchmark 분포나 성능 개선을 보장하지 않는다.
+- 다음 반복의 병목은 로직 튜닝이 아니라 work item 검토/승격이다. 승격 전 CUDA/AI 벤치나 파라미터 sweep은 탐색 자료로만 본다.
+
+### 2026-06-20 로그 수집/검토 진행률 history 필드 보강
+
+논문의 근거를 보충하려면 파라미터 변경 규칙뿐 아니라, 앱 로그에서 수집한 실패 후보가 어떻게 reviewed benchmark case로 승격되는지 반복 기록되어야 한다. 이에 `monitor_sbd_case_workflow.py`가 `report_sbd_review_progress.py`의 언어별 목표/부족분과 추천 검토 파일을 history에 함께 남기도록 보강했다.
+
+검증 실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/monitor_sbd_case_workflow.py \
+  --iterations 1 \
+  --interval-seconds 0 \
+  --run-id codex-rule-evidence-20260620
+
+./.venv/bin/python tests/eval/dictation_ai/report_sbd_monitor_history.py \
+  .tmp/eval/dictation-ai-sbd/monitor-history.jsonl \
+  --summary-output .tmp/eval/dictation-ai-sbd/monitor-history-summary.json
+```
+
+최신 관측값:
+
+```text
+draft_count=1000
+draft_language_counts: en=200, ko=400, zh=400
+draft_tags: missing-final=1000, stage-queue=1000, cjk-internal-gap=1000,
+            duplicate-final=490, no-end-marker=261
+review_queue_count=1000
+suggested_expected_final_count=787
+diverse_review_queue_count=168
+diverse_suggested_expected_final_count=128
+review_work_item_count=787
+pending_review_work_item_count=787
+ready_to_promote_from_work_items=0
+reviewed_case_count=164
+reviewed_expected_final_case_count=160
+remaining_finalization_to_target=840
+```
+
+언어별 finalization 목표와 부족분:
+
+```text
+suggested_finalization_language_targets: en=200, ko=400, zh=400
+finalization_progress_language_counts: en=55, ko=76, zh=29
+remaining_finalization_by_language: en=145, ko=324, zh=371
+```
+
+언어 부족분 기준 추천 검토 파일:
+
+```text
+.tmp/eval/dictation-ai-sbd/review-work-items.part-0003.jsonl
+  score=76719 languages=en:57, ko:67, zh:126
+
+.tmp/eval/dictation-ai-sbd/review-work-items.part-0002.jsonl
+  score=72863 languages=en:62, ko:125, zh:63
+
+.tmp/eval/dictation-ai-sbd/review-work-items.part-0001.jsonl
+  score=72637 languages=en:63, ko:125, zh:62
+
+.tmp/eval/dictation-ai-sbd/review-work-items.part-0004.jsonl
+  score=13727 languages=zh:37
+```
+
+판단:
+
+- 앱 로그 기반 draft 후보 풀은 1000건을 유지하고 있지만, 논문 성능 근거로 사용할 수 있는 reviewed `expected_final` case는 아직 160건이다.
+- `suggested_expected_final`이 있는 work item 787건은 검토 효율을 높이는 작업 후보일 뿐, 사람이 확인하기 전에는 benchmark case가 아니다.
+- 파라미터 sweep은 `dictation_tuning_manifest()`의 범위 안에서만 허용하고, 논문 근거용 sweep은 reviewed finalization case 1000건을 만족한 뒤 `--paper-evidence`로만 실행한다.
+- 새 history 필드는 수집/검토 운영 근거이며, 성능 비교 수치는 아니다. 성능 비교는 승격 완료 JSONL에 대해 실제 `sat + cuda + float16` benchmark 또는 parameter sweep으로 생성한다.
+
+### 2026-06-20 전체 review queue 워크시트화 보강
+
+기존 워크플로는 `suggested_expected_final`이 있는 항목만 work item으로 만들었기 때문에, 앱 로그 draft 1000건 중 일부가 검토 템플릿에도 올라오지 않았다. 논문 근거용 케이스 1000건을 모으려면 final 힌트가 있는 쉬운 항목만 고르는 편향을 피해야 하므로, 기본 `prepare-review-work-items` 단계에 `--include-without-suggestions`를 추가했다. final 힌트가 없는 항목은 `expected_final=[]`, `review_work_source=empty_template`로 남기며, 사람이 확인하기 전에는 여전히 승격되지 않는다.
+
+검증 실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_case_workflow.py --execute
+
+./.venv/bin/python tests/eval/dictation_ai/monitor_sbd_case_workflow.py \
+  --iterations 1 \
+  --interval-seconds 0 \
+  --run-id codex-workitem-source-breakdown-20260620
+
+./.venv/bin/python tests/eval/dictation_ai/report_sbd_monitor_history.py \
+  .tmp/eval/dictation-ai-sbd/monitor-history.jsonl \
+  --summary-output .tmp/eval/dictation-ai-sbd/monitor-history-summary.json
+```
+
+최신 관측값:
+
+```text
+draft_count=1000
+draft_language_counts: en=200, ko=400, zh=400
+draft_tags: missing-final=1000, stage-queue=1000, cjk-internal-gap=1000,
+            duplicate-final=520, no-end-marker=274
+review_queue_count=1000
+suggested_expected_final_count=804
+review_work_item_count=1000
+work_item_source_counts: suggested_expected_final=804, empty_template=196
+pending_review_work_item_count=1000
+ready_to_promote_from_work_items=0
+reviewed_case_count=164
+reviewed_expected_final_case_count=160
+remaining_finalization_to_target=840
+```
+
+언어별 finalization 목표와 부족분:
+
+```text
+suggested_finalization_language_targets: en=200, ko=400, zh=400
+finalization_progress_language_counts: en=55, ko=76, zh=29
+remaining_finalization_by_language: en=145, ko=324, zh=371
+```
+
+언어 부족분 기준 추천 검토 파일:
+
+```text
+.tmp/eval/dictation-ai-sbd/review-work-items.part-0004.jsonl
+  score=86875 languages=ko:125, zh:125
+
+.tmp/eval/dictation-ai-sbd/review-work-items.part-0003.jsonl
+  score=80216 languages=en:33, ko:108, zh:109
+
+.tmp/eval/dictation-ai-sbd/review-work-items.part-0002.jsonl
+  score=70044 languages=en:83, ko:84, zh:83
+
+.tmp/eval/dictation-ai-sbd/review-work-items.part-0001.jsonl
+  score=69865 languages=en:84, ko:83, zh:83
+```
+
+판단:
+
+- 이제 앱 로그 draft 1000건 전체가 review work item으로 생성된다.
+- 804건은 실제 final 로그 힌트가 있는 항목이고, 196건은 사람이 원 로그를 보고 `expected_final`을 직접 채워야 하는 빈 템플릿이다.
+- 자동 승격 가능한 항목은 여전히 0건이다. 이는 사람이 확인하지 않은 `expected_final`을 논문 성능 근거로 쓰지 않기 위한 정상 동작이다.
+- reviewed finalization case는 아직 160건이므로 논문 근거용 `--paper-evidence` sweep 조건은 충족하지 못했다.
+
+### 2026-06-20 final hint context 분리
+
+전체 review queue 워크시트화 이후에도 final 힌트가 없는 빈 템플릿이 196건 남았다. 원인은 raw replay에 필요한 STT window context와, 사람이 기대 final을 확인할 때 필요한 실제 확정 로그 검색 범위를 같은 값으로 묶어 둔 데 있었다. 논문 근거용 benchmark 입력은 실패 구간 주변의 짧은 연속 window여야 하지만, 사람이 검토할 때는 조금 뒤에 확정된 final 로그가 참고값으로 필요할 수 있다.
+
+이에 수집기의 raw replay context는 기본 4 chunk로 유지하고, final 힌트 검색만 `--final-hint-context 12`로 분리했다. 이 값은 `observed_final_texts`와 `suggested_expected_final` 힌트에만 영향을 주며, benchmark 입력이나 `expected_final`을 자동으로 늘리지 않는다.
+
+검증 실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_case_workflow.py --execute
+
+./.venv/bin/python tests/eval/dictation_ai/monitor_sbd_case_workflow.py \
+  --iterations 1 \
+  --interval-seconds 0 \
+  --run-id codex-final-hint-context-20260620
+
+./.venv/bin/python tests/eval/dictation_ai/report_sbd_monitor_history.py \
+  .tmp/eval/dictation-ai-sbd/monitor-history.jsonl \
+  --summary-output .tmp/eval/dictation-ai-sbd/monitor-history-summary.json
+```
+
+최신 관측값:
+
+```text
+draft_count=1000
+draft_language_counts: en=200, ko=400, zh=400
+draft_tags: missing-final=1000, stage-queue=1000, cjk-internal-gap=1000,
+            duplicate-final=489, no-end-marker=258
+review_queue_count=1000
+suggested_expected_final_count=939
+diverse_review_queue_count=168
+diverse_suggested_expected_final_count=157
+review_work_item_count=1000
+work_item_source_counts: suggested_expected_final=939, empty_template=61
+pending_review_work_item_count=1000
+ready_to_promote_from_work_items=0
+reviewed_case_count=164
+reviewed_expected_final_case_count=160
+remaining_finalization_to_target=840
+```
+
+판단:
+
+- final 힌트 coverage는 804/1000에서 939/1000으로 증가했다.
+- 빈 템플릿은 196건에서 61건으로 줄었지만, 이 61건도 review work item으로 유지된다.
+- 자동 승격 가능 항목은 0건으로 유지된다. 사람이 확인하지 않은 힌트는 여전히 논문 성능 근거로 사용하지 않는다.
+- reviewed finalization case는 160건으로 unchanged이며, 1000건 목표까지 840건이 남았다.
+
+### 2026-06-20 review work source index 보강
+
+final 힌트 coverage가 높아져도 사람이 실제로 검토해야 하는 work item은 여전히 1000건이다. 기존 Markdown index는 언어와 source log 분포만 보여줘, final 힌트가 붙은 항목과 빈 템플릿 항목이 어느 배치에 있는지 바로 알기 어려웠다. 이에 `prepare_sbd_review_work_items.py`의 Markdown 항목과 index에 `review_work_source` 분포를 추가했다.
+이후 각 Markdown 항목에 `Observed Status Signals` 섹션도 추가했다. 이 섹션은 draft 수집 당시 원 로그에서 관측된 `중복 문장 무시`, `stage 교체 보류`, `stage_queue_*`, `raw_without_final` 같은 상태 신호를 보여준다. 검토자가 왜 해당 chunk가 수집됐는지 확인하고 `expected_final`을 손볼 수 있게 하기 위한 운영 정보이며, 자동 승격 기준은 아니다.
+
+검증 실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_case_workflow.py --execute
+
+./.venv/bin/python tests/eval/dictation_ai/monitor_sbd_case_workflow.py \
+  --iterations 1 \
+  --interval-seconds 0 \
+  --run-id codex-review-source-index-20260620
+
+./.venv/bin/python tests/eval/dictation_ai/report_sbd_monitor_history.py \
+  .tmp/eval/dictation-ai-sbd/monitor-history.jsonl \
+  --summary-output .tmp/eval/dictation-ai-sbd/monitor-history-summary.json
+```
+
+최신 관측값:
+
+```text
+draft_count=1000
+draft_language_counts: en=200, ko=400, zh=400
+draft_tags: missing-final=1000, stage-queue=1000, cjk-internal-gap=1000,
+            duplicate-final=589, no-end-marker=275
+review_queue_count=1000
+suggested_expected_final_count=964
+diverse_review_queue_count=168
+diverse_suggested_expected_final_count=162
+review_work_item_count=1000
+work_item_source_counts: suggested_expected_final=964, empty_template=36
+pending_review_work_item_count=1000
+ready_to_promote_from_work_items=0
+reviewed_case_count=164
+reviewed_expected_final_case_count=160
+remaining_finalization_to_target=840
+```
+
+Markdown index 예:
+
+```text
+review_work_source_counts: {'empty_template': 36, 'suggested_expected_final': 964}
+batch review_work_sources: {'suggested_expected_final': 25}
+Observed Status Signals
+```
+
+판단:
+
+- 앱 로그 회전 이후 final 힌트 coverage는 964/1000까지 올라갔다.
+- 빈 템플릿은 36건만 남았으며, Markdown index에서 어느 배치에 포함됐는지 확인할 수 있다.
+- reviewed finalization case 수는 160건으로 변하지 않았다. 이번 변경은 성능 수치 개선이 아니라 사람 검토 병목을 줄이는 수집/검토 운영 개선이다.
+- 자동 승격 가능 항목은 0건이다. 사람이 확인하지 않은 항목은 여전히 논문 성능 근거로 쓰지 않는다.
+
+### 2026-06-20 review progress 파일별 source 분포 보강
+
+Markdown index에 source 분포가 생겼지만, 실제 검토 순서는 `report_sbd_review_progress.py`의 `recommended_review_work_item_files`를 보고 정하게 된다. 따라서 진행률 리포트의 `next_review_work_item_files`와 `recommended_review_work_item_files`에도 파일별 `review_work_source_counts`를 추가했다. 이 값은 `suggested_expected_final` 힌트가 있는 항목과 `empty_template` 항목이 어느 part 파일에 몰려 있는지 확인하기 위한 검토 운영 메타데이터다.
+
+검증 실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_case_workflow.py --execute
+
+./.venv/bin/python tests/eval/dictation_ai/monitor_sbd_case_workflow.py \
+  --iterations 1 \
+  --interval-seconds 0 \
+  --run-id codex-review-file-source-counts-20260620
+```
+
+최신 진행률:
+
+```text
+target_cases=1000
+reviewed_case_count=164
+reviewed_expected_final_case_count=160
+remaining_finalization_to_target=840
+review_work_item_count=1000
+pending_review_work_item_count=1000
+ready_to_promote_from_work_items=0
+work_item_sources: empty_template=36, suggested_expected_final=964
+```
+
+추천 검토 파일별 source 분포:
+
+```text
+.tmp/eval/dictation-ai-sbd/review-work-items.part-0004.jsonl
+  score=86875 languages=ko:125, zh:125
+  work_item_sources=empty_template:34, suggested_expected_final:216
+
+.tmp/eval/dictation-ai-sbd/review-work-items.part-0003.jsonl
+  score=80216 languages=en:33, ko:108, zh:109
+  work_item_sources=empty_template:2, suggested_expected_final:248
+
+.tmp/eval/dictation-ai-sbd/review-work-items.part-0002.jsonl
+  score=70044 languages=en:83, ko:84, zh:83
+  work_item_sources=suggested_expected_final:250
+
+.tmp/eval/dictation-ai-sbd/review-work-items.part-0001.jsonl
+  score=69865 languages=en:84, ko:83, zh:83
+  work_item_sources=suggested_expected_final:250
+```
+
+판단:
+
+- 검토 우선순위가 높은 `part-0004`에 빈 템플릿 34건이 집중되어 있다.
+- 논문 근거용 케이스 1000건 목표를 채우려면 `part-0004`, `part-0003`부터 사람이 원 로그를 확인해 `expected_final`을 확정하는 것이 효율적이다.
+- 파일별 source 분포는 검토 운영을 돕는 값이며, 자동 승격이나 성능 벤치 근거가 아니다. 성능 수치는 reviewed JSONL로 승격한 뒤 실제 `sat + cuda + float16` 벤치에서만 산출한다.
+
+### 2026-06-20 review progress와 Markdown batch 연결
+
+진행률 리포트는 추천 검토 단위를 JSONL part 파일로 보여주지만, 사람이 실제로 읽기 쉬운 자료는 `prepare_sbd_review_work_items.py`가 만든 Markdown batch다. 이 둘이 분리되어 있으면 추천 1순위가 어떤 Markdown 파일 범위인지 다시 계산해야 하므로 검토 병목이 남는다. 이에 `report_sbd_review_progress.py`에 `--review-work-markdown-dir`와 `--review-work-markdown-batch-size` 옵션을 추가하고, `next_review_work_item_files`와 `recommended_review_work_item_files`에 `markdown_files`를 함께 기록하게 했다.
+
+검증 실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/monitor_sbd_case_workflow.py \
+  --iterations 1 \
+  --interval-seconds 0 \
+  --run-id codex-review-markdown-link-20260620
+
+./.venv/bin/python tests/eval/dictation_ai/report_sbd_monitor_history.py \
+  .tmp/eval/dictation-ai-sbd/monitor-history.jsonl \
+  --summary-output .tmp/eval/dictation-ai-sbd/monitor-history-summary.json
+```
+
+최신 관측값:
+
+```text
+draft_count=1000
+draft_language_counts: en=200, ko=400, zh=400
+review_queue_count=1000
+suggested_expected_final_count=957
+diverse_review_queue_count=169
+diverse_suggested_expected_final_count=162
+review_work_item_count=1000
+work_item_sources: empty_template=43, suggested_expected_final=957
+reviewed_expected_final_case_count=160
+remaining_finalization_to_target=840
+ready_to_promote_from_work_items=0
+```
+
+추천 1순위는 `review-work-items.part-0004.jsonl`이고, 해당 part는 다음 Markdown batch와 연결된다.
+
+```text
+.tmp/eval/dictation-ai-sbd/review-work-item-batches/sbd-review-work-items-0031.md
+...
+.tmp/eval/dictation-ai-sbd/review-work-item-batches/sbd-review-work-items-0040.md
+```
+
+판단:
+
+- 추천 검토 단위와 사람이 읽는 Markdown batch가 연결되어, `part-0004`의 250건을 검토할 때 열어야 할 파일 범위를 리포트에서 바로 확인할 수 있다.
+- 이번 변경은 케이스 수집/검토 운영 개선이며, 성능 개선이나 논문 수치 근거가 아니다.
+- `expected_final`을 확인하지 않았으므로 자동 승격 가능 항목은 계속 0건이다.
+
+### 2026-06-20 지속 실행 로그 관찰과 검토 후보 갱신
+
+앱이 계속 실행되며 `.tmp/logs/avc-whisper.log`에 새 STT 로그가 누적되는 상태를 확인했다. `monitor_sbd_case_workflow.py`를 1분 간격 3회 실행해 draft/review queue/work item이 최신 로그를 반영하는지 확인했다. 이 실행은 비-CUDA 수집/검토 준비 단계이며, 성능 벤치 근거가 아니다.
+
+검증 실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/monitor_sbd_case_workflow.py \
+  --iterations 3 \
+  --interval-seconds 60 \
+  --run-id codex-continuous-log-observe-20260620
+
+./.venv/bin/python tests/eval/dictation_ai/report_sbd_monitor_history.py \
+  .tmp/eval/dictation-ai-sbd/monitor-history.jsonl \
+  --summary-output .tmp/eval/dictation-ai-sbd/monitor-history-summary.json
+```
+
+최신 관측값:
+
+```text
+draft_count=1000
+draft_language_counts: en=200, ko=400, zh=400
+review_queue_count=1000
+suggested_expected_final_count=947
+diverse_review_queue_count=169
+diverse_suggested_expected_final_count=161
+review_work_item_count=1000
+work_item_sources: empty_template=53, suggested_expected_final=947
+reviewed_expected_final_case_count=160
+remaining_finalization_to_target=840
+ready_to_promote_from_work_items=0
+```
+
+활성 로그 유입 변화:
+
+```text
+iteration 1: .tmp/logs/avc-whisper.log=282, avc-whisper.log.18=181
+iteration 2: .tmp/logs/avc-whisper.log=345, avc-whisper.log.18=118
+iteration 3: .tmp/logs/avc-whisper.log=402, avc-whisper.log.18=61
+```
+
+추천 검토 파일:
+
+```text
+.tmp/eval/dictation-ai-sbd/review-work-items.part-0004.jsonl
+  markdown_files: sbd-review-work-items-0031.md ... sbd-review-work-items-0040.md
+  review_work_sources: empty_template=44, suggested_expected_final=206
+
+.tmp/eval/dictation-ai-sbd/review-work-items.part-0003.jsonl
+  markdown_files: sbd-review-work-items-0021.md ... sbd-review-work-items-0030.md
+  review_work_sources: suggested_expected_final=250
+```
+
+판단:
+
+- 활성 로그 비중이 증가했으므로 앱 로그 기반 수집은 계속 동작하고 있다.
+- 1000건 draft와 947건 final 힌트 work item은 유지되지만, 확인한 `expected_final` 케이스는 160건에서 변하지 않았다.
+- 논문 근거용 1000건 목표를 채우려면 Markdown batch에서 원문 문맥과 observed final reference를 확인한 뒤 JSONL work item의 `review_status`와 `expected_final`을 사람이 확정해야 한다.
+- 모니터 history는 관찰/수집 운영 자료이며, 논문 성능 수치는 승격된 reviewed JSONL을 실제 `sat + cuda + float16` 벤치로 실행한 결과만 사용한다.
+
+### 2026-06-20 정식 케이스 등록 기준 정리
+
+케이스 후보 1000건을 모두 정식 benchmark case로 보는 것은 위험하다. 논문 목표는 raw STT 정확도 평가가 아니라, 불안정한 STT window 출력에서 final-only 번역 입력을 안정적으로 만드는 lifecycle 평가다. 따라서 정식 finalization benchmark case는 다음 조건을 만족해야 한다.
+
+등록 기준:
+
+- 앱 로그의 연속 STT window에서 확정 누락, 중복 확정, 문장 순서 파괴, premature fragment final, staged/pending 잔류, 최근 final echo처럼 final-only 번역 입력을 오염시키는 lifecycle 실패가 관측되어야 한다.
+- source chunk, observed final reference, status signal을 사람이 확인했을 때 하나 이상의 `expected_final`을 명확히 정할 수 있어야 한다.
+- `review_status=reviewed` 또는 `accepted`이고 `expected_final`이 비어 있지 않아야 한다.
+- 같은 로그 구간의 거의 동일한 반복 후보는 대표 케이스만 남긴다.
+
+제외 기준:
+
+- raw STT 자체가 입력 음성과 무관하거나 해석 불가능해 lifecycle 판단 근거가 약한 경우.
+- 연속 window 문맥이 부족해 pending/staged/final 판단 흐름을 재현할 수 없는 경우.
+- 사람이 봐도 정식 `expected_final`을 하나로 결정하기 어려운 경우.
+- 이미 같은 실패 유형과 같은 source chunk 구간을 대표하는 케이스가 있는 경우.
+
+도구 반영:
+
+- `promote_sbd_reviewed_cases.py`는 계속 `reviewed|accepted + expected_final`만 승격한다.
+- `excluded` 또는 `rejected` 상태는 승격하지 않으며, 리포트의 `excluded_count`와 `skipped_status_counts`로만 집계한다.
+- 이 집계는 검토 운영 지표이며 논문 성능 수치가 아니다.
+
+### 2026-06-20 그룹 기반 후보 평가와 자동 정식 케이스 분리
+
+후보 1000건을 개별 라벨링하면 검토 속도가 너무 느리다. 따라서 work item을 같은 근거를 가진 그룹으로 묶고, 그룹과 개별 항목이 모두 기준을 넘을 때 자동으로 정식 reviewed case로 분리하는 구조를 추가했다.
+
+그룹 기준:
+
+```text
+language
+review_priority_tag
+review_work_source
+tag_signature
+source_log
+```
+
+자동 등록 기본 임계치:
+
+```text
+min_group_size=3
+min_item_score=5
+min_group_ratio=0.9
+min_average_score=5.0
+```
+
+항목 evidence score:
+
+```text
+expected_final 있음: +2
+observed final reference/text 있음: +2
+source chunk 3개 이상: +1
+observed status signal 있음: +1
+review_work_source=suggested_expected_final: +1
+```
+
+검증 실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_case_workflow.py --group-review-work-items
+```
+
+동일 동작의 세부 명령:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/group_sbd_review_work_items.py \
+  '.tmp/eval/dictation-ai-sbd/review-work-items.part-*.jsonl' \
+  --output .tmp/eval/dictation-ai-sbd/review-work-item-groups.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/review-work-item-groups.md \
+  --auto-accept-output .tmp/eval/dictation-ai-sbd/auto-accepted-review-work-items.jsonl \
+  --promoted-group-dir tests/eval/dictation_ai/sbd_cases/auto-groups \
+  --existing tests/eval/dictation_ai/sbd_text_cases.sample.jsonl tests/eval/dictation_ai/sbd_cases \
+  --summary-output .tmp/eval/dictation-ai-sbd/review-work-item-groups-summary.json
+
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_case_files.py \
+  tests/eval/dictation_ai/sbd_text_cases.sample.jsonl \
+  tests/eval/dictation_ai/sbd_cases \
+  --min-expected-final-cases 1000 \
+  --max-drafts 0 \
+  --summary-output .tmp/eval/dictation-ai-sbd/reviewed-with-auto-groups-summary.json
+```
+
+결과:
+
+```text
+input_count=1000
+group_count=27
+auto_accept_group_count=18
+auto_accepted_item_count=944
+promoted_group_file_count=18
+
+validated_case_count=1108
+validated_expected_final_case_count=1104
+validated_draft_count=0
+language_counts: en=427, ko=461, zh=220
+```
+
+판단:
+
+- 단일 reviewed 파일에 누적하는 대신 `tests/eval/dictation_ai/sbd_cases/auto-groups/`에 그룹별 JSONL을 생성했다.
+- validator와 benchmark loader는 디렉터리 하위 JSONL을 재귀적으로 읽도록 변경했다.
+- 자동 등록은 `suggested_expected_final`과 observed final reference가 있는 항목으로 제한된다. `empty_template` 51건과 그룹/항목 기준 미달 후보는 자동 등록되지 않았다.
+- 이 데이터셋은 1000건 이상의 finalization benchmark 입력을 제공하지만, 성능 수치 근거는 별도 `sat + cuda + float16` benchmark 실행 결과로만 기록한다.
+
+### 2026-06-20 sample 파일 역할 정리
+
+`tests/eval/dictation_ai/sbd_text_cases.sample.jsonl`에 실제 로그 기반 reviewed case가 164건까지 누적되어 있었다. 그룹별 정식 케이스 구조가 생긴 뒤에는 이 파일이 정식 케이스 저장소처럼 보이는 문제가 있으므로 역할을 분리했다.
+
+정리 기준:
+
+- `sbd_text_cases.sample.jsonl`은 최소 seed 샘플만 유지한다.
+- 실제 로그 기반 reviewed case는 `tests/eval/dictation_ai/sbd_cases/` 아래에 둔다.
+- 기존 수동 reviewed 로그 케이스는 `tests/eval/dictation_ai/sbd_cases/manual-reviewed/`에 언어별 JSONL로 분리한다.
+- 자동 그룹 등록 케이스는 기존처럼 `tests/eval/dictation_ai/sbd_cases/auto-groups/`에 둔다.
+- benchmark와 validator는 sample 파일과 `sbd_cases/` 디렉터리를 함께 읽으므로 전체 케이스 수는 유지한다.
+
+분리 결과:
+
+```text
+sbd_text_cases.sample.jsonl: 3
+sbd_cases/manual-reviewed/reviewed-log-en.jsonl: 55
+sbd_cases/manual-reviewed/reviewed-log-ko.jsonl: 78
+sbd_cases/manual-reviewed/reviewed-log-zh.jsonl: 28
+```
+
+검증 결과:
+
+```text
+case_count=1108
+expected_final_case_count=1104
+draft_count=0
+language_counts: en=427, ko=461, zh=220
+```
+
+판단:
+
+- sample 파일은 더 이상 로그 기반 케이스 누적 대상이 아니다.
+- 정식 benchmark case 저장소는 `sbd_cases/`이며, 수동 reviewed와 자동 그룹 reviewed를 하위 디렉터리로 구분한다.
+- 이번 정리는 데이터 배치 정리이며 성능 수치 근거가 아니다. 성능 근거는 동일 케이스 집합을 실제 `sat + cuda + float16`으로 실행한 benchmark 결과로만 기록한다.
+
+### 2026-06-20 수집/검토/승격 도구 폐기
+
+로그 draft 수집, review queue/work item 생성, 그룹 자동 등록, 승격, 모니터링 workflow 도구는 유지하지 않기로 했다. 논문 근거의 중심은 도구 운영 절차가 아니라 확정한 reviewed JSONL 케이스와 실제 `sat + cuda + float16` benchmark 결과다.
+
+폐기한 도구 범위:
+
+```text
+collect_sbd_case_drafts_from_logs.py
+build_sbd_review_queue.py
+prepare_sbd_review_work_items.py
+validate_sbd_review_work_items.py
+promote_sbd_reviewed_cases.py
+group_sbd_review_work_items.py
+run_sbd_case_workflow.py
+monitor_sbd_case_workflow.py
+report_sbd_review_progress.py
+report_sbd_monitor_history.py
+```
+
+현재 유지하는 최소 경로:
+
+- 정식 로그 기반 케이스는 `tests/eval/dictation_ai/sbd_cases/` 아래의 JSONL 파일로 직접 관리한다.
+- `tests/eval/dictation_ai/sbd_benchmark.py`는 `sbd_cases/**/*.jsonl`을 로딩한다.
+- `tests/eval/dictation_ai/validate_sbd_case_files.py`는 케이스 수, draft marker, 중복 id를 확인하는 검증 도구로 유지한다.
+
+판단:
+
+- 자동화 도구로 후보를 승격하는 구조는 논문 목표를 흐릴 수 있으므로 폐기한다.
+- 기존 `sbd_cases/auto-groups/`의 JSONL은 이전 그룹 평가 산출물로 유지하되, 이후 새 케이스는 확인한 reviewed JSONL로 직접 추가한다.
+- 성능 근거는 도구 수집량이 아니라 reviewed case 집합을 실제 AI/CUDA 벤치로 실행한 결과로만 기록한다.
+
+### 2026-06-20 draft 후보 5건 수동 승격
+
+폐기한 자동 workflow 산출물 중 정식 `sbd_cases/`에 아직 없는 promoted group 후보를 다시 확인했다. 후보 파일 4개를 그대로 추가하면 기존 케이스와 id가 중복되므로 파일 단위 승격은 하지 않았다. 기존 정식 케이스 id와 비교해 신규 id만 추리면 영어 2건, 중국어 2건, 한국어 1건이 남았다.
+
+승격 기준:
+
+- `draft_expected_final_required` marker가 없어야 한다.
+- 기존 정식 케이스와 id가 중복되면 제외한다.
+- 자동 `suggested_expected_final`을 그대로 쓰지 않고, 연속 STT window에서 반복 관측되는 문장 단위로 `expected_final`을 다시 정리한다.
+- 절단 fragment나 다음 문맥의 과도한 선행/후행 문장은 제거한다.
+
+추가 파일:
+
+```text
+tests/eval/dictation_ai/sbd_cases/manual-reviewed/reviewed-log-promoted-20260620.jsonl
+```
+
+검증 결과:
+
+```text
+case_count=1113
+expected_final_case_count=1109
+draft_count=0
+language_counts: en=429, ko=462, zh=222
+manual_promoted_count=5
+```
+
+판단:
+
+- 이번 승격은 성능 개선이 아니라 benchmark case corpus 보강이다.
+- 성능 수치 근거로 사용하려면 동일 case set을 실제 `sat + cuda + float16` benchmark로 다시 실행해야 한다.
+
+### 2026-06-20 sample 파일 폐기
+
+`tests/eval/dictation_ai/sbd_text_cases.sample.jsonl`에 남아 있던 lifecycle seed 3건을 정식 케이스 디렉터리로 이관했다. 이 파일은 더 이상 별도 seed 역할을 유지하지 않고 폐기한다.
+
+이관 파일:
+
+```text
+tests/eval/dictation_ai/sbd_cases/manual-reviewed/reviewed-lifecycle-seed.jsonl
+```
+
+정리 기준:
+
+- benchmark 기본 입력은 `tests/eval/dictation_ai/sbd_cases/` 하나로 한다.
+- parameter sweep 기본 입력도 `tests/eval/dictation_ai/sbd_cases/` 하나로 한다.
+- sample 파일을 함께 넘기던 검증/벤치 명령 예시는 폐기한다.
+
+검증 기준은 sample 폐기 전후 모두 동일하게 `sbd_cases/**/*.jsonl` 전체 로딩과 중복 id/draft marker 확인이다.

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import sys
 import time
@@ -18,13 +19,16 @@ if str(REPO_ROOT) not in sys.path:
 from src.app.sentence_boundary import create_sentence_boundary_detector, normalized_text
 from src.app.dictation_pipeline_settings import (
     FINAL_SENTENCE_MATCH_MIN_SIMILARITY,
-    MAX_STAGED_SENTENCE_QUEUE,
-    NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS,
     SBD_BENCHMARK_BACKEND,
     SBD_BENCHMARK_COMPUTE_TYPE,
     SBD_BENCHMARK_DEVICE,
     SBD_BENCHMARK_MODEL,
     dictation_pipeline_policy,
+    dictation_tuning_manifest,
+    dictation_tuning_protocol,
+    lifecycle_tuning_policy,
+    max_staged_sentence_queue,
+    no_text_stale_stage_suppress_chunks,
 )
 from src.app.dictation_transcript_logic import (
     _final_sentence_diagnostic_flags,
@@ -56,6 +60,9 @@ from src.app.dictation_transcript_logic import (
 )
 from src.app.transcript_revision import append_context as _append_committed_text
 from src.app.transcript_revision import consume_committed_prefix as _consume_committed_prefix
+
+
+SBD_REVIEWED_CASE_DIR = REPO_ROOT / "tests/eval/dictation_ai/sbd_cases"
 
 
 @dataclass(frozen=True)
@@ -138,7 +145,7 @@ def _queue_staged_sentence(state: LifecycleState, candidate: str, forced: bool, 
             state.count("stage_queue_revision_age_reset")
         state.count("stage_age_tick")
         return
-    if len(state.staged_queue) >= MAX_STAGED_SENTENCE_QUEUE:
+    if len(state.staged_queue) >= max_staged_sentence_queue():
         state.staged_queue.popleft()
         state.count("stage_queue_drop_oldest")
     state.staged_queue.append(
@@ -154,7 +161,43 @@ def _queue_staged_sentence(state: LifecycleState, candidate: str, forced: bool, 
     state.count("segment_state_staged")
 
 
-def _load_cases(path: Path) -> list[SbdCase]:
+def _iter_case_paths(case_inputs: list[Path]) -> list[Path]:
+    paths: list[Path] = []
+    for case_input in case_inputs:
+        raw = str(case_input)
+        matches = sorted(Path(match) for match in glob.glob(raw))
+        if matches:
+            candidates = matches
+        else:
+            candidates = [case_input]
+        for candidate in candidates:
+            if candidate.is_dir():
+                paths.extend(sorted(candidate.rglob("*.jsonl")))
+            else:
+                paths.append(candidate)
+    unique_paths: list[Path] = []
+    seen: set[Path] = set()
+    for path in paths:
+        resolved = path.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        unique_paths.append(path)
+    if not unique_paths:
+        raise ValueError(f"no SBD benchmark case files matched: {', '.join(str(item) for item in case_inputs)}")
+    missing = [path for path in unique_paths if not path.is_file()]
+    if missing:
+        raise ValueError("SBD benchmark case files not found: " + ", ".join(str(path) for path in missing))
+    return unique_paths
+
+
+def _default_case_inputs() -> list[Path]:
+    if SBD_REVIEWED_CASE_DIR.is_dir() and any(SBD_REVIEWED_CASE_DIR.rglob("*.jsonl")):
+        return [SBD_REVIEWED_CASE_DIR]
+    return []
+
+
+def _load_case_file(path: Path) -> list[SbdCase]:
     cases: list[SbdCase] = []
     with path.open("r", encoding="utf-8") as handle:
         for line_no, raw_line in enumerate(handle, start=1):
@@ -169,6 +212,11 @@ def _load_cases(path: Path) -> list[SbdCase]:
             normalized_chunks = [normalized_text(chunk) for chunk in chunks]
             if not any(normalized_chunks):
                 raise ValueError(f"{path}:{line_no} case {case_id!r} has no text chunks")
+            if bool(payload.get("draft_expected_final_required", False)):
+                raise ValueError(
+                    f"{path}:{line_no} case {case_id!r} is a draft case. "
+                    "Review source logs and fill expected_final before using it in the benchmark."
+                )
             cases.append(
                 SbdCase(
                     id=case_id,
@@ -185,6 +233,24 @@ def _load_cases(path: Path) -> list[SbdCase]:
     if not cases:
         raise ValueError(f"no SBD benchmark cases loaded from {path}")
     return cases
+
+
+def _load_cases(case_inputs: list[Path]) -> tuple[list[SbdCase], list[str]]:
+    cases: list[SbdCase] = []
+    sources: list[str] = []
+    seen_ids: dict[str, str] = {}
+    for path in _iter_case_paths(case_inputs):
+        loaded = _load_case_file(path)
+        for case in loaded:
+            previous = seen_ids.get(case.id)
+            if previous is not None:
+                raise ValueError(f"duplicate SBD benchmark case id {case.id!r}: {previous} and {path}")
+            seen_ids[case.id] = str(path)
+            cases.append(case)
+        sources.append(str(path))
+    if not cases:
+        raise ValueError("no SBD benchmark cases loaded")
+    return cases, sources
 
 
 def _boundary_offsets(sentences: list[str]) -> set[int]:
@@ -621,7 +687,7 @@ def _suppress_stale_no_text_stage(state: LifecycleState, chunk_index: int) -> No
     required_confirmations = _sentence_required_confirmations(state.staged_forced)
     if state.staged_confirmations >= required_confirmations:
         return
-    if state.no_text_stage_skip_chunks < NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS:
+    if state.no_text_stage_skip_chunks < no_text_stale_stage_suppress_chunks():
         return
     state.count("stage_no_text_stale_suppressed")
     state.count("segment_state_suppressed")
@@ -743,7 +809,16 @@ def _validate_real_ai_cuda_args(args: argparse.Namespace) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run text-only Dictation AI SBD lifecycle benchmark cases.")
-    parser.add_argument("--cases", type=Path, default=REPO_ROOT / "tests/eval/dictation_ai/sbd_text_cases.sample.jsonl")
+    parser.add_argument(
+        "--cases",
+        type=Path,
+        nargs="+",
+        default=_default_case_inputs(),
+        help=(
+            "One or more JSONL files, directories containing JSONL files, or glob patterns. "
+            "By default, reviewed sbd_cases/**/*.jsonl files are loaded."
+        ),
+    )
     parser.add_argument("--model", default=SBD_BENCHMARK_MODEL)
     parser.add_argument("--device", default=SBD_BENCHMARK_DEVICE)
     parser.add_argument("--compute-type", default=SBD_BENCHMARK_COMPUTE_TYPE)
@@ -758,7 +833,7 @@ def main() -> int:
     args = parser.parse_args()
     _validate_real_ai_cuda_args(args)
 
-    cases = _load_cases(args.cases)
+    cases, case_sources = _load_cases(args.cases)
     detector = create_sentence_boundary_detector(
         SBD_BENCHMARK_BACKEND,
         model=args.model,
@@ -818,7 +893,11 @@ def main() -> int:
         "model": args.model,
         "device": args.device,
         "compute_type": args.compute_type,
+        "case_sources": case_sources,
         "dictation_pipeline_policy": dictation_pipeline_policy(),
+        "lifecycle_tuning_policy": lifecycle_tuning_policy(),
+        "dictation_tuning_protocol": dictation_tuning_protocol(),
+        "dictation_tuning_manifest": dictation_tuning_manifest(),
         "revision_similarity_policy": _revision_similarity_policy(),
         "case_count": len(results),
         "elapsed_ms": round((time.perf_counter() - started) * 1000.0, 3),
