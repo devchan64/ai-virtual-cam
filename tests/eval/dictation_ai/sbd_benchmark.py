@@ -517,15 +517,15 @@ def _stage_completed_sentence(
                 state.staged_forced,
             )
         ):
-            state.count("stage_unconfirmed_replacement_suppressed")
-            state.count("segment_state_suppressed")
-            state.staged_sentence = ""
-            state.staged_confirmations = 0
-            state.staged_age = 0
-            state.staged_forced = False
-            state.staged_deferred_age_chunk = -1
+            state.count("stage_age_finalize")
+            finalized = _finalize_staged_sentence(
+                state,
+                language,
+                "aged_forced" if state.staged_forced else "aged",
+                chunk_index,
+            )
             _promote_next_staged_sentence(state, chunk_index)
-            return []
+            return finalized
         if state.staged_age >= _sentence_max_age_chunks(state.staged_forced, sentence_finalize_age):
             state.count("stage_age_quality_blocked")
             state.count("segment_state_suppressed")

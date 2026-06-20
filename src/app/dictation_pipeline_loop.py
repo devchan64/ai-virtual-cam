@@ -504,19 +504,18 @@ def run_transcribe_loop(
                     active_stage.forced,
                 )
             ):
-                count_metric("stage_unconfirmed_replacement_suppressed")
-                count_segment_state("suppressed")
+                count_metric("stage_age_finalize")
                 worker._emit(
                     "status",
-                    "받아쓰기 AI stage 보류 후보 미확정 폐기: "
+                    "받아쓰기 AI stage 보류 후보 순서 확정: "
                     f"chunk={chunks} decision={replacement_reason} staged_confirmations={active_stage.confirmations} "
                     f"staged_age={active_stage.age} staged_tail={_diagnostic_tail(active_stage.sentence)} "
                     f"candidate_tail={_diagnostic_tail(candidate)}",
                     display=False,
                 )
-                active_stage.clear()
+                finalized = finalize_staged_sentence(detected, "aged_forced" if active_stage.forced else "aged")
                 promote_next_staged_sentence(detected)
-                return []
+                return finalized
             if active_stage.age >= _sentence_max_age_chunks(active_stage.forced, sentence_finalize_age):
                 count_metric("stage_age_quality_blocked")
                 count_segment_state("suppressed")

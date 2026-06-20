@@ -2561,3 +2561,66 @@ staged_exact_match=53
 - 반면 `finalized_per_stage_start`는 `0.684 -> 0.692`로 올라가, stage 수 자체가 줄고 더 보수적으로 소비되는 경향이 있다.
 - age 3은 즉시 운영 불가 수준의 장애는 아니지만, 누락/recall 측면에서는 비용이 있다.
 - 기본값 통일 목적은 언어별 예외 축소와 보수적인 확정 기준 유지다. 성능 개선은 age를 다시 낮추기보다 queue 소비, staged residue, no-end fragment 정책을 일반 로직으로 개선하는 방향에서 판단한다.
+
+## 2026-06-20 18:00 KST - aged staged 후보의 생성순서 final 소비
+
+- 최신 로그 모니터링에서 raw STT 자체의 정확도보다, active staged 후보가 보류되는 동안 후속 completed 후보가 queue에 쌓이고 final로 소비되지 않는 패턴을 다시 확인했다.
+- 이번 목적은 STT 문자열을 보정하는 것이 아니라, 부정확한 STT 가설을 사람이 속기하듯 보류하고 반복 관측된 문장을 순서대로 final-only 번역 입력으로 넘기는 것이다.
+- 코드상 `stage_replace_deferred` 경로에서 active staged 후보가 `sentenceFinalizeAge`에 도달했고 `_should_finalize_before_replacement(...)`가 참이어도, 기존 로직은 `stage_unconfirmed_replacement_suppressed`로 폐기한 뒤 queue 후보를 승격했다.
+- 이 동작은 “생성순서대로 소비” 원칙과 맞지 않고, 확정 가능한 문장을 버려 recall 손실을 만들 수 있으므로, 해당 경로를 폐기 대신 `stage_age_finalize` final 확정으로 변경했다.
+- raw STT, SBD backend, 언어별 규칙, 단어별 예외는 변경하지 않았다. 변경 범위는 revision-aware lifecycle의 staged 소비 정책이다.
+
+변경 전 기준:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/monitoring-before.json
+
+cases=164
+finalized=791
+stage_start=1143
+finalized_per_stage_start=0.692
+final_precision_avg=0.754
+final_recall_avg=0.656
+final_f1_avg=0.676
+final_similarity_coverage_avg=0.591
+final_boundary_f1_avg=0.268
+case_exact_match=12
+pending_exact_match=124
+staged_exact_match=53
+```
+
+변경 후 기준:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/monitoring-aged-finalize.json
+
+cases=164
+finalized=840
+stage_start=1143
+finalized_per_stage_start=0.735
+final_precision_avg=0.744
+final_recall_avg=0.678
+final_f1_avg=0.688
+final_similarity_coverage_avg=0.607
+final_boundary_f1_avg=0.298
+case_exact_match=12
+pending_exact_match=124
+staged_exact_match=52
+```
+
+판단:
+
+- `final_f1_avg`는 `0.676 -> 0.688`, `final_recall_avg`는 `0.656 -> 0.678`, `final_boundary_f1_avg`는 `0.268 -> 0.298`로 개선됐다.
+- `finalized_per_stage_start`는 `0.692 -> 0.735`로 올라가, 보류된 staged 후보가 더 많이 final로 소비됐다.
+- `stage_unconfirmed_replacement_suppressed`는 102에서 0이 됐고, `stage_age_finalize`는 21에서 122로 증가했다. 이는 폐기하던 확정 가능 후보를 생성순서대로 소비했다는 근거다.
+- `final_precision_avg`는 `0.754 -> 0.744`로 하락했다. 확정 누락을 줄이는 대신 false final 위험이 일부 증가한 것으로 보며, recent final memory와 no-end fragment 품질 게이트를 계속 함께 관찰해야 한다.
+- 케이스별 비교에서 개선은 한국어/영어의 `missing-final`, `stage-queue`, `mixed-context-final` 태그에 주로 나타났고, 악화는 short/no-end fragment 또는 기존 false-final 위험이 있던 케이스의 precision 하락으로 나타났다.
+- 이 변경은 논문의 주제인 “불안정 STT 스트림을 final-only 번역 입력으로 안정화하는 lifecycle”에 직접 해당한다. raw STT 정확도 개선 또는 언어별 문자열 보정으로 해석하지 않는다.

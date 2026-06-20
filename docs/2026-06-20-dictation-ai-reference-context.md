@@ -17,7 +17,7 @@
 - 확인 시각: 2026-06-20 KST
 - 다운로드 실행 기준: title/url 항목 79개, URL 기준 75개
 - 다운로드 결과: 57개 PDF, 21개 HTML/페이지, 1개 실패
-- 실패 항목: `Optimizing Sentence Segmentation for Speech Translation`의 ACL 2002 PDF 링크는 404로 원문 PDF를 받지 못했다.
+- 실패 항목: `Optimizing Sentence Segmentation for Speech Translation`의 ACL 2002 PDF 링크는 404로 원문 PDF를 받지 못했다. 이후 KIT PDF 링크(`https://isl.iar.kit.edu/downloads/803_Interspeech-2007_Rao.pdf`)로 Interspeech 2007 원문을 확인했다.
 
 `.tmp` 아래 원문 파일은 추적하지 않는다. 이 문서에는 원문 확인을 바탕으로 한 분류와 요약만 남긴다.
 
@@ -106,6 +106,7 @@
 | [Prosody-Based Automatic Segmentation](https://www.sri.com/wp-content/uploads/2021/12/prosody-based_automatic_segmentation_of_speech_into_sente.pdf) | prosody 기반 sentence/topic segmentation 자료다. | 현재는 prosody/VAD 미사용이므로 범위 밖 비교. |
 | [Don't Discard Fixed-Window Audio Segmentation](https://aclanthology.org/2022.wmt-1.13.pdf) | speech-to-text translation에서 fixed-window audio segmentation이 여전히 유효할 수 있음을 보인다. | fixed window 전략 비교. |
 | [Long-Form Speech Translation through Segmentation](https://aclanthology.org/2023.findings-emnlp.19.pdf) | LLM 제약 기반 long-form speech translation segmentation을 다룬다. | long-form ST/LLM 비교 후보. |
+| [Optimizing Sentence Segmentation for Speech Translation](https://isl.iar.kit.edu/downloads/803_Interspeech-2007_Rao.pdf) | Arabic broadcast speech translation에서 MT 시스템에 맞춘 segment length 최적화가 BLEU를 개선할 수 있고, ASR WER가 번역 성능에 비선형적으로 영향을 준다고 보고한다. | 번역 단위가 downstream 품질에 영향을 준다는 비교 근거. 현재 SBD/finalization 구현이나 VAD/pause 기반 운영 정책의 직접 근거는 아니다. |
 
 ### 평가 지표와 streaming stability
 
@@ -140,7 +141,7 @@
 
 | 자료 | 판단 | 이유 |
 | --- | --- | --- |
-| [Optimizing Sentence Segmentation for Speech Translation](https://aclanthology.org/2002.iwslt-1.15.pdf) | 제외 | 링크된 PDF가 404로 원문을 확보하지 못했다. 원문 확보 전에는 인용하지 않는다. |
+| [Optimizing Sentence Segmentation for Speech Translation](https://aclanthology.org/2002.iwslt-1.15.pdf) | 제외 | 링크된 ACL 2002 PDF가 404였다. 같은 제목의 Interspeech 2007 원문은 KIT PDF 링크로 확인해 비교군에 따로 분류했다. |
 | [Real-time and Continuous Turn-taking Prediction Using VAP](https://arxiv.org/abs/2401.04868) | 직접 인용 금지 | 대화 turn-taking 예측 자료다. 현재 발표형 받아쓰기 pipeline의 필수 구현 근거가 아니다. |
 | [Multilingual Turn-taking Prediction Using VAP](https://aclanthology.org/2024.lrec-main.1036/) | 직접 인용 금지 | 다국어 turn-taking 자료지만 현재 파이프라인에서 VAD/turn end 예측을 쓰지 않는다. |
 | [Turn-Taking Prediction for Natural Conversational Speech](https://www.isca-archive.org/interspeech_2022/chang22_interspeech.pdf) | 직접 인용 금지 | 자연 대화 turn-taking 자료다. 발표형 긴 발화 SBD/finalization과 문제 설정이 다르다. |
