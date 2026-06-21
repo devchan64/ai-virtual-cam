@@ -7,8 +7,10 @@ from src.app.dictation_pipeline_contracts import ActiveSentenceCandidate
 from src.app.dictation_transcript_logic import (
     _next_revision_confirmation_count,
     _prefer_sentence_revision,
+    _sentence_end_count,
     _sentences_are_revisions,
     _should_reset_revision_age,
+    _staged_sentence_required_confirmations,
 )
 
 
@@ -34,6 +36,7 @@ class SentenceCandidateCommitBufferNode:
         max_promotion_age_chunks: int,
         count_metric: MetricCounter,
         count_segment_state: MetricCounter,
+        finalize_reason: str = "",
     ) -> bool:
         active_sentence = self.active.sentence
         if not active_sentence:
@@ -57,6 +60,20 @@ class SentenceCandidateCommitBufferNode:
                 continue
             preferred = _prefer_sentence_revision(active_sentence, queued_sentence)
             if preferred == active_sentence:
+                index += 1
+                continue
+            queued_confirmations = int(entry["confirmations"])
+            queued_forced = bool(entry["forced"]) or self.active.forced
+            # 확정 가능한 active 문장은 더 강한 boundary 근거가 없는 낮은
+            # confirmation queued revision에 append-only 순서를 빼앗기지 않는다.
+            if (
+                _sentence_end_count(active_sentence) > 0
+                and _sentence_end_count(preferred) <= _sentence_end_count(active_sentence)
+                and queued_confirmations < _staged_sentence_required_confirmations(preferred, queued_forced)
+            ):
+                count_metric("stage_queue_revision_preempt_deferred", 1)
+                if finalize_reason:
+                    count_metric(f"stage_queue_revision_preempt_deferred_{finalize_reason}", 1)
                 index += 1
                 continue
             entry["sentence"] = preferred

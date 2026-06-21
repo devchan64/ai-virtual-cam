@@ -25,6 +25,7 @@ from src.app.dictation_transcript_logic import (
     _replacement_decision_reason,
     _revision_internal_stability_bucket,
     _sentence_max_age_chunks,
+    _sentence_end_count,
     _sentence_output_delta,
     _sentences_are_revisions,
     _stage_quality_block_age_limit,
@@ -124,7 +125,7 @@ def _promote_next_staged_sentence(state: LifecycleState, chunk_index: int) -> No
         state.count("segment_state_suppressed")
 
 
-def _prefer_queued_revision_for_active(state: LifecycleState, chunk_index: int) -> bool:
+def _prefer_queued_revision_for_active(state: LifecycleState, chunk_index: int, finalize_reason: str) -> bool:
     if not state.staged_sentence:
         return False
     assert state.staged_queue is not None
@@ -148,6 +149,17 @@ def _prefer_queued_revision_for_active(state: LifecycleState, chunk_index: int) 
             continue
         preferred = _prefer_sentence_revision(state.staged_sentence, queued_sentence)
         if preferred == state.staged_sentence:
+            index += 1
+            continue
+        queued_confirmations = int(entry["confirmations"])
+        queued_forced = bool(entry["forced"]) or state.staged_forced
+        if (
+            _sentence_end_count(state.staged_sentence) > 0
+            and _sentence_end_count(preferred) <= _sentence_end_count(state.staged_sentence)
+            and queued_confirmations < _staged_sentence_required_confirmations(preferred, queued_forced)
+        ):
+            state.count("stage_queue_revision_preempt_deferred")
+            state.count(f"stage_queue_revision_preempt_deferred_{finalize_reason}")
             index += 1
             continue
         entry["sentence"] = preferred
@@ -325,7 +337,7 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
         return []
     state.count("finalize_attempt")
     state.count(f"finalize_reason_{reason}")
-    if _prefer_queued_revision_for_active(state, chunk_index):
+    if _prefer_queued_revision_for_active(state, chunk_index, reason):
         return []
     staged_before = state.staged_sentence
     output_sentence = _sentence_output_delta(state.committed_text, staged_before)

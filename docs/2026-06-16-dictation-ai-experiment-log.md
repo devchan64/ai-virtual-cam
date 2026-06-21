@@ -15146,6 +15146,196 @@ HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_
 - `queue_len_1`은 좋아지지만 `no_queue`가 악화되어 전체 확정 성능 개선으로 보기 어렵다.
 - 따라서 replacement no-end final 차단은 폐기했다. boundary 개선만으로 채택하지 않는다.
 
+### 2026-06-22 CJK confirmation preserve ratio 0.55 채택
+
+목적:
+
+- queue/revision 병목에서 `stage_queue_revision_token_sentence_deferred=1794`가 크게 남아 있었다.
+- 이는 같은 token-sentence revision으로 볼 수 있는 후보도 confirmation 보존 임계값을 넘지 못하면 queue entry 갱신 대신 defer만 누적하는 경로다.
+- 문장 확정 규칙은 언어별 문구가 아니라 token-sentence similarity와 revision lifecycle로 관리한다는 기준에 맞춰, CJK confirmation 보존 임계값을 낮추는 ablation을 수행했다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 AVC_DICTATION_CJK_CONFIRM_PRESERVE_RATIO_MIN=0.65 \
+  ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-open-ko-removed-cjk-confirm-preserve-065.json
+
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 AVC_DICTATION_CJK_CONFIRM_PRESERVE_RATIO_MIN=0.60 \
+  ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-open-ko-removed-cjk-confirm-preserve-060.json
+
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 AVC_DICTATION_CJK_CONFIRM_PRESERVE_RATIO_MIN=0.55 \
+  ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-open-ko-removed-cjk-confirm-preserve-055.json
+
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 AVC_DICTATION_CJK_CONFIRM_PRESERVE_RATIO_MIN=0.50 \
+  ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-open-ko-removed-cjk-confirm-preserve-050.json
+```
+
+결과:
+
+| value | final F1 delta | precision delta | recall delta | boundary F1 delta | finalized delta | stage_start delta | staged exact delta | token defer delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `0.65` | +0.001177 | +0.000566 | +0.001416 | +0.000429 | +6 | -17 | +0 | -44 |
+| `0.60` | +0.001591 | +0.000505 | +0.002059 | +0.000587 | +13 | -27 | +3 | -81 |
+| `0.55` | +0.001658 | +0.000415 | +0.002339 | +0.000611 | +21 | -38 | +3 | -119 |
+| `0.50` | +0.001524 | +0.000285 | +0.002413 | +0.000579 | +27 | -42 | +6 | -159 |
+
+기본값 반영 검증:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-cjk-confirm-preserve-055-default.json
+```
+
+```text
+cases=1223 finalized=5063 stage_start=8514 finalized_per_stage_start=0.594668
+final_precision_avg=0.575166
+final_recall_avg=0.451562
+final_f1_avg=0.484062
+final_similarity_coverage_avg=0.396643
+final_boundary_f1_avg=0.113585
+case_exact_match=21 pending_exact_match=712 staged_exact_match=345
+```
+
+언어별 영향:
+
+```text
+en: final_f1_delta=+0.000521, precision_delta=+0.000194, recall_delta=+0.001049, boundary_delta=+0.000000
+ko: final_f1_delta=+0.000545, precision_delta=-0.000546, recall_delta=+0.000889, boundary_delta=+0.000555
+zh: final_f1_delta=+0.004675, precision_delta=+0.002038, recall_delta=+0.006024, boundary_delta=+0.001480
+```
+
+판단:
+
+- `0.50`은 더 많은 candidate를 살리지만 F1/precision 이득이 `0.55`보다 작아 과도하게 느슨한 하한으로 보았다.
+- `0.55`는 전체 final F1, recall, boundary F1, staged exact를 함께 올리고 precision도 baseline보다 낮아지지 않았다.
+- `stage_queue_revision_token_sentence_deferred=1794 -> 1675`, `stage_queue_enqueue=7644 -> 7573`, `stage_queue_promote=5738 -> 5697`로 queue churn이 줄었다.
+- 새 문구/언어별 예외를 추가하지 않고, 같은 CJK token-sentence revision의 confirmation reset을 덜 공격적으로 하는 공통 lifecycle 조정이므로 채택한다.
+
+### 2026-06-22 queued revision preemption 확인 조건 채택
+
+목적:
+
+- final 직전 `stage_finalize_deferred_for_queue_revision` 경로가 ready active sentence를 queued revision으로 교체하고 확정을 미루고 있었다.
+- 기존 동작은 queued revision이 더 선호되는 문장이라는 이유만으로 active final을 미뤘고, queued 후보 자체가 확정 가능한 confirmation을 갖췄는지는 확인하지 않았다.
+- append-only final 순서를 유지하려면 ready active sentence가 낮은 근거의 queued revision에 밀려서는 안 된다. 단, queued revision이 더 강한 boundary evidence를 갖는 경우는 예외로 둔다.
+
+변경:
+
+- `SentenceCandidateCommitBufferNode.prefer_queued_revision_for_active()`에서 active가 이미 문장 경계를 갖고 있고 queued revision이 boundary count를 늘리지 못하며 required confirmation을 만족하지 못하면 preemption을 보류한다.
+- text replay의 `_prefer_queued_revision_for_active()`에도 같은 조건을 반영했다.
+- `stage_queue_revision_preempt_deferred` counter를 추가해 이 보류가 실제로 발생하는지 관측한다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-cjk055-queue-preempt-confirmed-or-boundary-growth.json
+```
+
+결과:
+
+| metric | CJK preserve 0.55 baseline | current | delta |
+| --- | ---: | ---: | ---: |
+| `finalized` | 5063 | 5103 | +40 |
+| `stage_start` | 8514 | 8559 | +45 |
+| `finalized_per_stage_start` | 0.594668 | 0.596215 | +0.001547 |
+| `final_precision_avg` | 0.575166 | 0.579891 | +0.004725 |
+| `final_recall_avg` | 0.451562 | 0.455824 | +0.004262 |
+| `final_f1_avg` | 0.484062 | 0.488275 | +0.004214 |
+| `final_similarity_coverage_avg` | 0.396643 | 0.399617 | +0.002973 |
+| `final_boundary_f1_avg` | 0.113585 | 0.112375 | -0.001210 |
+| `staged_exact_match` | 345 | 347 | +2 |
+
+언어별 영향:
+
+```text
+en: delta 없음
+ko: delta 없음
+zh: final_f1_delta=+0.015522, precision_delta=+0.017404, recall_delta=+0.015699, boundary_delta=-0.004457, empty_final_delta=-6
+```
+
+주요 counter:
+
+```text
+stage_queue_revision_preempt_deferred=45
+stage_finalize_deferred_for_queue_revision=807 -> 782
+stage_queue_revision=4704 -> 4558
+stage_queue_revision_token_sentence_deferred=1675 -> 1632
+stage_replace=9731 -> 9572
+stage_replace_deferred=4871 -> 4713
+stage_queue_enqueue=7573 -> 7553
+stage_queue_promote=5697 -> 5737
+stage_queue_stale_promote_suppressed=20 -> 12
+candidate_duplicate_suppressed=13947 -> 14082
+```
+
+판단:
+
+- content finalization 지표인 precision, recall, final F1, finalized/stage, empty final이 함께 개선됐다.
+- 개선은 중국어 queue/revision 병목에 집중되며, 영어/한국어에는 영향을 주지 않았다.
+- boundary F1은 전체 -0.001210, 중국어 -0.004457 하락했다. 따라서 이 변경은 boundary 개선이 아니라 missing-final/queue churn 완화로 해석한다.
+- active final이 낮은 confirmation의 queued revision에 밀리지 않도록 하는 append-only 순서 원칙에 맞고, 문구/언어별 예외를 추가하지 않으므로 채택한다.
+- 후속 개선은 boundary 하락을 상쇄하기 위해 queued revision preemption을 더 열어두는 방향이 아니라, final 이후 boundary split/merge 품질을 별도 축으로 봐야 한다.
+
+추가 ablation:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-cjk055-queue-preempt-block-unended-only.json
+```
+
+- preemption 차단 조건을 “active는 끝났고 queued preferred는 no-end인 경우”로 좁히면 `CJK_CONFIRM_PRESERVE_RATIO_MIN=0.55` 기준선과 같은 결과가 나왔다.
+- 즉 개선을 만든 45건은 no-end queued revision이 아니라 같은 boundary count를 가진 lower-confirmation revision이었다.
+- 따라서 no-end-only 조건은 폐기한다. 현재 채택 조건은 active의 boundary slot을 같은 boundary count의 낮은 confirmation revision이 가로채지 못하게 하는 정책으로 유지한다.
+
+reason별 ablation:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-cjk055-queue-preempt-replaced-confirmed-only.json
+
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-cjk055-queue-preempt-confirmed-and-replaced-confirmed.json
+
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-cjk055-queue-preempt-reason-counters.json
+```
+
+| condition | preempt deferred | final F1 delta | precision delta | recall delta | boundary F1 delta | finalized delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `replaced_confirmed` only | 26 | +0.002755 | +0.003272 | +0.002868 | -0.000460 | +28 |
+| `confirmed + replaced_confirmed` | 41 | +0.003669 | +0.003907 | +0.003853 | -0.001111 | +38 |
+| all final reasons | 45 | +0.004214 | +0.004725 | +0.004262 | -0.001210 | +40 |
+
+reason 분포:
+
+```text
+stage_queue_revision_preempt_deferred=45
+stage_queue_revision_preempt_deferred_aged=2
+stage_queue_revision_preempt_deferred_confirmed=14
+stage_queue_revision_preempt_deferred_replaced_confirmed=27
+stage_queue_revision_preempt_deferred_terminal_tail_revision_split=2
+```
+
+- `replaced_confirmed`만 제한하면 boundary 하락은 가장 작지만 content finalization 이득도 크게 줄었다.
+- `confirmed + replaced_confirmed`는 broad 조건의 대부분을 따라가지만 boundary 하락도 거의 따라간다.
+- broad 조건의 추가 4건은 `aged`와 `terminal_tail_revision_split`이며, 전체 final F1과 recall/precision을 가장 크게 올린다.
+- 따라서 reason을 특정 final 경로로 좁히는 것은 일반 append-only 원칙을 흐리면서 성능 이득도 줄인다. 현재는 final reason과 무관하게 “ready active boundary slot은 낮은 confirmation same-boundary queued revision에 밀리지 않는다”는 조건을 유지한다.
+
 ### 2026-06-22 short no-end fragment 품질 게이트 CUDA 스윕
 
 목적:

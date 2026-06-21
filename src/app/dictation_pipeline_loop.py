@@ -194,6 +194,7 @@ def run_transcribe_loop(
         if commit_buffer_node.prefer_queued_revision_for_active(
             chunk_index=chunks,
             max_promotion_age_chunks=staged_queue_max_promotion_age_chunks(),
+            finalize_reason=reason,
             count_metric=count_metric,
             count_segment_state=count_segment_state,
         ):
