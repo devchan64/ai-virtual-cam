@@ -259,6 +259,7 @@ def build_evidence_protocol(
         "runtime_contract.model_source",
         "lifecycle_replay_contract.state_machine_parity",
         "lifecycle_replay_contract.shared_decision_helpers",
+        "lifecycle_replay_contract.replayed_runtime_signals",
         "lifecycle_replay_contract.missing_runtime_signals",
         "case_summary.expected_final_case_count",
         "parameter_axes",

@@ -140,6 +140,7 @@ def summarize_report(path: Path) -> dict[str, Any]:
             "state_machine_parity": lifecycle_replay_contract.get("state_machine_parity", ""),
             "runtime_state_owner": lifecycle_replay_contract.get("runtime_state_owner", ""),
             "replay_state_owner": lifecycle_replay_contract.get("replay_state_owner", ""),
+            "replayed_runtime_signals": lifecycle_replay_contract.get("replayed_runtime_signals", []),
             "missing_runtime_signals": lifecycle_replay_contract.get("missing_runtime_signals", []),
         },
         "candidate_count": len(candidates),
@@ -210,6 +211,7 @@ def _lifecycle_replay_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
     parity_counts: dict[str, int] = {}
     runtime_state_owner_counts: dict[str, int] = {}
     replay_state_owner_counts: dict[str, int] = {}
+    replayed_runtime_signal_counts: dict[str, int] = {}
     missing_runtime_signal_counts: dict[str, int] = {}
     for report in reports:
         contract = dict(report.get("lifecycle_replay_contract", {}))
@@ -219,6 +221,15 @@ def _lifecycle_replay_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
         runtime_state_owner_counts[runtime_owner] = runtime_state_owner_counts.get(runtime_owner, 0) + 1
         replay_owner = str(contract.get("replay_state_owner", "") or "unknown")
         replay_state_owner_counts[replay_owner] = replay_state_owner_counts.get(replay_owner, 0) + 1
+        replayed_signals = contract.get("replayed_runtime_signals", [])
+        if not isinstance(replayed_signals, list):
+            replayed_signals = []
+        for signal in replayed_signals:
+            signal_name = str(signal)
+            if signal_name:
+                replayed_runtime_signal_counts[signal_name] = (
+                    replayed_runtime_signal_counts.get(signal_name, 0) + 1
+                )
         signals = contract.get("missing_runtime_signals", [])
         if not isinstance(signals, list):
             signals = []
@@ -232,6 +243,7 @@ def _lifecycle_replay_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
         "state_machine_parity_counts": dict(sorted(parity_counts.items())),
         "runtime_state_owner_counts": dict(sorted(runtime_state_owner_counts.items())),
         "replay_state_owner_counts": dict(sorted(replay_state_owner_counts.items())),
+        "replayed_runtime_signal_counts": dict(sorted(replayed_runtime_signal_counts.items())),
         "missing_runtime_signal_counts": dict(sorted(missing_runtime_signal_counts.items())),
     }
 
@@ -478,8 +490,7 @@ def _paper_claim_matrix(
             if runtime_equivalence_blocked
             else "no partial replay marker in this package",
             "required_next_evidence": (
-                "end-to-end runtime replay with stable analysis, audio timestamps, "
-                "and translation request/output linkage"
+                "end-to-end runtime replay with audio timestamps and translation request/output linkage"
             ),
         },
     ]
@@ -644,6 +655,13 @@ def render_markdown(summary: dict[str, Any]) -> str:
             f"{key}={value}"
             for key, value in dict(
                 lifecycle_replay_summary.get("replay_state_owner_counts", {})
+            ).items()
+        ),
+        "- lifecycle_replayed_runtime_signal_counts: "
+        + ", ".join(
+            f"{key}={value}"
+            for key, value in dict(
+                lifecycle_replay_summary.get("replayed_runtime_signal_counts", {})
             ).items()
         ),
         "- lifecycle_missing_runtime_signal_counts: "

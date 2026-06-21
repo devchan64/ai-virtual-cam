@@ -102,12 +102,12 @@
 | 대부분의 confirm/max-age/forced/no-text/CJK hold 축은 metric delta가 0 또는 매우 작다. | 해당 상수만 바꾸는 실험은 현재 failure corpus에서 의미 있는 로직 변경 근거가 아니다. |
 | `SENTENCE_CONFIRM_CHUNKS=1`은 `final_f1`과 recall을 올리지만 precision을 크게 낮춘다. | 확정을 빠르게 하는 단일 정책은 중복/오확정 위험을 키우므로 채택 근거가 아니다. |
 | `REVISION_FALLBACK_COVERAGE_MIN`, `SHORT_NO_END_FRAGMENT_UNITS`, 일부 CJK/queue 축은 regression flag가 붙는다. | 누락을 줄이려는 완화가 boundary 또는 precision 손실로 전이된다. |
-| complete report의 `state_machine_parity=partial`이고 audio timestamp, stable internal overlap, translation linkage가 replay에 없다. | 현재 replay만 반복해서는 운영 loop의 구체 로직 변경 지점을 단정할 수 없다. |
+| complete report의 `state_machine_parity=partial`이고 audio timestamp, translation linkage가 replay에 없다. stable internal overlap은 현재 text replay에서 재계산하지만, 과거 complete report는 재생성 전까지 이전 계약을 따른다. | 현재 replay만 반복해서는 운영 loop의 구체 로직 변경 지점을 단정할 수 없다. |
 
 따라서 현 상태에서 새 앱 로직 변경을 바로 넣는 것은 근거가 약하다. 다음 개선 후보는 더 많은 threshold sweep이 아니라 다음 두 방향 중 하나여야 한다.
 
 1. structural lifecycle preflight: `stage-queue`, `staged-residue`, `boundary-mismatch`, `no-end-final`이 큰 exploratory subset에서 후보 소비 순서, revision 보류/확정, final 직전 boundary 보존 같은 상태 전이 변경을 작게 검증한다. 이 결과는 전체 1113건 challenge replay 재검증 전까지 논문 수치로 쓰지 않는다.
-2. runtime signal 보강: text replay가 빠뜨리는 audio timestamp latency, stable internal overlap, translation request/output linkage를 연결해 운영 loop에서만 보이는 병목을 찾는다.
+2. runtime signal 보강: text replay가 빠뜨리는 audio timestamp latency, translation request/output linkage를 연결해 운영 loop에서만 보이는 병목을 찾는다.
 
 즉 현재 결론은 "로직 변경 지점이 없다"가 아니라 "현재 반복한 파라미터 실험만으로는 로직 변경 지점을 찾지 못했으며, 새 변경은 구조 병목 preflight 또는 runtime signal 보강으로 원인을 좁힌 뒤에만 수행한다"이다.
 
@@ -160,12 +160,12 @@
 | partial hypothesis와 final transcript를 분리해야 한다. | 운영 로그 사례, 1113건 challenge replay, Whisper-Streaming/incremental ASR 문헌 | 사용 가능 | representative에서도 같은 실패축이 관측되는지 확인 |
 | SBD 후보와 final lifecycle은 별도 계층으로 평가해야 한다. | `final_f1_avg=0.483`, `final_boundary_f1_avg=0.108`, lifecycle counter, queue residue strata | 사용 가능 | representative replay의 boundary/queue strata |
 | threshold 단일 튜닝은 중심 개선축이 아니다. | complete evidence report 23개, 고유 parameter axis 12개, `hypothesis_status_counts={유지:2, 축소:2, 폐기:8}` | 사용 가능 | 새 구조 변경 후에도 닫힌 축이 다시 열리는지 확인 |
-| current baseline은 실패 중심 입력에서 재현 가능한 기준선이다. | `paper_evidence=true`, `sat + cuda + float16`, `missing_required_evidence_fields=none`인 complete report 23개 | 사용 가능 | 새 case 추가 시 같은 기준으로 재검증 |
+| current baseline은 실패 중심 입력에서 재현 가능한 기준선이다. | 기존 `sat + cuda + float16` complete report 23개. 현재 evidence 계약에서는 `lifecycle_replay_contract.replayed_runtime_signals`가 추가되어 이 report들은 재실행 후보로 분류된다. | 보류 | 최신 계약으로 complete report 재생성 |
 | 운영 평균 품질을 개선했다. | 없음. representative root에는 아직 정식 JSONL case 없음 | 사용 금지 | 사람이 확정한 representative case와 validator summary |
 | final-only sink가 번역 안정성을 높였다. | 시스템 계약과 speech translation segmentation 배경만 있음 | 보류 | final event, translation request id, translation output replay |
 | raw STT 모델 정확도를 개선했다. | 없음. 현재 입력은 STT window hypothesis replay | 사용 금지 | 별도 참조 전사와 ASR CER/WER 평가 |
 
-최신 evidence inventory 기준으로 전체 report 재고에는 exploratory/incomplete 결과가 섞여 있다. `sbd_benchmark.py validate-evidence --complete-only --summary-only` 기준 전체 report는 135개이고, complete paper-evidence report는 23개다. complete subset은 `experiment_stage=challenge-replay`, `claim_scope_key=failure-lifecycle-tradeoff`로만 구성되며 `complete_mixed_experiment_stage=false`, `complete_mixed_claim_scope_key=false`다. 따라서 논문 본문에 직접 옮길 수 있는 수치는 이 23개 complete report와 그 summary로 제한한다. 나머지 exploratory/incomplete report는 실험 설계나 후속 후보를 설명할 때만 사용한다.
+기존 evidence inventory 기준으로 전체 report 재고에는 exploratory/incomplete 결과가 섞여 있었다. 당시 `sbd_benchmark.py validate-evidence --complete-only --summary-only` 기준 전체 report는 135개이고, complete paper-evidence report는 23개였다. 이 23개 subset은 `experiment_stage=challenge-replay`, `claim_scope_key=failure-lifecycle-tradeoff`로만 구성되며 `complete_mixed_experiment_stage=false`, `complete_mixed_claim_scope_key=false`였다. 다만 현재 evidence 계약은 `lifecycle_replay_contract.replayed_runtime_signals`를 필수 필드로 추가했으므로, 같은 report들은 새 validator 기준에서 재실행 후보로 분류된다. 논문 본문에 새 수치를 직접 옮길 때는 최신 계약으로 complete report를 재생성해야 하며, 나머지 exploratory/incomplete report는 실험 설계나 후속 후보를 설명할 때만 사용한다.
 
 논문 표 작성에 사용할 표준 evidence package 산출물은 다음 두 파일로 고정한다.
 
@@ -543,7 +543,7 @@ Translation replay는 SBD/finalization replay와 다른 실험이다. SBD replay
 - `summary.json`과 Markdown header의 `supported_claims`, `unsupported_claims`, `deferred_claims`로 해당 결과가 지지하는 주장, 금지하는 주장, 후속 실험 전까지 보류할 주장을 확인
 - `summary.json`과 Markdown header의 `evidence_protocol.required_evidence_fields`로 논문에 옮길 때 함께 보존해야 하는 최소 필드 확인
 - `required_evidence_fields`에는 `evidence_protocol.experiment_stage`, `supported_claims`, `unsupported_claims`, `deferred_claims`가 포함된다.
-- `required_evidence_fields`에는 `lifecycle_replay_contract.state_machine_parity`, `shared_decision_helpers`, `missing_runtime_signals`도 포함된다. 구조 실험 결과를 인용할 때 benchmark replay가 운영 loop와 어느 정도 같은 판단 경로를 공유했는지 함께 보존하기 위함이다.
+- `required_evidence_fields`에는 `lifecycle_replay_contract.state_machine_parity`, `shared_decision_helpers`, `replayed_runtime_signals`, `missing_runtime_signals`도 포함된다. 구조 실험 결과를 인용할 때 benchmark replay가 운영 loop와 어느 정도 같은 판단 경로를 공유했고 어떤 runtime 신호를 재계산/누락했는지 함께 보존하기 위함이다.
 - representative corpus의 `required_evidence_fields`에는 `case_summary.representative_metadata.sampling_unit_counts`, `sampling_rule_counts`, `source_log_count`, `review_packet_count`, `expected_final_reviewer_counts`와 `case_summary.representative_review_packet_validation.packet_count`, `ready_packet_count`, `matched_case_count`가 추가된다.
 - benchmark report와 sweep `evidence_summary`의 `lifecycle_bottleneck_summary`로 `stage_replace_deferred`, `stage_queue_revision`, `no_end_marker`, 언어별 under/over-final 잔류를 확인
 - `lifecycle_bottleneck_summary.replacement_decision_counts`, `deferred_replacement_decision_counts`, `quality_block_reason_counts`로 병목 원인별 분포를 확인

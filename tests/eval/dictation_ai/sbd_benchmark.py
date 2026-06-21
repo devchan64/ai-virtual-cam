@@ -86,13 +86,6 @@ def _dispatch_subcommand() -> int | None:
     finally:
         sys.argv = original_argv
 
-
-from tests.eval.dictation_ai.benchmark.sbd_lifecycle_replay import (
-    LifecycleState,
-    _finalize_staged_sentence,
-    _run_lifecycle_case,
-    _stage_completed_sentence,
-)
 def _write_report(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

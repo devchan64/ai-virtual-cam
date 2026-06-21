@@ -152,6 +152,10 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         )
         self.assertIn(
             "stable_analysis.stable_internal_ratio",
+            report["lifecycle_replay_contract"]["replayed_runtime_signals"],
+        )
+        self.assertIn(
+            "audio timestamp latency",
             report["lifecycle_replay_contract"]["missing_runtime_signals"],
         )
         self.assertNotIn("min_final_f1", report["summary"])

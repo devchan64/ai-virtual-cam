@@ -47,10 +47,12 @@ def lifecycle_replay_contract() -> dict[str, object]:
             "structural changes must be rechecked on the full challenge replay with sat+cuda+float16; "
             "changes that depend on runtime-only stability signals are not paper evidence from text replay alone"
         ),
-        "missing_runtime_signals": [
+        "replayed_runtime_signals": [
             "stable_analysis.stable_internal_ratio",
             "stable_analysis.stable_internal_chars",
             "stable_analysis.stable_overlap_source",
+        ],
+        "missing_runtime_signals": [
             "audio timestamp latency",
             "translation request/output linkage",
         ],

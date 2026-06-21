@@ -637,6 +637,9 @@ def render_markdown_summary(payload: dict[str, Any]) -> str:
     missing_runtime_signals = [
         str(item) for item in lifecycle_replay.get("missing_runtime_signals", []) if str(item).strip()
     ]
+    replayed_runtime_signals = [
+        str(item) for item in lifecycle_replay.get("replayed_runtime_signals", []) if str(item).strip()
+    ]
     representative_metadata = dict(case_summary.get("representative_metadata", {}))
     representative_review_packet_validation = dict(case_summary.get("representative_review_packet_validation", {}))
     lines = [
@@ -665,6 +668,7 @@ def render_markdown_summary(payload: dict[str, Any]) -> str:
         f"- lifecycle_state_machine_parity: {lifecycle_replay.get('state_machine_parity', '')}",
         f"- lifecycle_runtime_state_owner: {lifecycle_replay.get('runtime_state_owner', '')}",
         f"- lifecycle_replay_state_owner: {lifecycle_replay.get('replay_state_owner', '')}",
+        f"- lifecycle_replayed_runtime_signals: {', '.join(replayed_runtime_signals)}",
         f"- lifecycle_missing_runtime_signals: {', '.join(missing_runtime_signals)}",
         f"- paper_evidence_requested: {str(evidence_protocol.get('paper_evidence_requested', False)).lower()}",
         f"- paper_evidence: {str(evidence_protocol.get('paper_evidence', False)).lower()}",

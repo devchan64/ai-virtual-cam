@@ -14837,6 +14837,29 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-21 lifecycle replay contract stable signal 정정
+
+문제:
+
+- benchmark replay는 현재 `analyze_stable_window(previous_window_text, window_text, language)`를 호출해 `stable_internal_ratio`, `stable_internal_chars`, `stable_overlap_source`를 계산하고 revision reset/confirmation 판단에 넘긴다.
+- 그러나 `lifecycle_replay_contract()`는 이 세 값을 여전히 `missing_runtime_signals`로 기록하고 있었다.
+- 그 결과 새 evidence summary를 만들 때 text replay가 실제보다 더 많은 runtime signal을 빠뜨리는 것처럼 표시될 수 있었다.
+
+반영:
+
+- `tests/eval/dictation_ai/benchmark/sbd_runtime_contract.py`에 `replayed_runtime_signals`를 추가하고 stable analysis 세 값을 그쪽으로 옮겼다.
+- `missing_runtime_signals`에는 현재 text replay가 여전히 포함하지 않는 `audio timestamp latency`, `translation request/output linkage`만 남겼다.
+- parameter sweep Markdown summary와 complete evidence summary 집계에도 `lifecycle_replayed_runtime_signals`를 노출하도록 했다.
+- `required_evidence_fields`에도 `lifecycle_replay_contract.replayed_runtime_signals`를 추가해 새 report가 이 계약을 필수 문맥으로 보존하도록 했다.
+- `paper_claim_matrix.runtime_loop_equivalence.required_next_evidence`도 stable analysis가 아니라 audio timestamp와 translation request/output linkage를 요구하도록 축약했다.
+- 논문 초안과 실험 프로토콜 문서는 “과거 complete report의 계약”과 “현재 replay 계약”을 구분하도록 정리했다.
+
+해석:
+
+- `state_machine_parity=partial`은 유지한다. stable analysis를 재계산하더라도 text replay는 실제 오디오 시간, 번역 요청/출력 연결, end-to-end latency를 포함하지 않는다.
+- 따라서 현재 변경은 성능 개선 주장이 아니라 evidence report의 계약 정확도를 높이는 정리다.
+- 다음 유효한 성능 근거는 최신 코드로 `sat + cuda + float16` complete report를 다시 생성해 이전 paper-evidence summary와 비교하는 것이다.
+
 ### 2026-06-21 파라미터 sweep 종합과 revision reset 원칙 보강
 
 기존 실제 CUDA/SaT paper-evidence sweep을 다시 확인했다.

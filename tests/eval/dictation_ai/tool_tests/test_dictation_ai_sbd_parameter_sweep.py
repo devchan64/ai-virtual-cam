@@ -686,6 +686,7 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
         self.assertIn("runtime_contract.device", protocol["required_evidence_fields"])
         self.assertIn("lifecycle_replay_contract.state_machine_parity", protocol["required_evidence_fields"])
         self.assertIn("lifecycle_replay_contract.shared_decision_helpers", protocol["required_evidence_fields"])
+        self.assertIn("lifecycle_replay_contract.replayed_runtime_signals", protocol["required_evidence_fields"])
         self.assertIn("lifecycle_replay_contract.missing_runtime_signals", protocol["required_evidence_fields"])
         self.assertIn("evidence_summary.results", protocol["required_evidence_fields"])
         self.assertIn("evidence_summary.adoption_review_counts", protocol["required_evidence_fields"])
@@ -2005,7 +2006,8 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
             "lifecycle_replay_state_owner: tests.eval.dictation_ai.sbd_benchmark.LifecycleState",
             markdown,
         )
-        self.assertIn("lifecycle_missing_runtime_signals: stable_analysis.stable_internal_ratio", markdown)
+        self.assertIn("lifecycle_replayed_runtime_signals: stable_analysis.stable_internal_ratio", markdown)
+        self.assertIn("lifecycle_missing_runtime_signals: audio timestamp latency", markdown)
         self.assertIn("paper_evidence_requested: true", markdown)
         self.assertIn("paper_evidence: true", markdown)
         self.assertIn("paper_evidence_eligible: true", markdown)

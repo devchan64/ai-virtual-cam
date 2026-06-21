@@ -287,6 +287,11 @@ class DictationAiPaperReadinessAuditTest(unittest.TestCase):
                     "lifecycle_replay_contract": {
                         "state_machine_parity": "partial",
                         "shared_decision_helpers": [],
+                        "replayed_runtime_signals": [
+                            "stable_analysis.stable_internal_ratio",
+                            "stable_analysis.stable_internal_chars",
+                            "stable_analysis.stable_overlap_source",
+                        ],
                         "missing_runtime_signals": ["translation request/output linkage"],
                     },
                 },
