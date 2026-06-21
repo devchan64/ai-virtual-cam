@@ -14873,6 +14873,62 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 backend 초기화 fail-fast로 중단됐다.
 - sandbox 밖 CUDA 실행 승인 요청도 현재 환경 정책에서 거부됐다. CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-21 중국어 Christmas market/foreign crowd 구간 누락 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 18:18:30..18:19:06
+chunk=3348..3384 중심
+```
+
+감사 결과:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 18:18:30" --until "2026-06-21 18:19:06" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-zh-christmas-market-181830-181906.json
+```
+
+```text
+stt_raw_line_count=37
+finalize_event_count=8
+finalize_per_stt_raw=0.216
+stage_replace_deferred_count=23
+stage_replace_deferred_per_stt_raw=0.622
+stage_queue_promote_count=8
+stage_queue_promote_per_stt_raw=0.216
+duplicate_suppressed_count=43
+quality_block_count=16
+stage_queue_recent_final_delta_trimmed_count=2
+stage_queue_recent_final_suppressed_count=4
+has_runtime_metadata=false
+```
+
+관측:
+
+- raw window는 `韩国餐/套餐/各式各样的美食`, `nunchucks/goban`, `很多外国人`, `圣诞市集`, `小吃`, `圣诞气息`, `偏贵`, `市集没有什么东西买但有很多小吃` 흐름으로 안정화됐다.
+- 실제 final은 `可是很多都需要。`, `套餐啊还有卖就是各式各样的美食。`, `唐模。`, `它有很多小吃。`처럼 짧거나 앞부분이 잘린 문장이 중심이었다.
+- `duplicate_suppressed_per_stt_raw=1.162`가 높고, open-latin clause가 섞인 stage defer가 발생했다. 이 구간은 라틴 토큰이 섞인 STT 흔들림이 있더라도 안정화된 의미 문장을 final로 소비해야 하는 lifecycle 케이스다.
+- 최신 로그에는 `stage_queue_stale_promote_suppressed` 지표가 없었다. 따라서 현재 실행 중인 앱은 직전 `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS` 패치를 반영한 재시작 상태가 아닌 것으로 본다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-6-20260621.jsonl`에 `zh_log_christmas_market_food_foreigner_missing_final_20260621_001` 케이스를 추가했다.
+- 직전 stale queue 승격 제한 패치의 효과를 재시작 이후 로그/CUDA 벤치에서 확인해야 하므로, 이번 항목에서는 추가 로직 변경을 보류한다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases --max-drafts 0
+case_count=1193, expected_final_case_count=1189, zh=302
+
+./.venv/bin/python -m unittest tests.unit.test_dictation_pipeline_nodes tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle
+Ran 35 tests in 0.006s, OK
+
+git diff --check
+OK
+```
+
 ### 2026-06-21 중국어 가족/사진/옷 걱정 구간 delta/queue 손실 케이스 추가
 
 관측 구간:
