@@ -14750,6 +14750,50 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-21 중국어 Seongsu last-day popup/cafe 구간 지연 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 15:51:45..15:52:43
+chunk=4046..4068 중심
+```
+
+감사 결과:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 15:51:45" --until "2026-06-21 15:52:43" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-zh-155145-155243.json
+```
+
+```text
+stt_raw_line_count=58
+finalize_event_count=11
+finalize_per_stt_raw=0.190
+stage_replace_deferred_count=238
+stage_replace_deferred_per_stt_raw=4.103
+stage_queue_promote_count=25
+stage_queue_promote_per_stt_raw=0.431
+duplicate_suppressed_count=20
+duplicate_suppressed_per_stt_raw=0.345
+quality_block_count=20
+finalize_delta_suppressed_stage_retained_count=2
+finalize_delta_suppressed_stage_dropped_count=2
+stage_queue_recent_final_suppressed_count=6
+```
+
+관측:
+
+- `stage_queue_len=20`까지 커진 뒤 `stage_queue_drop_oldest`가 발생했고, 이후에도 10 전후의 queue가 유지됐다.
+- `今天是四十八小时内的最后一天`, `圣水洞`, `Bruce...超大洞`, `服装美妆店`, `十一点后才开`, `先来吃东西`, `圣水洞旁边的咖啡厅` 흐름이 반복됐지만 stage head가 `八分，吃饱了，吃饱了。`, `接着。` 같은 짧은 후보에 잡혀 뒤 후보가 밀렸다.
+- `stage_replace_deferred_per_stt_raw=4.103`으로 최근 관측 중 높은 편이며, final 비율은 0.190이다.
+- `pub store`는 raw 흔들림으로 보고 기대 문장에는 의미상 `pop-up store`로 정규화했다. 이 케이스의 목적은 STT 원문 정확도 평가가 아니라 반복 window에서 문장 흐름이 final로 소비되는지 확인하는 것이다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-5-20260621.jsonl`에 `zh_log_delayed_seongsu_last_day_popup_cafe_queue_20260621_001` 케이스를 추가했다.
+- 로직 변경은 보류한다. queue head 교체 완화는 중복 확정과 오확정 위험이 있어 CUDA 벤치에서 누적 케이스 개선이 확인될 때만 적용한다.
+
 ### 2026-06-21 중국어 Yeonnam retro cafe/meal 구간 지연 케이스 추가
 
 관측 구간:
