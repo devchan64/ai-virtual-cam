@@ -1131,8 +1131,6 @@ def _compact_recent_final_delta(candidate_words: list[str], recent_words: list[s
         return None
     if candidate_key == recent_key or candidate_key in recent_key:
         return ""
-    if recent_key in candidate_key:
-        return ""
     matcher = SequenceMatcher(None, recent_key, candidate_key, autojunk=False)
     ratio = matcher.ratio()
     max_block = max((block.size for block in matcher.get_matching_blocks()), default=0)

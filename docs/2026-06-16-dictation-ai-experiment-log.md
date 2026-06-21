@@ -14476,3 +14476,25 @@ chunk=111..120
 - `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-3-20260621.jsonl`에 `zh_log_missing_fried_chicken_next_place_terminal_prefix_revision_20260621_001` 케이스를 추가했다.
 - revision 선호 규칙에서 한 후보가 명확한 종결 경계를 가진 prefix 문장이고 기존 후보가 그 뒤에 짧은 tail을 붙여 하나의 문장처럼 만든 경우, 더 긴 문자열보다 종결 경계를 보존한 후보를 우선하도록 보강했다.
 - 이는 문구별 예외가 아니라 terminal-boundary prefix와 짧은 tail 결합으로 인한 sentence destruction을 줄이기 위한 lifecycle 규칙이다.
+
+### 2026-06-21 중국어 stamina/shopping 구간 recent final 내부 delta 보강
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log.1, .tmp/logs/avc-whisper.log
+2026-06-21 14:37:06..14:37:19
+chunk=33..47
+```
+
+관측:
+
+- `所以要先去吃个东西来补充一下体力。`가 먼저 final 확정된 뒤, 후속 window에서 `老夫家累到...所以要先去吃个东西来补充一下体力，也要逛街才有力气。` 형태의 긴 후보가 반복됐다.
+- 최근 final 문장이 새 후보 내부에 포함되자 `candidate_recent_final_delta_trimmed`와 `candidate_duplicate_suppressed`가 반복되어 앞쪽 `老夫家...才站得起来。`와 뒤쪽 `也要逛街才有力气。`가 모두 밀렸다.
+- 원인은 compact recent-final echo 판단이 `recent_key in candidate_key`를 즉시 duplicate로 처리해, 이후의 prefix/suffix delta 회수 규칙까지 도달하지 못한 것이다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-4-20260621.jsonl`에 `zh_log_missing_stamina_shopping_recent_final_internal_delta_20260621_001` 케이스를 추가했다.
+- `_compact_recent_final_delta`에서 `recent_key in candidate_key` 즉시 폐기를 제거했다. 완전 동일하거나 후보가 최근 final 내부에 포함되는 echo 억제는 유지하고, 최근 final이 후보 내부에 포함된 경우는 상세 prefix/suffix 회수 로직이 판단하게 했다.
+- 문구별 예외가 아니라 append-only final 이후 sliding window가 같은 구간을 더 긴 후보로 다시 제시할 때, 새 suffix가 있는지를 구조적으로 판단하기 위한 변경이다.

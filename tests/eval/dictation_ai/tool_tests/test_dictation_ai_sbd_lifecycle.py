@@ -1,6 +1,6 @@
 import unittest
 
-from src.app.dictation_transcript_logic import _prefer_sentence_revision
+from src.app.dictation_transcript_logic import _prefer_sentence_revision, _recent_final_output_delta
 from tests.eval.dictation_ai.sbd_benchmark import LifecycleState, _finalize_staged_sentence, _stage_completed_sentence
 
 
@@ -120,6 +120,15 @@ class DictationAiSbdLifecycleTest(unittest.TestCase):
         self.assertEqual(state.staged_sentence, "全部都是这里这里。")
         self.assertEqual(state.metrics["candidate_recent_final_delta_trimmed"], 1)
         self.assertNotIn("candidate_duplicate_suppressed", state.metrics)
+
+    def test_recent_final_internal_match_can_recover_following_sentence(self) -> None:
+        candidate = "所以要先去吃个东西，来补充一下体力。也要逛街才有力气。"
+        recent = "所以要先去吃个东西来补充一下体力。"
+
+        delta, source = _recent_final_output_delta(candidate, (recent,), "zh")
+
+        self.assertEqual(source, recent)
+        self.assertEqual(delta, "也要逛街才有力气。")
 
     def test_terminal_prefix_revision_wins_over_short_appended_tail(self) -> None:
         preferred = _prefer_sentence_revision(
