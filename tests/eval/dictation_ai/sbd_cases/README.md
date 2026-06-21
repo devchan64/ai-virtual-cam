@@ -1,14 +1,15 @@
 # SBD reviewed benchmark cases
 
-이 디렉터리는 받아쓰기 AI SBD benchmark에 사용할 정식 reviewed case를 둔다.
-모든 benchmark case는 이 디렉터리 아래의 JSONL 파일로 관리한다.
+이 디렉터리는 받아쓰기 AI SBD benchmark에 사용할 정식 reviewed challenge replay case를 둔다.
+현재 파일들은 일반 운영 평균을 대표하는 표본이 아니라, 앱 로그에서 관측된 확정 누락과 중복 확정 같은 실패 구간을 누적한 failure-enriched challenge set이다.
 
 ## 운영 규칙
 
 - JSONL 파일만 benchmark 입력으로 사용한다.
 - 케이스 파일은 `en/`, `ko/`, `zh/` 언어별 하위 디렉터리에 둔다.
 - 각 언어 디렉터리의 파일은 case id 해시 prefix shard인 `reviewed-context-{language}-{hash}.jsonl` 형식을 따른다.
-- `tests/eval/dictation_ai/sbd_benchmark.py`는 이 디렉터리 아래 `*.jsonl`을 재귀적으로 읽는다.
+- `tests/eval/dictation_ai/sbd_benchmark.py`의 기본 입력은 이 디렉터리의 `en/`, `ko/`, `zh/` shard만 읽는다.
+- 대표 운영 품질을 보기 위한 representative corpus는 이 루트 아래에 넣지 않는다. `../sbd_representative_cases/`와 명시적 `--cases` 입력으로 관리해야 challenge 기준선에 섞이지 않는다.
 - `draft_expected_final_required=true`가 남은 draft 파일은 이 디렉터리에 넣지 않는다.
 - 정식 finalization benchmark case의 `chunks`는 실제 STT 컨텍스트 윈도우 처리 결과로 본다.
 - benchmark의 목표는 이 입력에서 문장 경계와 final lifecycle을 산출하고, 그 결과가 확정한 `expected_final`과 충분히 유사한지 평가하는 것이다.
@@ -23,7 +24,7 @@
 - `ko/`: 한국어 STT 컨텍스트 윈도우 reviewed case shard.
 - `zh/`: 중국어 STT 컨텍스트 윈도우 reviewed case shard.
 
-파일명 해시는 케이스를 작은 JSONL shard로 나누기 위한 저장 단위일 뿐 실험 의미를 갖지 않는다. 수집/검토/승격 도구는 폐기되었으므로 새 케이스는 언어별 shard JSONL에 직접 추가한다.
+파일명 해시는 케이스를 작은 JSONL shard로 나누기 위한 저장 단위일 뿐 실험 의미를 갖지 않는다. 수집/검토/승격 도구는 폐기되었으므로 새 challenge case는 언어별 shard JSONL에 직접 추가한다.
 
 ## 검증 예
 

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import glob
 import json
 import sys
 import time
@@ -23,10 +22,6 @@ from src.app.dictation_pipeline_settings import (
     SBD_BENCHMARK_COMPUTE_TYPE,
     SBD_BENCHMARK_DEVICE,
     SBD_BENCHMARK_MODEL,
-    dictation_pipeline_policy,
-    dictation_tuning_manifest,
-    dictation_tuning_protocol,
-    lifecycle_tuning_policy,
     max_staged_sentence_queue,
     no_text_stale_stage_suppress_chunks,
 )
@@ -41,7 +36,6 @@ from src.app.dictation_transcript_logic import (
     _prefer_sentence_revision,
     _recent_final_output_delta,
     _replacement_decision_reason,
-    _revision_similarity_policy,
     _sentence_max_age_chunks,
     _sentence_output_delta,
     _sentence_required_confirmations,
@@ -60,51 +54,14 @@ from src.app.dictation_transcript_logic import (
 )
 from src.app.transcript_revision import append_context as _append_committed_text
 from src.app.transcript_revision import consume_committed_prefix as _consume_committed_prefix
-
-
-SBD_REVIEWED_CASE_DIR = REPO_ROOT / "tests/eval/dictation_ai/sbd_cases"
-SBD_DIAGNOSTIC_TAG_MARKERS = (
-    "audio-residual",
-    "boundary",
-    "cjk-internal-gap",
-    "confirmed",
-    "duplicate",
-    "final",
-    "fragment",
-    "mixed-latin",
-    "missing",
-    "no-end",
-    "no-speech",
-    "no-text",
-    "pending",
-    "premature",
-    "queue",
-    "recent-final",
-    "repeated",
-    "revision",
-    "sentence-destruction",
-    "sliding-window",
-    "speaker-transition",
-    "stage",
-    "staged",
-    "stale",
-    "tail-echo",
-    "terminal-tail",
-    "trailing",
+from tests.eval.dictation_ai.sbd_case_paths import (
+    case_corpus_role as _case_corpus_role,
+    default_case_inputs as _default_case_inputs,
 )
-
-
-@dataclass(frozen=True)
-class SbdCase:
-    id: str
-    language: str
-    chunks: list[str]
-    expected_completed: list[str]
-    expected_pending: str
-    expected_final: list[str]
-    expected_staged: str
-    tags: tuple[str, ...]
-    sentence_finalize_age: int
+from tests.eval.dictation_ai.sbd_case_loader import SbdCase, load_cases as _load_cases
+from tests.eval.dictation_ai.sbd_benchmark_report import build_benchmark_report
+from tests.eval.dictation_ai.sbd_runtime_contract import force_offline_model_cache_env
+from tests.eval.dictation_ai.validate_sbd_case_files import validate_case_files
 
 
 @dataclass
@@ -188,98 +145,6 @@ def _queue_staged_sentence(state: LifecycleState, candidate: str, forced: bool, 
     )
     state.count("stage_queue_enqueue")
     state.count("segment_state_staged")
-
-
-def _iter_case_paths(case_inputs: list[Path]) -> list[Path]:
-    paths: list[Path] = []
-    for case_input in case_inputs:
-        raw = str(case_input)
-        matches = sorted(Path(match) for match in glob.glob(raw))
-        if matches:
-            candidates = matches
-        else:
-            candidates = [case_input]
-        for candidate in candidates:
-            if candidate.is_dir():
-                paths.extend(sorted(candidate.rglob("*.jsonl")))
-            else:
-                paths.append(candidate)
-    unique_paths: list[Path] = []
-    seen: set[Path] = set()
-    for path in paths:
-        resolved = path.resolve()
-        if resolved in seen:
-            continue
-        seen.add(resolved)
-        unique_paths.append(path)
-    if not unique_paths:
-        raise ValueError(f"no SBD benchmark case files matched: {', '.join(str(item) for item in case_inputs)}")
-    missing = [path for path in unique_paths if not path.is_file()]
-    if missing:
-        raise ValueError("SBD benchmark case files not found: " + ", ".join(str(path) for path in missing))
-    return unique_paths
-
-
-def _default_case_inputs() -> list[Path]:
-    if SBD_REVIEWED_CASE_DIR.is_dir() and any(SBD_REVIEWED_CASE_DIR.rglob("*.jsonl")):
-        return [SBD_REVIEWED_CASE_DIR]
-    return []
-
-
-def _load_case_file(path: Path) -> list[SbdCase]:
-    cases: list[SbdCase] = []
-    with path.open("r", encoding="utf-8") as handle:
-        for line_no, raw_line in enumerate(handle, start=1):
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
-                continue
-            payload = json.loads(line)
-            case_id = str(payload.get("id") or f"{path.name}:{line_no}").strip()
-            chunks = payload.get("chunks")
-            if chunks is None:
-                chunks = [payload.get("text", "")]
-            normalized_chunks = [normalized_text(chunk) for chunk in chunks]
-            if not any(normalized_chunks):
-                raise ValueError(f"{path}:{line_no} case {case_id!r} has no text chunks")
-            if bool(payload.get("draft_expected_final_required", False)):
-                raise ValueError(
-                    f"{path}:{line_no} case {case_id!r} is a draft case. "
-                    "Review source logs and fill expected_final before using it in the benchmark."
-                )
-            cases.append(
-                SbdCase(
-                    id=case_id,
-                    language=str(payload.get("language", "")).strip().lower() or "en",
-                    chunks=normalized_chunks,
-                    expected_completed=[normalized_text(item) for item in payload.get("expected_completed", [])],
-                    expected_pending=normalized_text(str(payload.get("expected_pending", ""))),
-                    expected_final=[normalized_text(item) for item in payload.get("expected_final", [])],
-                    expected_staged=normalized_text(str(payload.get("expected_staged", ""))),
-                    tags=tuple(str(tag).strip() for tag in payload.get("tags", []) if str(tag).strip()),
-                    sentence_finalize_age=int(payload.get("sentence_finalize_age", 3)),
-                )
-            )
-    if not cases:
-        raise ValueError(f"no SBD benchmark cases loaded from {path}")
-    return cases
-
-
-def _load_cases(case_inputs: list[Path]) -> tuple[list[SbdCase], list[str]]:
-    cases: list[SbdCase] = []
-    sources: list[str] = []
-    seen_ids: dict[str, str] = {}
-    for path in _iter_case_paths(case_inputs):
-        loaded = _load_case_file(path)
-        for case in loaded:
-            previous = seen_ids.get(case.id)
-            if previous is not None:
-                raise ValueError(f"duplicate SBD benchmark case id {case.id!r}: {previous} and {path}")
-            seen_ids[case.id] = str(path)
-            cases.append(case)
-        sources.append(str(path))
-    if not cases:
-        raise ValueError("no SBD benchmark cases loaded")
-    return cases, sources
 
 
 def _boundary_offsets(sentences: list[str]) -> set[int]:
@@ -386,88 +251,6 @@ def _score_sequence(expected: list[str], actual: list[str]) -> dict[str, Any]:
         "match_min_similarity": FINAL_SENTENCE_MATCH_MIN_SIMILARITY,
         "exact": actual_normalized == expected_normalized,
     }
-
-
-def _average_scores(results: list[dict[str, Any]], key: str) -> dict[str, float]:
-    if not results:
-        return {"precision": 0.0, "recall": 0.0, "f1": 0.0, "similarity_coverage": 0.0}
-    return {
-        "precision": sum(float(result[key]["precision"]) for result in results) / len(results),
-        "recall": sum(float(result[key]["recall"]) for result in results) / len(results),
-        "f1": sum(float(result[key]["f1"]) for result in results) / len(results),
-        "similarity_coverage": sum(float(result[key].get("similarity_coverage", 0.0)) for result in results)
-        / len(results),
-    }
-
-
-def _summarize_result_group(group_results: list[dict[str, Any]]) -> dict[str, Any]:
-    final_score_avg = _average_scores(group_results, "final_score")
-    final_boundary_score_avg = _average_scores(group_results, "final_boundary_score")
-    completed_last_score_avg = _average_scores(group_results, "completed_last_score")
-    metrics_total: dict[str, int] = {}
-    for result in group_results:
-        for key, value in dict(result.get("metrics", {})).items():
-            metrics_total[key] = metrics_total.get(key, 0) + int(value)
-    stage_start = metrics_total.get("stage_start", 0)
-    finalized = metrics_total.get("finalized", 0)
-    return {
-        "case_count": len(group_results),
-        "case_exact_match": sum(1 for result in group_results if result["case_exact_match"]),
-        "pending_exact_match": sum(1 for result in group_results if result["pending_exact"]),
-        "staged_exact_match": sum(1 for result in group_results if result["staged_exact"]),
-        "finalized": finalized,
-        "stage_start": stage_start,
-        "finalized_per_stage_start": finalized / max(stage_start, 1),
-        "final_precision_avg": final_score_avg["precision"],
-        "final_recall_avg": final_score_avg["recall"],
-        "final_f1_avg": final_score_avg["f1"],
-        "final_similarity_coverage_avg": final_score_avg["similarity_coverage"],
-        "final_boundary_precision_avg": final_boundary_score_avg["precision"],
-        "final_boundary_recall_avg": final_boundary_score_avg["recall"],
-        "final_boundary_f1_avg": final_boundary_score_avg["f1"],
-        "completed_last_precision_avg": completed_last_score_avg["precision"],
-        "completed_last_recall_avg": completed_last_score_avg["recall"],
-        "completed_last_f1_avg": completed_last_score_avg["f1"],
-        "staged_residue_count": sum(
-            1
-            for result in group_results
-            if result["actual_staged"] or result["actual_staged_queue"]
-        ),
-        "empty_final_count": sum(
-            1
-            for result in group_results
-            if result["expected_final"] and not result["actual_final"]
-        ),
-        "expected_boundary_zero_count": sum(
-            1
-            for result in group_results
-            if result["expected_final"] and float(result["final_boundary_score"]["f1"]) == 0.0
-        ),
-        "metrics": metrics_total,
-    }
-
-
-def _summarize_results_by_language(results: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for result in results:
-        language = str(result.get("language") or "unknown")
-        grouped.setdefault(language, []).append(result)
-    return {language: _summarize_result_group(grouped[language]) for language in sorted(grouped)}
-
-
-def _is_diagnostic_tag(tag_name: str) -> bool:
-    return any(marker in tag_name for marker in SBD_DIAGNOSTIC_TAG_MARKERS)
-
-
-def _summarize_results_by_tag(results: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for result in results:
-        for tag in result.get("tags", []):
-            tag_name = str(tag).strip()
-            if not tag_name or not _is_diagnostic_tag(tag_name):
-                continue
-            grouped.setdefault(tag_name, []).append(result)
-    return {tag: _summarize_result_group(grouped[tag]) for tag in sorted(grouped)}
 
 
 def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str, chunk_index: int) -> list[str]:
@@ -915,7 +698,7 @@ def main() -> int:
         default=_default_case_inputs(),
         help=(
             "One or more JSONL files, directories containing JSONL files, or glob patterns. "
-            "By default, reviewed sbd_cases/**/*.jsonl files are loaded."
+            "By default, reviewed challenge sbd_cases/{en,ko,zh}/*.jsonl files are loaded."
         ),
     )
     parser.add_argument("--model", default=SBD_BENCHMARK_MODEL)
@@ -923,15 +706,26 @@ def main() -> int:
     parser.add_argument("--compute-type", default=SBD_BENCHMARK_COMPUTE_TYPE)
     parser.add_argument("--output", type=Path, default=REPO_ROOT / ".tmp/eval/dictation-ai-sbd/latest.json")
     parser.add_argument(
+        "--review-packets",
+        type=Path,
+        default=None,
+        help="For representative cases, validate review_packet_id/source_log/language links before writing the report.",
+    )
+    parser.add_argument(
         "--fail-on-regression",
         action="store_true",
-        help="Exit non-zero when final F1 average is below --min-final-f1.",
+        help="Optional local guard: exit non-zero when final F1 average is below --min-final-f1.",
     )
     parser.add_argument("--min-final-f1", type=float, default=0.0)
     parser.add_argument("--min-pass-rate", type=float, default=None, help=argparse.SUPPRESS)
     args = parser.parse_args()
     _validate_real_ai_cuda_args(args)
+    force_offline_model_cache_env()
 
+    corpus_role = _case_corpus_role(args.cases)
+    case_validation_summary = (
+        validate_case_files(args.cases, review_packets=args.review_packets) if args.review_packets is not None else None
+    )
     cases, case_sources = _load_cases(args.cases)
     detector = create_sentence_boundary_detector(
         SBD_BENCHMARK_BACKEND,
@@ -979,75 +773,51 @@ def main() -> int:
             }
         )
 
-    exact_match_count = sum(1 for result in results if result["case_exact_match"])
-    pending_exact_count = sum(1 for result in results if result["pending_exact"])
-    staged_exact_count = sum(1 for result in results if result["staged_exact"])
-    finalized = metric_totals.get("finalized", 0)
-    stage_start = metric_totals.get("stage_start", 0)
-    final_score_avg = _average_scores(results, "final_score")
-    final_boundary_score_avg = _average_scores(results, "final_boundary_score")
-    completed_last_score_avg = _average_scores(results, "completed_last_score")
-    language_summary = _summarize_results_by_language(results)
-    tag_summary = _summarize_results_by_tag(results)
-    report = {
-        "backend": SBD_BENCHMARK_BACKEND,
-        "model": args.model,
-        "device": args.device,
-        "compute_type": args.compute_type,
-        "case_sources": case_sources,
-        "dictation_pipeline_policy": dictation_pipeline_policy(),
-        "lifecycle_tuning_policy": lifecycle_tuning_policy(),
-        "dictation_tuning_protocol": dictation_tuning_protocol(),
-        "dictation_tuning_manifest": dictation_tuning_manifest(),
-        "revision_similarity_policy": _revision_similarity_policy(),
-        "case_count": len(results),
-        "elapsed_ms": round((time.perf_counter() - started) * 1000.0, 3),
-        "summary": {
-            "case_exact_match": exact_match_count,
-            "pending_exact_match": pending_exact_count,
-            "staged_exact_match": staged_exact_count,
-            "min_final_f1": args.min_final_f1,
-            "finalized": finalized,
-            "stage_start": stage_start,
-            "finalized_per_stage_start": finalized / max(stage_start, 1),
-            "final_precision_avg": final_score_avg["precision"],
-            "final_recall_avg": final_score_avg["recall"],
-            "final_f1_avg": final_score_avg["f1"],
-            "final_similarity_coverage_avg": final_score_avg["similarity_coverage"],
-            "final_boundary_precision_avg": final_boundary_score_avg["precision"],
-            "final_boundary_recall_avg": final_boundary_score_avg["recall"],
-            "final_boundary_f1_avg": final_boundary_score_avg["f1"],
-            "completed_last_precision_avg": completed_last_score_avg["precision"],
-            "completed_last_recall_avg": completed_last_score_avg["recall"],
-            "completed_last_f1_avg": completed_last_score_avg["f1"],
-            "stage_revision": metric_totals.get("stage_revision", 0),
-            "stage_replace": metric_totals.get("stage_replace", 0),
-            "stage_replaced_unconfirmed": metric_totals.get("stage_replaced_unconfirmed", 0),
-            "pending_overrun": metric_totals.get("pending_overrun", 0),
-        },
-        "language_summary": language_summary,
-        "tag_summary": tag_summary,
-        "metrics": metric_totals,
-        "cases": results,
-    }
+    report = build_benchmark_report(
+        args=args,
+        case_sources=case_sources,
+        corpus_role=corpus_role,
+        cases=cases,
+        results=results,
+        metric_totals=metric_totals,
+        elapsed_ms=(time.perf_counter() - started) * 1000.0,
+        representative_review_packet_validation=(
+            dict(case_validation_summary.get("representative_review_packet_validation", {}))
+            if case_validation_summary is not None
+            else None
+        ),
+    )
+    summary = dict(report["summary"])
+    evidence_protocol = dict(report.get("evidence_protocol", {}))
     _write_report(args.output, report)
     print(
         "[dictation-ai-sbd-benchmark] "
-        f"cases={len(results)} finalized={finalized} "
-        f"stage_start={stage_start} finalized_per_stage_start={finalized / max(stage_start, 1):.3f} "
-        f"final_precision_avg={final_score_avg['precision']:.3f} final_recall_avg={final_score_avg['recall']:.3f} "
-        f"final_f1_avg={final_score_avg['f1']:.3f} "
-        f"final_similarity_coverage_avg={final_score_avg['similarity_coverage']:.3f} "
-        f"final_boundary_f1_avg={final_boundary_score_avg['f1']:.3f} "
-        f"case_exact_match={exact_match_count} "
-        f"pending_exact_match={pending_exact_count} "
-        f"staged_exact_match={staged_exact_count} "
+        f"corpus_role={corpus_role} cases={len(results)} finalized={summary['finalized']} "
+        f"claim_scope_key={evidence_protocol.get('claim_scope_key', '')} "
+        f"stage_start={summary['stage_start']} "
+        f"finalized_per_stage_start={summary['finalized_per_stage_start']:.3f} "
+        f"final_precision_avg={summary['final_precision_avg']:.3f} "
+        f"final_recall_avg={summary['final_recall_avg']:.3f} "
+        f"final_f1_avg={summary['final_f1_avg']:.3f} "
+        f"final_similarity_coverage_avg={summary['final_similarity_coverage_avg']:.3f} "
+        f"final_boundary_f1_avg={summary['final_boundary_f1_avg']:.3f} "
+        f"case_exact_match={summary['case_exact_match']} "
+        f"pending_exact_match={summary['pending_exact_match']} "
+        f"staged_exact_match={summary['staged_exact_match']} "
         f"output={args.output}"
     )
-    if args.fail_on_regression and final_score_avg["f1"] < args.min_final_f1:
+    if args.fail_on_regression and summary["final_f1_avg"] < args.min_final_f1:
         return 1
     return 0
 
 
+def cli_main() -> int:
+    try:
+        return main()
+    except (ValueError, RuntimeError) as exc:
+        print(f"[dictation-ai-sbd-benchmark] error: {exc}", file=sys.stderr)
+        return 1
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(cli_main())

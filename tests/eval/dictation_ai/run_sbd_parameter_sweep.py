@@ -22,6 +22,15 @@ from src.app.dictation_pipeline_settings import (
     dictation_tuning_manifest,
     dictation_tuning_protocol,
 )
+from tests.eval.dictation_ai.sbd_case_paths import build_evidence_protocol, corpus_interpretation
+from tests.eval.dictation_ai.sbd_parameter_sweep_report import (
+    METRIC_KEYS,
+    attach_baseline_deltas,
+    build_evidence_summary,
+    missing_required_evidence_fields,
+    render_markdown_summary,
+)
+from tests.eval.dictation_ai.sbd_runtime_contract import OFFLINE_MODEL_ENV, lifecycle_replay_contract, runtime_contract
 from tests.eval.dictation_ai.validate_sbd_case_files import enforce_case_thresholds, validate_case_files
 
 
@@ -29,25 +38,6 @@ DEFAULT_CASES = (
     Path("tests/eval/dictation_ai/sbd_cases"),
 )
 DEFAULT_OUTPUT_DIR = Path(".tmp/eval/dictation-ai-sbd/parameter-sweeps")
-METRIC_KEYS = (
-    "final_precision_avg",
-    "final_recall_avg",
-    "final_f1_avg",
-    "final_boundary_f1_avg",
-    "finalized_per_stage_start",
-)
-LANGUAGE_MARKDOWN_KEYS = (
-    "final_precision_avg",
-    "final_recall_avg",
-    "final_f1_avg",
-    "final_boundary_f1_avg",
-    "staged_residue_count",
-    "empty_final_count",
-)
-TAG_MARKDOWN_KEYS = LANGUAGE_MARKDOWN_KEYS
-TAG_MARKDOWN_MAX_ROWS = 40
-
-
 @dataclass(frozen=True)
 class SweepParameter:
     name: str
@@ -172,159 +162,30 @@ def _load_report_summary(job: SweepJob) -> dict[str, Any]:
     return {
         "label": job.label,
         "output": str(job.output),
+        "corpus_role": report.get("corpus_role", "unknown"),
         "case_count": report.get("case_count"),
         "env_overrides": job.env_overrides,
         "metrics": {key: summary.get(key) for key in METRIC_KEYS},
         "language_summary": report.get("language_summary", {}),
         "tag_summary": report.get("tag_summary", {}),
+        "lifecycle_bottleneck_summary": report.get("lifecycle_bottleneck_summary", {}),
+        "staged_queue_residue_summary": report.get("staged_queue_residue_summary", {}),
+        "queue_residue_strata_summary": report.get("queue_residue_strata_summary", {}),
+        "evidence_strata_summary": report.get("evidence_strata_summary", {}),
+        "case_exemplar_summary": report.get("case_exemplar_summary", {}),
     }
 
 
-def _numeric_delta(current: Any, baseline: Any) -> float | None:
-    if isinstance(current, bool) or isinstance(baseline, bool):
-        return None
-    if not isinstance(current, (int, float)) or not isinstance(baseline, (int, float)):
-        return None
-    return float(current) - float(baseline)
-
-
-def _attach_baseline_deltas(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    baseline = next((result for result in results if not result.get("env_overrides")), None)
-    if baseline is None:
-        return results
-    baseline_metrics = dict(baseline.get("metrics", {}))
-    baseline_languages = dict(baseline.get("language_summary", {}))
-    baseline_tags = dict(baseline.get("tag_summary", {}))
-    updated: list[dict[str, Any]] = []
-    for result in results:
-        item = dict(result)
-        metric_deltas: dict[str, float] = {}
-        for key, value in dict(result.get("metrics", {})).items():
-            delta = _numeric_delta(value, baseline_metrics.get(key))
-            if delta is not None:
-                metric_deltas[key] = delta
-        language_deltas: dict[str, dict[str, float]] = {}
-        for language, language_summary in dict(result.get("language_summary", {})).items():
-            baseline_summary = baseline_languages.get(language, {})
-            if not isinstance(language_summary, dict) or not isinstance(baseline_summary, dict):
-                continue
-            deltas: dict[str, float] = {}
-            for key, value in language_summary.items():
-                delta = _numeric_delta(value, baseline_summary.get(key))
-                if delta is not None:
-                    deltas[key] = delta
-            language_deltas[language] = deltas
-        item["metric_deltas"] = metric_deltas
-        item["language_deltas"] = language_deltas
-        tag_deltas: dict[str, dict[str, float]] = {}
-        for tag, tag_summary in dict(result.get("tag_summary", {})).items():
-            baseline_summary = baseline_tags.get(tag, {})
-            if not isinstance(tag_summary, dict) or not isinstance(baseline_summary, dict):
-                continue
-            deltas = {}
-            for key, value in tag_summary.items():
-                delta = _numeric_delta(value, baseline_summary.get(key))
-                if delta is not None:
-                    deltas[key] = delta
-            tag_deltas[tag] = deltas
-        item["tag_deltas"] = tag_deltas
-        updated.append(item)
-    return updated
-
-
-def _format_markdown_number(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, bool):
-        return str(value).lower()
-    if isinstance(value, int):
-        return str(value)
-    if isinstance(value, float):
-        return f"{value:.4f}"
-    return str(value)
-
-
-def _format_markdown_delta(value: Any) -> str:
-    if not isinstance(value, (int, float)) or isinstance(value, bool):
-        return ""
-    if abs(float(value)) < 0.00005:
-        return "+0.0000"
-    return f"{float(value):+.4f}"
-
-
-def render_markdown_summary(payload: dict[str, Any]) -> str:
-    lines = [
-        "# Dictation AI SBD Parameter Sweep",
-        "",
-        f"- dry_run: {str(payload.get('dry_run', False)).lower()}",
-        f"- jobs: {len(payload.get('jobs', []))}",
-        "",
-        "## Overall Metrics",
-        "",
-        "| label | env | " + " | ".join(METRIC_KEYS) + " |",
-        "| --- | --- | " + " | ".join("---:" for _ in METRIC_KEYS) + " |",
-    ]
-    results = list(payload.get("results", []))
-    for result in results:
-        metrics = dict(result.get("metrics", {}))
-        deltas = dict(result.get("metric_deltas", {}))
-        env = ", ".join(f"{key}={value}" for key, value in dict(result.get("env_overrides", {})).items()) or "baseline"
-        cells = []
-        for key in METRIC_KEYS:
-            value = _format_markdown_number(metrics.get(key))
-            delta = _format_markdown_delta(deltas.get(key))
-            cells.append(f"{value} ({delta})" if delta else value)
-        lines.append(f"| {result.get('label', '')} | {env} | " + " | ".join(cells) + " |")
-
-    lines.extend(
-        [
-            "",
-            "## Language Metrics",
-            "",
-            "| label | language | " + " | ".join(LANGUAGE_MARKDOWN_KEYS) + " |",
-            "| --- | --- | " + " | ".join("---:" for _ in LANGUAGE_MARKDOWN_KEYS) + " |",
-        ]
-    )
-    for result in results:
-        language_summary = dict(result.get("language_summary", {}))
-        language_deltas = dict(result.get("language_deltas", {}))
-        for language in sorted(language_summary):
-            summary = dict(language_summary.get(language, {}))
-            deltas = dict(language_deltas.get(language, {}))
-            cells = []
-            for key in LANGUAGE_MARKDOWN_KEYS:
-                value = _format_markdown_number(summary.get(key))
-                delta = _format_markdown_delta(deltas.get(key))
-                cells.append(f"{value} ({delta})" if delta else value)
-            lines.append(f"| {result.get('label', '')} | {language} | " + " | ".join(cells) + " |")
-
-    lines.extend(
-        [
-            "",
-            "## Tag Metrics",
-            "",
-            "| label | tag | " + " | ".join(TAG_MARKDOWN_KEYS) + " |",
-            "| --- | --- | " + " | ".join("---:" for _ in TAG_MARKDOWN_KEYS) + " |",
-        ]
-    )
-    for result in results:
-        tag_summary = dict(result.get("tag_summary", {}))
-        tag_deltas = dict(result.get("tag_deltas", {}))
-        ordered_tags = sorted(
-            tag_summary,
-            key=lambda tag: (-int(dict(tag_summary.get(tag, {})).get("case_count", 0)), tag),
-        )[:TAG_MARKDOWN_MAX_ROWS]
-        for tag in ordered_tags:
-            summary = dict(tag_summary.get(tag, {}))
-            deltas = dict(tag_deltas.get(tag, {}))
-            cells = []
-            for key in TAG_MARKDOWN_KEYS:
-                value = _format_markdown_number(summary.get(key))
-                delta = _format_markdown_delta(deltas.get(key))
-                cells.append(f"{value} ({delta})" if delta else value)
-            lines.append(f"| {result.get('label', '')} | {tag} | " + " | ".join(cells) + " |")
-    lines.append("")
-    return "\n".join(lines)
+def _parameter_axes_from_jobs(jobs: list[SweepJob]) -> list[str]:
+    prefix = "AVC_DICTATION_"
+    axes: set[str] = set()
+    for job in jobs:
+        for env_name in job.env_overrides:
+            if env_name.startswith(prefix):
+                axes.add(env_name[len(prefix) :])
+            else:
+                axes.add(env_name)
+    return sorted(axes)
 
 
 def validate_sweep_case_set(
@@ -332,19 +193,56 @@ def validate_sweep_case_set(
     *,
     paper_evidence: bool,
     min_expected_final_cases: int | None,
+    review_packets: Path | None = None,
 ) -> dict[str, object]:
-    summary = validate_case_files(cases, allow_drafts=False)
+    summary = validate_case_files(cases, allow_drafts=False, review_packets=review_packets)
+    corpus_role = str(summary.get("corpus_role", "unknown"))
+    if paper_evidence and corpus_role == "exploratory":
+        raise ValueError(
+            "--paper-evidence requires a challenge-replay or representative corpus; "
+            "use exploratory mode without --paper-evidence for ad-hoc case inputs"
+        )
+    if paper_evidence and corpus_role == "representative" and min_expected_final_cases is None:
+        raise ValueError(
+            "--paper-evidence with representative corpus requires explicit --min-expected-final-cases; "
+            "representative operating sample size is not shared with the challenge-replay target"
+        )
+    if paper_evidence and corpus_role == "representative" and review_packets is None:
+        raise ValueError(
+            "--paper-evidence with representative corpus requires --review-packets so source packet traceability "
+            "is verified before using the result as paper evidence"
+        )
     min_expected = min_expected_final_cases
-    if paper_evidence and min_expected is None:
+    if paper_evidence and corpus_role == "challenge-replay" and min_expected is None:
         min_expected = PAPER_EVIDENCE_REVIEWED_FINALIZATION_CASE_TARGET
     enforce_case_thresholds(summary, min_expected_final_cases=min_expected, max_drafts=0)
     return summary
 
 
+def validate_sweep_execution_contract(
+    *,
+    paper_evidence: bool,
+    include_baseline: bool,
+    parameters: tuple[SweepParameter, ...],
+) -> None:
+    if not paper_evidence:
+        return
+    if paper_evidence and not include_baseline:
+        raise ValueError("--paper-evidence requires --include-baseline so all deltas use the same case set baseline")
+    parameter_axes = {parameter.name for parameter in parameters}
+    if len(parameter_axes) > 1:
+        raise ValueError(
+            "--paper-evidence requires one parameter axis per sweep; "
+            f"got: {', '.join(sorted(parameter_axes))}"
+        )
+
+
 def run_job(job: SweepJob, *, dry_run: bool = False) -> None:
     env = os.environ.copy()
+    env.update(OFFLINE_MODEL_ENV)
     env.update(job.env_overrides)
-    prefix = " ".join(f"{key}={shlex.quote(value)}" for key, value in sorted(job.env_overrides.items()))
+    command_env = {**OFFLINE_MODEL_ENV, **job.env_overrides}
+    prefix = " ".join(f"{key}={shlex.quote(value)}" for key, value in sorted(command_env.items()))
     command = shlex.join(job.argv)
     if prefix:
         command = f"{prefix} {command}"
@@ -355,9 +253,19 @@ def run_job(job: SweepJob, *, dry_run: bool = False) -> None:
     subprocess.run(job.argv, cwd=REPO_ROOT, env=env, check=True)
 
 
-def build_summary_payload(jobs: list[SweepJob], *, dry_run: bool) -> dict[str, Any]:
+def build_summary_payload(
+    jobs: list[SweepJob],
+    *,
+    dry_run: bool,
+    paper_evidence: bool = False,
+    case_summary: dict[str, object] | None = None,
+) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "dry_run": dry_run,
+        "case_summary": case_summary or {},
+        "parameter_axes": _parameter_axes_from_jobs(jobs),
+        "runtime_contract": runtime_contract(),
+        "lifecycle_replay_contract": lifecycle_replay_contract(),
         "tuning_protocol": dictation_tuning_protocol(),
         "tuning_manifest": dictation_tuning_manifest(),
         "jobs": [
@@ -371,13 +279,38 @@ def build_summary_payload(jobs: list[SweepJob], *, dry_run: bool) -> dict[str, A
         ],
     }
     if not dry_run:
-        payload["results"] = _attach_baseline_deltas([_load_report_summary(job) for job in jobs])
+        payload["results"] = attach_baseline_deltas([_load_report_summary(job) for job in jobs])
+        payload["evidence_summary"] = build_evidence_summary(payload["results"])
+        corpus_roles = sorted({str(result.get("corpus_role", "unknown")) for result in payload["results"]})
+        payload["corpus_roles"] = corpus_roles
+    else:
+        payload["corpus_roles"] = [str((case_summary or {}).get("corpus_role", "unknown"))]
+    payload["evidence_protocol"] = build_evidence_protocol(
+        case_summary=case_summary,
+        corpus_roles=list(payload.get("corpus_roles", [])),
+        paper_evidence=paper_evidence and not dry_run,
+    )
+    payload["evidence_protocol"]["paper_evidence_requested"] = paper_evidence
+    payload["evidence_protocol"]["dry_run"] = dry_run
+    payload["evidence_protocol"]["missing_required_evidence_fields"] = missing_required_evidence_fields(payload)
     return payload
 
 
-def write_summary(path: Path, jobs: list[SweepJob], *, dry_run: bool) -> dict[str, Any]:
+def write_summary(
+    path: Path,
+    jobs: list[SweepJob],
+    *,
+    dry_run: bool,
+    paper_evidence: bool = False,
+    case_summary: dict[str, object] | None = None,
+) -> dict[str, Any]:
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = build_summary_payload(jobs, dry_run=dry_run)
+    payload = build_summary_payload(
+        jobs,
+        dry_run=dry_run,
+        paper_evidence=paper_evidence,
+        case_summary=case_summary,
+    )
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return payload
 
@@ -415,15 +348,27 @@ def main() -> int:
         default=None,
         help="Optional reviewed finalization case threshold. --paper-evidence defaults this to the protocol target.",
     )
+    parser.add_argument(
+        "--review-packets",
+        type=Path,
+        default=None,
+        help="For representative paper evidence, validate case review_packet_id/source_log/language links.",
+    )
     args = parser.parse_args()
 
     parameters = tuple(parse_sweep_parameter(raw) for raw in args.param)
     if not parameters and not args.include_baseline:
         raise ValueError("at least one --param or --include-baseline is required")
+    validate_sweep_execution_contract(
+        paper_evidence=args.paper_evidence,
+        include_baseline=args.include_baseline,
+        parameters=parameters,
+    )
     case_summary = validate_sweep_case_set(
         tuple(args.cases),
         paper_evidence=args.paper_evidence,
         min_expected_final_cases=args.min_expected_final_cases,
+        review_packets=args.review_packets,
     )
     jobs = build_sweep_jobs(
         python=sys.executable,
@@ -434,14 +379,25 @@ def main() -> int:
     )
     for job in jobs:
         run_job(job, dry_run=args.dry_run)
-    summary_payload = write_summary(args.summary_output, jobs, dry_run=args.dry_run)
+    summary_payload = write_summary(
+        args.summary_output,
+        jobs,
+        dry_run=args.dry_run,
+        paper_evidence=args.paper_evidence,
+        case_summary=case_summary,
+    )
     if args.markdown_output is not None:
         write_markdown_summary(args.markdown_output, summary_payload)
+    evidence_protocol = dict(summary_payload.get("evidence_protocol", {}))
     print(
         "[dictation-ai-sbd-parameter-sweep] "
+        f"corpus_role={case_summary.get('corpus_role', 'unknown')} "
         f"case_count={case_summary['case_count']} "
         f"expected_final_case_count={case_summary['expected_final_case_count']} "
-        f"paper_evidence={args.paper_evidence}",
+        f"claim_scope_key={evidence_protocol.get('claim_scope_key', '')} "
+        f"paper_evidence_requested={evidence_protocol.get('paper_evidence_requested', args.paper_evidence)} "
+        f"paper_evidence={evidence_protocol.get('paper_evidence', False)} "
+        f"paper_evidence_eligible={evidence_protocol.get('paper_evidence_eligible', False)}",
         flush=True,
     )
     print(f"[dictation-ai-sbd-parameter-sweep] summary={args.summary_output}", flush=True)
@@ -451,4 +407,15 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except ValueError as exc:
+        print(f"[dictation-ai-sbd-parameter-sweep] error: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+    except subprocess.CalledProcessError as exc:
+        print(
+            f"[dictation-ai-sbd-parameter-sweep] error: job failed with exit_code={exc.returncode}: "
+            f"{shlex.join(exc.cmd) if isinstance(exc.cmd, (list, tuple)) else exc.cmd}",
+            file=sys.stderr,
+        )
+        raise SystemExit(exc.returncode)

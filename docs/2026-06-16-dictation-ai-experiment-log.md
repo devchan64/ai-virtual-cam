@@ -5085,3 +5085,7723 @@ staged_exact_match=406
 - `stage-queue`, `cjk-internal-gap`, `no-end-marker` 태그는 전체 boundary F1보다 낮아, 다음 파라미터/로직 검토에서 우선 관찰할 실패군이다.
 - `missing-final`과 `stage-queue`는 케이스 수와 staged residue가 모두 커서 평균값을 크게 좌우한다.
 - 이 지표는 태그별 corpus가 겹칠 수 있으므로 독립 표본의 평균으로 해석하지 않는다. 같은 케이스가 여러 실패 증상을 가질 수 있고, 목적은 파라미터 변경 시 어떤 실패 증상군이 움직였는지 관찰하는 것이다.
+
+### 2026-06-21 실험 설계와 결과 해석 재정리
+
+누적된 실험을 종합하면 현재 1113건 paper-evidence case set은 일반 발화 품질을 대표하는 benchmark가 아니라, 확정 누락과 중복 확정이 반복된 로그 구간을 모은 failure-enriched challenge set으로 보는 것이 타당하다. 이 판단은 실험 설계를 약화하는 것이 아니라, 논문에서 주장할 수 있는 범위를 명확히 하는 정리다.
+
+현재 설계가 지지하는 주장:
+
+- 실시간 STT 후처리 품질은 raw STT 정확도만으로 설명되지 않는다.
+- `raw STT`, `SBD 후보`, `revision lifecycle`, `final-only sink`는 서로 다른 실패 축이므로 분리 계측해야 한다.
+- `final_f1_avg=0.483`과 `final_boundary_f1_avg=0.108`의 큰 차이는 내용 회수와 문장 경계 품질이 다른 문제임을 보여준다.
+- `SENTENCE_CONFIRM_CHUNKS`, `SHORT_NO_END_FRAGMENT_UNITS`, `MAX_STAGED_SENTENCE_QUEUE` 주변값 sweep은 단일 threshold 조정이 안정적인 개선축이 아님을 보여준다.
+- `REVISION_FALLBACK_COVERAGE_MIN=0.55`처럼 채택 가능한 값도 전체 평균, 언어별 delta, 실패 증상 태그별 delta가 같은 방향을 지지할 때만 기본값으로 반영할 수 있다.
+
+현재 설계가 지지하지 못하는 주장:
+
+- 일반 사용자 입력 전체에서의 평균 품질.
+- STT backend 자체의 WER/CER 개선.
+- 번역 BLEU 또는 번역 만족도 개선.
+- 실제 오디오 지연 시간 개선.
+- SaT 또는 특정 SBD 모델 단독의 우수성.
+
+참조 논문과의 연결:
+
+- Whisper-Streaming은 확정 prefix와 미확정 hypothesis를 분리해야 한다는 직접 비교 기준이다. 현재 실험은 이를 문장 final event와 final-only 번역 sink까지 확장한 engineering case study로 해석한다.
+- incremental ASR 평가 문헌은 WER 외에 latency, update/revoke, 안정성 지표를 봐야 한다는 근거다. 현재 `final_f1`, `final_boundary_f1`, replacement churn, staged residue, duplicate suppression 지표는 이 방향과 맞지만, 실제 latency 측정은 아직 부족하다.
+- SaT와 streaming punctuation 문헌은 regex/ad-hoc 분할 대신 모델 기반 SBD 후보와 bounded right-context 신호를 쓰는 배경이다. 다만 현재 낮은 boundary F1은 SaT 후보를 곧바로 final로 쓰면 안 된다는 근거이기도 하다.
+- Rao et al.의 speech translation segmentation 연구는 번역 단위가 downstream 품질에 영향을 줄 수 있다는 비교 근거로만 사용한다. 현재 실험은 번역 품질을 직접 측정하지 않았으므로, final-only sink가 번역 BLEU를 개선한다고 주장하지 않는다.
+
+실험 방법 재구성 판단:
+
+- 기존 1113건 집합은 폐기하지 않고 `challenge replay corpus`로 유지한다.
+- 이 corpus의 목적은 회귀 감지, 실패 유형별 파라미터 채택/기각, lifecycle counter 해석이다.
+- 논문 주장을 일반화하려면 별도의 `representative corpus`가 필요하다. 이 집합은 운영 로그에서 시간 구간 또는 세션 단위로 층화 추출하고, 실패 태그가 많은 구간만 골라서는 안 된다.
+- 가능하면 representative corpus에는 동일 오디오 replay, 사람이 작성한 참조 전사, final event timestamp를 연결해 latency, deletion, duplicate insertion, translation-side churn을 함께 평가한다.
+- challenge corpus와 representative corpus의 평균 점수는 섞지 않는다. 전자는 어려운 실패 케이스에서의 개선 방향을, 후자는 운영 평균 품질을 설명한다.
+
+재구성한 실험 질문:
+
+| 질문 | 사용할 corpus | 우선 지표 | 현재 판단 |
+| --- | --- | --- | --- |
+| 흔들리는 STT 가설에서 final-only 입력을 안정화할 수 있는가? | challenge replay | final precision/recall/F1, duplicate suppression, staged residue | 현재 1113건으로 비교 가능하다. 개선은 같은 case set 전후 비교만 의미가 있다. |
+| 내용 회수와 문장 경계가 독립적으로 실패하는가? | challenge replay, representative | final F1, final boundary F1, no-end/stage-queue tag delta | 현재 수치가 독립 실패를 지지한다. boundary 개선은 별도 목표로 유지해야 한다. |
+| 파라미터 변경이 일반 개선인가 특정 실패군 보상인가? | challenge replay | metric/language/tag delta, lifecycle counter | tag summary 추가 후 판단 가능하다. 전체 평균만으로 채택하지 않는다. |
+| 운영 평균 품질을 주장할 수 있는가? | representative | duplicate insertion, deletion, latency, final event rate | 아직 corpus가 없으므로 주장하지 않는다. |
+| final-only sink가 번역 안정성을 높이는가? | representative + translation output | translation churn, duplicate translation, delayed translation | 현재는 동기와 계약만 주장한다. 번역 품질 개선 주장은 후속 실험 필요. |
+
+실행 규칙:
+
+- challenge replay 실험은 실패 증상별 튜닝과 회귀 추적에만 사용한다.
+- representative 실험은 실패 태그가 많은 구간을 의도적으로 고르지 않고, 시간/세션/언어 기준으로 표본을 분리한다.
+- 두 corpus의 평균은 한 표에서 섞지 않는다.
+- 파라미터 채택은 challenge replay에서 실패군 악화가 없는지 먼저 보고, representative corpus가 준비되면 운영 평균 악화 여부를 추가 확인한다.
+
+논문 반영 방향:
+
+- `pass_rate`는 계속 제외한다.
+- 최신 1113건 수치는 “일반 성능”이 아니라 “실패 중심 challenge set 기준선”으로 표기한다.
+- 결과 해석은 최고 점수보다 채택/기각 근거를 중심으로 정리한다.
+- 후속 실험은 새 threshold를 추가하기보다, 현재 지표가 실제 사용 목적을 충분히 설명하는지 먼저 보강한다.
+
+### 2026-06-21 challenge corpus 기본 입력 범위 고정
+
+실험 설계를 challenge replay corpus와 representative corpus로 분리하기로 했으므로, 기본 벤치 입력이 representative 후보를 실수로 포함하지 않도록 로딩 범위를 정리했다.
+
+변경:
+
+- `tests/eval/dictation_ai/sbd_benchmark.py`의 기본 입력은 `sbd_cases/{en,ko,zh}/*.jsonl`만 읽는다.
+- `tests/eval/dictation_ai/validate_sbd_case_files.py`도 `sbd_cases` 루트가 입력되면 같은 언어별 challenge shard만 검증한다.
+- `tests/eval/dictation_ai/sbd_cases/README.md`에 이 디렉터리가 failure-enriched challenge set이며 representative corpus를 같은 루트 아래에 두지 않는다고 명시했다.
+- representative corpus의 위치는 `tests/eval/dictation_ai/sbd_representative_cases/`로 둔다. 현재는 README만 두고 case는 추가하지 않는다.
+- `sbd_benchmark.py` 결과 JSON과 stdout에 `corpus_role`을 남긴다. 기본 challenge 루트는 `challenge-replay`, representative 루트는 `representative`, 그 외 명시 입력은 `exploratory`로 해석한다.
+- parameter sweep summary도 각 job의 `corpus_role`을 보존해 challenge 평균과 representative 평균을 섞어 읽지 않게 한다.
+- case path와 corpus role 판정은 `tests/eval/dictation_ai/sbd_case_paths.py`로 분리했다. benchmark와 validator가 같은 로딩 기준을 공유한다.
+- 진단 태그 marker는 `tests/eval/dictation_ai/sbd_diagnostic_tags.py`로 분리해 benchmark 본문이 lifecycle 실행과 scoring 책임에 집중하게 했다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_case_files.py \
+  tests/eval/dictation_ai/sbd_cases \
+  --min-expected-final-cases 1000 \
+  --max-drafts 0
+```
+
+결과:
+
+```text
+case_count=1113
+expected_final_case_count=1109
+draft_count=0
+language_counts={en: 429, ko: 462, zh: 222}
+```
+
+실제 CUDA/SaT baseline 재검증:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/challenge-scope-baseline.json
+```
+
+결과:
+
+```text
+corpus_role=challenge-replay
+cases=1113
+finalized=4012
+stage_start=5638
+finalized_per_stage_start=0.712
+final_precision_avg=0.602
+final_recall_avg=0.440
+final_f1_avg=0.483
+final_similarity_coverage_avg=0.393
+final_boundary_f1_avg=0.108
+case_exact_match=17
+pending_exact_match=602
+staged_exact_match=406
+```
+
+판단:
+
+- 기존 challenge 기준선의 케이스 수는 유지됐다.
+- 실제 `sat + cuda + float16` 벤치에서도 기존 1113건 기준선 metric이 재현됐다.
+- 대표 운영 품질을 위한 future representative corpus는 `tests/eval/dictation_ai/sbd_representative_cases/`와 명시적 `--cases` 입력으로만 실행해야 한다.
+- dry-run parameter sweep summary에도 `case_summary.corpus_role=challenge-replay`와 `corpus_roles=[challenge-replay]`가 남는 것을 확인했다. 따라서 실행 전 sweep 계획 파일만 보아도 challenge/representative 해석 범위를 확인할 수 있다.
+- parameter sweep stdout에도 `corpus_role`을 출력하도록 정리했다. 장시간 반복 실행 로그만 남아도 해당 수치가 challenge replay인지 representative 표본인지 구분할 수 있다.
+
+### 2026-06-21 representative corpus 수집 기준 보강
+
+challenge replay corpus는 실패 중심 회귀/튜닝 자료이고, representative corpus는 운영 평균 추정 자료다. 두 corpus의 선택 기준이 다르므로 representative README에 표본 단위와 metadata 기준을 추가했다.
+
+정리:
+
+- 표본 단위는 사람이 발견한 실패 구간이 아니라 운영 로그의 연속 시간 구간 또는 세션 구간이다.
+- 표본 선택은 fixed interval, session window, deterministic hash sampling처럼 재현 가능한 규칙을 기록해야 한다.
+- 각 case에는 `corpus_role=representative`, `sampling_unit`, `sampling_rule`, `source_log`, `source_started_at`, `source_ended_at`을 남긴다.
+- representative case도 `expected_final`은 사람이 확정해야 하며, draft는 논문 수치에 포함하지 않는다.
+- challenge replay에서 이미 쓰인 실패 구간을 그대로 복사하지 않는다. 같은 로그가 포함되더라도 representative sampling rule로 선택된 구간이어야 한다.
+
+판단:
+
+- 아직 representative case는 추가하지 않았다.
+- 현재 논문의 일반 운영 품질 주장은 여전히 보류한다.
+- 후속으로 representative corpus를 만들 때는 `.tmp/logs/avc-whisper.log.*` 같은 운영 로그에서 언어/시간/세션 기준 표본을 추출하고, challenge replay와 별도 summary로 실행해야 한다.
+- `validate_sbd_case_files.py`가 representative root를 감지하면 `corpus_role=representative`, `sampling_unit`, `sampling_rule`, `source_log`, `source_started_at`, `source_ended_at`와 비어 있지 않은 `expected_final`을 검증하도록 보강했다.
+- 빈 representative root를 명시 검증하면 `no SBD case files matched` 오류로 실패한다. CLI는 traceback 대신 `[dictation-ai-sbd-case-validator] error: ...` 한 줄로 실패 원인을 출력하도록 정리했다.
+- representative root 아래 JSONL shard를 직접 입력해도 `corpus_role=representative`로 판정해 같은 metadata 검증을 적용한다. challenge shard도 직접 입력 시 `challenge-replay`로 판정한다.
+- `sbd_benchmark.py`도 representative case를 직접 로드할 때 같은 metadata와 비어 있지 않은 `expected_final`을 검증한다. 따라서 validator를 우회해 benchmark를 실행해도 representative corpus 계약이 유지된다.
+- benchmark case loader는 `tests/eval/dictation_ai/sbd_case_loader.py`로 분리했다. 이로써 `sbd_benchmark.py`는 1000라인 이하를 유지하면서 lifecycle replay/scoring 책임에 집중한다.
+- `sbd_benchmark.py` CLI도 `ValueError` 실패를 traceback 대신 `[dictation-ai-sbd-benchmark] error: ...` 한 줄로 출력한다. 빈 representative root와 CPU/float32 실행 거부를 이 방식으로 확인했다.
+- `run_sbd_parameter_sweep.py` CLI도 입력 검증 실패와 하위 benchmark 실패를 `[dictation-ai-sbd-parameter-sweep] error: ...` 한 줄로 출력한다. 빈 representative 입력과 범위를 벗어난 parameter override에서 traceback이 제거되는 것을 확인했다.
+- parameter sweep Markdown summary 헤더에도 `corpus_role`, `case_count`, `expected_final_case_count`, `draft_count`를 출력한다. 실험일지나 논문 초안에 Markdown 표를 붙일 때 case set 전제가 함께 보이게 하기 위한 변경이다.
+
+### 2026-06-21 실험 설계 유효성 재검토
+
+지금까지의 로그 수집, 1113건 challenge replay, 파라미터 sweep, reference 논문 검토를 종합하면 현재 실험 설계는 "운영 평균 품질 측정"이 아니라 "실패 재현 기반 lifecycle 튜닝"으로 해석할 때 유효하다.
+
+판단:
+
+- `tests/eval/dictation_ai/sbd_cases/`의 1113건은 failure-enriched challenge replay다. 확정 누락, 중복 확정, boundary mismatch, staged residue를 반복 재현하는 데 의미가 있다.
+- 이 corpus의 `final_f1_avg=0.483`, `final_boundary_f1_avg=0.108`은 제품 전체 평균 품질이나 STT 모델 정확도가 아니다. 어려운 실패 케이스에서 lifecycle 정책이 어느 정도 내용을 회수하고 경계를 맞추는지 보는 기준선이다.
+- 참조 논문과 직접 맞닿는 부분은 partial hypothesis/final 분리, incremental ASR에서 update/revoke와 latency를 함께 봐야 한다는 문제 설정, 모델 기반 SBD 후보 생성이다.
+- 현재 자료만으로 번역 BLEU 개선, 사용자 만족도, 일반 운영 평균 품질, raw STT backend 우열을 주장하면 근거가 부족하다.
+- 파라미터 실험은 단일 평균 개선보다 언어별 `language_summary`, 증상별 `tag_summary`, lifecycle counter의 trade-off를 함께 봐야 한다. 특히 전체 final F1이 오르더라도 중국어 precision이나 주요 실패군 boundary F1이 크게 낮아지면 기본값 채택 근거가 약하다.
+
+재구성 방향:
+
+1. 현재 challenge replay corpus는 유지한다. 목적은 실패군 회귀, 보수적 파라미터 비교, lifecycle counter 해석이다.
+2. 일반 운영 품질을 주장하려면 `tests/eval/dictation_ai/sbd_representative_cases/`에 별도 representative corpus를 만든다. 표본은 실패 관측 기준이 아니라 시간 구간, 세션 구간, deterministic hash sampling 같은 재현 가능한 선택 규칙이어야 한다.
+3. 논문 결과표는 challenge replay와 representative 결과를 섞지 않는다. challenge 결과는 "어려운 실패 입력에서의 회수/경계/잔류", representative 결과는 "운영 평균 추정"으로 해석한다.
+4. 후속 번역 안정성 주장은 final event timestamp와 번역 output replay가 붙은 뒤에만 시도한다.
+5. 실험방법을 재구성하더라도 현재의 핵심 가설은 유지한다. 가설은 "raw STT 정확도 개선"이 아니라 "흔들리는 STT partial을 사람이 속기하듯 보류하고, 반복 관측된 문장 단위만 final-only 번역 입력으로 소비하면 중복/누락 trade-off를 계측하고 줄일 수 있다"이다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest discover -s tests/unit -p 'test_dictation_ai_sbd_*.py'
+```
+
+결과:
+
+```text
+Ran 35 tests in 0.010s
+OK
+```
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_case_files.py \
+  tests/eval/dictation_ai/sbd_cases \
+  --min-expected-final-cases 1000 \
+  --max-drafts 0
+```
+
+결과:
+
+```text
+case_count=1113
+corpus_role=challenge-replay
+draft_count=0
+expected_final_case_count=1109
+language_counts={en: 429, ko: 462, zh: 222}
+```
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --dry-run \
+  --paper-evidence \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/design-review-dry-run \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/design-review-dry-run/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/design-review-dry-run/summary.md
+```
+
+결과:
+
+```text
+corpus_role=challenge-replay
+case_count=1113
+expected_final_case_count=1109
+paper_evidence=True
+```
+
+실제 CUDA/SaT baseline 재검증:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/design-review-challenge-baseline.json
+```
+
+결과:
+
+```text
+corpus_role=challenge-replay
+cases=1113
+finalized=4012
+stage_start=5638
+finalized_per_stage_start=0.712
+final_precision_avg=0.602
+final_recall_avg=0.440
+final_f1_avg=0.483
+final_similarity_coverage_avg=0.393
+final_boundary_f1_avg=0.108
+case_exact_match=17
+pending_exact_match=602
+staged_exact_match=406
+```
+
+판단:
+
+- 현재 문서화한 실험 재구성 방향은 실제 도구 출력과 일치한다.
+- challenge replay corpus는 검증 도구, sweep dry-run, 실제 CUDA benchmark 모두에서 `corpus_role=challenge-replay`로 표시된다.
+- 따라서 현재 기준선은 일반 운영 평균이 아니라 실패 재현 기반 lifecycle 튜닝 기준선으로 해석해야 한다는 문서 판단을 유지한다.
+
+### 2026-06-21 revision fallback coverage 주변값 재검증
+
+실험 목적:
+
+- `REVISION_FALLBACK_COVERAGE_MIN=0.55` 기본값이 우연한 단일 실행 결과인지, 주변값에서도 유지되는지 실제 `sat + cuda + float16` sweep으로 재확인한다.
+- 이 값은 특정 언어/문구 예외가 아니라, 새 후보가 기존 staged/final 후보와 같은 발화 구간으로 볼 수 있는지 판단하는 일반 revision lifecycle 축이다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --paper-evidence \
+  --param REVISION_FALLBACK_COVERAGE_MIN=0.50 \
+  --param REVISION_FALLBACK_COVERAGE_MIN=0.60 \
+  --param REVISION_FALLBACK_COVERAGE_MIN=0.70 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/revision-fallback-coverage-review \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/revision-fallback-coverage-review/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/revision-fallback-coverage-review/summary.md
+```
+
+전체 결과:
+
+| 조건 | precision | recall | final F1 | boundary F1 | finalized/stage |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| baseline 0.55 | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+| 0.50 | 0.5949 | 0.4378 | 0.4796 | 0.1095 | 0.7176 |
+| 0.60 | 0.5974 | 0.4348 | 0.4781 | 0.1092 | 0.7045 |
+| 0.70 | 0.5942 | 0.4295 | 0.4736 | 0.1094 | 0.6908 |
+
+언어별 delta:
+
+| 조건 | en final F1 | ko final F1 | zh final F1 | 주요 잔류 변화 |
+| --- | ---: | ---: | ---: | --- |
+| 0.50 | -0.0004 | -0.0069 | -0.0030 | ko empty final +3 |
+| 0.60 | -0.0013 | -0.0082 | -0.0062 | en staged residue +9, ko empty final +6 |
+| 0.70 | -0.0117 | -0.0090 | -0.0070 | en staged residue +19, ko empty final +7 |
+
+주요 실패 태그 delta:
+
+| 조건 | missing-final F1 | stage-queue F1 | cjk-internal-gap F1 | duplicate-final F1 | no-end-marker F1 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 0.50 | -0.0038 | -0.0042 | -0.0046 | -0.0020 | -0.0023 |
+| 0.60 | -0.0054 | -0.0059 | -0.0063 | -0.0011 | -0.0016 |
+| 0.70 | -0.0093 | -0.0093 | -0.0094 | -0.0067 | -0.0079 |
+
+판단:
+
+- 0.50은 finalized/stage를 올리고 일부 staged residue를 줄이지만 precision과 final F1을 낮춘다. 더 쉽게 revision fallback을 허용하면 false final 위험이 증가하는 방향으로 해석한다.
+- 0.60과 0.70은 더 엄격해질수록 recall과 final F1이 떨어지고 staged residue/empty final이 늘어난다. 특히 0.70은 `boundary-mismatch`와 `staged-residue` 태그에서도 큰 F1 하락을 만든다.
+- 주변값 모두 기본값 0.55보다 전체 final F1이 낮고, 세 언어 final F1도 모두 하락했다.
+- 따라서 `REVISION_FALLBACK_COVERAGE_MIN=0.55`는 현재 challenge replay corpus에서 유지할 근거가 재확인됐다.
+- 이 결과는 단일 confirmation age 조정보다 “같은 발화 구간인지 판단하는 revision lifecycle 유사도 축”이 현재 실험 설계에서 의미 있는 파라미터라는 가설을 지지한다.
+
+### 2026-06-21 parameter sweep Markdown 해석 범위 표시
+
+revision fallback coverage sweep을 해석하는 과정에서 JSON/Markdown summary만 보고도 해당 결과가 challenge replay인지 representative sample인지 즉시 확인할 필요가 있었다. 전체 평균 수치가 일반 운영 평균처럼 오해되면 논문 근거 해석이 흔들리므로, sweep Markdown 헤더에 corpus 해석 문구를 추가했다.
+
+변경:
+
+- `run_sbd_parameter_sweep.py`의 Markdown summary 헤더에 `interpretation` 필드를 추가했다.
+- challenge replay 입력은 `failure-enriched challenge replay baseline`으로 표시한다.
+- representative 입력이 준비되면 같은 필드가 representative 해석을 표시한다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_sbd_parameter_sweep
+```
+
+결과:
+
+```text
+Ran 11 tests in 0.002s
+OK
+```
+
+dry-run 확인:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --dry-run \
+  --paper-evidence \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/interpretation-dry-run \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/interpretation-dry-run/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/interpretation-dry-run/summary.md
+```
+
+Markdown 헤더:
+
+```text
+- corpus_role: challenge-replay
+- case_count: 1113
+- expected_final_case_count: 1109
+- draft_count: 0
+- interpretation: failure-enriched challenge replay baseline
+```
+
+판단:
+
+- 반복 sweep 결과를 실험일지나 논문 초안에 붙일 때, corpus 해석 범위가 수치와 함께 남는다.
+- 이 변경은 점수를 개선하지는 않지만, 실험 결과를 잘못 일반화하는 위험을 줄인다.
+
+### 2026-06-21 parameter sweep evidence summary 추가
+
+문제:
+
+- `summary.json`은 전체 `tag_summary`와 `tag_deltas`를 모두 포함하므로 수만 줄까지 커질 수 있다.
+- 논문 근거 정리에서는 매번 별도 스크립트로 전체 metric, 언어별 delta, 핵심 실패 태그 delta만 다시 추출해야 했다.
+- 이 과정이 반복되면 같은 실험을 해도 사람이 다른 열을 골라 해석하는 문제가 생길 수 있다.
+
+변경:
+
+- `run_sbd_parameter_sweep.py` summary payload에 `evidence_summary`를 추가했다.
+- full `results`, `language_summary`, `tag_summary`는 그대로 유지한다.
+- `evidence_summary`는 다음만 축약해서 담는다.
+  - 전체 metric과 baseline delta
+  - 언어별 핵심 delta
+  - `missing-final`, `stage-queue`, `cjk-internal-gap`, `duplicate-final`, `no-end-marker`, `boundary-mismatch`, `staged-residue` 핵심 태그 delta
+
+검증:
+
+```text
+./.venv/bin/python -m unittest discover -s tests/unit -p 'test_dictation_ai_sbd_*.py'
+```
+
+결과:
+
+```text
+Ran 36 tests in 0.010s
+OK
+```
+
+기존 revision fallback coverage sweep 결과에 적용:
+
+```text
+keys= ['key_tags', 'language_keys', 'metric_keys', 'results']
+key_tags= missing-final,stage-queue,cjk-internal-gap,duplicate-final,no-end-marker,boundary-mismatch,staged-residue
+baseline 0.0 ['en', 'ko', 'zh']
+revision_fallback_coverage_min-0.50 -0.0036025633925111378 ['en', 'ko', 'zh']
+revision_fallback_coverage_min-0.60 -0.005125221653705048 ['en', 'ko', 'zh']
+revision_fallback_coverage_min-0.70 -0.0096197641595554 ['en', 'ko', 'zh']
+```
+
+판단:
+
+- 이후 sweep을 반복할 때 논문/실험일지용 핵심 근거는 `evidence_summary`에서 바로 추출한다.
+- 전체 태그 분석이 필요하면 기존 full `tag_summary`와 `tag_deltas`를 계속 사용한다.
+- 이 변경은 파라미터 성능을 바꾸지 않고, 반복 실험의 해석 일관성을 높인다.
+
+### 2026-06-21 evidence summary 실제 CUDA sweep 검증
+
+`evidence_summary`는 dry-run에서는 생성되지 않고 실제 benchmark report가 있을 때 의미가 있다. 따라서 실제 `sat + cuda + float16` 경로에서 baseline과 `REVISION_FALLBACK_COVERAGE_MIN=0.50`만 비교하는 최소 sweep을 실행해 새 summary 구조를 검증했다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --paper-evidence \
+  --param REVISION_FALLBACK_COVERAGE_MIN=0.50 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/evidence-summary-real-check \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/evidence-summary-real-check/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/evidence-summary-real-check/summary.md
+```
+
+결과:
+
+```text
+baseline:
+  final_f1_avg=0.4832
+  final_precision_avg=0.6019
+  final_recall_avg=0.4399
+  final_boundary_f1_avg=0.1077
+
+REVISION_FALLBACK_COVERAGE_MIN=0.50:
+  final_f1_avg=0.4796
+  final_precision_avg=0.5949
+  final_recall_avg=0.4378
+  final_boundary_f1_avg=0.1095
+```
+
+`evidence_summary` 확인:
+
+```text
+has_evidence_summary= True
+metric_keys= ['final_precision_avg', 'final_recall_avg', 'final_f1_avg', 'final_boundary_f1_avg', 'finalized_per_stage_start']
+key_tags= ['missing-final', 'stage-queue', 'cjk-internal-gap', 'duplicate-final', 'no-end-marker', 'boundary-mismatch', 'staged-residue']
+baseline 0.0 ['en', 'ko', 'zh'] ['boundary-mismatch', 'cjk-internal-gap', 'duplicate-final', 'missing-final', 'no-end-marker']
+revision_fallback_coverage_min-0.50 -0.0036025633925111378 ['en', 'ko', 'zh'] ['boundary-mismatch', 'cjk-internal-gap', 'duplicate-final', 'missing-final', 'no-end-marker']
+```
+
+Markdown 헤더도 다음처럼 corpus 해석 범위를 포함했다.
+
+```text
+- dry_run: false
+- jobs: 2
+- corpus_roles: challenge-replay
+- corpus_role: challenge-replay
+- case_count: 1113
+- expected_final_case_count: 1109
+- draft_count: 0
+- interpretation: failure-enriched challenge replay baseline
+```
+
+판단:
+
+- 실제 CUDA/SaT sweep에서도 `evidence_summary`가 생성된다.
+- 기존 full `tag_summary`를 보존하면서 논문 근거용 핵심 delta를 작게 확인할 수 있다.
+- `REVISION_FALLBACK_COVERAGE_MIN=0.50`은 이번 최소 재검증에서도 baseline 0.55보다 final F1, precision, recall이 낮아 기본값 변경 근거가 없다.
+
+### 2026-06-21 Markdown evidence summary section 추가
+
+`evidence_summary`가 JSON에는 생성되지만, 사람이 읽는 `summary.md`에서는 여전히 full tag table을 내려가야 핵심 태그 delta를 확인할 수 있었다. 반복 실험과 논문 정리를 위해 Markdown에도 compact evidence section을 추가했다.
+
+변경:
+
+- `summary.md`의 `Overall Metrics` 뒤에 `Evidence Summary` 섹션을 추가했다.
+- baseline의 0 delta 행은 제외하고, 실제 parameter override job만 표시한다.
+- 첫 표는 전체 final F1/precision/recall/boundary F1 delta를 보여준다.
+- 두 번째 표는 핵심 실패 태그의 final F1/precision/recall/staged residue/empty final delta를 보여준다.
+- full `Language Metrics`와 `Tag Metrics`는 그대로 유지한다.
+
+재렌더링 예:
+
+```text
+## Evidence Summary
+
+| label | env | final_f1_delta | precision_delta | recall_delta | boundary_f1_delta |
+| revision_fallback_coverage_min-0.50 | AVC_DICTATION_REVISION_FALLBACK_COVERAGE_MIN=0.50 | -0.0036 | -0.0071 | -0.0021 | +0.0017 |
+
+| label | tag | final_f1_delta | precision_delta | recall_delta | staged_residue_delta | empty_final_delta |
+| revision_fallback_coverage_min-0.50 | missing-final | -0.0038 | -0.0073 | -0.0022 | -4.0000 | +3.0000 |
+| revision_fallback_coverage_min-0.50 | stage-queue | -0.0042 | -0.0076 | -0.0028 | -5.0000 | +3.0000 |
+| revision_fallback_coverage_min-0.50 | cjk-internal-gap | -0.0046 | -0.0078 | -0.0033 | -4.0000 | +3.0000 |
+```
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_sbd_parameter_sweep
+```
+
+결과:
+
+```text
+Ran 12 tests in 0.001s
+OK
+```
+
+### 2026-06-21 실험 프로토콜 문서 분리
+
+검토 배경:
+
+- 실험일지에는 반복 sweep과 해석 기록이 누적되어 있고, 논문 초안에는 요약된 방법론만 필요하다.
+- challenge replay, representative corpus, evidence summary, adoption review의 해석 규칙이 여러 위치에 반복되면 후속 실험에서 기준이 흔들릴 수 있다.
+
+변경:
+
+- [받아쓰기 AI 실험 프로토콜](2026-06-21-dictation-ai-experiment-protocol.md)을 추가했다.
+- 이 문서에 corpus 역할, representative metadata, CUDA 실행 규칙, 지표 해석, 파라미터 채택 기준, 외부 문헌 사용 범위, 후속 실험 우선순위를 고정했다.
+- 논문 초안과 `AGENTS.md`에서 이 프로토콜을 참조하도록 연결했다.
+
+판단:
+
+- 현재 실험 설계는 운영 평균 품질 측정이 아니라 failure-enriched challenge replay를 통한 lifecycle trade-off 분석으로 해석할 때 유효하다.
+- 논문은 이 제한된 범위 안에서만 주장하고, representative corpus와 final timestamp/translation output replay가 준비되기 전까지 일반 운영 평균, 번역 품질, 실제 지연 개선은 주장하지 않는다.
+
+### 2026-06-21 paper evidence 입력 검증 강화
+
+검토 배경:
+
+- 실험 프로토콜은 논문 근거용 sweep이 `challenge-replay` 또는 `representative` corpus에서만 수행되어야 한다고 정의한다.
+- 기존 도구는 케이스 수 조건만 만족하면 임시 `exploratory` 입력도 `--paper-evidence`로 실행될 여지가 있었다.
+- 빈 case 디렉터리도 validator API에서는 0건 summary로 반환될 수 있어, 대표 corpus 준비 상태를 오해할 수 있었다.
+
+변경:
+
+- `run_sbd_parameter_sweep.py`의 `--paper-evidence` 모드에서 `corpus_role=exploratory` 입력을 거부하도록 했다.
+- `validate_sbd_case_files.py`는 매칭된 JSONL case 파일이 없으면 즉시 실패한다.
+- 단위 테스트에 exploratory paper-evidence 거부와 빈 case 입력 거부를 추가했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest discover -s tests/unit -p 'test_dictation_ai_sbd_*.py'
+```
+
+결과:
+
+```text
+Ran 40 tests in 0.012s
+OK
+```
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --dry-run \
+  --paper-evidence \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/protocol-dry-run \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/protocol-dry-run/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/protocol-dry-run/summary.md
+```
+
+결과:
+
+```text
+corpus_role=challenge-replay
+case_count=1113
+expected_final_case_count=1109
+paper_evidence=True
+```
+
+판단:
+
+- 논문 근거용 결과가 challenge replay, representative, exploratory 사이에서 섞이는 위험을 줄였다.
+- representative corpus는 아직 비어 있으므로, 대표 운영 평균은 계속 주장하지 않는다.
+
+### 2026-06-21 sweep evidence protocol payload 추가
+
+검토 배경:
+
+- Markdown summary에는 corpus 해석이 보이지만, JSON summary를 후처리하거나 논문 표로 옮길 때 같은 해석 범위가 구조화되어 남아야 한다.
+- 특히 challenge replay 결과를 운영 평균처럼 해석하지 않도록, 결과 파일 안에 근거 사용 범위와 제한을 함께 저장할 필요가 있다.
+
+변경:
+
+- `run_sbd_parameter_sweep.py` summary payload에 `evidence_protocol`을 추가했다.
+- 이 payload는 `paper_evidence`, `paper_evidence_eligible`, `corpus_role`, `corpus_interpretation`, `evidence_use`, `limitations`, `required_followup`을 포함한다.
+- Markdown summary 헤더도 `evidence_use`, `paper_evidence`, `paper_evidence_eligible`을 출력한다.
+- 실험 프로토콜 문서에 `evidence_protocol` 확인 규칙을 추가했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_sbd_parameter_sweep
+```
+
+결과:
+
+```text
+Ran 15 tests in 0.002s
+OK
+```
+
+판단:
+
+- 이후 sweep summary JSON만 보아도 해당 결과가 논문 근거로 사용 가능한지, 어떤 범위로 해석해야 하는지 확인할 수 있다.
+- 이 변경은 benchmark metric이나 lifecycle 로직을 바꾸지 않고, 실험 결과 해석의 재현성을 높인다.
+
+### 2026-06-21 benchmark report evidence protocol 공유
+
+검토 배경:
+
+- parameter sweep summary뿐 아니라 개별 `sbd_benchmark.py` report도 논문/실험일지에 직접 인용될 수 있다.
+- benchmark report에 corpus role만 있고 사용 범위/제한이 없으면 challenge replay 결과를 운영 평균처럼 해석할 여지가 남는다.
+
+변경:
+
+- `evidence_protocol` 생성 로직을 `sbd_case_paths.py` 공용 함수로 옮겼다.
+- `run_sbd_parameter_sweep.py`와 `sbd_benchmark.py`가 같은 `evidence_protocol`을 사용한다.
+- `sbd_benchmark.py`의 report payload 생성을 `_build_benchmark_report`로 분리해 evidence protocol 포함 여부를 단위 테스트로 검증할 수 있게 했다.
+- 이후 report summary/evidence protocol 책임을 `tests/eval/dictation_ai/sbd_benchmark_report.py`로 분리해 `sbd_benchmark.py`를 lifecycle replay 실행 책임에 가깝게 줄였다.
+- 개별 benchmark report에는 `paper_evidence=false`, `paper_evidence_corpus_eligible=true/false`가 함께 기록된다. 이는 corpus는 논문 근거 후보일 수 있지만, sweep gate와 threshold 검증을 통과했다는 뜻은 아니라는 구분이다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_sbd_benchmark_report
+```
+
+결과:
+
+```text
+Ran 3 tests in 0.000s
+OK
+```
+
+실제 CUDA/SaT benchmark 확인:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/protocol-benchmark-report.json
+```
+
+결과:
+
+```text
+corpus_role=challenge-replay
+cases=1113
+finalized=4012
+stage_start=5638
+finalized_per_stage_start=0.712
+final_precision_avg=0.602
+final_recall_avg=0.440
+final_f1_avg=0.483
+final_similarity_coverage_avg=0.393
+final_boundary_f1_avg=0.108
+case_exact_match=17
+pending_exact_match=602
+staged_exact_match=406
+```
+
+report 확인:
+
+```text
+evidence_protocol.paper_evidence=false
+evidence_protocol.paper_evidence_corpus_eligible=true
+evidence_protocol.paper_evidence_eligible=false
+evidence_protocol.evidence_use=failure replay lifecycle trade-off analysis
+```
+
+판단:
+
+- 개별 benchmark JSON과 sweep JSON의 해석 문구가 같은 기준으로 유지된다.
+- 논문 근거로 승격할 때는 개별 benchmark report만 보지 않고 case threshold 검증 또는 `--paper-evidence` sweep summary를 함께 확인해야 한다.
+
+### 2026-06-21 evidence summary adoption review count 추가
+
+검토 배경:
+
+- `adoption_review`는 후보별 검토 상태를 표시하지만, 한 sweep 안에서 `review-risk` 후보가 몇 개인지는 별도 집계가 없었다.
+- 반복 실험에서는 후보별 표와 함께 sweep 전체의 위험 후보 수를 바로 확인할 필요가 있다.
+
+변경:
+
+- `evidence_summary.adoption_review_counts`를 추가했다.
+- baseline은 집계에서 제외하고 env override가 있는 비교 job만 센다.
+- Markdown `Evidence Summary`에 `adoption_review | count` 표를 추가했다.
+
+기존 sentence confirmation 실제 CUDA sweep 재생성:
+
+```text
+.tmp/eval/dictation-ai-sbd/parameter-sweeps/sentence-confirm-evidence-review/summary-with-adoption-counts.json
+.tmp/eval/dictation-ai-sbd/parameter-sweeps/sentence-confirm-evidence-review/summary-with-adoption-counts.md
+```
+
+핵심 출력:
+
+| adoption_review | count |
+| --- | ---: |
+| review-risk | 2 |
+
+판단:
+
+- `SENTENCE_CONFIRM_CHUNKS=1`과 `3`은 모두 `review-risk`다.
+- 이 집계는 기본값 유지/변경을 자동 결정하지 않는다.
+- 다만 sentence confirmation sweep 전체가 안전한 후보를 찾은 것이 아니라, 두 비교 후보 모두 추가 설명이 필요한 위험 신호를 가진다는 점을 명확히 보여준다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_sbd_parameter_sweep
+```
+
+결과:
+
+```text
+Ran 12 tests in 0.002s
+OK
+```
+
+### 2026-06-21 주요 sweep adoption review 재해석
+
+검토 배경:
+
+- `adoption_review_counts`를 추가한 뒤, 기존 실제 CUDA sweep 결과를 새 형식으로 다시 해석했다.
+- 새 벤치를 실행한 것이 아니라, 이미 저장된 실제 `sat + cuda + float16` 결과 JSON을 현재 summary renderer로 재집계했다.
+
+대상:
+
+- `sentence-confirm-evidence-review`
+- `revision-fallback-coverage-review`
+- `short-no-end-evidence-review`
+- `max-staged-queue-evidence-review`
+
+재생성 파일:
+
+```text
+.tmp/eval/dictation-ai-sbd/parameter-sweeps/*/summary-with-adoption-counts.json
+.tmp/eval/dictation-ai-sbd/parameter-sweeps/*/summary-with-adoption-counts.md
+```
+
+요약:
+
+| sweep | adoption_review_counts | 핵심 해석 |
+| --- | --- | --- |
+| sentence-confirm | `review-risk=2` | confirm=1/3 모두 언어별 final F1 또는 주요 tag 회귀가 있다. |
+| revision-fallback-coverage | `review-risk=3` | 0.50/0.60/0.70 모두 언어별 final F1/precision 및 주요 tag 회귀가 있다. 0.55 유지 근거가 재확인된다. |
+| short-no-end | `review-risk=2` | units=3/5 모두 언어별 final F1/precision 및 주요 tag 회귀가 있다. 기본값 4 유지가 타당하다. |
+| max-staged-queue | `review-risk=1`, `no-risk-flag=1` | queue=12는 회귀 flag가 있고, queue=30은 위험 flag가 없지만 baseline과 사실상 동일해 개선축으로 보지 않는다. |
+
+판단:
+
+- 현재 주요 parameter 주변값 sweep은 checked-in 기본값을 바꿀 강한 근거를 제공하지 않는다.
+- 특히 sentence confirmation과 short no-end fragment는 단일 threshold 조정으로는 누락/중복/boundary trade-off를 안정적으로 개선하지 못한다.
+- revision fallback coverage는 checked-in 0.55가 주변값보다 균형적이라는 판단을 유지한다.
+- max staged queue는 20 이상에서 포화되므로, 성능 개선축이 아니라 조기 폐기 방지 하한으로 해석한다.
+- 다음 실험은 새 threshold를 더 추가하기보다, representative corpus 또는 final timestamp/translation output replay처럼 현재 논문에서 부족한 근거 축을 보강하는 쪽이 더 의미 있다.
+
+### 2026-06-21 evidence summary interpretation flag count 추가
+
+검토 배경:
+
+- 개별 parameter job의 `interpretation_flags`만으로는 한 sweep 전체가 어떤 방향의 위험 신호를 반복하는지 바로 보기 어렵다.
+- 논문 근거용 sweep에서는 "특정 후보 하나의 문제"와 "후보군 전체에서 반복되는 문제"를 구분해야 한다.
+
+변경:
+
+- `evidence_summary.interpretation_flag_counts`를 추가했다.
+- baseline은 flag count에서 제외하고, env override가 있는 비교 job만 집계한다.
+- Markdown `Evidence Summary`에도 flag count 표를 출력한다.
+
+기존 sentence confirmation 실제 CUDA sweep 재생성:
+
+```text
+.tmp/eval/dictation-ai-sbd/parameter-sweeps/sentence-confirm-evidence-review/summary-with-flag-counts.json
+.tmp/eval/dictation-ai-sbd/parameter-sweeps/sentence-confirm-evidence-review/summary-with-flag-counts.md
+```
+
+flag count:
+
+| flag | count |
+| --- | ---: |
+| key-tag-boundary-regression | 2 |
+| key-tag-precision-regression | 2 |
+| language-final-f1-regression | 2 |
+| language-precision-regression | 1 |
+| overall-final-f1-up-precision-down | 1 |
+
+판단:
+
+- sentence confirmation 주변값 1/3은 모두 언어별 final F1 회귀와 주요 태그 회귀를 포함한다.
+- confirm=1만 전체 final F1 상승과 precision 하락이 동시에 나타난다.
+- 따라서 이 sweep의 결론은 "confirm 값을 바꾸면 개선된다"가 아니라, "confirm=1은 recall 보상으로 precision 위험을 키우고, confirm=3도 안정적인 개선축이 아니다"로 정리한다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_sbd_parameter_sweep
+```
+
+결과:
+
+```text
+Ran 12 tests in 0.002s
+OK
+```
+
+### 2026-06-21 evidence summary adoption review 상태 추가
+
+검토 배경:
+
+- `interpretation_flags`는 위험 신호를 보여주지만, 각 parameter 후보가 별도 검토가 필요한 상태인지 한눈에 보려면 추가 상태값이 필요했다.
+- 자동 채택/기각은 과도하다. 현재 benchmark는 failure-enriched challenge replay이므로 수동 해석을 유지해야 한다.
+
+변경:
+
+- `evidence_summary.results[]`에 `adoption_review`를 추가했다.
+- baseline은 `baseline`, 위험 flag가 없는 비교 후보는 `no-risk-flag`, 위험 flag가 하나 이상 있는 비교 후보는 `review-risk`로 표시한다.
+- Markdown `Evidence Summary`의 flag 표에 `adoption_review` 열을 추가했다.
+
+기존 sentence confirmation 실제 CUDA sweep 재생성:
+
+```text
+.tmp/eval/dictation-ai-sbd/parameter-sweeps/sentence-confirm-evidence-review/summary-with-adoption-review.json
+.tmp/eval/dictation-ai-sbd/parameter-sweeps/sentence-confirm-evidence-review/summary-with-adoption-review.md
+```
+
+핵심 출력:
+
+| 조건 | adoption_review | interpretation flags |
+| --- | --- | --- |
+| confirm=1 | review-risk | overall-final-f1-up-precision-down, language-final-f1-regression, language-precision-regression, key-tag-precision-regression, key-tag-boundary-regression |
+| confirm=3 | review-risk | language-final-f1-regression, key-tag-precision-regression, key-tag-boundary-regression |
+
+판단:
+
+- confirm=1/3은 모두 위험 flag가 있으므로 `review-risk`가 맞다.
+- 이 필드는 기본값 변경을 자동으로 막는 규칙이 아니다.
+- 다만 논문 근거로 채택하려면 `review-risk` 후보의 악화 지표를 설명하거나, representative corpus에서 운영 평균 악화가 없음을 별도로 확인해야 한다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_sbd_parameter_sweep
+```
+
+결과:
+
+```text
+Ran 12 tests in 0.002s
+OK
+```
+
+판단:
+
+- 이후 실제 sweep의 Markdown만 열어도 기본값 채택/기각에 필요한 핵심 delta를 바로 확인할 수 있다.
+- 이 변경은 benchmark metric 자체를 바꾸지 않고, 반복 실험 결과 해석 시간을 줄인다.
+
+### 2026-06-21 sentence confirmation evidence summary 재검증
+
+실험 목적:
+
+- `SENTENCE_CONFIRM_CHUNKS=2` 기본값이 여전히 지연/중복/누락의 절충값으로 타당한지 확인한다.
+- 새 Markdown `Evidence Summary`가 파라미터 채택/기각 판단을 짧게 보여주는지 실제 `sat + cuda + float16` sweep으로 검증한다.
+- `missing_required_evidence_fields=none`까지 만족하는 실제 논문 근거용 summary인지 재확인한다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --paper-evidence \
+  --param SENTENCE_CONFIRM_CHUNKS=1 \
+  --param SENTENCE_CONFIRM_CHUNKS=3 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/sentence-confirm-evidence-review \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/sentence-confirm-evidence-review/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/sentence-confirm-evidence-review/summary.md
+```
+
+2026-06-21 리포트 completeness 재확인 경로:
+
+```text
+.tmp/eval/dictation-ai-sbd/parameter-sweeps/sentence-confirm-axis-evidence/summary.md
+```
+
+```text
+paper_evidence=true
+paper_evidence_eligible=true
+missing_required_evidence_fields=none
+```
+
+전체 결과:
+
+| 조건 | precision | recall | final F1 | boundary F1 | finalized/stage |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| baseline confirm=2 | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+| confirm=1 | 0.5647 | 0.4838 | 0.4951 | 0.1084 | 0.7867 |
+| confirm=3 | 0.6122 | 0.4164 | 0.4709 | 0.1030 | 0.6817 |
+
+Evidence Summary 핵심:
+
+| 조건 | final F1 delta | precision delta | recall delta | boundary F1 delta |
+| --- | ---: | ---: | ---: | ---: |
+| confirm=1 | +0.0119 | -0.0372 | +0.0438 | +0.0006 |
+| confirm=3 | -0.0124 | +0.0103 | -0.0235 | -0.0047 |
+
+언어별 판단:
+
+- confirm=1은 영어 `+0.0203`, 한국어 `+0.0234` final F1을 올리지만, 중국어 final F1은 `-0.0286`, 중국어 precision은 `-0.1524`로 크게 낮춘다.
+- confirm=3은 영어 `-0.0051`, 한국어 `-0.0123`, 중국어 `-0.0266`으로 세 언어 final F1이 모두 하락한다.
+
+주요 실패 태그 판단:
+
+- confirm=1은 `missing-final`, `stage-queue`, `cjk-internal-gap`, `duplicate-final`, `no-end-marker`의 staged residue와 empty final을 크게 줄인다.
+- 그러나 같은 태그들의 precision이 모두 하락한다. 예를 들어 `stage-queue` precision delta는 `-0.0427`, `cjk-internal-gap` precision delta는 `-0.0423`이다.
+- confirm=3은 주요 실패 태그의 precision을 조금 올리지만 final F1과 recall을 낮추고 staged residue를 늘린다. `missing-final` staged residue `+51`, `stage-queue` staged residue `+44`, `cjk-internal-gap` staged residue `+45`다.
+
+판단:
+
+- confirm=1은 확정 누락과 staged residue를 줄이는 공격적 설정이지만, precision 손실이 커서 final-only 번역 입력 기본값으로 채택하기 어렵다.
+- confirm=3은 false final 위험은 줄일 수 있으나, 확정 누락과 지연을 늘리는 방향이다.
+- 따라서 `SENTENCE_CONFIRM_CHUNKS=2` 기본값 유지 판단을 유지한다.
+- 이 실험은 `Evidence Summary`가 기본값 유지/기각 사유를 Markdown 상단에서 충분히 보여준다는 점도 확인했다.
+
+### 2026-06-21 short no-end fragment evidence summary 재검증
+
+실험 목적:
+
+- `SHORT_NO_END_FRAGMENT_UNITS=4` 기본값이 no-end fragment final과 확정 누락 사이의 절충값으로 유지 가능한지 확인한다.
+- 새 Markdown `Evidence Summary`가 no-end 계열 실패군의 trade-off를 충분히 보여주는지 실제 `sat + cuda + float16` sweep으로 검증한다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --paper-evidence \
+  --param SHORT_NO_END_FRAGMENT_UNITS=3 \
+  --param SHORT_NO_END_FRAGMENT_UNITS=5 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/short-no-end-axis-evidence \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/short-no-end-axis-evidence/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/short-no-end-axis-evidence/summary.md
+```
+
+출력:
+
+```text
+.tmp/eval/dictation-ai-sbd/parameter-sweeps/short-no-end-axis-evidence/summary.md
+missing_required_evidence_fields=none
+```
+
+전체 결과:
+
+| 조건 | precision | recall | final F1 | boundary F1 | finalized/stage |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| baseline units=4 | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+| units=3 | 0.5946 | 0.4376 | 0.4793 | 0.1090 | 0.7032 |
+| units=5 | 0.6013 | 0.4364 | 0.4809 | 0.1070 | 0.7232 |
+
+Evidence Summary 핵심:
+
+| 조건 | final F1 delta | precision delta | recall delta | boundary F1 delta |
+| --- | ---: | ---: | ---: | ---: |
+| units=3 | -0.0039 | -0.0073 | -0.0023 | +0.0012 |
+| units=5 | -0.0024 | -0.0006 | -0.0036 | -0.0007 |
+
+주요 실패 태그 판단:
+
+- units=3은 `no-end-marker` final F1 `-0.0030`, precision `-0.0075`로 낮아졌고 staged residue는 `+4` 증가했다.
+- units=3은 `missing-final`, `stage-queue`, `cjk-internal-gap`, `duplicate-final`도 모두 final F1이 하락하고 staged residue가 증가했다.
+- units=5는 `stage-queue`, `cjk-internal-gap`, `duplicate-final`의 residue를 줄이지만, `no-end-marker`에서 final F1 `-0.0085`, precision `-0.0099`, recall `-0.0100`으로 더 뚜렷하게 하락했다.
+- units=5는 finalized/stage를 올리지만, no-end 계열 품질을 낮추므로 단독 개선으로 보기 어렵다.
+
+언어별 판단:
+
+- units=3은 영어 final F1 `-0.0042`, 한국어 `-0.0056`, 중국어 `0.0000`이다.
+- units=5는 영어 final F1 `+0.0001` 수준으로 사실상 변화가 없고, 한국어 final F1은 `-0.0057`, 중국어는 `0.0000`이다.
+
+판단:
+
+- units=3/5 모두 전체 final F1은 baseline units=4보다 낮다.
+- units=3은 더 느슨한 조각 허용으로 precision과 주요 실패군 residue가 악화된다.
+- units=5는 일부 residue를 줄이지만 no-end-marker 품질을 낮춘다.
+- 따라서 `SHORT_NO_END_FRAGMENT_UNITS=4` 기본값 유지 판단을 유지한다.
+
+### 2026-06-21 staged queue 한도 evidence summary 재검증
+
+실험 목적:
+
+- `MAX_STAGED_SENTENCE_QUEUE=20`이 실제 개선축인지, 후보 조기 폐기를 막기 위한 보수적 하한인지 확인한다.
+- `Evidence Summary` 기준으로 12/30 주변값이 기본값 20 대비 어떤 변화를 만드는지 확인한다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --paper-evidence \
+  --param MAX_STAGED_SENTENCE_QUEUE=12 \
+  --param MAX_STAGED_SENTENCE_QUEUE=30 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/max-staged-queue-evidence-review \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/max-staged-queue-evidence-review/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/max-staged-queue-evidence-review/summary.md
+```
+
+전체 결과:
+
+| 조건 | precision | recall | final F1 | boundary F1 | finalized/stage |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| baseline queue=20 | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+| queue=12 | 0.6017 | 0.4393 | 0.4827 | 0.1077 | 0.7108 |
+| queue=30 | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+
+Evidence Summary 핵심:
+
+| 조건 | final F1 delta | precision delta | recall delta | boundary F1 delta |
+| --- | ---: | ---: | ---: | ---: |
+| queue=12 | -0.0005 | -0.0002 | -0.0006 | -0.0001 |
+| queue=30 | +0.0000 | +0.0000 | +0.0000 | +0.0000 |
+
+판단:
+
+- queue=12는 전체 metric을 아주 작게 낮춘다. 영어 final F1도 `-0.0013`으로 소폭 하락했다.
+- queue=30은 baseline queue=20과 전체/언어/핵심 태그 delta가 모두 0이다.
+- 현재 1113건 challenge replay 기준에서는 queue=20 이상에서 효과가 포화된다.
+- 따라서 `MAX_STAGED_SENTENCE_QUEUE=20`은 단독 성능 개선축이라기보다 긴 window와 multi-completed 후보에서 조기 폐기를 피하기 위한 보수적 하한으로 해석한다.
+
+### 2026-06-21 실험 설계와 결과 해석 재검토
+
+검토 질문:
+
+- 지금까지 누적한 실패 replay 실험이 논문 근거로 유효한가?
+- 참조 논문과 비교했을 때 현재 실험이 주장할 수 있는 범위와 주장하면 안 되는 범위는 무엇인가?
+- 실험 방법을 일반 운영 평균 측정으로 재구성해야 하는가, 아니면 실패 replay와 대표 표본을 분리해야 하는가?
+
+판단:
+
+- 현재 1113건 `sbd_cases/{en,ko,zh}` 집합은 운영 로그에서 확정 누락, 중복 확정, 문장 파괴, staged residue가 관측된 구간을 모은 failure-enriched challenge replay다.
+- 이 집합은 공개 ASR benchmark나 운영 평균 품질 측정으로 해석하면 안 된다.
+- 대신 같은 입력 집합에서 final lifecycle 정책이 어떤 실패를 줄이고 어떤 실패를 늘리는지 반복 측정하는 실험으로는 유효하다.
+- 따라서 실험 방법은 폐기보다 역할 분리가 필요하다. `challenge-replay`는 회귀와 실패 유형별 튜닝 근거로 유지하고, 일반 운영 평균을 주장하려면 별도 `representative` corpus를 만들어야 한다.
+
+참조 논문과의 비교:
+
+- Whisper-Streaming의 local agreement 연구는 partial hypothesis와 committed prefix를 분리해야 한다는 문제 설정의 직접 비교군이다.
+- Incremental ASR 평가는 WER만이 아니라 latency, update, revoke를 함께 보아야 한다는 평가 관점의 근거다.
+- SaT와 streaming punctuation 연구는 regex/ad-hoc 규칙 대신 모델 기반 문장 후보와 right-context 신호를 쓰는 배경 근거다.
+- Rao et al.의 speech translation segmentation 연구는 downstream 번역 단위가 중요하다는 비교 근거지만, 현재 파이프라인의 pause/VAD 기반 segment length 최적화 근거로 사용하지 않는다.
+- 따라서 외부 논문은 문제 설정과 비교군 근거로 제한하고, 운영 기본값과 임계값은 앱 로그 replay 실험으로만 정당화한다.
+
+결과 해석 기준:
+
+- `final_f1_avg` 단독 상승은 채택 근거가 아니다.
+- `final_precision_avg`, `final_recall_avg`, `final_boundary_f1_avg`, `finalized_per_stage_start`, staged residue, empty final을 함께 본다.
+- 언어별 `language_deltas`와 실패 증상별 `tag_deltas`는 전체 평균의 오독을 막는 필수 해석 자료다.
+- 예를 들어 `SENTENCE_CONFIRM_CHUNKS=1`은 전체 final F1을 `+0.0119` 올리지만 precision을 `-0.0372` 낮추고, 중국어 precision을 `-0.1524`, 중국어 final F1을 `-0.0286` 낮춘다. 그러므로 기본값 채택 근거가 아니라 공격적 recall 설정의 부작용 근거로 해석한다.
+
+도구 보완:
+
+- `run_sbd_parameter_sweep.py`의 Markdown `Evidence Summary`에 언어별 delta 표를 추가했다.
+- 상단 요약에서 전체 metric delta, 언어별 delta, 주요 실패 태그 delta를 함께 보여주도록 하여, 전체 평균 개선이 특정 언어나 실패군 악화를 가리는 문제를 줄였다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_sbd_parameter_sweep
+```
+
+결과:
+
+```text
+Ran 12 tests in 0.001s
+OK
+```
+
+기존 실제 CUDA sweep 재렌더링 확인:
+
+```text
+.tmp/eval/dictation-ai-sbd/parameter-sweeps/sentence-confirm-evidence-review/summary-with-language-evidence.md
+```
+
+확인된 핵심 행:
+
+| 조건 | 언어 | final F1 delta | precision delta | recall delta | staged residue delta | empty final delta |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| confirm=1 | en | +0.0203 | -0.0013 | +0.0383 | -56 | -1 |
+| confirm=1 | ko | +0.0234 | -0.0152 | +0.0413 | -16 | -10 |
+| confirm=1 | zh | -0.0286 | -0.1524 | +0.0599 | -38 | -10 |
+
+정리:
+
+- 현재 실험 설계는 “실패 중심 입력에서 revision-aware finalization의 trade-off를 측정한다”는 제한된 목표에서는 유효하다.
+- 논문은 raw STT 정확도 향상 논문이 아니라, 불안정한 STT partial hypothesis를 final-only 번역 입력으로 안정화하는 후처리 생명주기 실험으로 고정한다.
+- 일반 운영 평균, 사용자 체감 지연, 번역 품질 개선을 주장하려면 representative corpus와 final timestamp/translation output replay가 별도 후속 실험으로 필요하다.
+
+### 2026-06-21 representative sampling unit 검증 강화
+
+검토 배경:
+
+- representative corpus는 운영 평균 추정용 표본이어야 한다.
+- `sampling_unit`이 자유 문자열이면 `failure-cluster`, `manual-failure-pick` 같은 실패 후보 그룹을 representative로 등록할 수 있다.
+- 이렇게 되면 challenge replay와 representative corpus가 다시 섞여, 논문 결과 해석이 흔들린다.
+
+변경:
+
+- `tests/eval/dictation_ai/sbd_case_paths.py`에 representative `sampling_unit` 허용값을 `time-window`, `session-window`로 제한했다.
+- `validate_sbd_case_files.py`와 `sbd_benchmark.py` loader가 같은 `validate_representative_payload`를 사용하므로, 검증 도구를 우회해 benchmark를 실행해도 같은 계약이 적용된다.
+- `tests/eval/dictation_ai/sbd_representative_cases/README.md`에 실패 유형 묶음, 수동 후보 그룹, tag cluster를 representative 표본 단위로 쓰지 않는다고 명시했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.unit.test_dictation_ai_sbd_case_loader \
+  tests.unit.test_dictation_ai_sbd_case_validator
+```
+
+결과:
+
+```text
+Ran 24 tests in 0.007s
+OK
+```
+
+판단:
+
+- representative corpus 설계는 아직 case가 없는 상태지만, 앞으로 추가될 case가 시간/세션 기반 표본이라는 최소 계약은 코드로 강제된다.
+- 이 조치는 실험 설계를 새로 넓히는 것이 아니라, 현재 정리한 challenge/representative 분리를 깨뜨리지 않기 위한 방어선이다.
+
+### 2026-06-21 evidence summary interpretation flags 추가
+
+검토 배경:
+
+- `Evidence Summary`가 metric/language/tag delta를 보여주더라도, 매번 사람이 표를 읽어 채택 주의 신호를 다시 해석해야 했다.
+- 논문 근거용 반복 sweep에서는 “전체 final F1 상승이 precision 하락이나 특정 언어/실패군 악화를 가렸는가”를 일관되게 확인해야 한다.
+
+변경:
+
+- `run_sbd_parameter_sweep.py`의 `evidence_summary.results[]`에 `interpretation_flags`를 추가했다.
+- 현재 자동 flag는 다음 신호를 표시한다.
+  - `overall-final-f1-up-precision-down`
+  - `overall-final-f1-up-boundary-down`
+  - `language-final-f1-regression`
+  - `language-precision-regression`
+  - `key-tag-precision-regression`
+  - `key-tag-boundary-regression`
+- Markdown `Evidence Summary` 상단에도 flag 표를 추가했다.
+
+기존 실제 CUDA sweep 결과 재해석:
+
+```text
+.tmp/eval/dictation-ai-sbd/parameter-sweeps/sentence-confirm-evidence-review/summary-with-interpretation-flags.md
+```
+
+핵심 출력:
+
+| 조건 | interpretation flags |
+| --- | --- |
+| confirm=1 | overall-final-f1-up-precision-down, language-final-f1-regression, language-precision-regression, key-tag-precision-regression, key-tag-boundary-regression |
+| confirm=3 | language-final-f1-regression, key-tag-precision-regression, key-tag-boundary-regression |
+
+판단:
+
+- confirm=1은 전체 final F1이 오르지만 precision 하락, 중국어 final F1/precision 하락, 주요 실패 태그 precision/boundary 회귀가 동시에 표시된다.
+- 따라서 confirm=1은 “점수 개선 후보”가 아니라 “recall을 얻는 대신 false final 위험을 키우는 설정”으로 해석해야 한다.
+- confirm=3은 전체 final F1이 낮아지지만 일부 tag precision/boundary 회귀도 같이 감지된다. 단순히 보수적인 설정이라고 해서 안정적 개선으로 볼 수 없다.
+- 이 flag는 채택/기각을 자동 결정하지 않는다. 다만 논문 근거 해석에서 평균값 오독을 줄이는 체크리스트로 사용한다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_sbd_parameter_sweep
+```
+
+결과:
+
+```text
+Ran 12 tests in 0.001s
+OK
+```
+
+### 2026-06-21 sentence confirm max age 주변값 재검증
+
+실험 목적:
+
+- `SENTENCE_CONFIRM_MAX_AGE_CHUNKS=3` 기본값이 현재 challenge replay에서 의미 있는 튜닝 축인지 확인한다.
+- age 상한을 2 또는 4로 움직였을 때 확정 누락, 중복 확정, boundary 품질이 움직이는지 실제 `sat + cuda + float16` sweep으로 확인한다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --paper-evidence \
+  --param SENTENCE_CONFIRM_MAX_AGE_CHUNKS=2 \
+  --param SENTENCE_CONFIRM_MAX_AGE_CHUNKS=4 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/confirm-max-age-protocol-review \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/confirm-max-age-protocol-review/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/confirm-max-age-protocol-review/summary.md
+```
+
+결과:
+
+| 조건 | precision | recall | final F1 | boundary F1 | finalized/stage |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| baseline age=3 | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+| age=2 | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+| age=4 | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+
+Evidence protocol:
+
+```text
+paper_evidence=true
+paper_evidence_corpus_eligible=true
+paper_evidence_eligible=true
+corpus_role=challenge-replay
+evidence_use=failure replay lifecycle trade-off analysis
+```
+
+Evidence Summary:
+
+```text
+adoption_review_counts={no-risk-flag: 2}
+interpretation_flag_counts={}
+```
+
+판단:
+
+- age=2와 age=4는 baseline age=3 대비 전체 metric, 언어별 delta, 주요 실패 태그 delta가 모두 0이다.
+- `no-risk-flag`는 채택 후보라는 뜻이 아니라, 변화가 없어 regression flag도 발생하지 않았다는 뜻이다.
+- 따라서 현재 1113건 challenge replay에서는 `SENTENCE_CONFIRM_MAX_AGE_CHUNKS`가 유효한 성능 튜닝 축으로 보이지 않는다.
+- 기본값은 3으로 유지한다. 추가 개선은 이 상수를 더 움직이는 것보다 lifecycle 구조, representative corpus, final timestamp replay 쪽에서 찾아야 한다.
+
+### 2026-06-21 paper-evidence baseline 실행 계약 보강
+
+검토 배경:
+
+- 실험 프로토콜은 논문 근거용 sweep이 같은 case set의 baseline과 parameter 후보를 함께 비교해야 한다고 정의한다.
+- 그러나 도구가 `--paper-evidence` 실행에서 `--include-baseline`을 강제하지 않으면, baseline delta가 없는 결과도 논문 근거처럼 저장될 수 있다.
+
+변경:
+
+- `run_sbd_parameter_sweep.py`에 `validate_sweep_execution_contract`를 추가했다.
+- `--paper-evidence`와 `--include-baseline`이 함께 지정되지 않으면 실행 전에 실패한다.
+- 이 계약을 단위 테스트로 고정했다.
+
+판단:
+
+- 논문 근거용 sweep은 항상 같은 입력 집합의 baseline 대비 delta, language delta, tag delta, adoption review를 가져야 한다.
+- baseline 없는 실행은 탐색용으로는 가능하지만, paper-evidence로 승격하지 않는다.
+
+### 2026-06-21 paper-evidence 단일 파라미터 축 계약 보강
+
+검토 배경:
+
+- 실험 프로토콜은 논문 근거용 sweep을 한 번에 한 파라미터 축으로 제한한다.
+- 서로 다른 파라미터 이름을 한 summary에 섞으면 전체 delta, 언어별 delta, 태그별 delta의 원인을 분리하기 어렵다.
+
+변경:
+
+- `validate_sweep_execution_contract`가 `--paper-evidence` 실행에서 서로 다른 파라미터 이름이 섞인 입력을 거부하도록 했다.
+- 같은 파라미터의 여러 후보값은 허용한다. 예를 들어 `SENTENCE_CONFIRM_CHUNKS=1/3` 비교는 하나의 축으로 남는다.
+- 탐색 모드에서는 여러 파라미터 축을 같은 summary에 묶을 수 있지만, 그 결과는 paper-evidence로 해석하지 않는다.
+
+판단:
+
+- paper-evidence sweep은 baseline 포함, challenge/representative corpus, 단일 파라미터 축이라는 세 가지 실행 계약을 갖는다.
+- 이 계약을 통해 논문에 옮기는 delta가 어느 파라미터 축에서 나온 것인지 명확히 유지한다.
+
+### 2026-06-21 parameter axis summary 표시 추가
+
+검토 배경:
+
+- paper-evidence summary는 `jobs[].env_overrides`에 파라미터 값을 보존하지만, 사람이 summary를 읽을 때 비교 축을 즉시 확인하려면 별도 필드가 필요하다.
+- 특히 실험일지와 논문 초안에 Markdown 요약을 옮길 때 env override를 매번 역추적하면 해석 오류가 생길 수 있다.
+
+변경:
+
+- `run_sbd_parameter_sweep.py` summary payload에 `parameter_axes`를 추가했다.
+- Markdown header에도 `parameter_axes`를 출력한다.
+- baseline-only summary는 `parameter_axes=[]`이며 Markdown에서는 `none`으로 표시된다.
+
+판단:
+
+- 논문 근거용 sweep은 header에서 `corpus_role`, `parameter_axes`, `paper_evidence_eligible`을 먼저 확인한 뒤 세부 metric delta를 해석한다.
+- 이 변경은 metric을 바꾸지 않고, 실험 근거의 추적 가능성을 높이는 정리다.
+
+### 2026-06-21 dry-run paper evidence 해석 수정
+
+검토 배경:
+
+- `--dry-run --paper-evidence`는 실행 계획 검증에는 유용하지만 실제 `sat + cuda + float16` benchmark를 실행하지 않는다.
+- 그런데 summary가 `paper_evidence_eligible=true`로 보이면, 나중에 dry-run 결과를 실제 논문 근거로 오독할 수 있다.
+
+변경:
+
+- `run_sbd_parameter_sweep.py` summary의 `evidence_protocol.paper_evidence`는 실제 실행이 있는 경우에만 true가 되도록 수정했다.
+- dry-run에서 `--paper-evidence`를 지정하면 `paper_evidence_requested=true`, `dry_run=true`, `paper_evidence=false`, `paper_evidence_eligible=false`로 기록한다.
+- Markdown header에도 `paper_evidence_requested`를 출력한다.
+
+판단:
+
+- dry-run은 corpus role, parameter axis, 실행 명령, case threshold를 확인하는 계획 검증 자료다.
+- 논문 근거로 인용할 수 있는 수치는 실제 benchmark job이 실행된 summary만 사용한다.
+
+### 2026-06-21 benchmark regression guard 지표 분리
+
+검토 배경:
+
+- `pass_rate`는 현재 코드 출력에서는 제거됐고, 과거 실험일지 기록에만 남아 있다.
+- 다만 `sbd_benchmark.py` report summary에 `min_final_f1`가 남아 있어, 논문 지표처럼 오해될 수 있었다.
+- `min_final_f1`는 `--fail-on-regression`을 쓸 때 실행 실패 여부를 정하는 로컬 guard이지 성능 지표가 아니다.
+
+변경:
+
+- `sbd_benchmark_report.py`에서 `summary.min_final_f1`를 제거했다.
+- 대신 top-level `regression_guard`에 `enabled`, `min_final_f1`, `metric=final_f1_avg`, `paper_metric=false`를 기록한다.
+- CLI help도 `--fail-on-regression`을 optional local guard로 설명하도록 수정했다.
+
+판단:
+
+- 논문 지표는 계속 `final_precision_avg`, `final_recall_avg`, `final_f1_avg`, `final_boundary_f1_avg`, `finalized_per_stage_start` 중심으로 해석한다.
+- 회귀 가드는 자동 품질게이트가 아니라 로컬 실행 편의 기능으로 분리한다.
+
+### 2026-06-21 SBD benchmark 오프라인 모델 캐시 계약 보강
+
+검토 배경:
+
+- SBD benchmark를 실행할 때 캐시된 모델이 있음에도 Hugging Face 네트워크 조회가 시도될 수 있음을 확인했다.
+- 논문 근거용 실행은 모델 다운로드나 네트워크 상태에 의존하지 않고, 캐시된 모델과 CUDA 런타임이 준비되어 있지 않으면 fail-fast해야 한다.
+
+변경:
+
+- `sbd_benchmark.py`가 detector 생성 전에 `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`을 강제한다.
+- `run_sbd_parameter_sweep.py`의 하위 benchmark job도 같은 오프라인 환경을 강제하고, dry-run 출력 명령에도 해당 환경값을 표시한다.
+- `AGENTS.md`와 실험 프로토콜에 캐시된 모델만 사용하는 계약을 추가했다.
+
+판단:
+
+- 이 변경은 benchmark metric을 바꾸지 않는다.
+- 논문 근거용 실행이 네트워크 다운로드 여부에 따라 흔들리지 않게 하는 실행 재현성 보강이다.
+
+### 2026-06-21 SBD runtime contract report 기록 추가
+
+검토 배경:
+
+- 오프라인 모델 캐시 계약은 실행 명령과 코드에 반영됐지만, 나중에 JSON report만 보면 해당 실행이 캐시 전용 계약을 따랐는지 바로 확인하기 어려웠다.
+- 논문 근거용 결과는 report 자체가 실행 조건을 보존해야 한다.
+
+변경:
+
+- `tests/eval/dictation_ai/sbd_runtime_contract.py`를 추가해 `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`과 `sat + cuda + float16` 실행 계약을 한 곳에서 관리한다.
+- `sbd_benchmark.py`, `run_sbd_parameter_sweep.py`, `sbd_benchmark_report.py`가 같은 runtime contract를 사용한다.
+- benchmark report와 parameter sweep summary에 `runtime_contract`를 기록한다.
+- sweep Markdown header에도 runtime, `model_source=local-cache-only`, offline env를 출력한다.
+
+판단:
+
+- 이후 실험일지나 논문 초안에 summary를 옮길 때 `corpus_role`, `parameter_axes`, `paper_evidence_eligible`뿐 아니라 `runtime_contract`도 함께 확인한다.
+- 이 변경은 실행 재현성과 근거 추적성을 높이며, metric 자체는 바꾸지 않는다.
+
+### 2026-06-21 representative corpus metadata 계약 강화
+
+검토 배경:
+
+- 현재 1113건 challenge replay corpus는 실패 중심 입력이므로 운영 평균을 대표하지 않는다.
+- 논문 주장을 운영 평균으로 넓히려면 `sbd_representative_cases/`에 시간/세션 표본을 별도로 만들어야 한다.
+- representative case가 일반 case의 `text` fallback이나 기본 언어값으로 통과하면, 실제 STT context window 표본인지 확인하기 어렵다.
+
+변경:
+
+- representative payload 필수 metadata에 `language`, `chunks`, `expected_final`을 명시적으로 포함했다.
+- `chunks`는 실제 STT context window 결과여야 하며, representative 입력에서는 단일 `text` fallback으로 대체하지 않는다.
+- `expected_final`은 사람이 확정한 final 문장 목록이어야 하며 비어 있으면 representative benchmark 입력으로 쓰지 않는다.
+- 관련 validator test를 추가해 `language`, `chunks`, `expected_final` 누락을 실패시키도록 했다.
+
+판단:
+
+- 이 변경은 현재 challenge replay metric을 바꾸지 않는다.
+- representative corpus가 준비될 때 운영 평균 추정치로 해석 가능한 최소 표본 계약을 강화한 것이다.
+- failure cluster나 수동 후보 그룹을 representative sample처럼 해석하는 오류를 줄인다.
+
+### 2026-06-21 representative corpus paper-evidence 상태 확인
+
+검토 배경:
+
+- 실험방법 재구성의 핵심은 challenge replay와 representative operating sample을 분리하는 것이다.
+- 현재 representative corpus 디렉터리에는 README만 있고 정식 JSONL case가 없다.
+- 이 상태에서 운영 평균 품질을 논문 근거처럼 주장하면 안 된다.
+
+확인:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --paper-evidence \
+  --dry-run \
+  --cases tests/eval/dictation_ai/sbd_representative_cases \
+  --param SENTENCE_CONFIRM_CHUNKS=1
+```
+
+결과:
+
+```text
+[dictation-ai-sbd-parameter-sweep] error: no SBD case files matched: tests/eval/dictation_ai/sbd_representative_cases
+```
+
+판단:
+
+- 현재 논문 수치 근거는 1113건 challenge replay의 failure lifecycle trade-off 분석으로 제한한다.
+- representative operating-average estimate는 아직 근거 없음 상태다.
+- representative `evidence_protocol`은 운영 평균 추정치로 해석하되, 실패군 회귀 corpus가 아니므로 파라미터 채택은 challenge replay regression check와 함께 판단해야 한다.
+
+### 2026-06-21 evidence protocol claim scope 추가
+
+검토 배경:
+
+- `paper_evidence=true`라도 challenge replay와 representative corpus가 주장할 수 있는 범위는 다르다.
+- challenge replay는 실패 생명주기 trade-off 근거이고, representative는 운영 평균 추정 근거다.
+- 논문 작성 중 `paper_evidence=true`만 보고 두 결과를 같은 수준의 일반 품질 근거로 해석할 위험이 있다.
+
+변경:
+
+- `evidence_protocol`에 `claim_scope`를 추가했다.
+- challenge replay는 `failure-mode lifecycle trade-off only`로 기록한다.
+- representative는 `operating-average finalization estimate only`로 기록한다.
+- exploratory 입력은 `no paper claim`으로 기록한다.
+- parameter sweep Markdown header에도 `claim_scope`를 출력한다.
+
+판단:
+
+- `claim_scope`는 새 metric이 아니라 결과 해석 라벨이다.
+- 논문 표나 실험일지에 benchmark summary를 옮길 때 `paper_evidence`, `corpus_role`, `claim_scope`, `runtime_contract`를 함께 확인한다.
+
+### 2026-06-21 benchmark/sweep stdout claim scope 출력
+
+검토 배경:
+
+- JSON report와 Markdown summary에는 `claim_scope`가 남지만, 반복 실행 중에는 stdout 한 줄 요약만 먼저 보는 경우가 많다.
+- 장시간 sweep 로그만 남은 상황에서도 해당 결과가 실패군 trade-off 근거인지 운영 평균 추정치인지 바로 구분할 필요가 있다.
+
+변경:
+
+- `evidence_protocol`에 공백 없는 `claim_scope_key`를 추가했다.
+- `claim_scope`는 사람이 읽는 설명으로 유지하고, `claim_scope_key`는 로그/표 후처리 식별자로 사용한다.
+- `sbd_benchmark.py`의 최종 stdout summary에 `claim_scope_key`를 출력한다.
+- `run_sbd_parameter_sweep.py`의 최종 stdout summary에도 `claim_scope_key`를 출력한다.
+- sweep Markdown header에는 `claim_scope_key`와 `claim_scope`를 모두 출력한다.
+
+판단:
+
+- 이 변경은 metric과 report payload를 바꾸지 않는 실행 로그 가독성 보강이다.
+- 장시간 반복 실험 로그에서는 `corpus_role`과 `claim_scope_key`를 함께 확인해 논문 근거 사용 범위를 판단한다.
+
+### 2026-06-21 parameter sweep report 렌더링 분리
+
+검토 배경:
+
+- `run_sbd_parameter_sweep.py`가 job 구성, 실행, evidence summary, Markdown 렌더링을 모두 갖고 있어 800라인에 가까워졌다.
+- 앞으로 실험 해석 필드가 더 늘면 실행 계약과 리포트 해석 코드가 한 파일에서 다시 비대해질 위험이 있다.
+- 논문 근거 도구는 반복 실험 중 자주 바뀌므로, 실행 경로와 리포트 렌더링을 분리하는 편이 후속 검증에 유리하다.
+
+변경:
+
+- `tests/eval/dictation_ai/sbd_parameter_sweep_report.py`를 추가했다.
+- baseline delta, evidence summary, Markdown summary 렌더링을 새 모듈로 이동했다.
+- `run_sbd_parameter_sweep.py`는 parameter parsing, case 검증, job 구성/실행, summary 파일 쓰기에 집중하도록 줄였다.
+
+검증:
+
+- 분리 전후 metric 계산 의도는 바꾸지 않았다.
+- `run_sbd_parameter_sweep.py`는 799라인에서 약 395라인으로 줄었다.
+
+판단:
+
+- 이 변경은 실험 결과를 바꾸는 로직 변경이 아니라 실험 도구의 유지보수성 보강이다.
+- 후속 실험에서 `evidence_summary` 필드가 늘어나도 실행 계약을 흔들지 않고 report 모듈에서 관리할 수 있다.
+
+### 2026-06-21 논문 근거 최소 필드 목록 추가
+
+검토 배경:
+
+- `paper_evidence=true`와 metric 평균만 복사하면, 해당 결과가 어떤 corpus, runtime, 파라미터 축, 해석 범위에서 나온 값인지 분리되지 않는다.
+- 특히 challenge replay 결과는 실패 생명주기 trade-off 근거이고, representative 결과는 운영 평균 추정 근거이므로 논문 표에 옮길 때 필수 문맥을 함께 보존해야 한다.
+
+변경:
+
+- `evidence_protocol.required_evidence_fields`를 추가했다.
+- 최소 필드에는 `paper_evidence`, `paper_evidence_eligible`, `corpus_role`, `claim_scope_key`, `runtime_contract`, `case_summary.expected_final_case_count`, `parameter_axes`, `evidence_summary`를 포함한다.
+- 실험 프로토콜 문서에도 이 필드를 논문 근거 인용 전 확인 항목으로 추가했다.
+- parameter sweep Markdown header에도 같은 필드 목록을 출력해, JSON summary를 열지 않고 Markdown 표만 옮기는 경우에도 근거 문맥 누락을 확인할 수 있게 했다.
+
+판단:
+
+- 이 변경은 metric 정의나 benchmark 동작을 바꾸지 않는다.
+- 논문 초안에 수치를 옮길 때 `required_evidence_fields`가 가리키는 항목이 함께 남아 있지 않으면 정식 근거로 사용하지 않는다.
+- 현재 1113건 결과는 계속 `failure-lifecycle-tradeoff` 범위에서만 해석한다.
+
+### 2026-06-21 논문 초안과 실험 프로토콜 정합성 보정
+
+검토 배경:
+
+- 실험 프로토콜은 challenge replay가 `raw STT`, `SBD 후보`, `revision lifecycle`, `final-only sink` 실패 축 분리의 근거가 된다고 정리한다.
+- 논문 초안의 평가 설계 표에서는 같은 항목이 `보류`로 표시되어, 현재 자료로 가능한 주장과 부족한 주장이 섞여 보였다.
+
+변경:
+
+- 논문 초안의 해당 항목을 `유지`로 수정했다.
+- 부족한 주장은 raw STT 모델 우열 또는 일반 ASR 정확도로 한정했다.
+- `evidence_protocol.required_evidence_fields`를 논문 수치 인용 전 확인해야 하는 최소 문맥으로 명시했다.
+
+판단:
+
+- 현재 challenge replay로 주장할 수 있는 것은 실패 축을 분리 계측해야 한다는 구조적 필요성이다.
+- raw STT backend 자체의 우열, 일반 사용자 평균 품질, 번역 품질 개선은 여전히 후속 representative/audio/translation replay 없이는 주장하지 않는다.
+
+### 2026-06-21 근거 필드 누락 표시 추가
+
+검토 배경:
+
+- `required_evidence_fields`는 논문 수치를 옮길 때 필요한 최소 문맥을 알려주지만, 실제 summary에서 어떤 항목이 빠졌는지는 사람이 직접 확인해야 했다.
+- dry-run과 실제 실행을 섞어 보면 `paper_evidence_requested=true`만 보고 결과를 근거로 오독할 수 있다.
+
+변경:
+
+- parameter sweep summary의 `evidence_protocol.missing_required_evidence_fields`에 누락된 필드 경로를 기록한다.
+- Markdown header에도 `missing_required_evidence_fields`를 출력한다.
+- dry-run은 실제 benchmark 결과가 없으므로 `evidence_summary`가 누락으로 표시된다.
+
+판단:
+
+- 실제 논문 근거로 인용할 summary는 `missing_required_evidence_fields=none`이어야 한다.
+- 이 변경은 성능 metric을 바꾸지 않고, 실험 결과를 논문 표로 옮기기 전 근거 completeness를 확인하기 위한 장치다.
+
+### 2026-06-21 실제 paper-evidence 리포트 완결성 확인
+
+실험 목적:
+
+- `missing_required_evidence_fields`가 실제 CUDA/SaT/float16 sweep에서 `none`으로 닫히는지 확인한다.
+- 같은 실행에서 `SENTENCE_CONFIRM_CHUNKS=1`의 기존 해석, 즉 recall 개선과 precision/중국어 악화 trade-off가 재현되는지 확인한다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --paper-evidence \
+  --param SENTENCE_CONFIRM_CHUNKS=1 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/evidence-completeness-sentence-confirm \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/evidence-completeness-sentence-confirm/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/evidence-completeness-sentence-confirm/summary.md
+```
+
+실행 조건:
+
+```text
+runtime=sat + cuda + float16
+model_source=local-cache-only
+offline_model_env=HF_HUB_OFFLINE=1, TRANSFORMERS_OFFLINE=1
+corpus_role=challenge-replay
+claim_scope_key=failure-lifecycle-tradeoff
+case_count=1113
+expected_final_case_count=1109
+paper_evidence=true
+paper_evidence_eligible=true
+missing_required_evidence_fields=none
+```
+
+전체 결과:
+
+| 조건 | precision | recall | final F1 | boundary F1 | finalized/stage |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| baseline | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+| `SENTENCE_CONFIRM_CHUNKS=1` | 0.5647 | 0.4838 | 0.4951 | 0.1084 | 0.7867 |
+| delta | -0.0372 | +0.0438 | +0.0119 | +0.0006 | +0.0751 |
+
+언어별 delta:
+
+| 언어 | final F1 | precision | recall | staged residue | empty final |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| en | +0.0203 | -0.0013 | +0.0383 | -56 | -1 |
+| ko | +0.0234 | -0.0152 | +0.0413 | -16 | -10 |
+| zh | -0.0286 | -0.1524 | +0.0599 | -38 | -10 |
+
+주요 태그 delta:
+
+| 태그 | final F1 | precision | recall | staged residue | empty final |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `missing-final` | +0.0110 | -0.0373 | +0.0416 | -104 | -21 |
+| `stage-queue` | +0.0042 | -0.0427 | +0.0322 | -89 | -17 |
+| `cjk-internal-gap` | +0.0038 | -0.0423 | +0.0310 | -83 | -17 |
+| `duplicate-final` | +0.0134 | -0.0304 | +0.0441 | -72 | -4 |
+| `no-end-marker` | +0.0221 | -0.0182 | +0.0536 | -33 | -2 |
+| `boundary-mismatch` | -0.0022 | -0.0732 | +0.0626 | -2 | 0 |
+| `staged-residue` | +0.0040 | -0.0668 | +0.0636 | -4 | 0 |
+
+자동 해석:
+
+```text
+adoption_review=review-risk
+interpretation_flags=[
+  overall-final-f1-up-precision-down,
+  language-final-f1-regression,
+  language-precision-regression,
+  key-tag-precision-regression,
+  key-tag-boundary-regression
+]
+```
+
+판단:
+
+- 실제 paper-evidence 실행에서도 새 리포트 completeness 계약은 동작한다. Markdown과 JSON 모두 `missing_required_evidence_fields=none`이다.
+- `SENTENCE_CONFIRM_CHUNKS=1`은 final F1과 recall을 올리지만 precision을 의미 있게 낮춘다.
+- 특히 중국어는 recall이 오르지만 precision이 `-0.1524`, final F1이 `-0.0286`, boundary F1이 `-0.0278`로 악화된다.
+- `missing-final`, `stage-queue`, `duplicate-final` 등 주요 실패 태그는 residue가 줄지만 precision이 함께 낮아진다.
+- 따라서 confirm=1은 확정 누락을 줄이는 탐색값으로는 의미가 있으나, 현재 기본값으로 채택할 근거는 부족하다. 기존 `review-risk` 해석을 유지한다.
+
+### 2026-06-21 benchmark report case summary와 누락 근거 필드 표시 보강
+
+실험 설계 재구성 후 `sbd_benchmark.py` 단독 report와 `run_sbd_parameter_sweep.py --paper-evidence` summary의 해석 범위를 다시 점검했다.
+
+확인:
+
+- `evidence_protocol.required_evidence_fields`에는 `case_summary.expected_final_case_count`, `parameter_axes`, `evidence_summary`가 포함된다.
+- parameter sweep summary에는 `case_summary`, `parameter_axes`, `evidence_summary`가 모두 있어 실제 paper-evidence 실행에서 `missing_required_evidence_fields=none`이 될 수 있다.
+- 반면 benchmark 단독 report는 parameter sweep의 baseline/delta/evidence summary가 아니므로 `parameter_axes`와 `evidence_summary`가 없다.
+
+변경:
+
+- benchmark report 최상위에 `case_summary`를 추가했다.
+- `missing_required_evidence_fields` 계산을 공통 helper로 이동했다.
+- benchmark report의 `evidence_protocol.missing_required_evidence_fields`에도 누락된 필드를 기록한다.
+
+해석:
+
+```text
+benchmark 단독 report:
+  paper_evidence=false
+  paper_evidence_corpus_eligible=true
+  missing_required_evidence_fields=[parameter_axes, evidence_summary]
+```
+
+판단:
+
+- 단독 benchmark report는 corpus/runtime/case summary를 보존하므로 탐색과 재현 확인에는 유용하다.
+- 하지만 paper-evidence sweep gate를 통과한 비교 결과가 아니므로, 논문 표로 직접 승격하려면 `--paper-evidence` parameter sweep 또는 같은 수준의 baseline/delta/evidence summary가 필요하다.
+- 이 변경은 수치 개선이 아니라 실험 근거 자료의 해석 오류를 줄이는 보강이다.
+
+### 2026-06-21 representative corpus 시작 전 로그 인벤토리
+
+대표 운영 평균을 주장하려면 challenge replay와 별도의 representative corpus가 필요하다. 현재 로그가 representative 표본화에 충분한 정보를 갖는지 먼저 확인했다.
+
+확인:
+
+```text
+find .tmp/logs -maxdepth 1 -type f -name 'avc-whisper.log*' | wc -l
+```
+
+결과:
+
+```text
+95
+```
+
+샘플 로그:
+
+```text
+.tmp/logs/avc-whisper.log      3.4M  2026-06-20 21:30
+.tmp/logs/avc-whisper.log.1    5.0M  2026-06-20 21:22
+.tmp/logs/avc-whisper.log.94   5.0M  2026-06-19 22:51
+```
+
+로그 포맷 관찰:
+
+- `Dictation AI stt_raw`는 언어와 raw STT window text를 가진다.
+- `Dictation AI transcript`는 현재 앱 로직이 표시한 staged/final 텍스트를 포함한다.
+- `Dictation AI translation`은 final 번역 출력 확인에 사용할 수 있다.
+- `받아쓰기 AI 문장 진단`, `안정성 지표`, `성능` 로그는 chunk, lifecycle counter, effective latency estimate, queue 상태를 포함한다.
+- 로그에는 chunk 번호와 timestamp가 있어 `time-window` 또는 `session-window` 표본 metadata의 `source_started_at`, `source_ended_at` 후보를 만들 수 있다.
+
+전사 루프 인벤토리:
+
+```text
+total_loop_start=29
+language=en 10
+language=ko 12
+language=zh 7
+```
+
+window/language 분포:
+
+```text
+window_seconds=10.0 language=ko 12
+window_seconds=12.0 language=en 1
+window_seconds=15.0 language=zh 7
+window_seconds=20.0 language=en 8
+window_seconds=7.0 language=en 1
+```
+
+backend/model 분포:
+
+```text
+language=en stt_backend=faster-whisper stt_model=large-v3 10
+language=ko stt_backend=faster-whisper stt_model=large-v3 12
+language=zh stt_backend=qwen3-asr-transformers stt_model=qwen3-asr-0.6b 6
+language=zh stt_backend=qwen3-asr-transformers stt_model=qwen3-asr-1.7b 1
+```
+
+판단:
+
+- 로그 수와 내용은 representative 표본 후보를 만들기에 충분하다.
+- 로그에는 현재 기본 계약과 다른 영어 window 7/12초, 중국어 qwen3-asr-1.7b, 과거 `sentence_finalize_age=2` 실행이 섞여 있다.
+- representative case는 운영 평균 표본이므로 `language`, STT backend/model, window/step/finalize age를 필수 metadata로 남겨야 한다.
+- 첫 representative 결과표는 현재 기본 계약과 다른 설정을 섞어 평균내지 않는다. 다른 설정을 포함할 경우 별도 strata 또는 exploratory로 분리한다.
+- 그러나 representative case의 `expected_final`은 사람이 확정해야 한다. `Dictation AI transcript`는 현재 앱 출력이므로 정답으로 자동 복사하면 평가가 자기참조가 된다.
+- `stt_raw`도 window 가설이지 final 정답이 아니므로, 자동으로 `expected_final`을 만들면 raw STT 오류를 정답으로 고정할 위험이 있다.
+- 따라서 이번 단계에서는 representative case를 자동 생성하지 않는다.
+- 다음 단계는 fixed interval 또는 deterministic hash sampling으로 source log와 chunk 범위를 고르고, 해당 범위의 raw/final/translation 로그를 사람이 검토해 `expected_final`을 확정하는 것이다.
+
+### 2026-06-21 논문 주장 범위 재점검
+
+논문 초안과 실험 프로토콜을 다시 대조했다. 현재 자료는 `challenge-replay`에서 lifecycle trade-off를 설명하는 데는 충분하지만, 실제 시간 기준 지연 개선이나 운영 평균 품질을 주장하기에는 아직 부족하다.
+
+정리:
+
+- 초록의 `finalization latency` 표현은 실제 timestamp 기반 지연 측정처럼 읽힐 수 있어, `candidate age`, `staged residue` 같은 확정 지연의 대리 신호로 낮춰 썼다.
+- 실제 finalization latency는 final event timestamp와 source audio/log time을 연결한 representative corpus가 준비된 뒤 별도 지표로 측정해야 한다.
+- 현재 논문 근거의 중심은 raw STT 정확도나 번역 BLEU가 아니라, 흔들리는 STT window 결과에서 final-only 번역 입력으로 소비할 문장을 보수적으로 확정하는 lifecycle 문제다.
+- 참조 논문은 partial/final 분리, incremental ASR 평가, 모델 기반 SBD, 번역 단위 영향의 문제 설정 근거로만 쓴다.
+- queue, age, no-end threshold, revision similarity 같은 앱 기본값은 외부 문헌이 아니라 같은 corpus에서 실행한 `sat + cuda + float16` replay 결과와 실험일지를 근거로만 설명한다.
+
+판단:
+
+- 실험 설계는 폐기할 단계가 아니라 역할을 분리해 재구성해야 한다.
+- 1113건 challenge replay는 계속 유지한다. 이 집합은 실패 중심 회귀, 파라미터 채택/기각, lifecycle counter 해석에 유효하다.
+- 일반 운영 평균을 논문에 넣으려면 representative corpus를 먼저 구축해야 한다.
+- 다음 실험 우선순위는 새 threshold 추가가 아니라 representative 표본 구축, final event timestamp/translation output replay 연결, 그리고 challenge replay에서 드러난 active staged/candidate queue 병목의 보수적 비교다.
+
+### 2026-06-21 실험 프로토콜 변경 후 challenge baseline 재확인
+
+실험 프로토콜, benchmark report, case loader를 정리한 뒤 실제 `sat + cuda + float16` 경로가 기존 challenge 기준선을 유지하는지 재확인했다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/20260621-protocol-baseline.json
+```
+
+결과:
+
+```text
+corpus_role=challenge-replay
+cases=1113
+finalized=4012
+stage_start=5638
+finalized_per_stage_start=0.712
+final_precision_avg=0.602
+final_recall_avg=0.440
+final_f1_avg=0.483
+final_similarity_coverage_avg=0.393
+final_boundary_f1_avg=0.108
+case_exact_match=17
+pending_exact_match=602
+staged_exact_match=406
+```
+
+리포트 계약 확인:
+
+```text
+evidence_protocol.paper_evidence=false
+evidence_protocol.paper_evidence_corpus_eligible=true
+evidence_protocol.paper_evidence_eligible=false
+evidence_protocol.claim_scope_key=failure-lifecycle-tradeoff
+evidence_protocol.claim_scope="failure-mode lifecycle trade-off only"
+evidence_protocol.missing_required_evidence_fields=[parameter_axes, evidence_summary]
+runtime_contract.backend=sat
+runtime_contract.device=cuda
+runtime_contract.compute_type=float16
+runtime_contract.model_source=local-cache-only
+```
+
+판단:
+
+- protocol/report 정리 후에도 1113건 challenge baseline 수치는 유지됐다.
+- 단독 benchmark report는 `corpus_role`, `claim_scope`, runtime contract를 보존하므로 재현 확인 자료로 유효하다.
+- 그러나 단독 benchmark는 baseline/delta/evidence summary를 갖는 paper-evidence sweep이 아니므로 논문 표로 직접 승격하지 않는다.
+- 이 결과는 현재 1113건 집합이 `failure-lifecycle-tradeoff` 범위의 근거라는 해석을 다시 확인한다.
+
+### 2026-06-21 paper-evidence sentence confirmation sweep 재확인
+
+실험 목적:
+
+- protocol/report 정리 이후 실제 paper-evidence sweep summary가 논문 근거 필수 필드를 모두 포함하는지 확인한다.
+- `SENTENCE_CONFIRM_CHUNKS` 축은 이미 여러 차례 확인한 축이므로, 새 로직 채택 목적이 아니라 evidence 출력 계약과 해석 재현성을 확인하는 데 사용했다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --paper-evidence \
+  --param SENTENCE_CONFIRM_CHUNKS=1 \
+  --param SENTENCE_CONFIRM_CHUNKS=3 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-confirm-axis \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-confirm-axis/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-confirm-axis/summary.md
+```
+
+Evidence 계약:
+
+```text
+corpus_role=challenge-replay
+case_count=1113
+expected_final_case_count=1109
+parameter_axes=[SENTENCE_CONFIRM_CHUNKS]
+paper_evidence_requested=true
+paper_evidence=true
+paper_evidence_eligible=true
+claim_scope_key=failure-lifecycle-tradeoff
+missing_required_evidence_fields=none
+runtime=sat + cuda + float16
+model_source=local-cache-only
+```
+
+전체 결과:
+
+| 조건 | precision | recall | final F1 | boundary F1 | finalized/stage |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| baseline | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+| confirm=1 | 0.5647 | 0.4838 | 0.4951 | 0.1084 | 0.7867 |
+| confirm=3 | 0.6122 | 0.4164 | 0.4709 | 0.1030 | 0.6817 |
+
+Delta:
+
+| 조건 | precision delta | recall delta | final F1 delta | boundary F1 delta | 해석 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| confirm=1 | -0.0372 | +0.0438 | +0.0119 | +0.0006 | recall/F1은 개선되지만 precision 손실과 언어/태그 회귀가 커서 `review-risk` |
+| confirm=3 | +0.0103 | -0.0235 | -0.0124 | -0.0047 | precision은 개선되지만 recall/F1/boundary가 낮아져 `review-risk` |
+
+주요 언어/태그 신호:
+
+- confirm=1은 영어/한국어 final F1은 올리지만 중국어 final F1 `-0.0286`, 중국어 precision `-0.1524`를 만든다.
+- confirm=1은 staged residue와 empty final을 줄이지만 `missing-final`, `stage-queue`, `cjk-internal-gap`, `duplicate-final`, `no-end-marker`의 precision 또는 boundary 회귀 flag가 생긴다.
+- confirm=3은 세 언어 모두 final F1을 낮추고 staged residue를 늘린다.
+- 두 후보 모두 `adoption_review=review-risk`로 표시됐다.
+
+판단:
+
+- 현재 paper-evidence sweep 출력은 논문 표로 승격하는 데 필요한 context field를 모두 갖춘다.
+- 단일 `SENTENCE_CONFIRM_CHUNKS` 조정은 여전히 기본값 변경 근거가 아니다.
+- confirm=1은 누락을 줄이는 보상 효과가 있지만 중복/false final 위험을 키울 수 있고, confirm=3은 보수성이 과해 확정 누락과 boundary 악화를 만든다.
+- 따라서 다음 개선 축은 confirmation count를 더 흔드는 것이 아니라 representative corpus와 active staged/candidate queue 구조 검토다.
+
+### 2026-06-21 paper-evidence staged queue sweep 재확인
+
+실험 목적:
+
+- `MAX_STAGED_SENTENCE_QUEUE=20` 기본값이 점수 개선축인지, 후보 조기 폐기를 막는 보수적 하한인지 다시 확인한다.
+- confirmation 축과 같은 paper-evidence 계약으로 실행해 결과표의 해석 범위를 고정한다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --paper-evidence \
+  --param MAX_STAGED_SENTENCE_QUEUE=12 \
+  --param MAX_STAGED_SENTENCE_QUEUE=30 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-stage-queue-axis \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-stage-queue-axis/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-stage-queue-axis/summary.md
+```
+
+Evidence 계약:
+
+```text
+corpus_role=challenge-replay
+case_count=1113
+expected_final_case_count=1109
+parameter_axes=[MAX_STAGED_SENTENCE_QUEUE]
+paper_evidence_requested=true
+paper_evidence=true
+paper_evidence_eligible=true
+claim_scope_key=failure-lifecycle-tradeoff
+missing_required_evidence_fields=none
+runtime=sat + cuda + float16
+model_source=local-cache-only
+```
+
+전체 결과:
+
+| 조건 | precision | recall | final F1 | boundary F1 | finalized/stage |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| baseline queue=20 | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+| queue=12 | 0.6017 | 0.4393 | 0.4827 | 0.1077 | 0.7108 |
+| queue=30 | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+
+Delta:
+
+| 조건 | precision delta | recall delta | final F1 delta | boundary F1 delta | 해석 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| queue=12 | -0.0002 | -0.0006 | -0.0005 | -0.0001 | 전체 하락은 작지만 영어와 일부 핵심 태그 회귀가 있어 `review-risk` |
+| queue=30 | +0.0000 | +0.0000 | +0.0000 | +0.0000 | baseline과 동일해 `no-risk-flag`지만 개선 근거는 없음 |
+
+주요 신호:
+
+- queue=12는 영어 final F1 `-0.0013`이고 `boundary-mismatch` final F1 `-0.0377`, `staged-residue` final F1 `-0.0262`를 만들었다.
+- queue=30은 전체/언어/핵심 태그 delta가 모두 0이다.
+- 따라서 현재 challenge corpus에서는 queue=20 이상에서 효과가 포화된다.
+
+판단:
+
+- `MAX_STAGED_SENTENCE_QUEUE=20`은 paper-evidence 기준에서도 성능 최적점이라기보다 긴 window 후보를 조기 폐기하지 않기 위한 보수적 하한으로 해석한다.
+- queue=30은 기본값 변경 근거가 없다. 같은 결과를 만들면서 stale 후보 유지 비용만 늘릴 수 있다.
+- queue=12는 소폭 하락과 핵심 태그 회귀가 있어 되돌릴 근거가 없다.
+- 다음 개선은 queue 크기 자체보다 queue 안의 후보 소비/정리 구조, 그리고 representative corpus에서 운영 평균에 미치는 영향을 보는 쪽이 더 타당하다.
+
+### 2026-06-21 paper-evidence revision fallback coverage sweep 재확인
+
+실험 목적:
+
+- 현재 기본값 `REVISION_FALLBACK_COVERAGE_MIN=0.55`가 주변값보다 안정적인지 paper-evidence 형식으로 다시 확인한다.
+- 이 값은 외부 문헌에서 직접 가져온 값이 아니라, 같은 challenge replay corpus에서 revision lifecycle trade-off를 비교해 채택한 운영 파라미터다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --paper-evidence \
+  --param REVISION_FALLBACK_COVERAGE_MIN=0.50 \
+  --param REVISION_FALLBACK_COVERAGE_MIN=0.60 \
+  --param REVISION_FALLBACK_COVERAGE_MIN=0.70 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-revision-fallback-coverage-axis \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-revision-fallback-coverage-axis/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-revision-fallback-coverage-axis/summary.md
+```
+
+Evidence 계약:
+
+```text
+corpus_role=challenge-replay
+case_count=1113
+expected_final_case_count=1109
+parameter_axes=[REVISION_FALLBACK_COVERAGE_MIN]
+paper_evidence_requested=true
+paper_evidence=true
+paper_evidence_eligible=true
+claim_scope_key=failure-lifecycle-tradeoff
+missing_required_evidence_fields=none
+runtime=sat + cuda + float16
+model_source=local-cache-only
+```
+
+전체 결과:
+
+| 조건 | precision | recall | final F1 | boundary F1 | finalized/stage |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| baseline 0.55 | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+| 0.50 | 0.5949 | 0.4378 | 0.4796 | 0.1095 | 0.7176 |
+| 0.60 | 0.5974 | 0.4348 | 0.4781 | 0.1092 | 0.7045 |
+| 0.70 | 0.5942 | 0.4295 | 0.4736 | 0.1094 | 0.6908 |
+
+Delta:
+
+| 조건 | precision delta | recall delta | final F1 delta | boundary F1 delta | 해석 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| 0.50 | -0.0071 | -0.0021 | -0.0036 | +0.0017 | finalized/stage와 boundary는 조금 오르지만 precision/F1 하락으로 `review-risk` |
+| 0.60 | -0.0045 | -0.0051 | -0.0051 | +0.0015 | recall/F1 하락과 empty final 증가로 `review-risk` |
+| 0.70 | -0.0077 | -0.0105 | -0.0096 | +0.0017 | 가장 큰 recall/F1 하락과 staged residue 증가로 `review-risk` |
+
+주요 언어/태그 신호:
+
+- 0.50/0.60/0.70은 모두 영어, 한국어, 중국어 중 하나 이상에서 final F1 또는 precision 회귀를 만든다.
+- 0.50은 staged residue를 일부 줄이지만 `missing-final`, `stage-queue`, `cjk-internal-gap`, `duplicate-final`, `no-end-marker`의 final F1을 모두 낮추고 empty final을 늘린다.
+- 0.60/0.70은 주요 실패 태그의 staged residue와 empty final을 더 악화시킨다.
+- 세 후보 모두 `adoption_review=review-risk`다.
+
+판단:
+
+- paper-evidence 기준에서도 0.55는 주변값 0.50/0.60/0.70보다 전체 final F1과 언어별 안정성이 낫다.
+- boundary F1만 보면 주변값이 아주 작게 오를 수 있지만, final F1/precision/recall 하락을 보상할 수준이 아니다.
+- 현재 논문에서는 이 값을 “문헌에서 도출한 임계값”이 아니라 “앱 로그 기반 challenge replay가 지지한 revision lifecycle 기본값”으로 설명해야 한다.
+- 다음 개선은 이 threshold를 더 미세 조정하기보다, representative corpus에서 운영 평균을 확인하고 active staged/candidate queue 구조 병목을 분리해 보는 쪽이 타당하다.
+
+### 2026-06-21 paper-evidence CJK replacement hold sweep
+
+실험 목적:
+
+- `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS`가 CJK 짧은 replacement 후보의 즉시 교체를 줄여 중복/누락 trade-off를 움직이는지 확인한다.
+- 이 축은 단어/문구 규칙이 아니라 후보 생명주기 보류값이므로, 단일 threshold 반복 튜닝보다 구조적 병목을 찾는 과정의 확인 실험으로 실행했다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --paper-evidence \
+  --param SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=0 \
+  --param SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=1 \
+  --param SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=3 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-cjk-replacement-hold-axis \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-cjk-replacement-hold-axis/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-cjk-replacement-hold-axis/summary.md
+```
+
+Evidence 계약:
+
+```text
+corpus_role=challenge-replay
+case_count=1113
+expected_final_case_count=1109
+parameter_axes=[SHORT_CJK_REPLACEMENT_HOLD_CHUNKS]
+paper_evidence_requested=true
+paper_evidence=true
+paper_evidence_eligible=true
+claim_scope_key=failure-lifecycle-tradeoff
+missing_required_evidence_fields=none
+runtime=sat + cuda + float16
+model_source=local-cache-only
+```
+
+전체 결과:
+
+| 조건 | precision | recall | final F1 | boundary F1 | finalized/stage |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| baseline hold=2 | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+| hold=0 | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+| hold=1 | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+| hold=3 | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+
+Delta:
+
+| 조건 | precision delta | recall delta | final F1 delta | boundary F1 delta | 해석 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| hold=0 | +0.0000 | +0.0000 | +0.0000 | +0.0000 | 전체/언어/핵심 태그 delta가 모두 0 |
+| hold=1 | +0.0000 | +0.0000 | +0.0000 | +0.0000 | 전체/언어/핵심 태그 delta가 모두 0 |
+| hold=3 | +0.0000 | +0.0000 | +0.0000 | +0.0000 | 전체/언어/핵심 태그 delta가 모두 0 |
+
+판단:
+
+- 현재 1113건 challenge replay에서는 `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS`가 출력 metric과 lifecycle residue를 움직이지 않는다.
+- 과거 0/2/4 비교와 이번 0/1/3 paper-evidence 비교가 같은 결론이므로, 이 값은 논문 근거용 성능 튜닝축으로 보기 어렵다.
+- 기본값 2는 짧은 CJK replacement에 대한 보수적 보호장치로만 설명하고, 개선 주장은 하지 않는다.
+- 다음 실험 우선순위는 이 값을 더 흔드는 것이 아니라 representative corpus 구축, final event timestamp/translation replay, active staged/candidate queue 구조 병목 분리다.
+
+### 2026-06-21 paper-evidence no-text stale stage sweep
+
+실험 목적:
+
+- no-text chunk가 반복될 때 미확정 staged 후보를 final로 올리지 않고 stale 후보로 정리하는 임계값을 최신 paper-evidence 계약으로 재확인한다.
+- 이 값은 VAD/silence를 final 근거로 쓰는 정책이 아니라, 텍스트 없는 chunk가 반복된 뒤 미확정 후보를 얼마나 빨리 폐기할지 정하는 lifecycle 정리값이다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --paper-evidence \
+  --param NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS=3 \
+  --param NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS=9 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-no-text-stale-axis \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-no-text-stale-axis/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-no-text-stale-axis/summary.md
+```
+
+Evidence 계약:
+
+```text
+corpus_role=challenge-replay
+case_count=1113
+expected_final_case_count=1109
+parameter_axes=[NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS]
+paper_evidence_requested=true
+paper_evidence=true
+paper_evidence_eligible=true
+claim_scope_key=failure-lifecycle-tradeoff
+missing_required_evidence_fields=none
+runtime=sat + cuda + float16
+model_source=local-cache-only
+```
+
+전체 결과:
+
+| 조건 | precision | recall | final F1 | boundary F1 | finalized/stage |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| baseline no-text=6 | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+| no-text=3 | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+| no-text=9 | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+
+Delta:
+
+| 조건 | precision delta | recall delta | final F1 delta | boundary F1 delta | staged residue 신호 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| no-text=3 | +0.0000 | +0.0000 | +0.0000 | +0.0000 | 한국어 staged residue -1, `audio-residual` -1, `no-speech` -1 |
+| no-text=9 | +0.0000 | +0.0000 | +0.0000 | +0.0000 | 한국어 staged residue +1 |
+
+판단:
+
+- no-text=3은 잔류 staged 후보를 일부 더 빨리 정리하지만, final 품질 지표와 주요 실패 태그 metric을 개선하지 않는다.
+- no-text=9는 반대로 한국어 staged residue를 1건 늘린다.
+- 두 후보 모두 `adoption_review=no-risk-flag`지만, 이는 개선 근거가 아니라 평균 품질 회귀 flag가 없다는 뜻에 가깝다.
+- 기본값 6은 유지한다. 현재 corpus에서는 이 축도 성능 개선축이 아니라 no-text 구간의 stale 후보 정리 정책으로만 설명하는 것이 맞다.
+
+### 2026-06-21 paper-evidence forced confirmation sweep
+
+실험 목적:
+
+- forced boundary 후보 전용 confirmation count가 최신 paper-evidence 계약에서도 결과를 움직이지 않는지 확인한다.
+- forced 후보는 모델이 강한 경계 후보를 낸 경우라도 뒤 window에서 문장이 이어질 수 있기 때문에 일반 후보보다 보수적으로 처리하는 정책이다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --paper-evidence \
+  --param FORCED_SENTENCE_CONFIRM_CHUNKS=2 \
+  --param FORCED_SENTENCE_CONFIRM_CHUNKS=4 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-forced-confirm-axis \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-forced-confirm-axis/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-forced-confirm-axis/summary.md
+```
+
+Evidence 계약:
+
+```text
+corpus_role=challenge-replay
+case_count=1113
+expected_final_case_count=1109
+parameter_axes=[FORCED_SENTENCE_CONFIRM_CHUNKS]
+paper_evidence_requested=true
+paper_evidence=true
+paper_evidence_eligible=true
+claim_scope_key=failure-lifecycle-tradeoff
+missing_required_evidence_fields=none
+runtime=sat + cuda + float16
+model_source=local-cache-only
+```
+
+전체 결과:
+
+| 조건 | precision | recall | final F1 | boundary F1 | finalized/stage |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| baseline forced=3 | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+| forced=2 | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+| forced=4 | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+
+Delta:
+
+| 조건 | precision delta | recall delta | final F1 delta | boundary F1 delta | 언어/핵심 태그 delta |
+| --- | ---: | ---: | ---: | ---: | --- |
+| forced=2 | +0.0000 | +0.0000 | +0.0000 | +0.0000 | 모두 0 |
+| forced=4 | +0.0000 | +0.0000 | +0.0000 | +0.0000 | 모두 0 |
+
+판단:
+
+- forced confirmation count는 현재 1113건 challenge replay에서 출력 metric, 언어별 metric, 핵심 실패 태그 metric을 전혀 움직이지 않는다.
+- `adoption_review=no-risk-flag`이지만 baseline과 동일하므로 개선 후보가 아니다.
+- 기본값 `FORCED_SENTENCE_CONFIRM_CHUNKS=3`은 유지한다.
+- 이 축은 추가 미세조정보다 representative corpus와 active staged/candidate queue 구조 검토를 우선해야 하는 근거로 분류한다.
+
+### 2026-06-21 paper-evidence forced age sweep
+
+실험 목적:
+
+- forced boundary 후보 전용 age 상한이 최신 paper-evidence 계약에서도 결과를 움직이지 않는지 확인한다.
+- forced confirmation count와 함께 forced 후보 계열 전체가 현재 challenge replay에서 닫힌 튜닝축인지 판단한다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --paper-evidence \
+  --param FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS=3 \
+  --param FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS=5 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-forced-age-axis \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-forced-age-axis/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-forced-age-axis/summary.md
+```
+
+Evidence 계약:
+
+```text
+corpus_role=challenge-replay
+case_count=1113
+expected_final_case_count=1109
+parameter_axes=[FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS]
+paper_evidence_requested=true
+paper_evidence=true
+paper_evidence_eligible=true
+claim_scope_key=failure-lifecycle-tradeoff
+missing_required_evidence_fields=none
+runtime=sat + cuda + float16
+model_source=local-cache-only
+```
+
+전체 결과:
+
+| 조건 | precision | recall | final F1 | boundary F1 | finalized/stage |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| baseline forced age=4 | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+| forced age=3 | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+| forced age=5 | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+
+Delta:
+
+| 조건 | precision delta | recall delta | final F1 delta | boundary F1 delta | 언어/핵심 태그 delta |
+| --- | ---: | ---: | ---: | ---: | --- |
+| forced age=3 | +0.0000 | +0.0000 | +0.0000 | +0.0000 | 모두 0 |
+| forced age=5 | +0.0000 | +0.0000 | +0.0000 | +0.0000 | 모두 0 |
+
+판단:
+
+- forced age 상한도 현재 1113건 challenge replay에서 출력 metric, 언어별 metric, 핵심 실패 태그 metric을 전혀 움직이지 않는다.
+- `FORCED_SENTENCE_CONFIRM_CHUNKS`와 `FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS` 모두 최신 paper-evidence 형식에서 0 delta이므로 forced 계열은 현재 corpus에서 닫힌 튜닝축으로 본다.
+- 기본값 `FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS=4`는 유지한다.
+- 다음 개선 시도는 forced 후보 전용 임계값이 아니라 active staged/candidate queue 구조, revision matching, representative corpus 검증을 우선한다.
+
+### 2026-06-21 paper-evidence CJK confirmation preserve sweep
+
+실험 목적:
+
+- CJK revision 후보가 같은 발화 구간으로 유지될 때 confirmation count를 보존하는 ratio 임계값이 최신 paper-evidence 계약에서도 의미 있는 개선을 만드는지 확인한다.
+- 이 축은 단순 final 지연값이 아니라 revision lifecycle의 동일 후보 판단에 연결되므로, forced/no-text 같은 닫힌 축보다 구조적 병목에 더 가까운 후보로 본다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --paper-evidence \
+  --param CJK_CONFIRM_PRESERVE_RATIO_MIN=0.65 \
+  --param CJK_CONFIRM_PRESERVE_RATIO_MIN=0.80 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-cjk-confirm-preserve-axis \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-cjk-confirm-preserve-axis/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-cjk-confirm-preserve-axis/summary.md
+```
+
+Evidence 계약:
+
+```text
+corpus_role=challenge-replay
+case_count=1113
+expected_final_case_count=1109
+parameter_axes=[CJK_CONFIRM_PRESERVE_RATIO_MIN]
+paper_evidence_requested=true
+paper_evidence=true
+paper_evidence_eligible=true
+claim_scope_key=failure-lifecycle-tradeoff
+missing_required_evidence_fields=none
+runtime=sat + cuda + float16
+model_source=local-cache-only
+```
+
+전체 결과:
+
+| 조건 | precision | recall | final F1 | boundary F1 | finalized/stage |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| baseline preserve=0.72 | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+| preserve=0.65 | 0.6019 | 0.4401 | 0.4834 | 0.1077 | 0.7118 |
+| preserve=0.80 | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+
+Delta:
+
+| 조건 | precision delta | recall delta | final F1 delta | boundary F1 delta | 주요 신호 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| preserve=0.65 | +0.0000 | +0.0002 | +0.0002 | +0.0000 | 중국어 final F1 +0.0008, staged residue -1 |
+| preserve=0.80 | +0.0000 | +0.0000 | +0.0000 | +0.0000 | 변화 없음 |
+
+세부 신호:
+
+- `preserve=0.65`는 `missing-final`, `stage-queue`, `cjk-internal-gap`, `duplicate-final` 태그에서 final F1을 +0.0002~+0.0003 올리고 staged residue를 1건 줄였다.
+- precision과 boundary F1은 전체/언어/태그 모두 변화가 없다.
+- `preserve=0.80`은 baseline과 동일하다.
+- 두 후보 모두 `adoption_review=no-risk-flag`다.
+
+판단:
+
+- `CJK_CONFIRM_PRESERVE_RATIO_MIN=0.65`는 방향성은 좋지만 개선 폭이 final F1 +0.0002, 중국어 final F1 +0.0008 수준으로 매우 작다.
+- boundary F1과 precision을 움직이지 못하므로, 현재 논문/운영 기본값을 바꿀 근거로는 부족하다.
+- 기본값 `CJK_CONFIRM_PRESERVE_RATIO_MIN=0.72`를 유지한다.
+- 다만 이 축은 완전한 0 delta 축은 아니므로, 향후 representative corpus나 CJK 전용 failure shard가 커지면 재검토할 후보로 남긴다.
+
+### 2026-06-21 실험 설계 의미 재검토
+
+검토 목적:
+
+- 누적된 challenge replay, parameter sweep, 참조 논문 분류를 종합해 현재 실험 설계가 논문 근거로 유효한지 다시 판단한다.
+- `final_f1_avg`를 계속 끌어올리는 방식이 논문 주제와 맞는지 확인한다.
+- 실험 방법을 과감하게 재구성해야 하는지 검토한다.
+
+판단:
+
+- 현재 1113건 challenge replay는 운영 평균 표본이 아니라 실패 중심 재현 corpus다.
+- 따라서 이 corpus의 `final_f1_avg=0.483`, `final_boundary_f1_avg=0.108`은 제품 평균 품질이나 STT 모델 성능으로 해석하면 안 된다.
+- 그러나 같은 입력 집합에서 revision lifecycle 변경 전후의 확정 누락, 중복 확정, boundary mismatch, staged residue를 비교하는 용도로는 유효하다.
+- 최근 paper-evidence sweep에서 여러 threshold 축은 대부분 0 delta이거나 precision/recall/boundary trade-off를 만들었다.
+- `SENTENCE_CONFIRM_CHUNKS=1`처럼 final F1을 올리는 값도 precision과 중국어 품질을 크게 낮추므로 단일 점수 최적화로 채택하기 어렵다.
+- forced confirmation, forced age, CJK replacement hold, no-text stale suppression은 현재 corpus에서 성능 개선축으로 보기 어렵다.
+- `REVISION_FALLBACK_COVERAGE_MIN=0.55`처럼 일부 값은 challenge replay에서 주변값보다 안정적이지만, 이 역시 문헌 기반 보편 임계값이 아니라 앱 로그 replay가 지지한 운영 기본값이다.
+
+참조 논문 대비 의미:
+
+| 참조 축 | 현재 논문에서의 의미 | 이번 실험이 보태는 부분 |
+| --- | --- | --- |
+| Whisper-Streaming | partial hypothesis와 committed output 분리 필요성 | prefix 확정 문제를 문장 단위 final, duplicate suppression, staged residue까지 확장해 계측한다. |
+| Incremental ASR 평가 | WER 외 latency/update/revoke/stability 필요성 | final F1, boundary F1, lifecycle counter, duplicate/staged residue를 함께 보존하는 replay 실험 포맷을 만든다. |
+| SaT / punctuation | regex/ad-hoc 대신 모델 기반 SBD 후보와 right context 사용 | SBD 후보만으로 final을 결정하지 않고 revision lifecycle과 결합해야 함을 실패 replay로 확인한다. |
+| Speech translation segmentation | 번역 단위가 downstream 품질에 영향을 줄 수 있음 | final-only 번역 sink를 별도 실험 축으로 분리한다. 현재 challenge replay만으로 번역 품질 개선을 주장하지 않는다. |
+| Qwen3-ASR / NLLB | STT/번역 backend 후보 배경 | raw STT 품질과 final lifecycle 품질을 분리해 실험해야 함을 운영 로그로 확인한다. |
+
+재구성 방향:
+
+1. `challenge-replay`는 유지한다. 역할은 실패 재현, 회귀 감지, lifecycle trade-off 비교다.
+2. 논문 근거용 parameter sweep은 한 번에 한 축만 baseline과 비교하고, `paper_evidence`, `corpus_role`, `runtime_contract`, `evidence_summary`, 언어별/태그별 delta를 함께 보존한다.
+3. 운영 평균을 주장하려면 `tests/eval/dictation_ai/sbd_representative_cases/` 아래에 시간/세션 단위 representative corpus를 별도로 구축한다.
+4. final-only 번역 안정화 주장은 final event timestamp와 translation output replay가 연결된 뒤에만 다룬다.
+5. 새 threshold를 계속 늘리기보다 active staged/candidate queue 구조, no-end fragment 처리, recent final memory처럼 반복 실패를 설명하는 일반 lifecycle 구조를 보수적으로 비교한다.
+
+결론:
+
+- 현재 실험 설계는 "일반 성능 평균을 증명하는 벤치"로는 부적절하다.
+- 하지만 "불안정한 STT window 가설을 final-only 번역 입력으로 안정화하기 위해 실패 축을 분리하고 lifecycle 정책을 검증하는 사례 연구"로는 유효하다.
+- 논문은 raw STT 정확도 개선이나 threshold 최적화 논문이 아니라, 실시간 STT partial revision을 final-only translation input으로 안정화하는 계측/생명주기 설계 논문으로 유지해야 한다.
+
+### 2026-06-21 paper-evidence CJK revision ratio sweep
+
+실험 목적:
+
+- `CJK_REVISION_RATIO_MIN`이 최신 paper-evidence 계약에서도 기본값 변경 근거를 만드는지 확인한다.
+- 이 값은 CJK 후보가 기존 staged 후보의 revision인지 판정하는 similarity 임계값이다.
+- 과거 기록에서는 `0.70`이 staged residue만 줄이고 final 품질은 바꾸지 않았으며, `0.85`는 중국어 precision/F1을 낮췄다. 최신 report/evidence 계약에서도 같은 결론인지 재검증한다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --paper-evidence \
+  --param CJK_REVISION_RATIO_MIN=0.70 \
+  --param CJK_REVISION_RATIO_MIN=0.85 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-cjk-revision-ratio-axis \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-cjk-revision-ratio-axis/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-cjk-revision-ratio-axis/summary.md
+```
+
+Evidence 계약:
+
+```text
+corpus_role=challenge-replay
+case_count=1113
+expected_final_case_count=1109
+parameter_axes=[CJK_REVISION_RATIO_MIN]
+paper_evidence_requested=true
+paper_evidence=true
+paper_evidence_eligible=true
+claim_scope_key=failure-lifecycle-tradeoff
+missing_required_evidence_fields=none
+runtime=sat + cuda + float16
+model_source=local-cache-only
+```
+
+전체 결과:
+
+| 조건 | precision | recall | final F1 | boundary F1 | finalized/stage |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| baseline ratio=0.78 | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+| ratio=0.70 | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7119 |
+| ratio=0.85 | 0.6012 | 0.4397 | 0.4829 | 0.1078 | 0.7115 |
+
+Delta:
+
+| 조건 | precision delta | recall delta | final F1 delta | boundary F1 delta | 주요 신호 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| ratio=0.70 | +0.0000 | +0.0000 | +0.0000 | +0.0000 | 중국어 staged residue -2 |
+| ratio=0.85 | -0.0008 | -0.0002 | -0.0003 | +0.0000 | 중국어 precision -0.0039, final F1 -0.0016, staged residue +1 |
+
+세부 신호:
+
+- `ratio=0.70`은 `missing-final`, `stage-queue`, `cjk-internal-gap`, `duplicate-final`, `no-end-marker` 태그에서 staged residue를 각각 2건 줄였지만 final precision/recall/F1/boundary F1은 움직이지 않았다.
+- `ratio=0.85`는 `language-final-f1-regression`, `language-precision-regression`, `key-tag-precision-regression` flag가 붙었다.
+- `ratio=0.85`는 `missing-final`, `stage-queue`, `cjk-internal-gap`, `duplicate-final`, `no-end-marker`의 final F1 또는 precision을 낮췄고, 주요 실패군 staged residue를 1건 늘렸다.
+
+판단:
+
+- `CJK_REVISION_RATIO_MIN=0.70`은 잔류 staged 후보를 조금 줄이지만 사용자 final 품질 지표를 개선하지 않는다.
+- `CJK_REVISION_RATIO_MIN=0.85`는 보수적으로 보일 수 있지만 실제로는 중국어 precision/F1과 핵심 태그 precision을 낮춘다.
+- 기본값 `CJK_REVISION_RATIO_MIN=0.78`을 유지한다.
+- 이 결과는 CJK 전용 similarity 임계값을 더 미세 조정하는 것보다, candidate queue/revision lifecycle 구조와 representative corpus 검증이 우선이라는 현재 실험 설계 판단을 보강한다.
+
+### 2026-06-21 paper-evidence short CJK final gate sweep
+
+실험 목적:
+
+- `SHORT_CJK_FINAL_UNITS`가 최신 paper-evidence 계약에서도 기본값 변경 근거를 만드는지 확인한다.
+- 이 값은 짧은 CJK final 후보를 fragment/false-final 위험으로 볼지 판단하는 품질 게이트다.
+- 과거 기록에서는 `8`이 중국어 recall/F1을 아주 소폭 올렸지만 precision을 낮췄고, `12`는 recall/F1을 낮췄다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --paper-evidence \
+  --param SHORT_CJK_FINAL_UNITS=8 \
+  --param SHORT_CJK_FINAL_UNITS=12 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-short-cjk-final-axis \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-short-cjk-final-axis/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-short-cjk-final-axis/summary.md
+```
+
+Evidence 계약:
+
+```text
+corpus_role=challenge-replay
+case_count=1113
+expected_final_case_count=1109
+parameter_axes=[SHORT_CJK_FINAL_UNITS]
+paper_evidence_requested=true
+paper_evidence=true
+paper_evidence_eligible=true
+claim_scope_key=failure-lifecycle-tradeoff
+missing_required_evidence_fields=none
+runtime=sat + cuda + float16
+model_source=local-cache-only
+```
+
+전체 결과:
+
+| 조건 | precision | recall | final F1 | boundary F1 | finalized/stage |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| baseline units=10 | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+| units=8 | 0.6016 | 0.4403 | 0.4836 | 0.1077 | 0.7128 |
+| units=12 | 0.6020 | 0.4393 | 0.4827 | 0.1076 | 0.7109 |
+
+Delta:
+
+| 조건 | precision delta | recall delta | final F1 delta | boundary F1 delta | 주요 신호 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| units=8 | -0.0003 | +0.0004 | +0.0004 | -0.0000 | 중국어 final F1 +0.0018, 중국어 precision -0.0016, empty final -1 |
+| units=12 | +0.0001 | -0.0006 | -0.0005 | -0.0001 | 중국어 recall -0.0030, 중국어 final F1 -0.0025 |
+
+세부 신호:
+
+- `units=8`은 `overall-final-f1-up-precision-down`, `overall-final-f1-up-boundary-down`, `language-precision-regression`, `key-tag-precision-regression` flag가 붙었다.
+- `units=8`은 `missing-final`, `stage-queue`, `cjk-internal-gap`에서 final F1을 +0.0004 정도 올리고 empty final을 1건 줄였지만, `duplicate-final` precision을 -0.0020 낮췄다.
+- `units=12`는 `language-final-f1-regression`, `key-tag-boundary-regression` flag가 붙었다.
+- `units=12`는 precision을 아주 소폭 올리지만 중국어 recall/final F1과 전체 boundary F1을 낮춘다.
+
+판단:
+
+- `SHORT_CJK_FINAL_UNITS=8`은 방향성 일부는 좋지만 precision과 boundary 회귀가 함께 있어 기본값으로 채택하기 어렵다.
+- `SHORT_CJK_FINAL_UNITS=12`는 recall과 final F1을 낮추므로 기본값 후보가 아니다.
+- 기본값 `SHORT_CJK_FINAL_UNITS=10`을 유지한다.
+- 이 결과도 CJK 품질 게이트 단독 튜닝보다 revision lifecycle 구조와 representative corpus 검증이 우선이라는 판단을 보강한다.
+
+### 2026-06-21 paper-evidence sentence confirm max age 재실행
+
+실험 목적:
+
+- 기존 `SENTENCE_CONFIRM_MAX_AGE_CHUNKS` 주변값 2/4 비교는 실제 CUDA/SaT로 수행됐지만, 당시 summary에는 최신 `parameter_axes`와 `missing_required_evidence_fields=none` 계약 표시가 부족했다.
+- 논문 근거 표준화를 위해 같은 축을 최신 paper-evidence 출력 형식으로 재실행한다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --paper-evidence \
+  --param SENTENCE_CONFIRM_MAX_AGE_CHUNKS=2 \
+  --param SENTENCE_CONFIRM_MAX_AGE_CHUNKS=4 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-confirm-max-age-axis \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-confirm-max-age-axis/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-confirm-max-age-axis/summary.md
+```
+
+Evidence 계약:
+
+```text
+corpus_role=challenge-replay
+case_count=1113
+expected_final_case_count=1109
+parameter_axes=[SENTENCE_CONFIRM_MAX_AGE_CHUNKS]
+paper_evidence_requested=true
+paper_evidence=true
+paper_evidence_eligible=true
+claim_scope_key=failure-lifecycle-tradeoff
+missing_required_evidence_fields=none
+runtime=sat + cuda + float16
+model_source=local-cache-only
+```
+
+결과:
+
+| 조건 | precision delta | recall delta | final F1 delta | boundary F1 delta | 언어/핵심 태그 delta |
+| --- | ---: | ---: | ---: | ---: | --- |
+| age max=2 | +0.0000 | +0.0000 | +0.0000 | +0.0000 | 모두 0 |
+| age max=4 | +0.0000 | +0.0000 | +0.0000 | +0.0000 | 모두 0 |
+
+판단:
+
+- 최신 paper-evidence 출력 형식에서도 `SENTENCE_CONFIRM_MAX_AGE_CHUNKS` 2/3/4는 현재 1113건 challenge replay에서 결과를 전혀 움직이지 않는다.
+- 기본값 `SENTENCE_CONFIRM_MAX_AGE_CHUNKS=3`을 유지한다.
+- age 상한 단독 튜닝은 닫힌 축으로 보고, 다음 개선은 active staged/candidate queue 구조와 representative corpus 검증을 우선한다.
+
+### 2026-06-21 튜닝 manifest 축 coverage 감사
+
+검토 목적:
+
+- 단일 threshold sweep을 계속 반복하기 전에 `dictation_tuning_manifest`에 등록된 축이 paper-evidence 조건으로 충분히 확인됐는지 점검한다.
+- 확인 조건은 `paper_evidence=true`, `paper_evidence_eligible=true`, `sat + cuda + float16`, `model_source=local-cache-only`, `missing_required_evidence_fields=none`이다.
+
+확인 결과:
+
+| 축 | summary | 판단 |
+| --- | --- | --- |
+| `SENTENCE_CONFIRM_CHUNKS` | `20260621-paper-evidence-confirm-axis` | recall/precision trade-off가 커서 기본값 변경 근거 없음 |
+| `SENTENCE_CONFIRM_MAX_AGE_CHUNKS` | `20260621-paper-evidence-confirm-max-age-axis` | 전체/언어/핵심 태그 delta 모두 0 |
+| `FORCED_SENTENCE_CONFIRM_CHUNKS` | `20260621-paper-evidence-forced-confirm-axis` | 전체/언어/핵심 태그 delta 모두 0 |
+| `FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS` | `20260621-paper-evidence-forced-age-axis` | 전체/언어/핵심 태그 delta 모두 0 |
+| `MAX_STAGED_SENTENCE_QUEUE` | `20260621-paper-evidence-stage-queue-axis` | 20은 성능 최적값보다 조기 폐기 방지 하한 |
+| `NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS` | `20260621-paper-evidence-no-text-stale-axis` | final 품질 변화 없음, stale 정리값 |
+| `SHORT_CJK_FINAL_UNITS` | `20260621-paper-evidence-short-cjk-final-axis` | 작은 F1 상승 후보도 precision/boundary 회귀가 있어 기본값 유지 |
+| `SHORT_NO_END_FRAGMENT_UNITS` | `short-no-end-axis-evidence` | 3/5 모두 review-risk, 기본값 유지 |
+| `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS` | `20260621-paper-evidence-cjk-replacement-hold-axis` | 전체/언어/핵심 태그 delta 모두 0 |
+| `CJK_REVISION_RATIO_MIN` | `20260621-paper-evidence-cjk-revision-ratio-axis` | 낮추면 residue만 감소, 높이면 precision/F1 회귀 |
+| `CJK_CONFIRM_PRESERVE_RATIO_MIN` | `20260621-paper-evidence-cjk-confirm-preserve-axis` | 개선 폭이 매우 작고 boundary/precision 변화 없음 |
+| `REVISION_FALLBACK_COVERAGE_MIN` | `20260621-paper-evidence-revision-fallback-coverage-axis` | 주변값 대비 현재 기본값 0.55가 가장 안정적 |
+
+판단:
+
+- Manifest의 12개 축은 모두 최신 논문 근거 필드가 있는 paper-evidence summary를 갖는다.
+- 현재 1113건 challenge replay에서 단일 threshold를 더 촘촘히 흔드는 실험은 우선순위가 낮다.
+- 다음 실험 우선순위는 active staged/candidate queue 구조 검토, representative corpus 구축, final timestamp/translation replay 연결이다.
+
+### 2026-06-21 기준선 lifecycle 병목 감사
+
+검토 목적:
+
+- 누적 threshold sweep 이후에도 `final_f1_avg`가 큰 폭으로 오르지 않는 이유가 단순 파라미터 문제인지 구조 문제인지 확인한다.
+- 최신 paper-evidence 기준선 `20260621-paper-evidence-confirm-max-age-axis/baseline.json`을 재사용해 lifecycle counter와 언어별 잔류 신호를 집계했다.
+
+기준선:
+
+```text
+corpus_role=challenge-replay
+case_count=1113
+expected_final_case_count=1109
+finalized=4012
+stage_start=5638
+finalized_per_stage_start=0.7116
+final_precision_avg=0.6019
+final_recall_avg=0.4399
+final_f1_avg=0.4832
+final_boundary_f1_avg=0.1077
+pending_exact_match=602
+staged_exact_match=406
+case_exact_match=17
+runtime=sat + cuda + float16
+model_source=local-cache-only
+```
+
+상위 lifecycle counter:
+
+| counter | count | 해석 |
+| --- | ---: | --- |
+| `stage_replace` | 8273 | 새 completed 후보가 기존 staged 후보를 자주 대체하려 한다. |
+| `stage_replace_deferred` | 7551 | 기존 후보를 확정/폐기하지 못해 후속 후보가 queue로 보류된다. |
+| `stage_start` | 5638 | SBD 후보 생성은 충분히 발생한다. |
+| `stage_queue_enqueue` | 4257 | 생성순서 보존을 위해 후보 queue가 자주 사용된다. |
+| `stage_candidate_quality_blocked` | 3963 | 후보 품질 게이트가 final 소비를 많이 막는다. |
+| `stage_queue_revision` | 3961 | queue 내부에서도 후보 revision이 계속 발생한다. |
+| `stage_candidate_quality_no_end_marker` | 2280 | 종결 경계가 약한 fragment가 큰 비중을 차지한다. |
+
+언어별 잔류/오류 신호:
+
+| 언어 | expected final | actual final | underfinal | overfinal | zero actual | pending residue | staged+queue residue | 주요 병목 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| en | 2636 | 2477 | 186 | 151 | 6 | 183 | 703 | no-end, deferred replace, queue revision |
+| ko | 1615 | 895 | 371 | 10 | 64 | 342 | 427 | recall 손실, pending 잔류 |
+| zh | 1008 | 640 | 154 | 23 | 24 | 2 | 400 | quality blocked, staged/queue 잔류 |
+
+판단:
+
+- 현재 실험 설계는 `challenge-replay`로 실패 축을 분리하는 데 유효하다.
+- 반면 단일 `final_f1_avg` 목표를 정해 threshold만 반복 조정하는 방식은 효과가 약하다.
+- SBD는 후보를 충분히 만들고 있으므로, 남은 병목은 후보 생성 부족보다 `stage_replace_deferred`, queue 내부 revision, no-end fragment 품질, recent final memory와 같은 lifecycle 소비 규칙에 있다.
+- 다음 실험은 threshold grid를 더 촘촘히 늘리는 방식보다, 특정 lifecycle counter가 줄어드는지와 final 누락/중복 trade-off가 어떻게 변하는지 보는 구조 실험으로 전환한다.
+- 논문에서는 이 결과를 “운영 평균 성능”이 아니라 “불안정한 STT window hypothesis를 final-only 번역 입력으로 안정화할 때 필요한 실패 축 분리와 계측”의 근거로 사용한다.
+
+도구 보강:
+
+- `sbd_benchmark.py` report에 `lifecycle_bottleneck_summary`를 추가했다.
+- 이 summary는 전체 lifecycle counter와 언어별 `underfinal_count`, `overfinal_count`, `zero_actual_final_expected_count`, `pending_residue_count`, `staged_residue_count`, `staged_queue_residue_count`, `no_end_marker_count`, `quality_blocked_count`, `replace_deferred_count`, `queue_revision_count`를 남긴다.
+- `replacement_decision_counts`, `deferred_replacement_decision_counts`, `quality_block_reason_counts`를 추가해 deferred/quality block의 원인별 분해를 남긴다.
+- `run_sbd_parameter_sweep.py`도 각 job report의 `lifecycle_bottleneck_summary`를 보존하고, `evidence_summary`에 포함한다.
+- sweep summary는 baseline 대비 `lifecycle_bottleneck_deltas`도 계산한다.
+- 따라서 후속 paper-evidence sweep은 평균 metric뿐 아니라 구조적 병목이 어떤 방향으로 움직였는지 같은 summary JSON에서 확인할 수 있다.
+
+검증:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/structural-bottleneck-report-check.json
+```
+
+결과:
+
+```text
+corpus_role=challenge-replay
+cases=1113
+finalized=4012
+stage_start=5638
+finalized_per_stage_start=0.712
+final_precision_avg=0.602
+final_recall_avg=0.440
+final_f1_avg=0.483
+final_boundary_f1_avg=0.108
+```
+
+`lifecycle_bottleneck_summary` 확인:
+
+```text
+stage_replace=8273
+stage_replace_deferred=7551
+stage_queue_enqueue=4257
+stage_queue_revision=3961
+stage_candidate_quality_blocked=3963
+stage_candidate_quality_no_end_marker=2280
+final_quality_no_end_marker=595
+```
+
+언어별 병목:
+
+| 언어 | underfinal | overfinal | zero actual | pending residue | staged residue | queue residue | no-end | quality blocked | deferred replace | queue revision |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| en | 186 | 151 | 6 | 183 | 307 | 396 | 1856 | 2196 | 4833 | 2635 |
+| ko | 371 | 10 | 64 | 342 | 268 | 159 | 881 | 775 | 1191 | 517 |
+| zh | 154 | 23 | 24 | 2 | 132 | 268 | 138 | 992 | 1527 | 809 |
+
+원인별 breakdown 확인:
+
+```text
+replacement_decision_counts:
+  unconfirmed=4039
+  open_latin_clause=1620
+  unconfirmed_cjk=1527
+  confirmed=615
+  open_korean_clause=365
+  partial_revision=48
+  duplicate_or_suffix=37
+  partial_preserve=22
+
+deferred_replacement_decision_counts:
+  unconfirmed=4039
+  open_latin_clause=1620
+  unconfirmed_cjk=1527
+  open_korean_clause=365
+
+quality_block_reason_counts:
+  no_end_marker=2280
+  short_no_end_fragment=2020
+  latin_only_for_zh=873
+  trailing_ellipsis=569
+  repeated_word_ngram=504
+  short_cjk=96
+  cjk_internal_gap=82
+  low_value_cjk_fragment=77
+  spaced_cjk=32
+  mixed_latin_zh=24
+```
+
+판단:
+
+- `stage_replace_deferred`를 한 덩어리로 줄이는 실험은 위험하다. 보류 이유가 `unconfirmed`, `open_latin_clause`, `unconfirmed_cjk`, `open_korean_clause`로 나뉘며 각각 false final과 missing final의 trade-off가 다르다.
+- `stage_candidate_quality_blocked`도 단일 품질 게이트가 아니라 `no_end_marker`와 `short_no_end_fragment`가 가장 크고, `latin_only_for_zh`, `trailing_ellipsis`, `repeated_word_ngram`이 뒤따른다.
+- 다음 구조 실험은 먼저 `no_end_marker`/`short_no_end_fragment`가 실제 expected final 회수에 얼마나 기여하는지 representative 또는 challenge subgroup에서 나누어 봐야 한다.
+- 언어별 ad-hoc 규칙을 추가하기보다, reason별 delta가 줄어드는지와 final precision/boundary가 악화되는지를 함께 보는 방식으로 실험한다.
+
+실제 paper-evidence sweep delta 검증:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --paper-evidence \
+  --param SENTENCE_CONFIRM_MAX_AGE_CHUNKS=2 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/structural-lifecycle-delta-check \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/structural-lifecycle-delta-check/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/structural-lifecycle-delta-check/summary.md
+```
+
+결과:
+
+```text
+paper_evidence=true
+missing_required_evidence_fields=none
+metric_deltas={final_precision_avg: 0, final_recall_avg: 0, final_f1_avg: 0, final_boundary_f1_avg: 0, finalized_per_stage_start: 0}
+lifecycle_bottleneck_deltas.metrics={stage_start: 0, finalized: 0, stage_replace: 0, stage_replace_deferred: 0, stage_queue_enqueue: 0, stage_queue_revision: 0, stage_candidate_quality_blocked: 0, stage_candidate_quality_no_end_marker: 0, final_quality_no_end_marker: 0, candidate_duplicate_suppressed: 0, finalize_recent_echo_suppressed: 0}
+```
+
+판단:
+
+- `SENTENCE_CONFIRM_MAX_AGE_CHUNKS=2`가 최신 lifecycle delta까지 포함한 paper-evidence sweep에서도 전체 metric과 구조 병목을 전혀 움직이지 않는다는 기존 결론이 유지된다.
+- 새 summary 필드 덕분에 후속 구조 실험은 `final_f1` 변화가 작더라도 `stage_replace_deferred`, `queue_revision`, `no_end_marker`, 언어별 under/over-final이 줄었는지 직접 확인할 수 있다.
+
+Markdown summary 검증:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --paper-evidence \
+  --param SENTENCE_CONFIRM_MAX_AGE_CHUNKS=2 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/structural-markdown-lifecycle-check \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/structural-markdown-lifecycle-check/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/structural-markdown-lifecycle-check/summary.md
+```
+
+확인:
+
+```text
+missing_required_evidence_fields=none
+deferred_reason_deltas={open_korean_clause: 0, open_latin_clause: 0, unconfirmed: 0, unconfirmed_cjk: 0}
+quality_reason_deltas={no_end_marker: 0, short_no_end_fragment: 0, latin_only_for_zh: 0, trailing_ellipsis: 0, repeated_word_ngram: 0, ...}
+```
+
+Markdown에는 다음 표가 포함된다.
+
+```text
+| label | stage_replace_deferred | queue_revision | quality_blocked | no_end_marker | short_no_end_fragment | unconfirmed_deferred | open_latin_deferred | unconfirmed_cjk_deferred |
+| baseline | 7551 | 3961 | 3963 | 2280 | 2020 | 4039 | 1620 | 1527 |
+| sentence_confirm_max_age_chunks-2 | 7551 | 3961 | 3963 | 2280 | 2020 | 4039 | 1620 | 1527 |
+
+| label | stage_replace_deferred_delta | queue_revision_delta | quality_blocked_delta | no_end_marker_delta | short_no_end_fragment_delta | unconfirmed_deferred_delta | open_latin_deferred_delta | unconfirmed_cjk_deferred_delta |
+| sentence_confirm_max_age_chunks-2 | +0.0000 | +0.0000 | +0.0000 | +0.0000 | +0.0000 | +0.0000 | +0.0000 | +0.0000 |
+```
+
+판단:
+
+- 후속 구조 실험은 JSON을 별도 수동 분석하지 않아도 Markdown summary만으로 핵심 lifecycle 규모와 delta를 확인할 수 있다.
+- age max 축은 이 표에서도 닫힌 축으로 유지된다.
+
+### 2026-06-21 short no-end lifecycle reason delta 재검증
+
+현재 기준선의 가장 큰 품질 차단 원인이 `no_end_marker=2280`, `short_no_end_fragment=2020`이므로, `SHORT_NO_END_FRAGMENT_UNITS` 주변값 3/5를 최신 lifecycle reason delta 리포트로 다시 검증했다. 목적은 기본값 변경이 아니라 이 축이 실제 구조 개선축인지, 아니면 precision/recall/boundary trade-off를 설명하는 축인지 확인하는 것이다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --paper-evidence \
+  --param SHORT_NO_END_FRAGMENT_UNITS=3 \
+  --param SHORT_NO_END_FRAGMENT_UNITS=5 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/structural-short-no-end-lifecycle-axis \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/structural-short-no-end-lifecycle-axis/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/structural-short-no-end-lifecycle-axis/summary.md
+```
+
+실행 계약:
+
+```text
+corpus_role=challenge-replay
+cases=1113
+paper_evidence=true
+paper_evidence_eligible=true
+missing_required_evidence_fields=none
+runtime=sat + cuda + float16
+model_source=local-cache-only
+```
+
+전체 지표:
+
+| label | final precision | final recall | final F1 | boundary F1 | finalized/stage |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| baseline | 0.6019 | 0.4399 | 0.4832 | 0.1077 | 0.7116 |
+| `SHORT_NO_END_FRAGMENT_UNITS=3` | 0.5946 | 0.4376 | 0.4793 | 0.1090 | 0.7032 |
+| `SHORT_NO_END_FRAGMENT_UNITS=5` | 0.6013 | 0.4364 | 0.4809 | 0.1070 | 0.7232 |
+
+Lifecycle delta:
+
+| label | stage_replace_deferred | queue_revision | quality_blocked | no_end_marker | short_no_end_fragment | unconfirmed_deferred | open_latin_deferred | unconfirmed_cjk_deferred |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `SHORT_NO_END_FRAGMENT_UNITS=3` | +404 | +198 | -492 | -490 | -489 | +118 | +170 | +8 |
+| `SHORT_NO_END_FRAGMENT_UNITS=5` | -416 | -235 | +456 | +450 | +449 | -2 | -291 | -1 |
+
+언어/태그 해석:
+
+- `3`은 short/no-end 품질 차단을 줄이지만 확정 후보와 교체 보류가 늘고, 영어/한국어 final F1과 precision이 하락한다. `no-end-marker` 태그 recall은 거의 움직이지 않고 precision이 낮아져 회수 개선보다 false final 위험이 더 크다.
+- `5`는 queue revision과 deferred replacement를 줄이지만 no-end/short-fragment 차단을 늘리고 recall/final F1/boundary F1을 낮춘다. 한국어 final F1 하락과 `no-end-marker` 태그 하락이 함께 나타난다.
+- 두 값 모두 `adoption_review=review-risk`이며 `language-final-f1-regression`, `language-precision-regression`, `key-tag-precision-regression`, `key-tag-boundary-regression`이 기록됐다.
+
+판단:
+
+- `SHORT_NO_END_FRAGMENT_UNITS=4` 기본값 유지 판단을 유지한다.
+- 이 축은 구조 개선축이 아니라 no-end fragment를 얼마나 보수적으로 소비할지 설명하는 trade-off 축이다.
+- threshold를 낮추면 차단 count는 줄지만 queue/replacement churn이 증가하고 precision이 하락한다. threshold를 높이면 churn은 줄지만 recall과 boundary가 하락한다.
+- 따라서 후속 실험은 short no-end threshold를 더 세밀하게 흔드는 방식보다, 같은 candidate가 생성순서 안에서 어떤 revision 계열로 소비되거나 보류되는지 직접 설명하는 lifecycle 구조 실험으로 전환한다.
+
+### 2026-06-21 evidence strata summary 추가
+
+상위 실패 케이스를 수동 점검한 결과, 일부 케이스는 후처리 lifecycle 실패가 아니라 raw STT 입력 오염, 무음/잔류 출력, speaker transition 같은 원천 입력 검토 대상으로 볼 수 있다. 이 케이스를 challenge replay 전체 평균에 그대로 섞으면 "후처리 lifecycle이 고칠 수 있는 문제"와 "입력/원천 STT 단계에서 분리해야 하는 문제"가 섞인다.
+
+이에 benchmark report에 `evidence_strata_summary`를 추가했다. 점수 계산은 바꾸지 않고, 같은 results를 다음 해석 층으로 나눈다.
+
+- `all_cases`: 입력 전체
+- `lifecycle_focus`: missing/duplicate/final/fragment/no-end/queue/revision/stage/boundary 등 final lifecycle 진단 태그가 있는 케이스
+- `lifecycle_without_input_review`: lifecycle focus 중 `audio-residual`, `no-speech`, `no-text`, `speaker-transition` 검토 태그가 없는 케이스
+- `input_contamination_review`: 입력 잔류/무음/화자 전환 등 원천 입력 검토 태그가 있는 케이스
+
+기존 실제 `sat + cuda + float16` 기준선 report(`structural-bottleneck-breakdown-check.json`)를 새 strata 함수로 재분석했다.
+
+| stratum | cases | final F1 | boundary F1 | staged residue | empty final | queue revision | replace deferred | quality blocked |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| all cases | 1113 | 0.4832 | 0.1077 | 707 | 94 | 3961 | 7551 | 3963 |
+| lifecycle focus | 1112 | 0.4828 | 0.1069 | 706 | 94 | 3961 | 7551 | 3963 |
+| lifecycle without input review | 1108 | 0.4817 | 0.1061 | 703 | 94 | 3953 | 7521 | 3953 |
+| input contamination review | 5 | 0.8168 | 0.4780 | 4 | 0 | 8 | 30 | 10 |
+
+판단:
+
+- input contamination review는 5건뿐이므로, 현재 1113건 challenge replay의 낮은 `final_f1_avg`와 `final_boundary_f1_avg`를 입력 오염 대량 혼입으로 설명할 수 없다.
+- 따라서 challenge replay의 핵심 병목은 여전히 lifecycle focus 자체에 있다. 특히 `stage_queue_revision`, `stage_replace_deferred`, no-end/quality blocked가 주요 설명축이다.
+- 다만 input contamination review는 raw STT/입력 source 검토 대상으로 분리해 논문 지표표에서 별도 표기해야 한다. 이 stratum은 final lifecycle 개선 효과의 직접 근거로 쓰지 않는다.
+- 후속 논문 결과표는 `all_cases`만 제시하지 말고, 최소한 `lifecycle_without_input_review`와 `input_contamination_review` 규모를 함께 보여야 한다.
+
+기존 `SHORT_NO_END_FRAGMENT_UNITS=3/5` 실제 CUDA sweep job report를 새 strata 함수로 재분석했다. 이는 모델 재실행이 아니라, 이미 생성된 `sat + cuda + float16` case 결과의 해석 층을 추가한 것이다.
+
+| label | stratum | final F1 delta | precision delta | recall delta | boundary delta | staged residue delta | empty final delta |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `SHORT_NO_END_FRAGMENT_UNITS=3` | all cases | -0.0039 | -0.0073 | -0.0023 | +0.0012 | +13 | -1 |
+| `SHORT_NO_END_FRAGMENT_UNITS=3` | lifecycle without input review | -0.0040 | -0.0074 | -0.0023 | +0.0012 | +13 | -1 |
+| `SHORT_NO_END_FRAGMENT_UNITS=3` | input contamination review | +0.0000 | +0.0000 | +0.0000 | +0.0000 | 0 | 0 |
+| `SHORT_NO_END_FRAGMENT_UNITS=5` | all cases | -0.0024 | -0.0006 | -0.0036 | -0.0007 | -21 | 0 |
+| `SHORT_NO_END_FRAGMENT_UNITS=5` | lifecycle without input review | -0.0024 | -0.0007 | -0.0036 | -0.0008 | -21 | 0 |
+| `SHORT_NO_END_FRAGMENT_UNITS=5` | input contamination review | +0.0074 | +0.0179 | +0.0000 | +0.0000 | 0 | 0 |
+
+판단:
+
+- short no-end threshold 주변값의 기각 결론은 input contamination review를 제외해도 유지된다.
+- `3`의 boundary 소폭 상승은 clean lifecycle stratum에서도 final F1/precision 하락과 staged residue 증가를 동반한다.
+- `5`의 staged residue 감소도 clean lifecycle stratum에서 recall/final F1/boundary 하락을 동반한다.
+- 따라서 이 축은 `all_cases` 평균 착시가 아니라 clean lifecycle 대상에서도 trade-off 축으로 유지된다.
+
+### 2026-06-21 case exemplar summary 추가
+
+평균 지표와 lifecycle counter만으로는 논문에서 실패 구조를 설명하기 어렵다. 따라서 benchmark report에 `case_exemplar_summary`를 추가했다. 이 필드는 점수 계산에는 영향을 주지 않고, 정성 분석과 다음 구조 실험 후보 선정을 위한 compact 사례 목록만 제공한다.
+
+선정 규칙:
+
+- lifecycle focus case 중 input contamination review 태그가 없는 케이스를 대상으로 한다.
+- `stage_queue_revision`, `stage_replace_deferred`, `stage_candidate_quality_blocked`, `candidate_duplicate_suppressed`, staged residue, 낮은 final/boundary F1을 조합한 bottleneck score로 정렬한다.
+- payload에는 전체 텍스트를 넣지 않고 case id, language, tags, 핵심 metric, final/boundary F1, expected/actual/staged/queue preview만 넣는다.
+- input contamination review case는 별도 목록으로 분리한다.
+
+기존 실제 `sat + cuda + float16` 기준선 report를 새 exemplar 함수로 재분석한 lifecycle top 5:
+
+| case id | final F1 | boundary F1 | queue revision | replace deferred | quality blocked | 해석 |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `en_log_optimus_surgeons_zimbabwe_gigafactory_queue_20260620_001` | 0.596 | 0.000 | 64 | 85 | 19 | long-context 후보가 queue/replacement churn을 만들고, staged/queue에 후속 문장이 남는다. |
+| `en_log_supply_chain_recursive_medicine_free_20260620_001` | 0.696 | 0.000 | 137 | 154 | 43 | 내용 일부는 회수되지만 boundary가 맞지 않고 queue revision이 매우 크다. |
+| `en_log_replacement_rate_north_korea_underpopulation_queue_20260620_001` | 0.667 | 0.200 | 80 | 96 | 25 | queue 크기 하한 실험의 대표 사례로, staged/queue 잔류가 병목이다. |
+| `en_log_draft_20260620_avc_whisper_log_000134` | 0.000 | 0.000 | 24 | 30 | 10 | 기대 문장과 실제 final이 어긋나며 staged/queue 후보가 남는다. |
+| `en_log_booster_reentry_falcon9_reflights_20260620_001` | 0.875 | 0.250 | 26 | 38 | 30 | final 내용 회수는 높지만 boundary와 no-end quality block이 남는다. |
+
+판단:
+
+- 대표 병목 사례는 대부분 영어 long-context에서 `stage_queue_revision`과 `stage_replace_deferred`가 동시에 큰 케이스다.
+- `final_f1`이 0.6 이상이어도 `boundary_f1=0.0`인 사례가 있어, 내용 회수와 번역 단위 안정화는 분리해서 봐야 한다.
+- 다음 구조 실험은 threshold 조정보다 active staged와 candidate queue가 같은 발화 구간을 어떻게 소비하는지, 그리고 final 직전 boundary 품질이 어떻게 보존되는지를 겨냥해야 한다.
+
+### 2026-06-21 staged queue 한도 strata/exemplar 재분석
+
+대표 병목 사례가 queue/replacement churn을 가리키므로, 기존 실제 CUDA sweep `20260621-paper-evidence-stage-queue-axis`를 새 `evidence_strata_summary`와 `case_exemplar_summary` 관점으로 다시 해석했다. 모델 재실행은 하지 않았고 기존 `sat + cuda + float16` report의 case rows를 재분석했다.
+
+기준선은 `MAX_STAGED_SENTENCE_QUEUE=20`이다.
+
+| label | stratum | final F1 delta | precision delta | recall delta | boundary delta | staged residue delta | queue revision delta | drop oldest delta |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| queue=12 | all cases | -0.0005 | -0.0002 | -0.0006 | -0.0001 | 0 | +18 | +19 |
+| queue=12 | lifecycle without input review | -0.0005 | -0.0002 | -0.0006 | -0.0001 | 0 | +18 | +19 |
+| queue=12 | input contamination review | +0.0000 | +0.0000 | +0.0000 | +0.0000 | 0 | 0 | 0 |
+| queue=30 | all cases | +0.0000 | +0.0000 | +0.0000 | +0.0000 | 0 | 0 | 0 |
+| queue=30 | lifecycle without input review | +0.0000 | +0.0000 | +0.0000 | +0.0000 | 0 | 0 | 0 |
+| queue=30 | input contamination review | +0.0000 | +0.0000 | +0.0000 | +0.0000 | 0 | 0 | 0 |
+
+대표 사례 변화:
+
+- baseline/queue=30의 top lifecycle case는 `en_log_optimus_surgeons_zimbabwe_gigafactory_queue_20260620_001`이며 `stage_queue_revision=64`, `stage_replace_deferred=85`, `final_boundary_f1=0.0`이다.
+- queue=12의 top lifecycle case는 `en_log_supply_chain_recursive_medicine_free_20260620_001`이며 `stage_queue_revision=143`, `stage_replace_deferred=168`, `final_f1=0.343`, `final_boundary_f1=0.057`이다.
+
+판단:
+
+- queue=12는 clean lifecycle stratum에서도 조기 폐기(`stage_queue_drop_oldest=+19`)를 만들고 queue revision을 늘린다. 기본값을 낮출 근거가 없다.
+- queue=30은 clean lifecycle stratum에서도 baseline 20과 완전히 동일하다. 20 이상에서 queue 한도는 성능 개선축이 아니라 포화된 하한으로 보인다.
+- 따라서 대표 병목 사례의 queue/replacement churn은 단순히 queue 크기를 더 키우거나 줄여 해결할 문제가 아니다.
+- 후속 구조 실험은 queue 용량이 아니라 queue 안 후보의 revision 계열 판정, 순서 보존, final 직전 boundary 품질 보존 규칙을 겨냥해야 한다.
+
+### 2026-06-21 staged queue residue profile 계측 추가
+
+검토 목적:
+
+- 기준선과 파라미터 sweep에서 staged queue가 얼마나 남는지 case 수, 총량, 평균, 최대 길이로 관측한다.
+- `stage_queue_revision`과 `stage_replace_deferred` count만으로는 queue 잔류의 실제 모양을 보기 어렵기 때문에 `staged_queue_residue_summary`를 benchmark report와 sweep evidence summary에 추가했다.
+- 점수 계산은 바꾸지 않고, 기존 실제 CUDA report의 case rows를 새 함수로 재분석했다.
+
+기준선 profile:
+
+| 항목 | 값 |
+| --- | ---: |
+| case count | 1113 |
+| queue residue case count | 368 |
+| queue residue case ratio | 0.331 |
+| queue residue total | 823 |
+| queue residue avg per case | 0.739 |
+| queue residue avg when present | 2.236 |
+| queue residue max | 16 |
+| queue len >= 2 cases | 182 |
+| queue len >= 5 cases | 34 |
+| active staged residue cases | 707 |
+| pending residue cases | 527 |
+
+`MAX_STAGED_SENTENCE_QUEUE` 재분석:
+
+| 조건 | queue residue cases | queue total | avg when present | queue max | len >= 5 | active staged residue | delta 해석 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| baseline queue=20 | 368 | 823 | 2.236 | 16 | 34 | 707 | 기준선 |
+| queue=12 | 368 | 827 | 2.247 | 12 | 35 | 707 | 최대 길이만 낮추고 총 residue +4, drop oldest +19 |
+| queue=30 | 368 | 823 | 2.236 | 16 | 34 | 707 | 기준선과 동일 |
+
+`SHORT_NO_END_FRAGMENT_UNITS` 재분석:
+
+| 조건 | queue residue cases | queue total | avg when present | len >= 2 | len >= 5 | active staged residue | 해석 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| baseline units=4 | 368 | 823 | 2.236 | 182 | 34 | 707 | 기준선 |
+| units=3 | 386 | 896 | 2.321 | 203 | 40 | 720 | 품질 차단은 줄지만 queue/active staged residue 증가 |
+| units=5 | 331 | 756 | 2.284 | 175 | 34 | 686 | residue는 줄지만 recall/final F1/boundary 하락 |
+
+판단:
+
+- 기준선에서 약 1/3의 케이스가 queue residue를 남기므로, candidate queue는 실제 구조 병목이다.
+- queue=12는 residue 총량을 줄이지 못하고 조기 폐기를 만든다. queue=30은 기준선과 동일하다.
+- short no-end threshold는 queue residue를 크게 움직이지만 final 품질 trade-off가 함께 나타난다.
+- 따라서 후속 구조 실험은 queue 용량이나 no-end threshold가 아니라, queue 안 후보의 revision 계열 판정과 final 직전 boundary 보존 규칙을 직접 겨냥해야 한다.
+
+기준선 top queue residue 사례:
+
+| case id | lang | queue len | queue revision | replace deferred | final F1 | boundary F1 | 해석 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `en_log_optimus_surgeons_zimbabwe_gigafactory_queue_20260620_001` | en | 16 | 64 | 85 | 0.596 | 0.000 | 가장 긴 queue residue. 내용 일부는 회수되지만 boundary가 무너지고 후속 후보가 queue에 남는다. |
+| `en_log_ultracapacitor_phds_grad_school_queue_20260620_001` | en | 10 | 41 | 55 | 0.400 | 0.100 | long-context 영어 케이스. duplicate/no-end final 태그와 함께 queue 잔류가 크다. |
+| `en_log_chimps_pyramids_raptor_queue_20260620_001` | en | 10 | 37 | 57 | 0.750 | 0.000 | final 내용 회수는 높지만 boundary F1이 0이고 queue 잔류가 크다. |
+| `zh_log_draft_20260620_avc_whisper_log_11_000872` | zh | 10 | 21 | 33 | 0.750 | 0.000 | CJK draft 케이스에서도 queue residue와 boundary 실패가 같이 나타난다. |
+| `zh_log_duplicate_supper_20260617_001` | zh | 10 | 9 | 19 | 0.200 | 0.200 | 중복 출력/짧은 문장 흐름에서 queue 잔류가 남는다. |
+
+판단:
+
+- top queue residue는 영어 long-context에 집중되지만 중국어 duplicate/draft 케이스도 상위권에 포함된다.
+- queue 길이가 긴 케이스 중 일부는 final F1이 높아도 boundary F1이 0이므로, 내용 회수율만으로 final-only 번역 안정성을 설명할 수 없다.
+- 다음 구조 실험의 대표 사례는 이 top queue residue 목록에서 고르는 것이 타당하다. 특히 queue 길이 16 영어 케이스와 queue 길이 10 중국어 케이스를 함께 사용하면 언어별 ad-hoc이 아닌 일반 lifecycle 규칙을 검증할 수 있다.
+
+Queue residue severity strata 재분석:
+
+| 조건 | stratum | cases | final F1 | boundary F1 | staged residue | empty final | queue revision | replace deferred |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| baseline | no queue | 745 | 0.515 | 0.116 | 339 | 66 | 983 | 2468 |
+| baseline | queue len 1 | 186 | 0.397 | 0.086 | 186 | 19 | 797 | 1594 |
+| baseline | queue len 2-4 | 148 | 0.434 | 0.107 | 148 | 9 | 1363 | 2302 |
+| baseline | queue len >= 5 | 34 | 0.476 | 0.043 | 34 | 0 | 818 | 1187 |
+| queue=12 | queue len >= 5 | 35 | 0.467 | 0.038 | 35 | 0 | 973 | 1380 |
+| queue=30 | queue len >= 5 | 34 | 0.476 | 0.043 | 34 | 0 | 818 | 1187 |
+| short units=3 | queue len >= 5 | 40 | 0.503 | 0.095 | 40 | 0 | 1066 | 1515 |
+| short units=5 | queue len >= 5 | 34 | 0.433 | 0.039 | 34 | 0 | 749 | 1103 |
+
+해석:
+
+- queue len >= 5 stratum은 `empty_final_count=0`이므로, "아예 확정하지 못한 실패"와는 다른 실패다.
+- 이 구간은 final F1이 완전히 낮지 않아도 boundary F1이 낮다. final-only translation에서는 내용 일부 회수보다 문장 단위 경계 안정성이 중요하므로 별도 병목으로 봐야 한다.
+- queue=12는 긴 queue stratum의 revision/deferred count를 늘리고 boundary를 낮춘다. queue=30은 baseline과 동일하다.
+- short units=3은 긴 queue stratum의 final/boundary를 올리지만 queue case 수와 revision/deferred count도 늘린다. 단일 threshold 채택보다 trade-off 축으로 남긴다.
+- 실험 설계는 여전히 유효하다. 다만 다음 단계의 claim은 "일반 STT 정확도 개선"이 아니라 "불안정한 raw STT window에서 final lifecycle 병목을 severity stratum으로 분리하고, queue 후보 소비/경계 보존 구조를 검증한다"로 좁혀야 한다.
+
+### 2026-06-21 representative paper-evidence threshold 명시화
+
+검토 목적:
+
+- 실험 방법 재구성에서 `challenge-replay`와 `representative` 평균을 분리하기로 했으므로, 두 corpus가 같은 paper-evidence case target을 암묵 공유하지 않게 한다.
+- 기존 `--paper-evidence` 기본 target 1000건은 challenge replay의 reviewed expected-final 규모를 보장하기 위한 값이다.
+- representative corpus는 아직 표본 설계와 목표 규모가 확정되지 않았으므로, 논문 근거용 실행 시 사용자가 `--min-expected-final-cases`를 명시해야 한다.
+
+변경:
+
+- `run_sbd_parameter_sweep.py`에서 representative corpus에 `--paper-evidence`를 붙이고 `--min-expected-final-cases`를 생략하면 실행을 거부하도록 했다.
+- challenge replay는 기존처럼 `--paper-evidence` 기본 target 1000건을 유지한다.
+- `sbd_representative_cases/README.md`와 실험 프로토콜에 representative paper-evidence 실행은 명시 threshold가 필요하다고 기록했다.
+
+판단:
+
+- 이 변경은 성능 수치를 바꾸지 않는다.
+- 목적은 작은 representative 초안이 실수로 운영 평균 근거처럼 승격되는 것을 막는 것이다.
+- 초기 representative 탐색은 `--paper-evidence` 없이 실행하거나, 표본 규모 기준을 정한 뒤 명시 threshold로 실행한다.
+
+### 2026-06-21 representative metadata summary 추가
+
+검토 목적:
+
+- representative corpus는 case 수만으로 운영 평균 근거가 되지 않는다.
+- 표본 단위와 선택 규칙이 한쪽으로 몰리면 운영 평균 추정이라는 claim이 약해진다.
+- validator summary에 sampling/source 분포를 남겨, 실험일지와 논문 표로 옮길 때 표본 설계 전제를 같이 확인한다.
+
+변경:
+
+- `validate_sbd_case_files.py`가 representative corpus를 검증할 때 `representative_metadata`를 출력한다.
+- 포함 필드는 `sampling_unit_counts`, `sampling_rule_counts`, `source_log_count`, `source_log_counts`다.
+- challenge replay summary에는 이 필드를 추가하지 않아 기존 1113건 challenge 검증 출력 의미를 바꾸지 않는다.
+
+판단:
+
+- 이 변경은 성능 수치를 바꾸지 않는다.
+- representative 결과를 논문 근거로 승격할 때는 final F1 같은 metric만이 아니라 sampling rule/source 분포를 함께 기록한다.
+- source log가 1개 또는 sampling rule 하나에 과도하게 몰린 초안은 운영 평균 claim보다 탐색 표본으로 해석한다.
+
+### 2026-06-21 representative required evidence 보강
+
+검토 목적:
+
+- validator summary에 representative sampling/source 분포를 추가했지만, paper-evidence summary의 필수 필드에는 아직 포함되지 않았다.
+- representative 결과가 논문 표로 옮겨질 때 sampling context가 빠지면 운영 평균 추정 claim이 약해진다.
+
+변경:
+
+- `build_evidence_protocol`에서 `corpus_role=representative`일 때 `required_evidence_fields`에 다음 필드를 추가했다.
+  - `case_summary.representative_metadata.sampling_unit_counts`
+  - `case_summary.representative_metadata.sampling_rule_counts`
+  - `case_summary.representative_metadata.source_log_count`
+- 해당 필드가 없는 representative summary는 `missing_required_evidence_fields`에 표시된다.
+- challenge replay의 required field 목록은 기존과 동일하게 유지했다.
+
+판단:
+
+- representative paper-evidence는 case 수, runtime, metric 외에 sampling metadata가 함께 있어야 한다.
+- 이 보강은 나중에 representative 표본을 작게 시작하더라도 운영 평균 claim과 exploratory sample을 구분하는 guard 역할을 한다.
+
+### 2026-06-21 representative Markdown summary context 출력
+
+검토 목적:
+
+- representative metadata가 JSON summary에만 있고 Markdown에는 보이지 않으면, 실험일지나 논문 초안에 Markdown 표를 옮길 때 표본 문맥이 빠질 수 있다.
+- 운영 평균 claim은 sampling unit/rule/source 분포와 함께 읽어야 하므로 Markdown header에도 해당 값을 출력한다.
+
+변경:
+
+- representative parameter sweep Markdown header에 다음 항목을 추가했다.
+  - `representative_sampling_units`
+  - `representative_sampling_rules`
+  - `representative_source_log_count`
+- challenge replay에서는 해당 항목을 출력하지 않아 기존 해석을 바꾸지 않는다.
+
+판단:
+
+- representative 결과를 사람이 읽는 요약으로 공유할 때도 표본 설계 전제가 함께 보인다.
+- JSON required evidence와 Markdown 표시가 같은 방향으로 맞춰졌다.
+
+### 2026-06-21 representative benchmark report metadata 보존
+
+검토 목적:
+
+- representative metadata가 validator와 sweep summary에는 남지만, `sbd_benchmark.py` 단독 report에는 남지 않는 경로가 있었다.
+- 단독 benchmark report는 paper-evidence sweep gate를 통과한 결과는 아니지만, 대표 표본을 빠르게 분석할 때 같은 표본 문맥을 보존해야 한다.
+
+변경:
+
+- `SbdCase`가 representative case의 `sampling_unit`, `sampling_rule`, `source_log` 메타데이터를 보관하도록 했다.
+- `sbd_benchmark_report.py`의 `case_summary`가 `corpus_role=representative`일 때 `representative_metadata`를 포함하도록 했다.
+- validator와 benchmark report가 같은 `summarize_representative_metadata` helper를 사용하도록 정리했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.unit.test_dictation_ai_sbd_benchmark_report \
+  tests.unit.test_dictation_ai_sbd_case_loader \
+  tests.unit.test_dictation_ai_sbd_case_validator
+
+Ran 39 tests in 0.012s
+OK
+
+./.venv/bin/python -m unittest discover -s tests/unit -p 'test_dictation_ai_sbd_*.py'
+
+Ran 63 tests in 0.014s
+OK
+```
+
+판단:
+
+- 이 변경은 성능 수치를 바꾸지 않는다.
+- 목적은 단독 benchmark, validator, paper-evidence sweep이 representative 표본 문맥을 서로 다르게 해석하는 것을 막는 것이다.
+- 따라서 현재 실험 설계의 핵심인 challenge replay와 representative operating sample 분리를 더 강하게 보존한다.
+
+### 2026-06-21 manifest 축 종합 해석
+
+검토 목적:
+
+- 현재까지 누적한 paper-evidence sweep이 threshold 최적화 실험으로 계속 확장될 가치가 있는지 확인한다.
+- 12개 tuning manifest 축을 채택 가능, trade-off, 닫힌 축, 보류 축으로 분류해 다음 실험 우선순위를 정한다.
+- 새 CUDA 실행은 하지 않고, 기존 실제 `sat + cuda + float16` summary JSON을 재집계했다.
+
+종합 결과:
+
+| 분류 | 축 | 근거 |
+| --- | --- | --- |
+| 유지 근거 있음 | `REVISION_FALLBACK_COVERAGE_MIN=0.55` | 0.50/0.60/0.70 모두 baseline보다 final F1, precision, recall이 낮다. |
+| trade-off 축 | `SENTENCE_CONFIRM_CHUNKS` | 1은 final F1 +0.0119지만 precision -0.0372, 중국어 precision/F1 하락. 3은 precision을 올리지만 recall/final F1/boundary 하락. |
+| trade-off 축 | `SHORT_NO_END_FRAGMENT_UNITS` | 3은 quality block을 줄이나 deferred replacement와 queue revision 증가, 5는 churn을 줄이나 recall/F1/boundary 하락. |
+| trade-off 축 | `SHORT_CJK_FINAL_UNITS` | 8은 final F1 +0.0004지만 precision/boundary 회귀, 12는 recall/final F1/boundary 하락. |
+| trade-off 축 | `MAX_STAGED_SENTENCE_QUEUE` | 12는 drop oldest +19와 queue revision +18, 30은 20과 동일. 20은 최적값보다 조기 폐기 방지 하한. |
+| trade-off 축 | `CJK_REVISION_RATIO_MIN` | 0.70은 residue만 줄이고 final 품질 변화 없음, 0.85는 중국어 precision/F1 하락. |
+| 닫힌 축 | `SENTENCE_CONFIRM_MAX_AGE_CHUNKS` | 2/4 모두 전체/언어/핵심 태그 delta 0. |
+| 닫힌 축 | `FORCED_SENTENCE_CONFIRM_CHUNKS` | 2/4 모두 delta 0. |
+| 닫힌 축 | `FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS` | 3/5 모두 delta 0. |
+| 닫힌 축 | `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS` | 0/1/3 모두 delta 0. |
+| 보류 축 | `NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS` | 한국어 staged residue를 소폭 움직이나 final 품질 변화 없음. |
+| 보류 축 | `CJK_CONFIRM_PRESERVE_RATIO_MIN` | 0.65가 final F1 +0.0002지만 boundary/precision 변화가 없고 개선 폭이 작다. |
+
+판단:
+
+- `REVISION_FALLBACK_COVERAGE_MIN=0.55` 외에는 현재 challenge replay에서 checked-in 기본값 변경 근거가 부족하다.
+- `final_f1_avg`만 보면 채택 가능해 보이는 후보도 언어별 precision, boundary, 핵심 태그 delta를 보면 review-risk가 붙는다.
+- 따라서 현재 자료로는 "threshold를 계속 촘촘히 탐색하면 0.65까지 올라간다"는 가설보다, "단일 threshold 탐색은 대부분 failure trade-off를 이동시킬 뿐이고 구조 병목은 candidate lifecycle에 있다"는 가설이 더 강하다.
+- 다음 실험은 active staged/candidate queue의 revision 계열 판정, 순서 보존, final 직전 boundary 품질 보존 규칙을 최소 구조 변경으로 비교하는 방향이 적합하다.
+
+### 2026-06-21 논문 가설 상태 재정리
+
+검토 목적:
+
+- 누적 실험이 많아지면서 논문이 어떤 주장을 유지하고 어떤 주장을 폐기/보류해야 하는지 명확히 해야 한다.
+- 특히 `final_f1_avg` 목표치를 계속 올리는 실험과, final-only 번역 입력 안정화라는 원래 목적을 분리한다.
+
+가설 상태:
+
+| 가설 | 상태 | 판단 |
+| --- | --- | --- |
+| partial hypothesis와 final transcript를 분리하지 않으면 중복/누락이 발생한다. | 유지 | 운영 로그와 challenge replay case가 반복해서 뒷받침한다. |
+| SBD 후보와 final lifecycle은 별도 계층으로 평가해야 한다. | 유지 | `final_f1`과 `final_boundary_f1`의 차이, lifecycle/queue residue summary가 이를 지지한다. |
+| 단일 threshold sweep을 촘촘히 반복하면 목표 성능을 크게 올릴 수 있다. | 축소 | 12개 manifest 축 대부분이 0 delta 또는 precision/recall/boundary trade-off였다. |
+| challenge replay 평균을 운영 평균 품질로 제시할 수 있다. | 폐기 | 1113건 corpus는 failure-enriched set이므로 representative corpus와 섞지 않는다. |
+| final-only sink가 번역 안정성을 높인다. | 보류 | 시스템 계약과 문헌 배경은 있으나, final timestamp/translation output replay가 아직 없다. |
+
+판단:
+
+- 논문의 중심 가설은 유지하되, 범위를 더 좁힌다.
+- 현재 논문은 raw STT 정확도 개선 논문이 아니라 revision-aware finalization layer와 evidence protocol 사례 연구다.
+- 후속 실험은 새 threshold 후보를 더 추가하기보다 representative corpus, translation replay, active staged/candidate queue 구조 검증 순서가 맞다.
+
+### 2026-06-21 evidence protocol claim list 추가
+
+검토 목적:
+
+- 논문 가설 상태를 문서에만 두면, 장시간 sweep 결과 JSON/Markdown만 따로 볼 때 해당 수치가 어떤 주장을 지지하거나 금지하는지 놓칠 수 있다.
+- 실험 산출물 자체가 claim scope와 함께 supported/unsupported/deferred claim을 포함해야 논문 표로 옮길 때 해석 범위를 보존할 수 있다.
+
+변경:
+
+- `build_evidence_protocol`이 corpus role별로 다음 필드를 추가한다.
+  - `supported_claims`
+  - `unsupported_claims`
+  - `deferred_claims`
+- challenge replay는 failure lifecycle trade-off와 metric decomposition은 지지하지만, operating-average quality, raw STT WER/CER, translation quality, universal threshold optimality는 지원하지 않는다고 기록한다.
+- representative는 sampled population의 operating-average finalization estimate는 지지하지만, failure regression coverage와 challenge replay 없는 parameter adoption은 지원하지 않는다고 기록한다.
+- exploratory 입력은 paper evidence와 parameter adoption을 지원하지 않는다고 기록한다.
+- parameter sweep Markdown header에도 세 claim list를 출력한다.
+
+판단:
+
+- 성능 수치는 바꾸지 않는다.
+- 이 변경은 실험 반복 과정에서 "결과 수치"와 "논문 주장 범위"가 분리되지 않도록 하는 evidence guard다.
+
+추가 정리:
+
+- 새 benchmark report를 실제 `sat + cuda + float16`로 생성하려 했지만, 현재 Codex sandbox에서는 CUDA 장치가 보이지 않아 Fail-Fast로 중단됐다.
+- sandbox 밖 실행 승인은 정책상 거부되어 우회 실행하지 않았다.
+- 따라서 이번 단계에서는 새 성능 수치를 만들지 않고, claim list가 향후 report에서 필수 evidence context로 빠지지 않도록 `required_evidence_fields`에 포함했다.
+- 기존 실제 CUDA report는 기준선/파라미터 결과 해석에 계속 사용할 수 있지만, claim list가 도입되기 전 산출물이므로 최신 논문 표로 옮길 때는 새 summary 형식으로 재생성하거나 claim context를 별도 문서와 함께 인용해야 한다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/claim-guard-challenge-baseline.json
+
+RuntimeError: No CUDA GPUs are available
+```
+
+판단:
+
+- CUDA가 보이지 않는 환경에서는 CPU fallback으로 성능 근거를 만들지 않는다.
+- claim list가 누락된 summary는 `missing_required_evidence_fields`로 걸러야 하므로, `evidence_protocol.supported_claims`, `unsupported_claims`, `deferred_claims`를 required field로 승격했다.
+
+### 2026-06-21 기존 report evidence context 검증 도구 추가
+
+검토 목적:
+
+- evidence protocol이 강화되면서 과거 CUDA report가 당시 기준으로는 충분해 보여도 최신 논문 근거 필드를 빠뜨릴 수 있다.
+- 논문 표에 수치를 옮기기 전에 report 자체가 현재 claim scope, claim list, runtime contract, evidence summary를 모두 보존하는지 재검증할 필요가 있다.
+
+변경:
+
+- `tests/eval/dictation_ai/validate_sbd_evidence_report.py`를 추가했다.
+- 이 도구는 report 안의 오래된 `required_evidence_fields`를 그대로 신뢰하지 않고, 현재 `build_evidence_protocol` 기준으로 누락 필드를 다시 계산한다.
+- `--allow-missing`은 과거 report 재고 조사에만 사용한다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_evidence_report.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps/claim-required-dry-run/summary.json \
+  --allow-missing
+
+missing_required_evidence_fields=["evidence_summary"]
+```
+
+판단:
+
+- dry-run은 claim context를 갖더라도 실제 benchmark 결과가 없어 논문 성능 근거가 아니다.
+- 기존 report를 논문에 인용하려면 최신 validator에서 missing field가 없어야 한다.
+
+### 2026-06-21 기존 sweep summary 재고 조사
+
+검토 목적:
+
+- `.tmp/eval/dictation-ai-sbd/parameter-sweeps`에는 여러 날짜의 탐색, dry-run, 실제 CUDA sweep summary가 섞여 있다.
+- 파일명에 `paper-evidence`가 있더라도 최신 evidence protocol의 claim list와 runtime/context field를 모두 갖춘 것은 아닐 수 있다.
+- 논문 초안에 수치를 옮기기 전에 기존 summary가 현재 기준으로 인용 가능한지 일괄 감사해야 한다.
+
+도구 보강:
+
+- `validate_sbd_evidence_report.py`가 디렉터리 입력을 받으면 하위 `summary.json`만 재귀적으로 검사하도록 했다.
+- job별 raw benchmark JSON이 섞이지 않도록 디렉터리 입력에서는 `baseline.json`, parameter job JSON은 자동 포함하지 않는다.
+- `--summary-only`를 추가해 누락 필드별 count를 먼저 볼 수 있게 했다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_evidence_report.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --allow-missing \
+  --summary-only
+```
+
+결과:
+
+```text
+report_count=83
+complete_report_count=0
+paper_evidence_complete_report_count=0
+missing_report_count=83
+missing_field_counts={
+  evidence_protocol.supported_claims: 81,
+  evidence_protocol.unsupported_claims: 81,
+  evidence_protocol.deferred_claims: 81,
+  evidence_summary: 61,
+  evidence_protocol.claim_scope_key: 59,
+  runtime_contract.backend/device/compute_type/model_source: 57,
+  parameter_axes: 54,
+  evidence_protocol.paper_evidence/paper_evidence_eligible/corpus_role: 50,
+  case_summary.expected_final_case_count: 33
+}
+```
+
+판단:
+
+- 기존 sweep summary 83개는 최신 논문 근거 기준으로 그대로 승격할 수 없다.
+- 현재 기준으로 missing field가 없는 summary는 0개이며, 논문 근거용 paper-evidence complete summary도 0개다.
+- 특히 claim list 누락이 81개로 가장 많아, 과거 summary는 "무엇을 지지하고 무엇을 지지하지 않는지"가 산출물 자체에 보존되지 않는다.
+- 기존 CUDA 수치는 실험일지의 역사적 결과로는 참조할 수 있지만, 논문 표에는 최신 `--paper-evidence` 계약으로 재생성하거나 현재 validator에서 missing field가 없는 summary만 옮긴다.
+- 이 결과는 현재 논문 실험 방법을 재구성해야 한다는 판단을 강화한다. 논문 근거는 점수 파일 하나가 아니라 corpus role, runtime contract, claim scope, supported/unsupported/deferred claim, evidence summary가 함께 있는 산출물이어야 한다.
+
+### 2026-06-21 최신 paper-evidence 재실행 시도와 환경 한계
+
+실험 목적:
+
+- 기존 summary 83개가 최신 evidence contract를 만족하지 못하므로, 대표 축인 `REVISION_FALLBACK_COVERAGE_MIN`을 최신 `--paper-evidence` 형식으로 재실행해 complete report를 만들 수 있는지 확인한다.
+
+실행 시도:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --paper-evidence \
+  --param REVISION_FALLBACK_COVERAGE_MIN=0.50 \
+  --param REVISION_FALLBACK_COVERAGE_MIN=0.60 \
+  --param REVISION_FALLBACK_COVERAGE_MIN=0.70 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-rerun-revision-fallback-coverage \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-rerun-revision-fallback-coverage/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-rerun-revision-fallback-coverage/summary.md
+```
+
+결과:
+
+```text
+RuntimeError: No CUDA GPUs are available
+sentence boundary backend 'sat' initialization failed: model=sat-3l-sm device=cuda compute=float16
+```
+
+추가 확인:
+
+- 같은 명령을 sandbox 밖 CUDA 환경에서 실행하도록 escalation을 요청했지만, 현재 환경 정책상 거부됐다.
+- CPU, mock, smoke로 우회하지 않았다. 이는 논문 근거용 SBD 벤치가 반드시 실제 `sat + cuda + float16`이어야 한다는 정책 때문이다.
+
+판단:
+
+- 이번 단계에서는 새 성능 수치를 만들지 않는다.
+- 논문 근거 complete report는 사용자가 CUDA 접근 가능한 환경에서 같은 명령을 실행한 뒤 `validate_sbd_evidence_report.py --complete-only`로 확인해야 한다.
+- validator에는 `--complete-only`를 추가해, 재실행 뒤 missing field가 없는 report 목록만 바로 뽑을 수 있게 했다.
+
+### 2026-06-21 기존 CUDA job report 기반 summary refresh
+
+검토 목적:
+
+- 기존 summary 83개는 최신 evidence protocol을 만족하지 못하지만, 일부는 하위 job JSON에 이미 실제 `sat + cuda + float16` 실행 결과를 보존한다.
+- 이 경우 CUDA를 다시 실행하지 않고도 기존 job 결과를 현재 summary/Markdown 포맷으로 다시 묶어 논문 근거 complete report로 승격할 수 있는지 확인한다.
+
+도구:
+
+- `tests/eval/dictation_ai/refresh_sbd_parameter_sweep_summary.py`를 추가했다.
+- 입력 summary의 `jobs[].output`을 읽어 기존 benchmark report를 다시 로드한다.
+- `build_summary_payload`와 현재 evidence protocol을 사용해 새 summary를 생성한다.
+- 이 도구는 benchmark를 실행하지 않는다. 따라서 새 성능 수치를 만들지 않고, 기존 CUDA job report의 evidence context만 갱신한다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/refresh_sbd_parameter_sweep_summary.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-revision-fallback-coverage-axis/summary.json \
+  --output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-revision-fallback-coverage-axis/summary.refreshed.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-revision-fallback-coverage-axis/summary.refreshed.md
+```
+
+결과:
+
+```text
+paper_evidence=True
+missing_required_evidence_fields=[]
+```
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_evidence_report.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260621-paper-evidence-revision-fallback-coverage-axis/summary.refreshed.json
+```
+
+결과:
+
+```text
+report_count=1
+complete_report_count=1
+paper_evidence_complete_report_count=1
+parameter_axes=[REVISION_FALLBACK_COVERAGE_MIN]
+job_env_overrides=[
+  {},
+  {AVC_DICTATION_REVISION_FALLBACK_COVERAGE_MIN: 0.50},
+  {AVC_DICTATION_REVISION_FALLBACK_COVERAGE_MIN: 0.60},
+  {AVC_DICTATION_REVISION_FALLBACK_COVERAGE_MIN: 0.70}
+]
+```
+
+판단:
+
+- `REVISION_FALLBACK_COVERAGE_MIN` 축은 기존 CUDA job report를 현재 evidence protocol로 재묶어 논문 근거 complete report로 승격할 수 있다.
+- 이 결과는 새 benchmark 실행 결과가 아니라 기존 실제 CUDA 실행 결과의 summary refresh다.
+- 다른 축도 하위 job JSON이 남아 있고 누락 필드가 claim list 중심이라면 같은 방식으로 complete report 후보가 될 수 있다.
+- 논문 표에는 원본 summary가 아니라 refreshed summary와 validator complete 결과를 함께 근거로 둔다.
+
+### 2026-06-21 주요 paper-evidence 축 12개 summary refresh
+
+검토 목적:
+
+- 기존 paper-evidence summary 중 하위 CUDA job JSON이 남아 있는 주요 축을 현재 evidence protocol로 일괄 refresh한다.
+- 새 CUDA 실행 없이 기존 실제 `sat + cuda + float16` 결과를 논문 근거 complete report로 승격 가능한지 확인한다.
+
+도구 보강:
+
+- `refresh_sbd_parameter_sweep_summary.py`가 여러 summary 또는 디렉터리를 입력받을 수 있게 했다.
+- 디렉터리 입력 시 하위 `summary.json`을 찾아 원본 옆에 `summary.refreshed.json`을 생성한다.
+- `--write-markdown`을 지정하면 `summary.refreshed.md`도 함께 생성한다.
+- `validate_sbd_evidence_report.py`의 디렉터리 감사는 이제 `summary.json`과 `summary.refreshed.json`을 함께 계산한다.
+
+refresh 대상:
+
+```text
+CJK_CONFIRM_PRESERVE_RATIO_MIN
+SHORT_CJK_REPLACEMENT_HOLD_CHUNKS
+CJK_REVISION_RATIO_MIN
+SENTENCE_CONFIRM_CHUNKS
+SENTENCE_CONFIRM_MAX_AGE_CHUNKS
+FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS
+FORCED_SENTENCE_CONFIRM_CHUNKS
+NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS
+REVISION_FALLBACK_COVERAGE_MIN
+SHORT_CJK_FINAL_UNITS
+MAX_STAGED_SENTENCE_QUEUE
+SHORT_NO_END_FRAGMENT_UNITS
+```
+
+실행 결과:
+
+```text
+refreshed_count=12
+각 refreshed summary의 missing_required_evidence_fields=[]
+```
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_evidence_report.py \
+  <12개 summary.refreshed.json> \
+  --complete-only
+```
+
+결과:
+
+```text
+report_count=12
+complete_report_count=12
+paper_evidence_complete_report_count=12
+```
+
+전체 재고 감사:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_evidence_report.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --allow-missing \
+  --summary-only
+```
+
+결과:
+
+```text
+report_count=95
+complete_report_count=12
+paper_evidence_complete_report_count=12
+missing_report_count=83
+paper_evidence_rerun_candidate_count=22
+```
+
+압축 요약:
+
+```text
+axis_count=12
+candidate_count=26
+adoption_review_counts={no-risk-flag: 15, review-risk: 11}
+```
+
+판단:
+
+- 최신 논문 근거 계약을 만족하는 complete report가 0개에서 12개로 늘었다.
+- 이 12개는 새 실행 결과가 아니라 기존 CUDA job JSON을 현재 evidence protocol로 다시 묶은 결과다.
+- 따라서 논문 본문에는 refreshed summary를 기준으로 인용하되, "기존 CUDA job report 기반 summary refresh"임을 실험 방법에 명시한다.
+- 12개 축의 26개 후보 중 11개는 `review-risk`였고, 나머지 15개도 대부분 0 delta 또는 매우 작은 delta였다.
+- 따라서 현재 challenge replay에서 단일 threshold sweep을 더 촘촘히 반복하는 방식은 우선순위가 낮다.
+- 아직 missing report 83개와 paper-evidence rerun candidate 22개가 남아 있으므로, 과거 결과를 추가 인용하려면 job JSON 존재 여부에 따라 refresh 또는 CUDA 재실행으로 정리한다.
+
+### 2026-06-21 실험 방법 재구성 기준 보강
+
+검토 목적:
+
+- 누적 실험이 threshold 최적화 시도로 흐르지 않도록, 다음 실험을 어떤 구조로 재구성해야 하는지 고정한다.
+- 논문에서 유지할 주장과 보류할 주장을 실험 방법 단계에 연결한다.
+
+보강 내용:
+
+- `docs/2026-06-21-dictation-ai-experiment-protocol.md`에 재구성한 실험 방법을 추가했다.
+- 실험 단계를 `challenge replay`, `structural lifecycle check`, `representative replay`로 나누었다.
+- 구조 변경 실험은 threshold sweep과 다르게, candidate queue/revision/boundary 보존 같은 lifecycle 상태 전이 변경으로 정의했다.
+- 구조 변경은 `final_f1`만으로 채택하지 않고 queue residue, deferred replacement, boundary F1, `lifecycle_without_input_review` stratum을 함께 확인하도록 했다.
+- representative corpus의 초기 표본은 작게 시작할 수 있지만, 표본 선택 규칙이 먼저 문서화되어야 하고 실패 여부를 보고 제외하면 안 된다고 명시했다.
+- translation replay는 final event timestamp, translation request id, translation output이 연결되기 전까지 성능 주장으로 승격하지 않는다고 명시했다.
+
+논문 반영:
+
+- `docs/paper/ko-revision-aware-realtime-stt.md`의 후속 실험 설명을 두 축에서 세 축으로 바꿨다.
+- `challenge replay`, `structural lifecycle check`, `representative replay`의 평균과 counter를 같은 표에서 섞지 않는다고 정리했다.
+- final-only sink는 현재 번역 품질 개선 결과가 아니라 시스템 계약이며, translation replay가 준비된 뒤에만 번역 안정성 수치로 승격한다고 정리했다.
+
+판단:
+
+- 현재 실험 설계는 폐기할 것이 아니라 역할을 재분류해야 한다.
+- 1113건 challenge replay는 실패 재현과 lifecycle trade-off 분석에 유효하다.
+- threshold 미세조정은 현재 우선순위가 낮고, 다음 유효 실험은 구조 변경 또는 representative/translation replay 구축이다.
+- 논문 가설은 `raw STT 정확도 개선`이 아니라 `불안정한 STT partial을 final-only 번역 입력으로 안정화하기 위한 lifecycle 계측과 corpus 역할 분리`로 유지한다.
+
+### 2026-06-21 structural lifecycle summary 컬럼 보강
+
+검토 목적:
+
+- `structural lifecycle check`를 별도 실험 단계로 정의했으므로, complete evidence summary에서도 구조 변화 신호를 빠르게 볼 수 있어야 한다.
+- 기존 압축 요약은 final F1/precision/recall/boundary delta와 review flag만 보여 주어, queue/revision 구조 실험 해석에는 부족했다.
+
+변경:
+
+- `summarize_sbd_evidence_reports.py`의 Markdown 표에 다음 컬럼을 추가했다.
+  - `stage_replace_deferred_delta`
+  - `stage_queue_revision_delta`
+  - `queue_residue_total_delta`
+  - `queue_residue_max_delta`
+  - `clean_lifecycle_boundary_f1_delta`
+- 해당 컬럼은 `lifecycle_bottleneck_deltas`, `staged_queue_residue_deltas`, `evidence_strata_deltas.lifecycle_without_input_review`에서 가져온다.
+- unit test에 구조 delta fixture를 추가해 Markdown 출력이 유지되도록 했다.
+
+기존 12개 refreshed summary 재요약:
+
+```text
+axis_count=12
+candidate_count=26
+adoption_review_counts={no-risk-flag: 15, review-risk: 11}
+```
+
+관찰:
+
+- 기존 refreshed summary는 구조 delta 객체를 포함하지만, 12개 threshold 축의 압축 컬럼에서 핵심 구조 metric이 비어 있는 경우가 많다.
+- 이는 해당 summary가 기존 CUDA job report를 현재 protocol로 다시 묶은 결과이며, 구조 실험을 목표로 새로 실행한 결과가 아니기 때문이다.
+
+판단:
+
+- 12개 refreshed summary는 threshold 축의 채택/기각 근거로는 사용할 수 있다.
+- 하지만 `structural lifecycle check`의 직접 근거로 쓰려면 새 실험이 구조 컬럼을 실제로 움직이는지 확인해야 한다.
+- 다음 구조 실험은 `final_f1` 변화뿐 아니라 새 구조 컬럼의 delta를 함께 보고해야 한다.
+
+### 2026-06-21 structural lifecycle 후보 case selector 추가
+
+검토 목적:
+
+- 구조 변경 실험을 시작하기 전에 queue/revision/boundary 병목이 큰 case를 일관되게 선택해야 한다.
+- 사람이 report JSON에서 top queue residue와 exemplar를 수동 복사하면 선택 기준이 흔들릴 수 있다.
+
+변경:
+
+- `tests/eval/dictation_ai/select_sbd_structural_cases.py`를 추가했다.
+- 입력 benchmark report의 `case_exemplar_summary`, `staged_queue_residue_summary`, per-case lifecycle metric을 사용해 구조 실험 후보를 선택한다.
+- 선택 case는 benchmark-compatible JSONL로 출력할 수 있다. 이때 `expected_final`과 원래 chunk input을 보존하고, actual output을 정답으로 쓰지 않는다.
+- Markdown summary에는 rank, case id, language, selection score, selection reason, final F1, boundary F1, queue length, `stage_queue_revision`, `stage_replace_deferred`를 출력한다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/select_sbd_structural_cases.py \
+  .tmp/eval/dictation-ai-sbd/20260621-protocol-baseline.json \
+  --limit 16 \
+  --case-output .tmp/eval/dictation-ai-sbd/structural-lifecycle-cases.jsonl \
+  --markdown-output .tmp/eval/dictation-ai-sbd/structural-lifecycle-cases.md
+```
+
+결과:
+
+```text
+selected_case_count=16
+language_counts={en: 10, zh: 6}
+expected_final_case_count=16
+draft_count=0
+corpus_role=exploratory
+```
+
+상위 후보:
+
+| rank | id | language | final_f1 | boundary_f1 | queue_len | stage_queue_revision | stage_replace_deferred |
+| ---: | --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | `en_log_optimus_surgeons_zimbabwe_gigafactory_queue_20260620_001` | en | 0.596 | 0.000 | 16 | 64 | 85 |
+| 2 | `en_log_supply_chain_recursive_medicine_free_20260620_001` | en | 0.696 | 0.000 | 4 | 137 | 154 |
+| 3 | `en_log_replacement_rate_north_korea_underpopulation_queue_20260620_001` | en | 0.667 | 0.200 | 5 | 80 | 96 |
+| 10 | `zh_log_draft_20260620_avc_whisper_log_11_000872` | zh | 0.750 | 0.000 | 10 | 21 | 33 |
+| 11 | `zh_log_duplicate_supper_20260617_001` | zh | 0.200 | 0.200 | 10 | 9 | 19 |
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_case_files.py \
+  .tmp/eval/dictation-ai-sbd/structural-lifecycle-cases.jsonl \
+  --min-expected-final-cases 1 \
+  --max-drafts 0
+```
+
+결과:
+
+```text
+case_count=16
+expected_final_case_count=16
+draft_count=0
+corpus_role=exploratory
+```
+
+판단:
+
+- 이 subset은 구조 변경 디버깅과 정성 분석용이다.
+- `.tmp` 단일 파일 입력이므로 `exploratory`로 해석하며, 평균 점수를 논문 성능 수치로 쓰지 않는다.
+- 구조 변경 후보가 이 subset에서 유효해 보이면, 같은 변경을 전체 challenge replay에서 `sat + cuda + float16`로 재검증해야 한다.
+
+### 2026-06-21 structural lifecycle subset CUDA baseline 시도
+
+검토 목적:
+
+- 추출한 16개 structural subset이 실제 benchmark 입력으로 실행 가능한지 확인한다.
+- 이 결과는 논문 성능 수치가 아니라 구조 변경 전 탐색 baseline으로만 사용한다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases .tmp/eval/dictation-ai-sbd/structural-lifecycle-cases.jsonl \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/structural-lifecycle-baseline.json
+```
+
+결과:
+
+```text
+[dictation-ai-sbd-benchmark] error: sentence boundary backend 'sat' initialization failed: model=sat-3l-sm device=cuda compute=float16. Fail-Fast: fix the model/device/runtime instead of falling back to regex.
+```
+
+판단:
+
+- 현재 Codex sandbox 세션에서는 CUDA device가 보이지 않아 구조 subset baseline을 실행하지 못했다.
+- sandbox 밖 escalated CUDA 실행도 환경 정책으로 거절되었다.
+- CPU/mock/smoke로 대체 실행하지 않았다. 이는 받아쓰기 AI SBD 성능 근거는 실제 `sat + cuda + float16`만 인정한다는 정책을 유지하기 위한 것이다.
+- `sbd_benchmark.py` CLI가 RuntimeError를 traceback 대신 `[dictation-ai-sbd-benchmark] error: ...` 한 줄로 출력하도록 보강했다.
+- 구조 subset은 입력 검증까지 완료됐지만, 성능 baseline은 CUDA 접근 가능한 세션에서 재실행해야 한다.
+
+### 2026-06-21 누적 실험 설계 재평가
+
+검토 목적:
+
+- 지금까지의 로그 수집, challenge replay, parameter sweep, reference 원문 검토가 논문 주장에 실제로 기여하는지 재평가한다.
+- 실험 방법을 계속 threshold 최적화로 밀고 갈지, corpus 역할과 지표 해석을 재구성할지 판단한다.
+
+종합 판단:
+
+- 현재 실험 설계는 `운영 평균 품질 측정`으로는 부족하지만, `실패 중심 replay 기반 lifecycle 분석`으로는 유효하다.
+- 1113건 challenge replay는 확정 누락, 중복 확정, boundary mismatch, staged queue residue를 반복 재현하므로 폐기하지 않는다.
+- 다만 이 집합의 `final_f1_avg=0.483`, `final_boundary_f1_avg=0.108`은 제품 전체 평균 품질이나 STT backend 정확도가 아니다.
+- 12개 paper-evidence parameter axis 중 기본값 채택 근거가 뚜렷한 축은 `REVISION_FALLBACK_COVERAGE_MIN=0.55` 하나였다.
+- 나머지 축은 대부분 0 delta, 매우 작은 delta, 또는 precision/recall/boundary trade-off였으므로 단일 threshold를 더 촘촘히 흔드는 실험은 우선순위가 낮다.
+- lifecycle counter는 `stage_replace_deferred`, `stage_queue_revision`, queue residue, no-end fragment 계열이 남은 병목임을 가리킨다.
+
+참조 논문과의 비교:
+
+- Whisper-Streaming은 확정 prefix와 미확정 hypothesis 분리의 비교 기준을 제공한다.
+- incremental ASR 평가는 WER 외 update/revoke, latency, 안정성 지표가 필요하다는 배경을 제공한다.
+- SaT와 streaming punctuation 문헌은 regex/ad-hoc 대신 모델 기반 SBD 후보와 bounded right context를 쓰는 근거를 제공한다.
+- speech translation segmentation 문헌은 번역 단위가 downstream 품질에 영향을 줄 수 있음을 보여주지만, 현재 final-only sink의 번역 품질 개선 수치로 직접 사용할 수는 없다.
+- 외부 논문은 문제 설정과 비교 기준으로만 쓰고, 앱 기본값과 개선 여부는 실험일지와 CUDA benchmark 결과로만 주장한다.
+
+실험 방법 재구성:
+
+| 실험 축 | 판단 | 다음 사용 방식 |
+| --- | --- | --- |
+| Challenge replay | 유지 | 실패 재현, 회귀 추적, lifecycle trade-off 분석 |
+| Threshold sweep | 축소 | 기본값 채택/기각 근거가 필요한 축에서만 제한 수행 |
+| Structural lifecycle check | 강화 | queue/revision/boundary 병목을 줄이는 구조 변경 검증 |
+| Representative replay | 신규 필요 | 시간/세션 표본으로 운영 평균과 실제 지연 추정 |
+| Translation replay | 신규 필요 | final event와 translation output을 연결해 번역 churn 검증 |
+
+논문 반영:
+
+- `docs/2026-06-21-dictation-ai-experiment-protocol.md`에 폐기/유지/강화할 실험 축을 명시했다.
+- `docs/paper/ko-revision-aware-realtime-stt.md`에 challenge replay, threshold sweep, structural lifecycle, representative replay, translation replay의 역할 분리를 추가했다.
+
+결론:
+
+- 실험 설계는 유지하되 논문 주장을 좁힌다.
+- 주제는 raw STT 정확도 개선이 아니라, 불안정한 STT partial을 final-only 번역 입력으로 만들기 위한 revision-aware lifecycle 계측과 corpus 역할 분리다.
+- 다음 실험은 `final_f1_avg` 목표치를 올리는 반복이 아니라, structural lifecycle subset과 전체 challenge replay에서 queue/revision/boundary 병목이 실제로 줄어드는지 확인하는 방향이 적합하다.
+
+### 2026-06-21 evidence protocol 실험 단계 필드 추가
+
+검토 목적:
+
+- 실험 방법을 `challenge replay`, `structural lifecycle check`, `representative replay`, `translation replay`로 재구성했으므로, 리포트 자체에도 어떤 실험 단계의 근거인지 남겨야 한다.
+- 기존 `claim_scope_key`는 주장 범위를 설명하지만, 사람이 summary Markdown만 볼 때 threshold sweep과 representative/structural 결과를 섞어 읽는 실수를 막기에는 부족하다.
+
+변경:
+
+- `evidence_protocol.experiment_stage`를 추가했다.
+  - `challenge-replay`: 실패 재현과 revision lifecycle trade-off 분석
+  - `representative-replay`: 시간/세션 표본 기반 운영 평균 추정
+  - `exploratory`: 논문 근거가 아닌 임시 분석
+- Markdown summary header에 `experiment_stage`와 `experiment_stage_description`을 출력한다.
+- `required_evidence_fields`에 `evidence_protocol.experiment_stage`를 추가했다.
+- 실험 프로토콜 문서에 `experiment_stage`가 성능 지표가 아니라 해석 범위 표시라고 명시했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_sbd_parameter_sweep
+```
+
+결과:
+
+```text
+Ran 31 tests in 0.005s
+OK
+```
+
+```text
+./.venv/bin/python -m unittest discover -s tests/unit -p 'test_dictation_ai_sbd_*.py'
+```
+
+결과:
+
+```text
+Ran 73 tests in 0.016s
+OK
+```
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_case_files.py \
+  tests/eval/dictation_ai/sbd_cases \
+  --min-expected-final-cases 1000 \
+  --max-drafts 0
+```
+
+결과:
+
+```text
+case_count=1113
+corpus_role=challenge-replay
+draft_count=0
+expected_final_case_count=1109
+language_counts={en: 429, ko: 462, zh: 222}
+```
+
+기존 evidence 재고 영향:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_evidence_report.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --allow-missing \
+  --summary-only
+```
+
+`experiment_stage` 추가 직후 결과:
+
+```text
+complete_report_count=0
+paper_evidence_complete_report_count=0
+missing_field_counts에 evidence_protocol.experiment_stage=95
+```
+
+판단:
+
+- 새 필드는 evidence contract를 강화하므로, 과거 refreshed summary도 다시 refresh해야 한다.
+- 이는 새 성능 실행이 아니라 기존 실제 CUDA job JSON을 현재 protocol로 다시 묶는 작업이다.
+
+주요 12개 축 refresh:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/refresh_sbd_parameter_sweep_summary.py \
+  <paper-evidence 11개 summary.json> \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps/short-no-end-axis-evidence/summary.json \
+  --write-markdown
+```
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_evidence_report.py \
+  <12개 summary.refreshed.json> \
+  --complete-only
+```
+
+결과:
+
+```text
+complete_report_count=12
+paper_evidence_complete_report_count=12
+report_count=12
+missing_required_evidence_fields=[]
+```
+
+요약 재생성:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/summarize_sbd_evidence_reports.py \
+  <12개 summary.refreshed.json> \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-evidence-summary.md
+```
+
+결과:
+
+```text
+axis_count=12
+candidate_count=26
+adoption_review_counts={no-risk-flag: 15, review-risk: 11}
+```
+
+판단:
+
+- 새 `experiment_stage` 계약을 적용한 뒤에도 12개 paper-evidence 축은 다시 complete 상태로 복구됐다.
+- `SHORT_NO_END_FRAGMENT_UNITS`는 `20260621-short-no-end-tag-summary`가 아니라 `short-no-end-axis-evidence/summary.refreshed.json`을 complete 근거로 사용한다. 전자는 `case_summary.expected_final_case_count`가 부족해 최신 계약의 논문 근거로 바로 쓰지 않는다.
+- 실험 결과 해석은 이전과 동일하다. 12개 축 중 기본값 채택 근거가 뚜렷한 축은 `REVISION_FALLBACK_COVERAGE_MIN=0.55` 하나이고, 나머지는 trade-off, 닫힌 축, 또는 보류 축으로 남는다.
+
+### 2026-06-21 evidence 감사/요약 출력 stage 노출
+
+검토 목적:
+
+- `experiment_stage`를 evidence protocol에 추가했지만, report inventory 출력에서 직접 보이지 않으면 재고 조사 시 stage가 섞였는지 확인하기 어렵다.
+- complete evidence summary Markdown도 축별 후보 delta만 보여 주면 challenge replay 결과와 representative/exploratory 결과를 같은 표로 오해할 수 있다.
+
+변경:
+
+- `validate_sbd_evidence_report.py`의 report summary에 `experiment_stage`를 추가했다.
+- aggregate summary에 `experiment_stage_counts`를 추가했다.
+- `summarize_sbd_evidence_reports.py`의 report summary와 Markdown 표에 `experiment_stage`/`stage` 컬럼을 추가했다.
+- 관련 단위 테스트에서 complete report와 rerun candidate 감사 결과가 `experiment_stage_counts`를 포함하는지 검증했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_sbd_parameter_sweep
+```
+
+결과:
+
+```text
+Ran 31 tests in 0.005s
+OK
+```
+
+12개 complete report 감사:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_evidence_report.py \
+  <12개 summary.refreshed.json> \
+  --complete-only
+```
+
+결과:
+
+```text
+complete_report_count=12
+paper_evidence_complete_report_count=12
+complete_reports[*].experiment_stage=challenge-replay
+```
+
+12개 complete evidence summary 재생성:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/summarize_sbd_evidence_reports.py \
+  <12개 summary.refreshed.json> \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-evidence-summary.md
+```
+
+결과:
+
+```text
+axis_count=12
+candidate_count=26
+adoption_review_counts={no-risk-flag: 15, review-risk: 11}
+reports[*].experiment_stage=challenge-replay
+```
+
+판단:
+
+- 이제 complete evidence inventory와 compact summary만 보아도 해당 결과가 `challenge-replay` 단계의 근거인지 확인할 수 있다.
+- representative replay가 추가되더라도 같은 summary에 섞이면 `experiment_stage_counts`와 Markdown `stage` 컬럼에서 즉시 드러난다.
+- 이는 논문 표에서 challenge replay와 representative replay 평균을 섞지 않는 실험 재구성 원칙을 도구 출력으로 보강한 것이다.
+
+### 2026-06-21 complete evidence summary stage 혼합 감지 보강
+
+검토 목적:
+
+- complete evidence summary의 각 행에 `stage`가 보이더라도, JSON aggregate에서 stage 혼합 여부를 자동으로 확인하기 어렵다.
+- 논문 표 생성 전 `challenge-replay`와 `representative-replay`가 섞였는지 빠르게 판정할 수 있어야 한다.
+
+변경:
+
+- `summarize_sbd_evidence_reports.py` summary payload에 `experiment_stage_counts`를 추가했다.
+- 서로 다른 stage가 섞이면 `mixed_experiment_stage=true`가 되도록 했다.
+- Markdown header에도 `experiment_stage_counts`와 `mixed_experiment_stage`를 출력한다.
+- 테스트에서 단일 challenge summary가 `experiment_stage_counts={challenge-replay: 1}`, `mixed_experiment_stage=false`를 갖는지 확인했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_sbd_parameter_sweep
+```
+
+결과:
+
+```text
+Ran 31 tests in 0.005s
+OK
+```
+
+12개 complete evidence summary 재생성:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/summarize_sbd_evidence_reports.py \
+  <12개 summary.refreshed.json> \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-evidence-summary.md
+```
+
+결과:
+
+```text
+axis_count=12
+candidate_count=26
+experiment_stage_counts={challenge-replay: 12}
+mixed_experiment_stage=false
+adoption_review_counts={no-risk-flag: 15, review-risk: 11}
+```
+
+판단:
+
+- 현재 compact evidence summary는 12개 축 모두 `challenge-replay` 단계만 포함한다.
+- 따라서 이 요약은 운영 평균이나 translation replay 근거가 아니라 failure lifecycle trade-off 근거로만 사용할 수 있다.
+- 이후 representative summary를 같은 입력에 섞으면 `mixed_experiment_stage=true`로 드러나므로, 논문 표 분리 원칙을 도구 수준에서 확인할 수 있다.
+
+### 2026-06-21 representative source log 감사
+
+검토 목적:
+
+- challenge replay는 실패 중심 corpus이므로 운영 평균 추정에는 representative corpus가 별도로 필요하다.
+- representative case를 만들기 전에 현재 운영 로그가 시간/세션 표본 후보를 뽑을 수 있는 구조를 갖추었는지 확인한다.
+- 이 단계는 case 자동 생성이 아니라 source readiness 감사다. `expected_final`은 여전히 사람이 확정해야 한다.
+
+추가 도구:
+
+- `tests/eval/dictation_ai/audit_sbd_representative_sources.py`
+- 입력 디렉터리에서 `avc-whisper.log*`를 스캔하고 timestamp, `stt_raw`, final event, transcript, translation, 성능/진단 marker, language/backend/model/window/step marker를 집계한다.
+- `--compact`는 실험일지용 aggregate만 stdout에 출력하고, `--summary-output`은 per-file 상세를 포함한 전체 JSON을 저장한다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/audit_sbd_representative_sources.py \
+  .tmp/logs \
+  --compact \
+  --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit.json
+```
+
+결과:
+
+```text
+source_count=95
+total_bytes=496213546
+line_count=682671
+timestamped_line_count=672028
+first_timestamp=2026-06-19 22:32:22
+last_timestamp=2026-06-20 21:30:13
+language_counts={en: 25006, ko: 48989, zh: 10678}
+window_seconds_counts={10.00s: 47169, 12.00s: 52, 15.00s: 10609, 20.00s: 17800, 7.00s: 70}
+step_seconds_counts={1.00s: 75700}
+stt_backend_counts={faster-whisper: 44, qwen3-asr-transformers: 15}
+stt_model_counts={large-v3: 44, qwen3-asr-0.6b: 13, qwen3-asr-1.7b: 2}
+boundary_backend_counts={sat: 75758}
+translation_backend_counts={m2m100-transformers: 945, nllb-transformers: 4102}
+stt_raw=64918
+finalize_event=11464
+transcript=32950
+translation=5047
+sentence_diagnostic=75700
+stability_metrics=75700
+performance_metrics=75700
+representative_readiness.can_seed_representative_candidates=true
+representative_readiness.requires_manual_expected_final=true
+representative_readiness.blockers=[]
+```
+
+판단:
+
+- 현재 보존된 로그는 representative 후보 구간을 seed할 수 있다.
+- raw STT window, final event, transcript, performance/diagnostic marker가 모두 있으므로 시간/세션 표본 선택 자체는 가능하다.
+- 엄격 집계에서 STT/SBD/번역 backend marker를 분리했다. 전체 aggregate에는 STT 설정 marker가 있으나, 일부 회전 로그 구간은 선택된 window 안에 loop-start 설정 line이 없을 수 있다.
+- 따라서 정식 case로 승격할 때는 선택된 source window별 STT backend/model, SBD backend/model, 번역 backend/model, window/step/finalize age metadata를 다시 확인해야 한다.
+- 운영 로그의 `Dictation AI transcript`는 현재 앱 로직의 출력이므로 `expected_final`로 자동 복사하지 않는다.
+- 다음 단계는 실패 여부를 보고 고르는 방식이 아니라, 언어별 시간/세션 sampling rule을 먼저 고정한 뒤 사람이 `expected_final`을 확정하는 것이다.
+
+논문 반영:
+
+- `docs/paper/ko-revision-aware-realtime-stt.md`에 source audit 결과를 반영했다.
+- 95개 로그와 `stt_raw`, final event, transcript marker 수는 representative 후보 seed 가능 근거로만 사용한다.
+- 운영 평균 품질 주장은 representative case와 사람이 확정한 `expected_final`이 준비될 때까지 보류한다고 명시했다.
+
+### 2026-06-21 representative source review manifest 생성
+
+검토 목적:
+
+- source audit이 후보 seed 가능성을 보여주었으므로, 실제 representative case 작성 전에 사람이 검토할 source 구간을 재현 가능한 방식으로 고른다.
+- 이 단계는 정식 case 생성이나 benchmark 실행이 아니다.
+- 실패 증상이 많은 구간을 고르는 대신 언어별 session-window 후보를 deterministic hash sampling으로 선택한다.
+
+추가 도구:
+
+- `tests/eval/dictation_ai/select_sbd_representative_sources.py`
+- 입력은 `audit_sbd_representative_sources.py`의 JSON summary다.
+- 기본값은 runtime metadata가 있고, 한 source 안에서 STT backend/model, window, step, finalize age가 단일 값으로 해석되는 후보만 사용한다.
+- 출력 manifest는 `paper_evidence=false`, `case_generation=false`, `requires_human_expected_final=true`로 해석한다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/select_sbd_representative_sources.py \
+  .tmp/eval/dictation-ai-sbd/representative-source-audit.json \
+  --per-language 2 \
+  --output .tmp/eval/dictation-ai-sbd/representative-source-review-manifest.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/representative-source-review-manifest.md
+```
+
+결과:
+
+```text
+eligible_source_counts={en: 3, ko: 3, zh: 1}
+selected_source_counts={en: 2, ko: 2, zh: 1}
+selected_source_count=5
+sampling_rule=session-hash-v1:seed=20260621-representative-v1:per_language=2
+```
+
+선택된 source:
+
+| language | source_log | started | ended | runtime |
+| --- | --- | --- | --- | --- |
+| en | `.tmp/logs/avc-whisper.log.23` | 2026-06-20 16:10:51 | 2026-06-20 16:23:24 | faster-whisper / large-v3 / 20s / age 3 |
+| en | `.tmp/logs/avc-whisper.log.41` | 2026-06-20 12:39:45 | 2026-06-20 12:53:42 | faster-whisper / large-v3 / 20s / age 3 |
+| ko | `.tmp/logs/avc-whisper.log.92` | 2026-06-19 23:08:44 | 2026-06-19 23:23:56 | faster-whisper / large-v3 / 10s / age 3 |
+| ko | `.tmp/logs/avc-whisper.log.91` | 2026-06-19 23:23:56 | 2026-06-19 23:37:25 | faster-whisper / large-v3 / 10s / age 3 |
+| zh | `.tmp/logs/avc-whisper.log.16` | 2026-06-20 17:43:09 | 2026-06-20 17:56:17 | qwen3-asr-transformers / qwen3-asr-0.6b / 15s / age 3 |
+
+판단:
+
+- 엄격 runtime-homogeneous 기준에서는 중국어 후보가 1개뿐이었다.
+- 이 부족함은 mixed-runtime source를 억지로 포함하지 않고 manifest에 그대로 남긴다.
+- 다음 단계는 위 source 구간에서 raw STT window와 final transcript 로그를 사람이 검토해 `expected_final`을 작성하는 것이다.
+- 해당 작업 전까지 이 manifest는 대표 운영 평균 근거가 아니라 representative case 작성 전 검수 큐다.
+
+### 2026-06-21 representative source review packet 생성
+
+검토 목적:
+
+- 선택된 representative source manifest를 사람이 읽을 수 있는 orientation packet으로 축약한다.
+- 이 단계는 raw STT, final event, transcript, 성능 event를 함께 보여주는 검토 보조 자료이며 정식 case 생성이 아니다.
+- `expected_final`은 생성하지 않고, 사람이 source 구간과 정답 final 문장을 별도로 확정해야 한다.
+
+추가 도구:
+
+- `tests/eval/dictation_ai/extract_sbd_representative_review_packets.py`
+- 입력은 `select_sbd_representative_sources.py`의 source review manifest다.
+- 출력 packet은 `paper_evidence=false`, `case_generation=false`, `expected_final_generated=false`로 해석한다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/extract_sbd_representative_review_packets.py \
+  .tmp/eval/dictation-ai-sbd/representative-source-review-manifest.json \
+  --output .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/representative-source-review-packets.md
+```
+
+결과:
+
+```text
+packet_count=5
+ready_packet_count=5
+packet_readiness_blockers=[]
+missing_source_logs=[]
+```
+
+선택 source별 event 수:
+
+| language | source_log | raw_chunks | transcripts | final_events | performance_events |
+| --- | --- | ---: | ---: | ---: | ---: |
+| en | `.tmp/logs/avc-whisper.log.23` | 698 | 558 | 199 | 698 |
+| en | `.tmp/logs/avc-whisper.log.41` | 746 | 411 | 161 | 793 |
+| ko | `.tmp/logs/avc-whisper.log.92` | 819 | 816 | 187 | 834 |
+| ko | `.tmp/logs/avc-whisper.log.91` | 780 | 673 | 220 | 780 |
+| zh | `.tmp/logs/avc-whisper.log.16` | 746 | 484 | 144 | 746 |
+
+판단:
+
+- 선택된 5개 source 모두 검토 가능한 raw/final/transcript/performance event를 포함한다.
+- 5개 packet 모두 raw STT, final event, transcript, performance event가 1개 이상 있어 사람 검토를 시작할 수 있다.
+- review packet은 representative case의 후보 범위를 읽기 쉽게 만들지만, 운영 평균 근거는 아니다.
+- 다음 단계는 packet을 참고해 사람이 연속 구간과 `expected_final`을 확정하고, 언어별 representative JSONL shard를 별도로 작성하는 것이다.
+- 정식 representative case는 `review_packet_id`와 `expected_final_reviewed_by`를 필수 metadata로 남긴다. 이를 통해 앱 로그 transcript를 자동 정답으로 복사한 case와 사람이 확정한 case를 구분한다.
+
+### 2026-06-21 representative source review packet 검증
+
+검토 목적:
+
+- 생성된 review packet이 사람이 검토할 수 있는 중간 산출물인지 별도 validator로 확인한다.
+- 이 단계도 정식 representative case 생성이 아니다.
+
+추가 도구:
+
+- `tests/eval/dictation_ai/validate_sbd_representative_review_packets.py`
+- packet version, manifest 선택 수와 언어별 선택 수, packet 수, ready packet 수, source 누락, readiness blocker 일치, not-ready packet, `paper_evidence=false`, `case_generation=false`, `expected_final_generated=false` 계약을 확인한다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_representative_review_packets.py \
+  .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json \
+  --summary-output .tmp/eval/dictation-ai-sbd/representative-source-review-packets.validation.json
+```
+
+결과:
+
+```text
+packet_count=5
+ready_packet_count=5
+not_ready_packet_count=0
+missing_source_log_count=0
+source_manifest.sampling_unit=session-window
+source_manifest.sampling_rule=session-hash-v1:seed=20260621-representative-v1:per_language=2
+source_manifest.selected_source_counts={en: 2, ko: 2, zh: 1}
+language_counts={en: 2, ko: 2, zh: 1}
+event_totals={raw_chunks: 3789, transcripts: 2942, final_events: 911, performance_events: 3851}
+```
+
+판단:
+
+- 현재 representative source review packet은 모두 사람 검토 시작 조건을 만족한다.
+- 아직 사람이 `expected_final`을 확정하지 않았으므로 representative 운영 평균 근거는 아니다.
+
+### 2026-06-21 representative case와 review packet 연결 검증 보강
+
+검토 목적:
+
+- representative case는 운영 평균 근거로 승격될 수 있으므로, `review_packet_id` 필드 존재만으로는 추적성이 부족하다.
+- 사람이 확정한 `expected_final`이 어느 source review packet에서 왔는지, case의 `source_log`와 `language`가 packet과 같은지 검증해야 한다.
+
+변경:
+
+- `validate_sbd_case_files.py`에 `--review-packets` 옵션을 추가했다.
+- 이 옵션은 representative corpus에서만 허용한다.
+- review packet JSON은 `validate_sbd_representative_review_packets.py`와 같은 계약으로 먼저 검증한다.
+- 각 representative case의 `review_packet_id`가 packet payload에 존재하는지 확인한다.
+- case의 `source_log`, `language`가 packet의 `source_log`, `language`와 일치하는지 확인한다.
+- validator summary에 `representative_review_packet_validation`을 추가해 packet 파일, packet 수, ready packet 수, matched case 수, source manifest를 남긴다.
+
+실행 예:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_case_files.py \
+  tests/eval/dictation_ai/sbd_representative_cases \
+  --max-drafts 0 \
+  --review-packets .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json
+```
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_sbd_case_validator
+```
+
+결과:
+
+```text
+Ran 21 tests
+OK
+```
+
+판단:
+
+- representative case가 준비되면 source review packet과의 연결을 자동 검증할 수 있다.
+- 이 검증은 representative case를 자동 생성하지 않고, 사람이 확정한 case의 source 추적성만 확인한다.
+- 따라서 운영 평균 실험으로 승격할 때 앱 transcript를 정답으로 복사한 자기참조 데이터를 줄이는 방어선이 된다.
+
+### 2026-06-21 representative paper-evidence sweep 추적성 계약 보강
+
+검토 목적:
+
+- `validate_sbd_case_files.py --review-packets`만으로는 사람이 수동 검증한 뒤 다른 경로로 paper-evidence sweep을 실행할 때 추적성 검증이 빠질 수 있다.
+- representative 결과는 운영 평균 근거로 쓰일 수 있으므로, 논문 근거용 sweep 자체에서도 review packet 연결을 강제해야 한다.
+
+변경:
+
+- `run_sbd_parameter_sweep.py`에 `--review-packets` 옵션을 추가했다.
+- `--paper-evidence`와 representative corpus를 함께 사용할 때는 `--min-expected-final-cases`뿐 아니라 `--review-packets`도 필수로 요구한다.
+- representative paper-evidence case set validation은 `validate_sbd_case_files.py`의 review packet 연결 검증을 그대로 사용한다.
+- representative evidence protocol의 `required_evidence_fields`에 `case_summary.representative_review_packet_validation.packet_count`, `ready_packet_count`, `matched_case_count`를 추가했다.
+- representative parameter sweep Markdown header에 `representative_review_packet_validation_packet_count`, `ready_packet_count`, `matched_case_count`를 출력하도록 했다.
+- `sbd_benchmark.py` 단독 실행에도 `--review-packets` 옵션을 추가했다. 지정하면 benchmark report의 `case_summary.representative_review_packet_validation`에 같은 검증 요약을 보존한다.
+
+판단:
+
+- representative corpus가 준비되더라도, review packet 검증 없이 생성된 sweep summary는 최신 evidence protocol에서 paper evidence complete로 보지 않는다.
+- Markdown summary만 보아도 representative case가 몇 개 packet과 연결됐고, 검증 가능한 ready packet 기반인지 확인할 수 있다.
+- benchmark 단독 report와 sweep summary가 같은 representative source 추적성 문맥을 공유할 수 있다.
+- challenge replay sweep에는 영향을 주지 않는다.
+- 이 변경은 representative case를 자동 생성하지 않고, 사람이 확정한 representative case가 선택된 source packet에서 왔다는 추적성만 paper-evidence 경로에 연결한다.
+
+### 2026-06-21 paper-evidence summary 필수 문맥 구체화
+
+검토 목적:
+
+- 현재 논문 해석은 단일 `final_f1_avg`보다 후보별 delta, 언어/태그 residual, lifecycle counter, adoption review를 함께 보는 구조로 재정리됐다.
+- 그런데 evidence protocol이 `evidence_summary` 존재만 요구하면, 후보별 결과나 채택 검토 집계가 빠진 약한 summary도 paper-evidence 문맥을 갖춘 것처럼 보일 수 있다.
+
+변경:
+
+- `evidence_protocol.required_evidence_fields`의 필수 summary 문맥을 `evidence_summary` 전체가 아니라 `evidence_summary.results`, `evidence_summary.adoption_review_counts`로 구체화했다.
+- dry-run이나 오래된 summary는 이제 누락 필드가 더 정확히 표시된다.
+- 논문 초안과 실험 프로토콜 문서의 설명도 같은 필드명으로 맞췄다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_sbd_benchmark_report
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_sbd_parameter_sweep
+./.venv/bin/python -m unittest discover -s tests/unit -p 'test_dictation_ai_sbd_*.py'
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_case_files.py \
+  tests/eval/dictation_ai/sbd_cases \
+  --min-expected-final-cases 1000 \
+  --max-drafts 0
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_representative_review_packets.py \
+  .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json \
+  --summary-output .tmp/eval/dictation-ai-sbd/representative-source-review-packets.validation.json
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_evidence_report.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --allow-missing \
+  --summary-only
+```
+
+결과:
+
+```text
+Ran 11 tests
+OK
+
+Ran 31 tests
+OK
+
+Ran 100 tests
+OK
+
+case_count=1113
+corpus_role=challenge-replay
+draft_count=0
+expected_final_case_count=1109
+language_counts={en: 429, ko: 462, zh: 222}
+
+packet_count=5
+ready_packet_count=5
+missing_source_log_count=0
+
+report_count=126
+complete_report_count=14
+paper_evidence_complete_report_count=14
+missing_report_count=112
+paper_evidence_rerun_candidate_count=51
+missing_field_counts includes evidence_summary.results=61, evidence_summary.adoption_review_counts=65
+```
+
+판단:
+
+- 논문 근거용 sweep summary는 이제 실행 결과 목록과 채택 검토 집계를 모두 가져야 complete로 해석된다.
+- 이는 "점수 하나를 올리는 실험"이 아니라 "파라미터/구조 변경의 trade-off를 기록하는 실험"이라는 재구성 방향과 맞다.
+- 기존 `.tmp/eval/dictation-ai-sbd/parameter-sweeps` 저장물 126개 중 현재 계약으로 complete인 paper-evidence summary는 14개다.
+- 나머지 오래된 summary는 새 계약에서 누락 필드를 드러내므로, 논문 표에 재인용하려면 refresh 또는 재실행이 필요하다.
+
+### 2026-06-21 complete paper-evidence 축별 집계
+
+검토 목적:
+
+- 현재 계약으로 complete인 paper-evidence summary만 모아 논문 해석에 쓸 수 있는 축별 개요를 만든다.
+- 오래된/incomplete summary와 중복 refresh summary가 섞이면 단일 축의 의미가 과대계산될 수 있으므로 report 수와 고유 parameter axis 수를 분리한다.
+
+변경:
+
+- `summarize_sbd_evidence_reports.py`에 `--complete-only`, `--summary-output`을 추가했다.
+- summary에는 `report_count`, `unique_axis_count`, `axis_name_counts`, `duplicate_axis_counts`를 남긴다.
+- 고유 축 대표 report 기준으로 `axis_conclusion_counts`를 추가했다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/summarize_sbd_evidence_reports.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --complete-only \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.md
+```
+
+결과:
+
+```text
+report_count=14
+unique_axis_count=12
+candidate_count=30
+unique_axis_candidate_count=26
+duplicate_axis_counts={SHORT_NO_END_FRAGMENT_UNITS: 3}
+adoption_review_counts={no-risk-flag: 15, review-risk: 15}
+unique_axis_adoption_review_counts={no-risk-flag: 15, review-risk: 11}
+axis_conclusion_counts={baseline-preferred-tradeoff: 2, no-effect-or-tiny: 6, tradeoff-gain: 2, tradeoff-or-regression: 2}
+experiment_stage_counts={challenge-replay: 14}
+```
+
+주요 후보 해석:
+
+```text
+SENTENCE_CONFIRM_CHUNKS=1
+  final_f1_delta=+0.0119
+  precision_delta=-0.0372
+  recall_delta=+0.0438
+  boundary_f1_delta=+0.0006
+  adoption_review=review-risk
+  flags=overall-final-f1-up-precision-down, language/tag regression
+
+SHORT_CJK_FINAL_UNITS=8
+  final_f1_delta=+0.0004
+  precision_delta=-0.0003
+  boundary_f1_delta=-0.0000
+  adoption_review=review-risk
+
+CJK_CONFIRM_PRESERVE_RATIO_MIN=0.65
+  final_f1_delta=+0.0002
+  precision_delta=0.0000
+  adoption_review=no-risk-flag
+```
+
+판단:
+
+- complete paper-evidence report 14개는 모두 `challenge-replay` 범위다. 운영 평균 또는 번역 안정성 근거는 아니다.
+- 고유 parameter axis는 12개이며, `SHORT_NO_END_FRAGMENT_UNITS`는 3개 complete report로 중복되어 있으므로 논문 표에서는 하나의 축으로 해석해야 한다.
+- 후보 30개 중 15개가 `review-risk`이고, 위험 없는 15개는 대부분 0 delta 또는 매우 작은 delta다.
+- 중복 축을 대표 report 하나로 줄이면 후보는 26개, `review-risk`는 11개다.
+- `SHORT_NO_END_FRAGMENT_UNITS`의 대표 report는 lifecycle delta가 포함된 `structural-short-no-end-lifecycle-axis/summary.refreshed.json`로 선택된다.
+- 고유 축 12개 중 6개는 `no-effect-or-tiny`, 2개는 `baseline-preferred-tradeoff`, 2개는 `tradeoff-gain`, 2개는 `tradeoff-or-regression`으로 분류된다.
+- 가장 큰 final F1 증가는 `SENTENCE_CONFIRM_CHUNKS=1`이지만 precision 하락과 언어/태그 회귀가 함께 나타나 기본값 채택 근거가 아니다.
+- 이 집계는 단일 threshold를 더 촘촘히 탐색하는 것보다 queue/revision/boundary lifecycle 구조 검증과 representative corpus 구축이 우선이라는 결론을 보강한다.
+
+### 2026-06-21 실험 설계 재구성 판정
+
+검토 목적:
+
+- 지금까지의 실험 결과가 논문 주장을 지지하는지, 아니면 실험 방법을 재구성해야 하는지 판단한다.
+- 참조 논문과 비교할 때 현재 앱 로그 replay 실험이 어떤 부분에서 의미 있고, 어떤 주장은 아직 부족한지 분리한다.
+
+판정:
+
+- 현재 1113건 `challenge-replay`는 폐기하지 않는다. 다만 운영 평균 품질이 아니라 실패 중심 구조 분석 corpus로 해석한다.
+- `final_f1_avg` 목표치를 계속 올리는 실험은 중단한다. 12개 complete paper-evidence parameter axis가 대부분 0 delta 또는 precision/recall/boundary trade-off를 보였기 때문이다.
+- threshold sweep은 기본값 채택/기각 기록으로만 축소한다. 논문 핵심 기여는 특정 threshold가 아니라 STT raw hypothesis, SBD 후보, revision lifecycle, final-only sink를 분리 계측하는 실험 프로토콜이다.
+- 현재 수치가 지지하는 핵심 결과는 `final_f1_avg=0.483` 자체가 아니라, `final_boundary_f1_avg=0.108`과의 격차 및 `stage_replace_deferred`, `stage_queue_revision`, queue residue, no-end quality block이 남은 병목을 설명한다는 점이다.
+- 외부 문헌은 partial/committed output 분리, incremental ASR stability 평가, 모델 기반 SBD 후보, 번역 segment 중요성의 배경 근거로만 사용한다. `sentenceFinalizeAge`, queue 크기, no-end threshold 같은 앱 기본값은 문헌이 아니라 앱 로그 replay와 CUDA benchmark 결과로만 정당화한다.
+
+후속 실험 재구성:
+
+1. `challenge-replay`: 실패 재현과 lifecycle trade-off 비교로 유지한다.
+2. `structural lifecycle check`: threshold로 설명되지 않는 queue/revision/boundary 병목을 작은 구조 변경으로 검증한다.
+3. `representative replay`: 시간/세션 표본과 사람이 확정한 `expected_final`로 운영 평균을 별도 측정한다.
+4. `translation replay`: final event timestamp와 번역 output을 연결해 final-only sink의 downstream churn을 별도 검증한다.
+
+논문 반영:
+
+- `docs/2026-06-21-dictation-ai-experiment-protocol.md`에 논문 주장 재배치 기준을 추가했다.
+- `docs/paper/ko-revision-aware-realtime-stt.md`에 실험 방법 재구성 결론과 현재 자료가 지지/보류/지지하지 않는 결론을 명시했다.
+
+### 2026-06-21 complete evidence Markdown 대표 축 표 보강
+
+검토 목적:
+
+- complete paper-evidence summary JSON에는 고유 parameter axis별 대표 report와 결론이 남지만, Markdown에는 후보 delta 표만 있어 논문 초안이나 실험일지에 바로 인용하기 어렵다.
+- 중복 축이 있는 경우 report 수와 고유 축 수를 혼동하지 않도록 사람이 읽는 summary에도 대표 축 기준 결론을 먼저 보여줘야 한다.
+
+변경:
+
+- `summarize_sbd_evidence_reports.py`의 Markdown 출력에 `Representative Axis Reports` 표를 추가했다.
+- 표에는 axis, representative report path, candidate count, richness score, conclusion을 출력한다.
+- 기존 후보별 delta 표는 `Candidate Deltas` 섹션으로 분리했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.unit.test_dictation_ai_sbd_parameter_sweep.DictationAiSbdParameterSweepTest.test_summarize_complete_evidence_reports_extracts_axis_deltas \
+  tests.unit.test_dictation_ai_sbd_parameter_sweep.DictationAiSbdParameterSweepTest.test_summarize_complete_evidence_prefers_richer_duplicate_axis_report \
+  tests.unit.test_dictation_ai_sbd_parameter_sweep.DictationAiSbdParameterSweepTest.test_summarize_complete_evidence_classifies_no_effect_axis
+```
+
+결과:
+
+```text
+Ran 3 tests
+OK
+```
+
+추가 검증:
+
+```text
+./.venv/bin/python -m unittest discover -s tests/unit -p 'test_dictation_ai_sbd_*.py'
+git diff --check
+```
+
+결과:
+
+```text
+Ran 103 tests
+OK
+git diff --check passed
+```
+
+### 2026-06-21 논문 초안의 challenge replay 라벨 정리
+
+검토 목적:
+
+- 실험 설계 재구성 결론은 1113건 집합을 운영 평균이 아니라 failure-enriched challenge replay로 해석한다.
+- 논문 초안 일부 표현에 `운영 벤치마크`, `paper-evidence baseline`처럼 운영 평균이나 일반 성능 기준선으로 오해될 수 있는 라벨이 남아 있었다.
+
+변경:
+
+- `docs/paper/ko-revision-aware-realtime-stt.md`의 최신 1113건 케이스 집합을 `challenge replay paper-evidence`로 명시했다.
+- 기준선 표의 조건명을 `1113건 challenge replay baseline`으로 바꿨다.
+- 1113건 벤치 설명을 `운영 벤치마크`가 아니라 `실패 재현 기반 성능 추적 자료`로 정리했다.
+
+판단:
+
+- 수치 자체는 유지하되 해석 범위를 좁혔다.
+- 현재 논문 주장은 raw STT 성능이나 운영 평균 품질이 아니라, 실패 중심 입력에서 final lifecycle 병목을 분리 계측하는 실험으로 유지한다.
+
+### 2026-06-21 논문 초안의 complete evidence 조건 보강
+
+검토 목적:
+
+- complete paper-evidence summary의 14개 report를 논문에 인용할 때, 전체 sweep 재고에 섞인 exploratory/incomplete report와 혼동하지 않도록 한다.
+- 숫자뿐 아니라 해당 report 집합의 해석 범위가 단일한지 함께 적어야 한다.
+
+변경:
+
+- `docs/paper/ko-revision-aware-realtime-stt.md`의 parameter sweep 해석 문단에 complete subset 조건을 추가했다.
+- 14개 complete report가 `mixed_experiment_stage=false`, `mixed_claim_scope_key=false`이며 모두 `challenge-replay`와 `failure-lifecycle-tradeoff` 범위로 해석된다고 명시했다.
+
+판단:
+
+- 논문에 옮길 수 있는 근거 범위가 더 분명해졌다.
+- 전체 report 재고의 exploratory/incomplete 혼합 상태를 complete paper-evidence subset의 상태로 오해할 가능성을 줄였다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_evidence_report.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --complete-only
+git diff --check
+```
+
+결과:
+
+```text
+complete_report_count=14
+paper_evidence_complete_report_count=14
+experiment_stage_counts={challenge-replay: 14}
+claim_scope_key_counts={failure-lifecycle-tradeoff: 14}
+mixed_experiment_stage=false
+mixed_claim_scope_key=false
+git diff --check passed
+```
+
+summary 재생성:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/summarize_sbd_evidence_reports.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --complete-only \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.md
+```
+
+결과:
+
+```text
+report_count=14
+unique_axis_count=12
+candidate_count=30
+unique_axis_candidate_count=26
+axis_conclusion_counts={baseline-preferred-tradeoff: 2, no-effect-or-tiny: 6, tradeoff-gain: 2, tradeoff-or-regression: 2}
+```
+
+판단:
+
+- Markdown만 보아도 complete paper-evidence 14개 report가 12개 고유 축으로 축약된다는 점을 확인할 수 있다.
+- `SHORT_NO_END_FRAGMENT_UNITS`는 3개 report 중 lifecycle delta가 포함된 `structural-short-no-end-lifecycle-axis/summary.refreshed.json`가 대표 report로 표시된다.
+- 이 출력은 threshold sweep을 추가로 촘촘히 진행하기보다, 고유 축별 결론을 기준으로 닫힌 축과 구조 검증 후보를 분리하는 데 쓰기 좋다.
+
+### 2026-06-21 complete evidence 결론 라벨 설명 보강
+
+검토 목적:
+
+- `tradeoff-gain`, `baseline-preferred-tradeoff`, `no-effect-or-tiny`, `tradeoff-or-regression` 같은 축별 결론 라벨은 코드 규칙을 모르면 의미가 모호하다.
+- 논문 근거용 Markdown summary는 단독으로 읽혀야 하므로, 결론 라벨 정의를 summary 안에 함께 남긴다.
+
+변경:
+
+- `summarize_sbd_evidence_reports.py`에 `AXIS_CONCLUSION_DESCRIPTIONS`를 추가했다.
+- Markdown 출력의 `Representative Axis Reports` 앞에 `Axis Conclusion Legend` 표를 추가했다.
+- 현재 complete summary에 실제로 등장한 결론 라벨만 legend에 출력한다.
+
+라벨 해석:
+
+| 라벨 | 의미 |
+| --- | --- |
+| `baseline-preferred-tradeoff` | 후보가 모두 review-risk이고 final F1 개선도 없어 baseline 유지가 더 타당한 축 |
+| `no-effect-or-tiny` | review-risk가 없고 final/precision/boundary delta가 사실상 0인 축 |
+| `tradeoff-gain` | final F1이 오르는 후보가 있지만 precision, 언어, 태그, boundary trade-off가 있는 축 |
+| `tradeoff-or-regression` | review-risk가 있고 명확한 final F1 개선이 없는 축 |
+
+검증:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.unit.test_dictation_ai_sbd_parameter_sweep.DictationAiSbdParameterSweepTest.test_summarize_complete_evidence_reports_extracts_axis_deltas
+./.venv/bin/python -m unittest discover -s tests/unit -p 'test_dictation_ai_sbd_*.py'
+git diff --check
+```
+
+결과:
+
+```text
+Ran 1 test
+OK
+
+Ran 103 tests
+OK
+
+git diff --check passed
+```
+
+summary 재생성:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/summarize_sbd_evidence_reports.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --complete-only \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.md
+```
+
+결과:
+
+```text
+Axis Conclusion Legend 섹션 생성 확인
+axis_conclusion_counts={baseline-preferred-tradeoff: 2, no-effect-or-tiny: 6, tradeoff-gain: 2, tradeoff-or-regression: 2}
+```
+
+판단:
+
+- summary Markdown만으로도 축별 결론 라벨이 기본값 채택, 기각, 보류 중 어디에 가까운지 해석할 수 있다.
+- 이 보강은 새 성능 수치를 만들지 않고, 이미 검증된 complete paper-evidence 결과를 논문 근거로 옮길 때의 해석 오류를 줄이는 작업이다.
+
+### 2026-06-21 complete evidence JSON 결론 설명 보강
+
+검토 목적:
+
+- Markdown에는 결론 라벨 설명이 들어갔지만, JSON summary에는 `axis_conclusion_counts`와 대표 report 결론만 남아 있었다.
+- 후속 자동 리포트나 논문 표 생성기가 JSON만 읽을 경우 `tradeoff-gain`, `baseline-preferred-tradeoff` 같은 라벨의 의미를 다시 코드에 의존하게 된다.
+
+변경:
+
+- `summarize_sbd_evidence_reports.py` summary JSON에 `axis_conclusion_descriptions`를 추가했다.
+- 이 필드는 실제 summary에 등장한 결론 라벨에 대해서만 설명을 남긴다.
+- Markdown legend와 JSON description은 같은 `AXIS_CONCLUSION_DESCRIPTIONS` 상수를 사용한다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.unit.test_dictation_ai_sbd_parameter_sweep.DictationAiSbdParameterSweepTest.test_summarize_complete_evidence_reports_extracts_axis_deltas
+```
+
+결과:
+
+```text
+Ran 1 test
+OK
+```
+
+추가 검증:
+
+```text
+./.venv/bin/python -m unittest discover -s tests/unit -p 'test_dictation_ai_sbd_*.py'
+git diff --check
+```
+
+결과:
+
+```text
+Ran 103 tests
+OK
+git diff --check passed
+```
+
+summary 재생성:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/summarize_sbd_evidence_reports.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --complete-only \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.md
+```
+
+결과:
+
+```text
+axis_conclusion_descriptions 포함 확인
+axis_conclusion_counts={baseline-preferred-tradeoff: 2, no-effect-or-tiny: 6, tradeoff-gain: 2, tradeoff-or-regression: 2}
+```
+
+판단:
+
+- complete paper-evidence summary JSON과 Markdown이 같은 결론 라벨 해석을 공유한다.
+- 이 변경은 후속 논문 표 자동 생성 또는 실험일지 요약 생성 시 라벨 의미가 누락되는 위험을 줄인다.
+
+### 2026-06-21 complete evidence claim scope 집계 보강
+
+검토 목적:
+
+- complete summary는 `experiment_stage_counts`로 `challenge-replay` 여부를 보여주지만, 논문 주장 범위인 `claim_scope_key`가 섞였는지는 따로 집계하지 않았다.
+- representative replay나 exploratory 결과가 나중에 같은 디렉터리에 섞이면 stage뿐 아니라 claim scope 혼합 여부도 바로 보여야 한다.
+
+변경:
+
+- `validate_sbd_evidence_report.py`가 report별 `claim_scope`와 aggregate `claim_scope_key_counts`를 반환하도록 했다.
+- `summarize_sbd_evidence_reports.py`가 `claim_scope_key_counts`와 `mixed_claim_scope_key`를 JSON/Markdown summary에 남기도록 했다.
+- candidate report summary에도 `claim_scope_key`, `claim_scope`를 보존한다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.unit.test_dictation_ai_sbd_parameter_sweep.DictationAiSbdParameterSweepTest.test_validate_evidence_reports_succeeds_for_current_claim_context \
+  tests.unit.test_dictation_ai_sbd_parameter_sweep.DictationAiSbdParameterSweepTest.test_validate_evidence_reports_counts_missing_fields \
+  tests.unit.test_dictation_ai_sbd_parameter_sweep.DictationAiSbdParameterSweepTest.test_summarize_complete_evidence_reports_extracts_axis_deltas
+./.venv/bin/python -m unittest discover -s tests/unit -p 'test_dictation_ai_sbd_*.py'
+git diff --check
+```
+
+결과:
+
+```text
+Ran 3 tests
+OK
+
+Ran 103 tests
+OK
+
+git diff --check passed
+```
+
+summary 재생성:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/summarize_sbd_evidence_reports.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --complete-only \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.md
+```
+
+결과:
+
+```text
+claim_scope_key_counts={failure-lifecycle-tradeoff: 14}
+mixed_claim_scope_key=false
+experiment_stage_counts={challenge-replay: 14}
+mixed_experiment_stage=false
+```
+
+판단:
+
+- 현재 complete paper-evidence summary 14개는 모두 `challenge-replay`이면서 `failure-lifecycle-tradeoff` claim scope에 속한다.
+- 따라서 이 summary는 운영 평균이나 번역 안정성 주장이 아니라, 실패 중심 lifecycle trade-off 근거로만 논문에 사용할 수 있음이 JSON/Markdown 양쪽에 남는다.
+
+### 2026-06-21 evidence validator complete-only 집계 수정
+
+검토 목적:
+
+- `validate_sbd_evidence_report.py --complete-only`는 논문 근거로 쓸 수 있는 complete report 목록을 뽑는 경로다.
+- 앞선 claim scope 집계 추가 후 실제 실행해보니, `complete_report_count=14`인데 `experiment_stage_counts`와 `claim_scope_key_counts`가 전체 126개 report 기준으로 출력됐다.
+- 또한 `--complete-only` 실행이 complete report만 출력하면서도 누락 report 존재 때문에 exit code 1로 종료됐다.
+
+수정:
+
+- `validate_reports()`에 전체 report 기준 count와 complete report 기준 count를 분리했다.
+- `--summary-only`는 전체 재고 감사용이므로 전체 기준 count와 complete 기준 count를 모두 출력한다.
+- `--complete-only`는 complete report 기준의 `experiment_stage_counts`, `claim_scope_key_counts`를 출력한다.
+- `--complete-only`는 누락 report가 같이 있는 디렉터리에서도 complete 목록을 뽑는 목적에 맞게 exit code 0으로 종료한다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.unit.test_dictation_ai_sbd_parameter_sweep.DictationAiSbdParameterSweepTest.test_validate_evidence_reports_succeeds_for_current_claim_context \
+  tests.unit.test_dictation_ai_sbd_parameter_sweep.DictationAiSbdParameterSweepTest.test_validate_evidence_reports_counts_missing_fields
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_evidence_report.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --complete-only
+./.venv/bin/python -m unittest discover -s tests/unit -p 'test_dictation_ai_sbd_*.py'
+git diff --check
+```
+
+결과:
+
+```text
+Ran 2 tests
+OK
+
+--complete-only exit code 0
+complete_report_count=14
+experiment_stage_counts={challenge-replay: 14}
+claim_scope_key_counts={failure-lifecycle-tradeoff: 14}
+
+Ran 103 tests
+OK
+
+git diff --check passed
+```
+
+판단:
+
+- complete-only 감사 출력만 보아도 논문 근거로 쓸 14개 report가 모두 `challenge-replay`와 `failure-lifecycle-tradeoff` 범위임을 확인할 수 있다.
+- 오래된/incomplete report가 같은 디렉터리에 남아 있어도 complete report 목록 추출이 실패하지 않는다.
+
+### 2026-06-21 evidence validator mixed scope 플래그 보강
+
+검토 목적:
+
+- `experiment_stage_counts`, `claim_scope_key_counts`만 있으면 사람이 count 종류를 직접 보고 결과가 섞였는지 판단해야 한다.
+- 논문 근거 감사에서는 전체 재고가 섞였는지와 complete subset이 섞였는지를 빠르게 구분해야 한다.
+
+변경:
+
+- `validate_sbd_evidence_report.py` aggregate에 `mixed_experiment_stage`, `mixed_claim_scope_key`를 추가했다.
+- complete report subset 기준으로 `complete_mixed_experiment_stage`, `complete_mixed_claim_scope_key`도 추가했다.
+- `--summary-only`는 전체 기준과 complete 기준 플래그를 모두 출력한다.
+- `--complete-only`는 complete subset 기준 플래그를 `mixed_experiment_stage`, `mixed_claim_scope_key`로 출력한다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.unit.test_dictation_ai_sbd_parameter_sweep.DictationAiSbdParameterSweepTest.test_validate_evidence_reports_succeeds_for_current_claim_context \
+  tests.unit.test_dictation_ai_sbd_parameter_sweep.DictationAiSbdParameterSweepTest.test_validate_evidence_reports_counts_missing_fields
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_evidence_report.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --summary-only \
+  --allow-missing
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_evidence_report.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --complete-only
+```
+
+결과:
+
+```text
+Ran 2 tests
+OK
+
+summary-only:
+mixed_experiment_stage=true
+mixed_claim_scope_key=true
+complete_mixed_experiment_stage=false
+complete_mixed_claim_scope_key=false
+
+complete-only:
+mixed_experiment_stage=false
+mixed_claim_scope_key=false
+experiment_stage_counts={challenge-replay: 14}
+claim_scope_key_counts={failure-lifecycle-tradeoff: 14}
+```
+
+판단:
+
+- 전체 parameter sweep 재고에는 exploratory/incomplete report가 섞여 있음을 즉시 확인할 수 있다.
+- 하지만 complete paper-evidence subset은 단일 stage/scope로 정리되어 있어 논문 근거로 사용할 범위가 명확하다.
+
+### 2026-06-21 evidence audit 프로토콜 문서 정합화
+
+검토 목적:
+
+- `validate_sbd_evidence_report.py`의 `--summary-only`, `--complete-only` 동작을 보강했지만, 실험 프로토콜 문서의 설명은 이전 기준에 머물러 있었다.
+- 후속 실험자가 전체 재고 기준 count와 complete subset 기준 count를 혼동하지 않도록 문서 기준을 맞춘다.
+
+변경:
+
+- `docs/2026-06-21-dictation-ai-experiment-protocol.md`의 evidence validator 설명을 현재 동작에 맞췄다.
+- `--summary-only`는 전체 재고 기준 stage/scope count와 complete subset 기준 stage/scope count를 함께 보는 재고 감사용이라고 명시했다.
+- `--complete-only`는 complete subset 기준 `experiment_stage_counts`, `claim_scope_key_counts`, `mixed_experiment_stage`, `mixed_claim_scope_key`를 출력한다고 명시했다.
+- 논문 표로 옮기기 전 `mixed_experiment_stage=false`, `mixed_claim_scope_key=false`를 확인하라는 규칙을 추가했다.
+
+판단:
+
+- 도구 출력과 프로토콜 문서의 해석 기준이 일치한다.
+- complete paper-evidence 결과를 논문 표로 옮길 때 전체 재고의 exploratory/incomplete 혼합 상태를 complete subset의 혼합 상태로 오해할 위험을 줄였다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest discover -s tests/unit -p 'test_dictation_ai_sbd_*.py'
+git diff --check
+```
+
+결과:
+
+```text
+Ran 103 tests
+OK
+git diff --check passed
+```
+
+### 2026-06-21 complete evidence와 논문 수치 재대조
+
+검토 목적:
+
+- 논문 초안에 들어간 complete paper-evidence 수치가 현재 summary 도구 출력과 계속 일치하는지 확인한다.
+- 실험일지 말미에서 현재 인용 가능한 근거 범위를 바로 확인할 수 있게 한다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/summarize_sbd_evidence_reports.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --complete-only \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.md
+```
+
+결과:
+
+```text
+report_count=14
+unique_axis_count=12
+candidate_count=30
+unique_axis_candidate_count=26
+experiment_stage_counts={challenge-replay: 14}
+mixed_experiment_stage=false
+claim_scope_key_counts={failure-lifecycle-tradeoff: 14}
+mixed_claim_scope_key=false
+duplicate_axis_counts={SHORT_NO_END_FRAGMENT_UNITS: 3}
+adoption_review_counts={no-risk-flag: 15, review-risk: 15}
+unique_axis_adoption_review_counts={no-risk-flag: 15, review-risk: 11}
+axis_conclusion_counts={baseline-preferred-tradeoff: 2, no-effect-or-tiny: 6, tradeoff-gain: 2, tradeoff-or-regression: 2}
+```
+
+판단:
+
+- 논문 초안의 complete paper-evidence 수치와 현재 summary 출력은 일치한다.
+- 14개 complete report는 모두 `challenge-replay`와 `failure-lifecycle-tradeoff` 범위다.
+- 고유 축 기준으로 보면 12개 축, 26개 후보이며, `review-risk`는 11개다.
+- 따라서 이 자료는 운영 평균 품질이나 번역 품질 개선 근거가 아니라, failure-enriched challenge replay에서 threshold 축 대부분이 0 delta 또는 trade-off였다는 근거로만 사용한다.
+
+### 2026-06-21 논문 초록과 부제 주장 범위 축소
+
+검토 목적:
+
+- 논문 본문과 evidence summary는 현재 자료를 운영 평균 개선이 아니라 failure-enriched challenge replay 기반 lifecycle 분석으로 해석한다.
+- 초록과 부제에 `개선 사례`처럼 성능 개선 논문으로 읽힐 수 있는 표현이 남아 있으면 논문 주제가 흐려진다.
+
+변경:
+
+- 부제를 `revision-aware lifecycle 튜닝을 통한 보수적 개선 사례`에서 `revision-aware lifecycle 계측을 통한 보수적 분석 사례`로 낮췄다.
+- 초록의 긴 문맥 효과를 `전사 안정성 개선`이 아니라 `원시 STT 가설을 더 안정적으로 만들 수 있음`으로 좁혔다.
+- 기여 문단의 마지막 문장을 운영 평균 성능 개선 주장이 아니라, 운영 로그 기반 실패 사례를 누적해 병목을 분석하는 사례 연구로 정리했다.
+
+판단:
+
+- 논문 앞부분의 주장이 결과 해석과 맞아졌다.
+- 현재 자료가 지지하는 핵심은 성능 개선 수치가 아니라 raw STT, SBD 후보, revision lifecycle, final-only sink를 분리해 failure lifecycle trade-off를 설명하는 것이다.
+
+### 2026-06-21 representative source 준비 상태 재검증
+
+검토 목적:
+
+- challenge replay는 실패 중심 근거로 정리됐지만, 운영 평균 품질 주장을 하려면 representative corpus가 별도로 필요하다.
+- 현재 로그가 representative case 후보를 만들 수 있는 상태인지, 그리고 아직 논문 성능 수치로 승격하면 안 되는 이유가 명확한지 재확인한다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/audit_sbd_representative_sources.py \
+  .tmp/logs \
+  --compact \
+  --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit.json
+./.venv/bin/python tests/eval/dictation_ai/select_sbd_representative_sources.py \
+  .tmp/eval/dictation-ai-sbd/representative-source-audit.json \
+  --per-language 2 \
+  --output .tmp/eval/dictation-ai-sbd/representative-source-review-manifest.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/representative-source-review-manifest.md
+./.venv/bin/python tests/eval/dictation_ai/extract_sbd_representative_review_packets.py \
+  .tmp/eval/dictation-ai-sbd/representative-source-review-manifest.json \
+  --output .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/representative-source-review-packets.md
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_representative_review_packets.py \
+  .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json \
+  --summary-output .tmp/eval/dictation-ai-sbd/representative-source-review-packets.validation.json
+```
+
+결과:
+
+```text
+source_count=95
+line_count=682671
+timestamped_line_count=672028
+first_timestamp=2026-06-19 22:32:22
+last_timestamp=2026-06-20 21:30:13
+stt_raw=64918
+finalize_event=11464
+transcript=32950
+translation=5047
+representative_readiness.can_seed_representative_candidates=true
+representative_readiness.requires_manual_expected_final=true
+
+eligible_source_counts={en: 3, ko: 3, zh: 1}
+selected_source_counts={en: 2, ko: 2, zh: 1}
+selected_source_count=5
+sampling_unit=session-window
+sampling_rule=session-hash-v1:seed=20260621-representative-v1:per_language=2
+
+packet_count=5
+ready_packet_count=5
+not_ready_packet_count=0
+missing_source_log_count=0
+event_totals={raw_chunks: 3789, final_events: 911, transcripts: 2942, performance_events: 3851}
+```
+
+판단:
+
+- 운영 로그에는 representative 후보를 seed할 충분한 raw STT, final event, transcript, performance event가 있다.
+- deterministic `session-window` 선택 규칙으로 사람 검토용 packet 5개를 만들 수 있고, 모두 ready 상태다.
+- 하지만 이 산출물은 아직 `paper_evidence=false`, `case_generation=false`, `expected_final_generated=false` 성격의 중간 검토 자료다.
+- 정식 representative corpus가 되려면 packet별 구간을 사람이 읽고 `expected_final`을 확정한 뒤 `tests/eval/dictation_ai/sbd_representative_cases/`에 JSONL로 작성해야 한다.
+- 따라서 현재 논문은 운영 평균 품질, 실제 지연, 번역 churn 개선을 계속 보류해야 한다.
+
+논문 반영:
+
+- `docs/paper/ko-revision-aware-realtime-stt.md`에 representative review packet validator 결과를 추가했다.
+- packet validator의 `raw_chunks=3789`, `final_events=911`, `transcripts=2942`, `performance_events=3851`, `not_ready_packet_count=0`, `missing_source_log_count=0`을 명시했다.
+- review packet interpretation이 `paper_evidence=false`, `case_generation=false`, `expected_final_generated=false`, `claim_scope=human review orientation packet only`임을 본문에 추가해, 이 산출물을 운영 평균 수치나 정답 case로 오해하지 않게 했다.
+
+추가 확인:
+
+```text
+find tests/eval/dictation_ai/sbd_representative_cases -maxdepth 3 -type f -print
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_case_files.py \
+  tests/eval/dictation_ai/sbd_representative_cases \
+  --max-drafts 0 \
+  --review-packets .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json
+```
+
+결과:
+
+```text
+tests/eval/dictation_ai/sbd_representative_cases/README.md
+[dictation-ai-sbd-case-validator] error: no SBD case files matched: tests/eval/dictation_ai/sbd_representative_cases
+```
+
+판단:
+
+- representative root에는 아직 정식 JSONL case가 없다.
+- 이 validator 실패는 현재 단계에서 의도된 미승격 상태다. 사람이 `expected_final`을 확정한 JSONL case를 추가하기 전까지 representative replay 결과는 생성할 수 없다.
+- `docs/paper/ko-revision-aware-realtime-stt.md`에도 이 상태를 반영했다.
+
+### 2026-06-21 structural lifecycle subset 재검증
+
+검토 목적:
+
+- threshold sweep 대부분이 0 delta 또는 trade-off로 정리됐으므로, 다음 유효 실험 후보는 queue/revision/boundary 병목을 겨냥한 structural lifecycle check다.
+- 이때 구조 후보 subset은 빠른 디버깅 입력일 뿐 논문 성능 수치가 아니어야 한다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/select_sbd_structural_cases.py \
+  .tmp/eval/dictation-ai-sbd/20260621-protocol-baseline.json \
+  --limit 16 \
+  --case-output .tmp/eval/dictation-ai-sbd/structural-lifecycle-cases.jsonl \
+  --markdown-output .tmp/eval/dictation-ai-sbd/structural-lifecycle-cases.md
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_case_files.py \
+  .tmp/eval/dictation-ai-sbd/structural-lifecycle-cases.jsonl \
+  --max-drafts 0
+```
+
+결과:
+
+```text
+selected_case_count=16
+case_count=16
+corpus_role=exploratory
+draft_count=0
+expected_final_case_count=16
+language_counts={en: 10, zh: 6}
+tag_counts.structural-lifecycle=16
+tag_counts.stage-queue=12
+tag_counts.missing-final=13
+tag_counts.translation-skip=8
+tag_counts.no-end-final=7
+tag_counts.duplicate-suppression=7
+```
+
+대표 병목:
+
+| rank | case | language | queue_len | stage_queue_revision | stage_replace_deferred | boundary_f1 |
+| ---: | --- | --- | ---: | ---: | ---: | ---: |
+| 1 | `en_log_optimus_surgeons_zimbabwe_gigafactory_queue_20260620_001` | en | 16 | 64 | 85 | 0.000 |
+| 2 | `en_log_supply_chain_recursive_medicine_free_20260620_001` | en | 4 | 137 | 154 | 0.000 |
+| 3 | `en_log_replacement_rate_north_korea_underpopulation_queue_20260620_001` | en | 5 | 80 | 96 | 0.200 |
+| 10 | `zh_log_draft_20260620_avc_whisper_log_11_000872` | zh | 10 | 21 | 33 | 0.000 |
+
+판단:
+
+- structural subset은 현재도 재현 가능하고 benchmark-compatible JSONL로 검증된다.
+- validator 기준 `corpus_role=exploratory`이므로 논문 성능 수치로 직접 사용하지 않는다.
+- 영어 10건, 중국어 6건으로 편향되어 있어 언어별 일반 규칙의 근거로도 쓰지 않는다.
+- 이 subset은 구조 변경 전후의 counter 움직임을 빠르게 보는 디버깅 입력이며, 개선 후보가 보이면 반드시 전체 challenge replay에서 `sat + cuda + float16`로 재검증해야 한다.
+
+### 2026-06-21 반복 실험 판정 절차 보강
+
+검토 목적:
+
+- 꽤 많은 threshold sweep과 lifecycle 실험이 누적되었지만, 단일 점수 상승 목표로 해석하면 논문 가설이 흔들린다.
+- 후속 실험을 계속 반복하려면 각 실험이 어떤 가설을 유지, 축소, 폐기, 보류하게 만드는지 판정 절차가 필요하다.
+
+반영:
+
+- `docs/2026-06-21-dictation-ai-experiment-protocol.md`에 `반복 실험 판정 절차` 섹션을 추가했다.
+- 반복 실험의 결과 판정을 `유지`, `축소`, `폐기`, `보류`로 고정했다.
+- 최소 기록 항목을 가설, corpus role, runtime 계약, 전체/언어별/태그별 delta, strata 결과, 채택/기각/보류 이유, 논문에서 사용할 수 있는 주장과 사용할 수 없는 주장으로 정리했다.
+
+판단:
+
+- 현재 1113건 challenge replay와 complete paper-evidence report 14개는 `failure-lifecycle-tradeoff` 가설을 유지하는 근거로 해석한다.
+- 운영 평균 품질, 실제 latency, 번역 churn 개선은 representative corpus와 translation replay가 없으므로 계속 보류한다.
+- 단일 threshold를 더 촘촘히 흔드는 실험은 우선순위가 낮다. 다음 반복은 `stage_replace_deferred`, `stage_queue_revision`, `no_end_marker`, recent-final memory 같은 lifecycle counter가 지목하는 구조적 병목을 작은 변경으로 검증하는 방식이어야 한다.
+
+### 2026-06-21 evidence summary 가설 판정 필드 추가
+
+검토 목적:
+
+- 실험 프로토콜에는 `유지`, `축소`, `폐기`, `보류` 판정 절차가 추가됐지만, 자동 evidence summary에는 아직 이 판정이 직접 남지 않았다.
+- 축별 `axis_conclusion`만 있으면 논문 작성 시 다시 사람이 결론 라벨을 해석해야 하므로, 반복 실험 판정 절차와 자동 리포트를 연결한다.
+
+반영:
+
+- `tests/eval/dictation_ai/summarize_sbd_evidence_reports.py`에 `hypothesis_status_counts`, `hypothesis_status_descriptions`, 축별 `hypothesis_status`를 추가했다.
+- Markdown summary에도 `Hypothesis Status Legend`와 representative axis report의 `hypothesis_status` 컬럼을 추가했다.
+- 테스트는 `baseline-preferred-tradeoff/minor-no-risk-gain -> 유지`, `tradeoff-gain -> 축소`, `no-effect-or-tiny/tradeoff-or-regression -> 폐기` 매핑을 확인하도록 보강했다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/summarize_sbd_evidence_reports.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --complete-only \
+  --summary-output .tmp/eval/dictation-ai-sbd/complete-evidence-summary.with-hypothesis-status.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/complete-evidence-summary.with-hypothesis-status.md
+```
+
+결과:
+
+```text
+report_count=14
+unique_axis_count=12
+candidate_count=30
+unique_axis_candidate_count=26
+experiment_stage_counts={challenge-replay: 14}
+claim_scope_key_counts={failure-lifecycle-tradeoff: 14}
+axis_conclusion_counts={baseline-preferred-tradeoff: 2, no-effect-or-tiny: 6, tradeoff-gain: 2, tradeoff-or-regression: 2}
+hypothesis_status_counts={유지: 2, 축소: 2, 폐기: 8}
+```
+
+판단:
+
+- 현재 complete paper-evidence report 14개는 모두 challenge replay와 failure lifecycle trade-off 범위다.
+- 고유 축 12개 중 2개는 현재 기준선 또는 현재 보수적 lifecycle 가설을 유지하는 근거다.
+- `축소=2`는 일부 final F1 개선 신호가 있지만 precision, 언어별 품질, 태그별 boundary/precision trade-off가 있어 실패군별 조건부 신호로만 해석한다.
+- `폐기=8`은 해당 비교 후보나 축을 새 기본값 후보 또는 논문 중심 개선 주장으로 쓰지 않는다는 뜻이다.
+- 이 결과는 다음 반복이 threshold 축 추가가 아니라 structural lifecycle 변경 검증이어야 한다는 결론을 보강한다.
+
+### 2026-06-21 structural lifecycle preflight
+
+검토 목적:
+
+- 자동 evidence summary 기준으로 새 threshold 축은 대부분 `축소` 또는 `폐기`로 정리됐다.
+- 다음 실험은 structural lifecycle 변경이어야 하지만, 구조 변경은 벤치 replay와 운영 루프가 같은 판단 경로를 공유한다는 전제가 있어야 한다.
+
+코드 확인:
+
+- 운영 루프는 `src/app/dictation_pipeline_loop.py`에서 `SentenceCandidateCommitBufferNode`를 사용한다.
+- `SentenceCandidateCommitBufferNode`는 queue revision 시 `_sentences_are_revisions`, `_prefer_sentence_revision`, `_should_reset_revision_age`, `_next_revision_confirmation_count`를 사용하고, 운영 루프의 `stable_analysis`를 함께 넘긴다.
+- 벤치 루프 `tests/eval/dictation_ai/sbd_benchmark.py`는 자체 `LifecycleState`, `_queue_staged_sentence`, `_promote_next_staged_sentence`를 갖고 있으며 같은 transcript helper 대부분을 공유하지만 replay case에는 운영 `stable_analysis` context가 보존되지 않는다.
+
+CUDA preflight 시도:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases .tmp/eval/dictation-ai-sbd/structural-lifecycle-cases.jsonl \
+  --output .tmp/eval/dictation-ai-sbd/structural-lifecycle-baseline-preflight.json \
+  --device cuda \
+  --compute-type float16
+```
+
+결과:
+
+```text
+[dictation-ai-sbd-benchmark] error: sentence boundary backend 'sat' initialization failed: model=sat-3l-sm device=cuda compute=float16. Fail-Fast: fix the model/device/runtime instead of falling back to regex.
+```
+
+판단:
+
+- sandbox 안에서 CUDA/SaT 초기화가 되지 않아 structural subset preflight report는 생성하지 못했다.
+- 정책상 CPU/mock/smoke 대체 실행은 논문 근거가 아니므로 수행하지 않았다.
+- 이번 반복은 실행 결과가 아니라 구조 실험 preflight 기준 보강으로 기록한다.
+- 다음 구조 실험은 replay case에 없는 `stable_analysis`를 핵심 근거로 삼지 않아야 한다.
+- 우선순위는 새 threshold가 아니라 운영/벤치 양쪽이 공유하는 active staged 소비 순서, candidate queue 정리, no-end fragment 처리, recent-final memory 일반 정책 중 하나를 작게 검증하는 것이다.
+
+### 2026-06-21 실험 설계 유효성 재검토
+
+검토 목적:
+
+- 누적 실험 결과를 논문 관점에서 다시 해석한다.
+- 현재 설계를 유지할지, 점수 상승 실험을 계속할지, 실험방법을 재구성할지 판단한다.
+
+판단:
+
+- 현재 실험 설계는 폐기 대상이 아니다.
+- 다만 `final_f1_avg` 목표치를 계속 올리는 최적화 실험으로 해석하면 의미가 약하다.
+- 1113건 challenge replay는 운영 평균 표본이 아니라 failure-enriched corpus이므로, 낮은 평균 점수는 제품 평균 품질이 아니라 실패 중심 입력의 난도와 lifecycle 병목을 보여주는 값이다.
+- complete evidence report 14개, 고유 parameter axis 12개는 `유지=2`, `축소=2`, `폐기=8`로 정리됐다.
+- 이 결과는 단일 threshold 미세조정보다 structural lifecycle check가 다음 실험 축이어야 함을 지지한다.
+
+참조 논문 비교:
+
+- Whisper-Streaming과 incremental ASR 문헌은 partial hypothesis와 committed/final output을 분리해야 한다는 문제 설정을 뒷받침한다.
+- SaT와 streaming punctuation 문헌은 regex/ad-hoc 분할 대신 모델 기반 SBD 후보와 right context를 쓰는 배경 근거다.
+- speech translation segmentation 문헌은 번역 단위가 downstream 품질에 영향을 줄 수 있음을 보여주지만, 현재 challenge replay만으로 번역 품질 개선을 주장할 수는 없다.
+- 외부 문헌은 `sentenceFinalizeAge`, queue 크기, no-end threshold 같은 앱 기본값을 직접 정당화하지 않는다. 해당 값은 앱 로그 replay의 trade-off 결과로만 해석한다.
+
+재구성 결론:
+
+- challenge replay는 실패 재현과 lifecycle 병목 분석 자료로 유지한다.
+- parameter sweep은 기본값 채택/기각 기록과 부정 결과 설명으로 축소한다.
+- 논문 중심 결과는 `final_f1_avg` 단독 상승이 아니라 `final_boundary_f1`, queue residue, `stage_replace_deferred`, `stage_queue_revision`, no-end quality block이 분리해 보여주는 구조 병목으로 옮긴다.
+- 운영 평균 품질은 representative corpus가 사람이 확정한 `expected_final`과 함께 준비된 뒤에만 주장한다.
+- final-only sink의 번역 안정성은 final event timestamp와 translation output replay가 연결되기 전까지 시스템 계약과 후속 실험 질문으로만 둔다.
+
+문서 반영:
+
+- `docs/2026-06-21-dictation-ai-experiment-protocol.md`에 현재 실험 설계의 유효성 판정과 실험방법 재구성 결론을 추가했다.
+
+### 2026-06-21 논문 방법론 재구성 gate 추가
+
+검토 목적:
+
+- 누적 실험을 논문 초안에 반영할 때 자료별 역할이 섞이지 않도록 한다.
+- 다음 반복 실험이 다시 단일 점수 상승 또는 threshold 미세조정으로 흐르지 않게 실행 gate를 고정한다.
+
+반영:
+
+- `docs/paper/ko-revision-aware-realtime-stt.md`에 자료/실험별 역할 판정표를 추가했다.
+- 운영 로그 사례, 1113건 challenge replay, parameter sweep, structural lifecycle check, representative replay, translation replay가 각각 어떤 주장까지 담당할 수 있는지 분리했다.
+- `docs/2026-06-21-dictation-ai-experiment-protocol.md`에 후속 실험 실행 gate를 추가했다.
+- 구조 변경 실험, parameter sweep, representative replay, translation replay마다 시작 조건, 논문 근거 승격 조건, 중단/보류 조건을 정리했다.
+
+판단:
+
+- 현재 자료의 중심 주장은 “성능을 크게 올렸다”가 아니라 “실패 중심 로그 replay로 finalization 병목을 분리하고, 어떤 주장을 보류해야 하는지 드러냈다”이다.
+- 다음 구조 변경 실험은 전체 challenge replay에서 `sat + cuda + float16`으로 검증되기 전까지 paper evidence로 승격하지 않는다.
+- representative replay는 사람이 확정한 `expected_final`과 review packet 추적성이 없으면 운영 평균 근거가 아니다.
+- translation replay는 final event와 translation output 연결이 없으면 final-only sink의 번역 품질 개선 근거가 아니다.
+
+### 2026-06-21 claim-evidence matrix 점검
+
+검토 목적:
+
+- 논문 초안에 들어갈 주장별 근거가 현재 artifact로 충분한지 점검한다.
+- exploratory/incomplete report가 논문 수치로 섞이지 않도록 complete evidence inventory를 다시 확인한다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_evidence_report.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --complete-only \
+  --summary-only
+```
+
+결과:
+
+```text
+report_count=126
+complete_report_count=14
+paper_evidence_complete_report_count=14
+experiment_stage_counts={challenge-replay: 64, exploratory: 62}
+complete_experiment_stage_counts={challenge-replay: 14}
+claim_scope_key_counts={failure-lifecycle-tradeoff: 64, no-paper-claim: 62}
+complete_claim_scope_key_counts={failure-lifecycle-tradeoff: 14}
+complete_mixed_experiment_stage=false
+complete_mixed_claim_scope_key=false
+missing_report_count=112
+paper_evidence_rerun_candidate_count=51
+```
+
+판단:
+
+- 전체 report 재고에는 exploratory/incomplete 결과가 많이 섞여 있다.
+- 논문 본문에 직접 옮길 수 있는 paper evidence는 현재 14개 complete report로 제한한다.
+- 이 14개는 모두 `challenge-replay`와 `failure-lifecycle-tradeoff` 범위이므로 운영 평균 품질이나 번역 품질 개선 근거로 쓰지 않는다.
+- `paper_evidence_rerun_candidate_count=51`은 과거 결과 중 최신 evidence protocol으로 재실행 또는 refresh 검토할 후보가 남아 있음을 의미한다. 다만 현재 주장 정리에 필요한 complete subset은 이미 분리되어 있다.
+
+Claim-evidence matrix:
+
+| 주장 | 현재 판정 | 근거 |
+| --- | --- | --- |
+| partial hypothesis와 final transcript를 분리해야 한다. | 사용 가능 | 운영 로그, challenge replay, Whisper-Streaming/incremental ASR 문헌 |
+| SBD 후보와 final lifecycle은 별도 계층으로 평가해야 한다. | 사용 가능 | `final_f1_avg=0.483`, `final_boundary_f1_avg=0.108`, lifecycle counter, queue residue strata |
+| threshold 단일 튜닝은 중심 개선축이 아니다. | 사용 가능 | 고유 parameter axis 12개, `hypothesis_status_counts={유지:2, 축소:2, 폐기:8}` |
+| current baseline은 실패 중심 입력에서 재현 가능한 기준선이다. | 사용 가능 | complete paper-evidence report 14개 |
+| 운영 평균 품질을 개선했다. | 사용 금지 | representative JSONL case가 아직 없음 |
+| final-only sink가 번역 안정성을 높였다. | 보류 | translation output replay가 아직 없음 |
+| raw STT 모델 정확도를 개선했다. | 사용 금지 | 참조 전사와 CER/WER 평가가 없음 |
+
+문서 반영:
+
+- `docs/2026-06-21-dictation-ai-experiment-protocol.md`에 claim-evidence matrix와 evidence inventory 해석을 추가했다.
+
+### 2026-06-21 canonical complete evidence package 갱신
+
+검토 목적:
+
+- complete evidence summary가 여러 임시 경로에 남아 있어 논문 표 작성 시 어느 파일을 기준으로 삼을지 혼동될 수 있다.
+- 표준 evidence package 경로를 고정하고 현재 complete report 재고로 다시 생성한다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/summarize_sbd_evidence_reports.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --complete-only \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.md
+```
+
+표준 산출물:
+
+```text
+.tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json
+.tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.md
+```
+
+결과:
+
+```text
+report_count=14
+unique_axis_count=12
+candidate_count=30
+unique_axis_candidate_count=26
+experiment_stage_counts={challenge-replay: 14}
+claim_scope_key_counts={failure-lifecycle-tradeoff: 14}
+mixed_experiment_stage=false
+mixed_claim_scope_key=false
+adoption_review_counts={no-risk-flag: 15, review-risk: 15}
+unique_axis_adoption_review_counts={no-risk-flag: 15, review-risk: 11}
+axis_conclusion_counts={baseline-preferred-tradeoff: 2, no-effect-or-tiny: 6, tradeoff-gain: 2, tradeoff-or-regression: 2}
+hypothesis_status_counts={유지: 2, 축소: 2, 폐기: 8}
+```
+
+판단:
+
+- 논문 표 작성과 실험일지 인용은 위 표준 경로의 summary만 기준으로 삼는다.
+- `.tmp/eval/dictation-ai-sbd/complete-evidence-summary.with-hypothesis-status.*` 같은 임시 summary는 같은 값을 담을 수 있지만 표준 인용 경로로 쓰지 않는다.
+- 이 summary도 `challenge-replay`와 `failure-lifecycle-tradeoff` 범위만 포함하므로 운영 평균/번역 품질 개선 근거가 아니다.
+
+문서 반영:
+
+- `docs/2026-06-21-dictation-ai-experiment-protocol.md`에 표준 evidence package 산출물 경로와 재생성 명령을 추가했다.
+
+### 2026-06-21 paper claim matrix 자동 출력 추가
+
+검토 목적:
+
+- claim-evidence matrix가 문서에만 있으면 summary 재생성 시 사람이 다시 해석해야 한다.
+- 논문 근거 패키지 JSON/Markdown 자체에 주장별 사용 가능 여부를 포함해, 초록과 본문 주장 범위를 자동 산출물로 확인할 수 있게 한다.
+
+변경:
+
+- `tests/eval/dictation_ai/summarize_sbd_evidence_reports.py`에 `paper_claim_matrix`를 추가했다.
+- Markdown summary에 `Paper Claim Matrix` 섹션을 추가했다.
+- 테스트는 `partial_final_separation`, `layered_finalization_metrics`, `threshold_optimization_limit`, `challenge_replay_baseline`, `operating_average_quality`, `translation_stability`, `raw_stt_accuracy`의 상태를 확인하도록 보강했다.
+
+표준 evidence package 재생성:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/summarize_sbd_evidence_reports.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --complete-only \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.md
+```
+
+추가된 claim matrix 결과:
+
+| claim_id | status | evidence |
+| --- | --- | --- |
+| `partial_final_separation` | 사용 가능 | complete challenge-replay failure-lifecycle reports |
+| `layered_finalization_metrics` | 사용 가능 | final/boundary/lifecycle/queue metrics in complete reports |
+| `threshold_optimization_limit` | 사용 가능 | hypothesis_status_counts classify parameter axes as kept baseline, narrowed, or discarded |
+| `challenge_replay_baseline` | 사용 가능 | paper-evidence complete reports share challenge-replay/failure-lifecycle scope |
+| `operating_average_quality` | 사용 금지 | no representative replay evidence in this package |
+| `translation_stability` | 보류 | no translation replay evidence in this package |
+| `raw_stt_accuracy` | 사용 금지 | SBD/finalization replay does not evaluate raw STT CER/WER |
+
+판단:
+
+- 논문 초안의 핵심 주장은 `사용 가능` 항목으로 제한한다.
+- 운영 평균 품질 개선과 raw STT 정확도 개선은 summary 도구 출력에서도 `사용 금지`로 표시된다.
+- final-only sink의 번역 안정성은 translation replay가 없으므로 계속 `보류`다.
+
+문서 반영:
+
+- `docs/2026-06-21-dictation-ai-experiment-protocol.md`에 표준 summary가 `paper_claim_matrix`를 포함한다고 명시했다.
+- `docs/paper/ko-revision-aware-realtime-stt.md`에 abstract/결론 표현 변경 전 `paper_claim_matrix`를 확인한다는 방법론 문장을 추가했다.
+
+### 2026-06-21 evidence summary hypothesis status 의미 보정
+
+검토 목적:
+
+- `baseline-preferred-tradeoff`는 모든 후보가 review-risk이고 baseline보다 나은 후보가 없어 현재 기준선을 유지한다는 결론이다.
+- 이전 자동 요약은 이 결론을 `폐기`로 집계해, 기준선 자체를 폐기하는 것처럼 오해될 수 있었다.
+- 논문 실험 해석에서는 후보축 폐기와 기준선 유지가 다르므로 상태 라벨을 분리해야 한다.
+
+변경:
+
+- `tests/eval/dictation_ai/summarize_sbd_evidence_reports.py`에서 `baseline-preferred-tradeoff`의 `hypothesis_status`를 `유지`로 변경했다.
+- 표준 complete evidence package를 재생성했다.
+
+재생성 결과:
+
+```text
+report_count=14
+unique_axis_count=12
+candidate_count=30
+unique_axis_candidate_count=26
+experiment_stage_counts={challenge-replay: 14}
+claim_scope_key_counts={failure-lifecycle-tradeoff: 14}
+axis_conclusion_counts={baseline-preferred-tradeoff: 2, no-effect-or-tiny: 6, tradeoff-gain: 2, tradeoff-or-regression: 2}
+hypothesis_status_counts={유지: 2, 축소: 2, 폐기: 8}
+```
+
+해석:
+
+- `유지=2`는 candidate 축을 새 개선 주장으로 채택한다는 뜻이 아니라, 현재 기준선 또는 현재 lifecycle 가설을 유지한다는 뜻이다.
+- `축소=2`는 일부 final F1 신호가 있으나 precision, boundary, 언어별/태그별 trade-off 때문에 실패군별 조건부 신호로만 해석한다.
+- `폐기=8`은 해당 candidate axis를 새 기본값 후보나 논문 중심 개선 주장으로 쓰지 않는다는 뜻이다.
+- 전체 결론은 유지된다. 단일 threshold sweep은 중심 개선 실험이 아니며, 다음 실험은 structural lifecycle check와 representative replay 준비로 이동한다.
+
+문서 반영:
+
+- `docs/2026-06-21-dictation-ai-experiment-protocol.md`의 claim-evidence matrix 수치를 `유지=2, 축소=2, 폐기=8`로 수정했다.
+
+### 2026-06-21 논문 결과 해석의 hypothesis status 반영
+
+검토 목적:
+
+- 표준 evidence package는 `hypothesis_status_counts={유지: 2, 축소: 2, 폐기: 8}`로 정리됐지만, 논문 결과 해석 절은 아직 `axis_conclusion_counts`까지만 직접 설명했다.
+- 논문 본문이 `baseline-preferred-tradeoff`를 단순 폐기축처럼 읽히지 않도록, 자동 판정 결과를 결과 해석에 반영한다.
+
+반영:
+
+- `docs/paper/ko-revision-aware-realtime-stt.md`의 1113건 parameter sweep 해석 문단에 `유지=2`, `축소=2`, `폐기=8`을 추가했다.
+- `유지`는 candidate 축을 새 개선 주장으로 채택한다는 뜻이 아니라, 주변 후보가 기준선보다 낫지 않아 현재 기준선 또는 현재 lifecycle 가설을 유지한다는 뜻이라고 명시했다.
+
+판단:
+
+- 논문 초안의 threshold sweep 해석은 이제 `axis_conclusion_counts`와 `hypothesis_status_counts`를 모두 반영한다.
+- 단일 threshold sweep을 중심 개선 실험으로 두지 않는 결론은 유지하되, 기준선 유지 근거와 후보축 폐기를 구분한다.
+
+### 2026-06-21 representative source audit 재실행
+
+검토 목적:
+
+- 운영 평균 주장은 현재 금지 상태이며, representative replay가 준비되어야만 승격할 수 있다.
+- `.tmp/logs`에 남은 운영 로그가 representative source 후보로 계속 사용할 수 있는지 확인한다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/audit_sbd_representative_sources.py \
+  .tmp/logs \
+  --compact \
+  --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit.json
+```
+
+결과:
+
+```text
+source_count=95
+line_count=682671
+timestamped_line_count=672028
+first_timestamp=2026-06-19 22:32:22
+last_timestamp=2026-06-20 21:30:13
+marker_counts={stt_raw:64918, finalize_event:11464, transcript:32950, translation:5047, performance_metrics:75700}
+language_counts={en:25006, ko:48989, zh:10678}
+stt_backend_counts={faster-whisper:44, qwen3-asr-transformers:15}
+stt_model_counts={large-v3:44, qwen3-asr-0.6b:13, qwen3-asr-1.7b:2}
+boundary_backend_counts={sat:75758}
+translation_backend_counts={m2m100-transformers:945, nllb-transformers:4102}
+representative_readiness={can_seed_representative_candidates:true, requires_manual_expected_final:true}
+```
+
+판단:
+
+- 로그에는 raw STT window, final event, transcript, performance event, runtime metadata가 충분히 남아 있다.
+- 이는 representative source 후보를 seed할 수 있다는 뜻이지, 정식 representative case가 생성됐다는 뜻은 아니다.
+- 운영 transcript나 final event를 그대로 `expected_final`로 복사하지 않고, 사람이 source packet을 검토해 expected final을 확정해야 한다.
+
+### 2026-06-21 representative source manifest와 review packet 갱신
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/select_sbd_representative_sources.py \
+  .tmp/eval/dictation-ai-sbd/representative-source-audit.json \
+  --per-language 2 \
+  --output .tmp/eval/dictation-ai-sbd/representative-source-review-manifest.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/representative-source-review-manifest.md
+```
+
+결과:
+
+```text
+eligible_source_counts={en:3, ko:3, zh:1}
+selected_source_counts={en:2, ko:2, zh:1}
+selected_source_count=5
+sampling_rule=session-hash-v1:seed=20260621-representative-v1:per_language=2
+```
+
+review packet 생성:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/extract_sbd_representative_review_packets.py \
+  .tmp/eval/dictation-ai-sbd/representative-source-review-manifest.json \
+  --output .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/representative-source-review-packets.md
+```
+
+결과:
+
+```text
+packet_count=5
+ready_packet_count=5
+missing_source_logs=[]
+packet_readiness_blockers=[]
+```
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_representative_review_packets.py \
+  .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json \
+  --summary-output .tmp/eval/dictation-ai-sbd/representative-source-review-packets.validation.json
+```
+
+결과:
+
+```text
+packet_count=5
+ready_packet_count=5
+not_ready_packet_count=0
+missing_source_log_count=0
+language_counts={en:2, ko:2, zh:1}
+event_totals={raw_chunks:3789, final_events:911, transcripts:2942, performance_events:3851}
+```
+
+판단:
+
+- 대표 표본 검토용 packet은 준비됐다.
+- 이 packet은 `paper_evidence=false`, `case_generation=false`, `expected_final_generated=false`인 중간 산출물이다.
+- 아직 `tests/eval/dictation_ai/sbd_representative_cases/`에는 정식 JSONL case가 없으므로 운영 평균 품질 주장은 계속 `사용 금지`다.
+- 다음 representative 단계는 packet별로 사람이 `expected_final`을 확정하고, `review_packet_id`와 `expected_final_reviewed_by`를 가진 JSONL case를 작성하는 것이다.
+
+### 2026-06-21 representative review packet Markdown 보강
+
+검토 목적:
+
+- review packet JSON은 충분한 정보를 담지만, 사람이 representative case를 작성하려면 Markdown에서 검수 절차와 runtime 맥락이 바로 보여야 한다.
+- 기존 Markdown은 raw/final/transcript 샘플 중심이라, selected window의 runtime metadata와 performance event 확인이 약했다.
+
+변경:
+
+- `extract_sbd_representative_review_packets.py`의 Markdown 출력에 `Review Checklist`를 추가했다.
+- 각 packet에 `sampling_unit`, `sampling_rule`, `runtime_candidates`를 표시한다.
+- raw/final/transcript 샘플 아래에 performance event 샘플을 추가했다.
+
+재생성:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/extract_sbd_representative_review_packets.py \
+  .tmp/eval/dictation-ai-sbd/representative-source-review-manifest.json \
+  --output .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/representative-source-review-packets.md
+```
+
+검증:
+
+```text
+packet_count=5
+ready_packet_count=5
+missing_source_logs=[]
+packet_readiness_blockers=[]
+```
+
+판단:
+
+- 이 변경은 expected final 자동 생성이나 case 자동 승격이 아니다.
+- 사람이 bounded time/chunk window를 고르고 `expected_final`을 확정하기 위한 orientation 산출물을 더 읽기 쉽게 만든 것이다.
+
+### 2026-06-21 실험 설계 재구성 최종 검토
+
+검토 목적:
+
+- 누적된 로그 관측, 1113건 challenge replay, 14개 complete paper-evidence report, representative source packet 준비 상태를 종합해 현재 실험 설계의 의미가 유효한지 다시 판단한다.
+- 참조 논문과 비교했을 때 현재 자료가 감당할 수 있는 주장과 감당할 수 없는 주장을 분리한다.
+
+종합 판단:
+
+- 현재 실험 설계는 `운영 평균 품질 측정`이나 `raw STT 성능 개선` 실험으로는 유효하지 않다.
+- 반대로 `불안정한 STT window hypothesis를 final-only 번역 입력으로 안정화하기 위한 revision lifecycle 분석`으로는 유효하다.
+- 1113건 challenge replay는 failure-enriched corpus이므로 낮은 평균 점수 자체가 제품 전체 평균을 뜻하지 않는다.
+- `final_f1_avg=0.483`과 `final_boundary_f1_avg=0.108`의 격차는 내용 회수와 문장 경계 안정성이 분리된 문제임을 보여준다.
+- 12개 고유 parameter axis와 14개 complete paper-evidence report는 단일 threshold 반복 튜닝이 중심 개선축이 아님을 보강한다.
+- representative source packet은 5개 ready 상태지만, 아직 사람이 확정한 representative JSONL case가 없으므로 운영 평균 주장은 계속 금지한다.
+- translation output replay도 아직 없으므로 final-only sink는 번역 품질 개선 결과가 아니라 시스템 계약으로만 둔다.
+
+재구성한 최소 실험 설계:
+
+| 단계 | 역할 | 논문 해석 |
+| --- | --- | --- |
+| 로그 관측 | 실패 후보와 representative source 후보를 찾는다. | 문제 정의와 사례 근거 |
+| challenge replay | 같은 실패 입력 집합에서 lifecycle 변경 전후를 비교한다. | failure lifecycle trade-off |
+| structural lifecycle check | queue/revision/no-end/boundary 병목을 작은 구조 변경으로 검증한다. | 새 개선 후보의 제한적 근거 |
+| representative/translation replay | 운영 평균과 downstream 번역 안정성을 별도 검증한다. | 준비 전까지 보류 |
+
+결론:
+
+- 기존 실험은 폐기하지 않고 역할을 축소한다.
+- 논문 주제는 `성능 개선 논문`이 아니라 `실시간 STT partial을 final-only 번역 입력으로 안정화하기 위한 실패 축 분석과 실험 프로토콜`로 고정한다.
+- 후속 실험은 새 threshold를 더 촘촘히 흔드는 방식보다, lifecycle counter가 지목하는 구조적 병목을 작게 수정하고 전체 challenge replay에서 재검증하는 방식으로 진행한다.
+
+문서 반영:
+
+- `docs/2026-06-21-dictation-ai-experiment-protocol.md`에 `재구성한 최소 실험 설계` 섹션을 추가했다.
+
+### 2026-06-21 structural lifecycle subset preflight
+
+검토 목적:
+
+- 다음 구조 실험을 threshold sweep이 아니라 lifecycle 병목 검증으로 진행하기 위해, 기존 1113건 challenge baseline report에서 queue/revision/boundary 병목 후보를 선택한다.
+- 이 subset은 구조 변경 디버깅과 정성 분석용이며, 논문 성능 수치로 쓰지 않는다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/select_sbd_structural_cases.py \
+  .tmp/eval/dictation-ai-sbd/20260621-protocol-baseline.json \
+  --limit 16 \
+  --case-output .tmp/eval/dictation-ai-sbd/structural-lifecycle-cases.jsonl \
+  --markdown-output .tmp/eval/dictation-ai-sbd/structural-lifecycle-cases.md
+```
+
+결과:
+
+```text
+selected_case_count=16
+language_counts={en:10, zh:6}
+```
+
+선택된 상위 병목:
+
+| rank | id | language | final F1 | boundary F1 | queue len | queue revision | replace deferred |
+| ---: | --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | `en_log_optimus_surgeons_zimbabwe_gigafactory_queue_20260620_001` | en | 0.596 | 0.000 | 16 | 64 | 85 |
+| 2 | `en_log_supply_chain_recursive_medicine_free_20260620_001` | en | 0.696 | 0.000 | 4 | 137 | 154 |
+| 3 | `en_log_replacement_rate_north_korea_underpopulation_queue_20260620_001` | en | 0.667 | 0.200 | 5 | 80 | 96 |
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_case_files.py \
+  .tmp/eval/dictation-ai-sbd/structural-lifecycle-cases.jsonl \
+  --min-expected-final-cases 1 \
+  --max-drafts 0
+```
+
+결과:
+
+```text
+case_count=16
+corpus_role=exploratory
+draft_count=0
+expected_final_case_count=16
+language_counts={en:10, zh:6}
+```
+
+판단:
+
+- 구조 후보 subset은 benchmark-compatible JSONL로 생성되고 validator를 통과한다.
+- Markdown 산출물에 `corpus_role=exploratory`, `paper_evidence=false`, `structural lifecycle preflight only`를 명시하도록 보강했다.
+- sandbox 내부에서 `sat + cuda + float16` benchmark는 CUDA/SaT 초기화 실패로 실행되지 않았다.
+- sandbox 밖 CUDA 재실행 승인 요청도 현재 실행 환경 정책상 거부됐다.
+- 따라서 이번 결과는 구조 실험 후보 선정과 입력 검증까지만 의미가 있고, 성능 수치나 논문 근거로 승격하지 않는다.
+
+코드 반영:
+
+- `select_sbd_structural_cases.py`의 Markdown header에 exploratory/preflight 해석을 추가했다.
+- `test_dictation_ai_sbd_structural_selector.py`에서 해당 header가 출력되는지 검증했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_sbd_structural_selector
+```
+
+결과:
+
+```text
+Ran 2 tests in 0.001s
+OK
+```
+
+### 2026-06-21 lifecycle replay contract 보강
+
+검토 목적:
+
+- 구조 변경 실험은 threshold sweep보다 위험하므로, benchmark replay가 운영 loop와 어떤 판단식을 공유하고 어떤 runtime signal을 잃는지 report에 남겨야 한다.
+- 현재 운영 loop는 `SentenceCandidateCommitBufferNode`가 active staged와 candidate queue를 관리하지만, `sbd_benchmark.py`는 replay용 `LifecycleState`를 별도로 가진다.
+- 다만 revision 판정, 선호 revision 선택, confirmation count, age reset, replacement decision, final quality gate 등 핵심 판단식은 `dictation_transcript_logic.py` helper를 공유한다.
+
+변경:
+
+- `tests/eval/dictation_ai/sbd_runtime_contract.py`에 `lifecycle_replay_contract()`를 추가했다.
+- benchmark report에 `lifecycle_replay_contract`를 포함하도록 했다.
+- 계약에는 `shared_decision_helpers`, `runtime_state_owner`, `replay_state_owner`, `state_machine_parity=partial`, `missing_runtime_signals`를 남긴다.
+
+판단:
+
+- 이 변경은 성능 개선이 아니라 실험 해석 안전장치다.
+- 구조 변경 결과를 논문 근거로 쓰려면 report의 `lifecycle_replay_contract`를 확인해 replay에 없는 runtime signal에 의존하지 않는지 먼저 봐야 한다.
+- 특히 `stable_analysis.stable_internal_ratio`, `stable_analysis.stable_internal_chars`, `stable_analysis.stable_overlap_source`, audio timestamp latency, translation request/output linkage는 text replay만으로 보존되지 않는다.
+
+문서 반영:
+
+- `docs/2026-06-21-dictation-ai-experiment-protocol.md`의 구조 실험 preflight에 `lifecycle_replay_contract` 확인 기준을 추가했다.
+
+### 2026-06-21 lifecycle replay contract 필수 evidence 문맥 반영
+
+검토 목적:
+
+- `lifecycle_replay_contract`가 benchmark report에만 있고 `required_evidence_fields`에 없으면, 오래된 summary가 이 문맥 없이도 complete evidence로 통과할 수 있다.
+- 구조 실험 결과를 논문 근거로 승격할 때는 runtime 계약뿐 아니라 replay/운영 상태 머신의 부분 일치 여부와 누락 runtime signal을 함께 보존해야 한다.
+
+변경:
+
+- `build_evidence_protocol()`의 `required_evidence_fields`에 다음 필드를 추가했다.
+  - `lifecycle_replay_contract.state_machine_parity`
+  - `lifecycle_replay_contract.shared_decision_helpers`
+  - `lifecycle_replay_contract.missing_runtime_signals`
+- `run_sbd_parameter_sweep.py` summary payload에도 `lifecycle_replay_contract`를 포함하도록 했다.
+- 기존 수동 test fixture를 현재 evidence contract에 맞게 갱신했다.
+
+판단:
+
+- 이제 complete paper-evidence summary는 `sat + cuda + float16` runtime contract와 함께 text replay의 구조적 한계도 같이 보존해야 한다.
+- `state_machine_parity=partial`인 결과는 논문에서 구조 변경의 직접 근거로 쓰기 전에, 어떤 helper가 공유되고 어떤 runtime signal이 빠졌는지 확인해야 한다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.unit.test_dictation_ai_sbd_parameter_sweep \
+  tests.unit.test_dictation_ai_sbd_benchmark_report
+```
+
+결과:
+
+```text
+Ran 46 tests in 0.007s
+OK
+```
+
+### 2026-06-21 lifecycle replay contract 적용 후 complete evidence inventory 갱신
+
+검토 목적:
+
+- `lifecycle_replay_contract`를 필수 evidence 문맥으로 올린 뒤, 기존 표준 evidence package가 새 계약을 만족하는지 확인한다.
+- 오래된 summary 중 저장된 job output이 남아 있는 항목은 CUDA를 다시 실행하지 않고 현재 summary 계약으로 refresh한다.
+
+초기 검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_evidence_report.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --complete-only \
+  --summary-only
+```
+
+결과:
+
+```text
+complete_report_count=0
+paper_evidence_complete_report_count=0
+missing_field_counts.lifecycle_replay_contract.state_machine_parity=126
+missing_field_counts.lifecycle_replay_contract.shared_decision_helpers=126
+missing_field_counts.lifecycle_replay_contract.missing_runtime_signals=126
+```
+
+해석:
+
+- 새 필수 필드를 도입했기 때문에 기존 summary는 모두 incomplete가 됐다.
+- 이는 실제 CUDA 결과가 틀렸다는 뜻이 아니라, summary artifact에 새 evidence 문맥이 없다는 뜻이다.
+
+보강:
+
+- `refresh_sbd_parameter_sweep_summary.py`에 `--skip-missing` 옵션을 추가했다.
+- dry-run처럼 저장된 job output이 없는 summary는 건너뛰고, 실제 job report가 남은 summary만 현재 evidence contract로 refresh할 수 있게 했다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/refresh_sbd_parameter_sweep_summary.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --write-markdown \
+  --skip-missing
+```
+
+결과:
+
+```text
+refreshed_count=52
+skipped_count=31
+```
+
+재검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_evidence_report.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --complete-only \
+  --summary-only
+```
+
+결과:
+
+```text
+report_count=135
+complete_report_count=23
+paper_evidence_complete_report_count=23
+complete_experiment_stage_counts={challenge-replay:23}
+complete_claim_scope_key_counts={failure-lifecycle-tradeoff:23}
+complete_mixed_experiment_stage=false
+complete_mixed_claim_scope_key=false
+```
+
+표준 evidence package 재생성:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/summarize_sbd_evidence_reports.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --complete-only \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.md
+```
+
+결과:
+
+```text
+report_count=23
+unique_axis_count=12
+candidate_count=45
+unique_axis_candidate_count=25
+adoption_review_counts={no-risk-flag:20, review-risk:25}
+unique_axis_adoption_review_counts={no-risk-flag:14, review-risk:11}
+axis_conclusion_counts={baseline-preferred-tradeoff:2, no-effect-or-tiny:6, tradeoff-gain:2, tradeoff-or-regression:2}
+hypothesis_status_counts={유지:2, 축소:2, 폐기:8}
+```
+
+판단:
+
+- 새 evidence contract 기준으로도 complete subset은 모두 `challenge-replay`와 `failure-lifecycle-tradeoff` 범위에만 있다.
+- complete report 수는 14개에서 23개로 늘었지만, 고유 parameter axis와 hypothesis status 결론은 변하지 않았다.
+- 따라서 논문 주장은 그대로 유지한다. 다만 논문과 프로토콜의 complete evidence inventory 수치는 23개 report 기준으로 갱신한다.
+
+문서 반영:
+
+- `docs/2026-06-21-dictation-ai-experiment-protocol.md`의 complete evidence report 수치를 23개로 갱신했다.
+- `docs/paper/ko-revision-aware-realtime-stt.md`의 parameter sweep 해석 문단을 23개 report, 후보 45개, 고유 후보 25개 기준으로 갱신했다.
+
+### 2026-06-21 실험 설계 재구성 최종 검토
+
+요청:
+
+- 지금까지의 실험 결과를 종합해 현재 실험 설계의 의미가 유효한지 확인한다.
+- 참조 논문과 비교해 논문에서 의미 있게 주장할 수 있는 부분과 보류해야 하는 부분을 구분한다.
+- 필요하다면 실험 방법을 과감하게 재구성한다.
+
+판단:
+
+- 현재 설계는 `final_f1_avg` 목표치를 계속 올리는 최적화 실험으로는 적합하지 않다.
+- 현재 설계는 failure-enriched challenge replay를 통해 흔들리는 STT window hypothesis가 final-only sink로 가기 전 어느 계층에서 중복, 누락, 경계 파괴를 만드는지 분리하는 실험으로는 유효하다.
+- 1113건 challenge replay 평균은 운영 평균이 아니므로 제품 전체 품질 또는 사용자 평균 체감 품질로 해석하지 않는다.
+- 참조 논문은 partial/final 분리, incremental ASR stability 평가, 모델 기반 SBD 후보 생성, 번역 단위의 중요성을 뒷받침한다. 다만 현재 앱의 개별 threshold 값을 직접 정당화하지는 않는다.
+- 따라서 논문 기여는 "STT 정확도 개선"이나 "threshold 최적화"가 아니라 "불안정한 realtime STT partial을 final-only 번역 입력으로 만들기 위한 lifecycle 계측과 claim-scope 분리"로 고정한다.
+
+정리한 실험 구조:
+
+| 단계 | 역할 | 논문 사용 |
+| --- | --- | --- |
+| 로그 관측 | 실제 앱에서 반복된 확정 누락, 중복 확정, 문장 파괴를 식별 | 문제 정의 |
+| challenge replay | 같은 실패 입력에서 lifecycle 변경 전후를 재현 가능하게 비교 | 중심 실험, failure lifecycle trade-off |
+| structural lifecycle check | threshold로 설명되지 않는 queue/revision/no-end/boundary 병목 검토 | 구조 변경 후보의 제한적 근거 |
+| representative replay | 시간/세션 단위 표본으로 운영 평균 추정 | 준비 전까지 보류 |
+| translation replay | final event와 번역 출력 연결로 downstream churn 검증 | 준비 전까지 보류 |
+
+도구 보강:
+
+- parameter sweep Markdown summary에 `lifecycle_replay_contract` 헤더를 노출했다.
+- 이 헤더는 `state_machine_parity=partial`, 운영 loop 상태 소유자, benchmark replay 상태 소유자, replay에 없는 runtime signal을 보여준다.
+- 따라서 benchmark 결과를 논문 근거로 옮길 때 replay가 운영 loop의 완전한 대체물이 아니라는 한계가 함께 보존된다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_sbd_parameter_sweep
+```
+
+결과:
+
+```text
+Ran 36 tests
+OK
+```
+
+```text
+./.venv/bin/python -m unittest discover -s tests/unit -p 'test_dictation_ai_sbd_*.py'
+```
+
+결과:
+
+```text
+Ran 106 tests
+OK
+```
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_evidence_report.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --complete-only \
+  --summary-only
+```
+
+결과:
+
+```text
+report_count=135
+complete_report_count=23
+paper_evidence_complete_report_count=23
+complete_experiment_stage_counts={challenge-replay:23}
+complete_claim_scope_key_counts={failure-lifecycle-tradeoff:23}
+complete_mixed_experiment_stage=false
+complete_mixed_claim_scope_key=false
+```
+
+최종 해석:
+
+- 실험 설계는 폐기하지 않는다.
+- 대신 `challenge replay`, `representative replay`, `translation replay`의 역할을 분리해 해석한다.
+- 현재 논문 본문에 직접 사용할 수 있는 수치는 complete challenge replay evidence 23개 report와 그 표준 summary로 제한한다.
+- 운영 평균 품질과 번역 안정성 주장은 아직 근거가 없으므로 후속 실험으로 분리한다.
+
+### 2026-06-21 표준 evidence summary의 lifecycle replay 한계 집계
+
+문제:
+
+- 개별 benchmark/sweep report에는 `lifecycle_replay_contract`가 있지만, complete evidence package의 aggregate summary만 보면 text replay가 운영 loop를 얼마나 대체하는지 바로 보이지 않았다.
+- 논문 표를 표준 summary에서 만들 때 이 한계가 빠지면 challenge replay 결과를 운영 runtime 검증처럼 과대해석할 수 있다.
+
+보강:
+
+- `summarize_sbd_evidence_reports.py`가 각 complete report의 `lifecycle_replay_contract`를 읽어 `lifecycle_replay_summary`를 집계하도록 했다.
+- 집계 항목은 `state_machine_parity_counts`, `runtime_state_owner_counts`, `replay_state_owner_counts`, `missing_runtime_signal_counts`다.
+- Markdown summary header에도 같은 값을 출력한다.
+- `docs/2026-06-21-dictation-ai-experiment-protocol.md`에 표준 summary 확인 시 `paper_claim_matrix`뿐 아니라 `lifecycle_replay_summary`도 확인해야 한다고 명시했다.
+
+재생성 결과:
+
+```text
+report_count=23
+lifecycle_replay_summary.state_machine_parity_counts={partial:23}
+lifecycle_replay_summary.runtime_state_owner_counts={src.app.dictation_node_sentence_candidate_commit_buffer.SentenceCandidateCommitBufferNode:23}
+lifecycle_replay_summary.replay_state_owner_counts={tests.eval.dictation_ai.sbd_benchmark.LifecycleState:23}
+lifecycle_replay_summary.missing_runtime_signal_counts={
+  stable_analysis.stable_internal_ratio:23,
+  stable_analysis.stable_internal_chars:23,
+  stable_analysis.stable_overlap_source:23,
+  audio timestamp latency:23,
+  translation request/output linkage:23
+}
+```
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_sbd_parameter_sweep
+```
+
+결과:
+
+```text
+Ran 36 tests
+OK
+```
+
+해석:
+
+- 현재 complete evidence 23개는 모두 `state_machine_parity=partial`인 text replay 근거다.
+- 따라서 논문에서는 “운영 loop와 동일한 runtime 검증”이라고 쓰지 않는다.
+- 현재 쓸 수 있는 주장은 “공유 decision helper를 사용한 text replay에서 failure lifecycle trade-off를 재현 가능하게 비교했다”까지다.
+- runtime-only signal인 stable internal ratio/char/source, 실제 audio timestamp latency, translation request/output linkage가 필요한 주장은 representative/translation replay가 준비될 때까지 보류한다.
+
+### 2026-06-21 논문 초안의 replay 한계 반영
+
+점검:
+
+- 표준 evidence summary에는 `paper_claim_matrix`와 `lifecycle_replay_summary`가 모두 들어갔지만, 논문 초안의 evidence package 설명은 `paper_claim_matrix`만 언급하고 있었다.
+- 이 상태에서는 초록/결론을 고칠 때 challenge replay가 운영 loop 전체 검증처럼 읽힐 위험이 있다.
+
+수정:
+
+- `docs/paper/ko-revision-aware-realtime-stt.md`의 evidence package 설명에 `lifecycle_replay_summary`를 추가했다.
+- complete 23개 report가 모두 `state_machine_parity=partial`이며, text replay에는 stable analysis 내부 신호, 실제 audio timestamp latency, translation request/output linkage가 없다고 명시했다.
+- 한계와 결론에도 현재 결과가 운영 loop 전체 end-to-end 검증이 아니라 공유 decision helper를 사용하는 text replay 기반 failure lifecycle 분석이라고 낮춰 썼다.
+
+판단:
+
+- 논문 주제는 계속 유지한다.
+- 다만 “final-only 번역 입력 안정화”는 현재 시스템 목표와 failure lifecycle 분석의 방향이며, 번역 안정성 개선 수치는 translation replay 전까지 주장하지 않는다.
+- 운영 평균 품질, raw STT 정확도, 번역 품질 개선, 운영 loop와 동일한 runtime 검증은 계속 `사용 금지` 또는 `보류` 상태다.
+
+### 2026-06-21 runtime equivalence claim matrix 보강
+
+문제:
+
+- `lifecycle_replay_summary`에는 complete report가 모두 `state_machine_parity=partial`이라는 집계가 있지만, `paper_claim_matrix`에는 “text replay가 full runtime loop와 동일하다”는 주장을 직접 금지하는 행이 없었다.
+- 논문 초안과 프로토콜에는 이 한계를 수동으로 적어두었지만, 자동 claim matrix에도 같은 금지가 있어야 향후 초록/결론 수정 때 누락을 줄일 수 있다.
+
+보강:
+
+- `summarize_sbd_evidence_reports.py`의 `paper_claim_matrix`에 `runtime_loop_equivalence` claim을 추가했다.
+- 이 claim은 `state_machine_parity_counts`에 `partial`이 있거나 `missing_runtime_signal_counts`가 있으면 `사용 금지`로 표시한다.
+- `required_next_evidence`는 stable analysis, audio timestamp, translation request/output linkage를 포함한 end-to-end runtime replay로 지정했다.
+
+표준 summary 재생성 결과:
+
+```text
+paper_claim_matrix.runtime_loop_equivalence.status=사용 금지
+paper_claim_matrix.runtime_loop_equivalence.evidence=state_machine_parity_counts={'partial': 23}; missing_runtime_signal_counts={...}
+paper_claim_matrix.runtime_loop_equivalence.required_next_evidence=end-to-end runtime replay with stable analysis, audio timestamps, and translation request/output linkage
+```
+
+문서 반영:
+
+- `docs/2026-06-21-dictation-ai-experiment-protocol.md`에 `paper_claim_matrix.runtime_loop_equivalence` 행도 같은 금지를 남긴다고 명시했다.
+- `docs/paper/ko-revision-aware-realtime-stt.md`에 `runtime_loop_equivalence`가 `사용 금지`인 동안 text replay 결과를 end-to-end runtime 검증으로 표현하지 않는다고 추가했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_sbd_parameter_sweep
+./.venv/bin/python -m unittest discover -s tests/unit -p 'test_dictation_ai_sbd_*.py'
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_evidence_report.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --complete-only \
+  --summary-only
+```
+
+결과:
+
+```text
+test_dictation_ai_sbd_parameter_sweep: Ran 36 tests, OK
+test_dictation_ai_sbd_*: Ran 106 tests, OK
+complete_report_count=23
+paper_evidence_complete_report_count=23
+complete_experiment_stage_counts={challenge-replay:23}
+complete_claim_scope_key_counts={failure-lifecycle-tradeoff:23}
+complete_mixed_experiment_stage=false
+complete_mixed_claim_scope_key=false
+```
+
+해석:
+
+- 현재 논문 근거는 여전히 challenge replay 기반 failure lifecycle 분석으로 제한된다.
+- 운영 loop 동일성은 자동 claim matrix에서도 `사용 금지`가 되었으므로, 논문 본문/초록/결론에서 강한 runtime equivalence 표현을 쓰면 근거와 충돌한다.
+
+### 2026-06-21 논문 claim guard audit 추가
+
+문제:
+
+- `paper_claim_matrix`가 금지/보류 claim을 자동으로 표시하더라도, 논문 초안에 해당 한계를 설명하는 방어 문장이 빠지면 독자가 결과를 과대해석할 수 있다.
+- 특히 `operating_average_quality`, `translation_stability`, `raw_stt_accuracy`, `runtime_loop_equivalence`는 논문을 고칠 때 반복해서 강한 주장으로 되돌아갈 위험이 있다.
+
+보강:
+
+- `tests/eval/dictation_ai/audit_paper_claim_scope.py`를 추가했다.
+- 이 도구는 표준 `complete-paper-evidence-summary.json`의 `paper_claim_matrix`를 읽고, `사용 금지` 또는 `보류` 상태인 주요 claim에 대응하는 방어 문구가 논문 초안에 있는지 확인한다.
+- 의미 분석기가 아니라 guard phrase audit이다. 따라서 통과는 “초안에 최소 방어 문구가 남아 있다”는 뜻이고, 문장 전체가 항상 논리적으로 안전하다는 뜻은 아니다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/audit_paper_claim_scope.py \
+  --summary .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
+  --paper docs/paper/ko-revision-aware-realtime-stt.md
+```
+
+결과:
+
+```text
+ok=true
+missing_guard_claims=[]
+restricted_claims=[
+  operating_average_quality: 사용 금지,
+  translation_stability: 보류,
+  raw_stt_accuracy: 사용 금지,
+  runtime_loop_equivalence: 사용 금지
+]
+```
+
+문서 반영:
+
+- `docs/2026-06-21-dictation-ai-experiment-protocol.md`에 논문 수정 후 claim guard audit을 실행하는 절차를 추가했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_paper_claim_scope_audit
+./.venv/bin/python -m unittest discover -s tests/unit -p 'test_dictation_ai_sbd_*.py'
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_evidence_report.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --complete-only \
+  --summary-only
+```
+
+결과:
+
+```text
+test_dictation_ai_paper_claim_scope_audit: Ran 2 tests, OK
+test_dictation_ai_sbd_*: Ran 106 tests, OK
+complete_report_count=23
+paper_evidence_complete_report_count=23
+complete_experiment_stage_counts={challenge-replay:23}
+complete_claim_scope_key_counts={failure-lifecycle-tradeoff:23}
+```
+
+해석:
+
+- 현재 논문 초안은 표준 evidence summary가 금지/보류하는 주요 claim에 대해 최소 방어 문구를 유지하고 있다.
+- 후속으로 초록, 결론, 결과 해석을 수정할 때는 이 audit을 같이 실행해 claim scope 이탈 여부를 빠르게 확인한다.
+
+### 2026-06-21 raw STT claim guard 강화
+
+문제:
+
+- claim guard audit의 `raw_stt_accuracy` 방어 문구에 `raw STT 정확도가 개선되었다`처럼 금지해야 할 주장 자체가 포함되어 있었다.
+- 이 상태에서는 논문 초안이 raw STT 개선을 주장하는 방향으로 잘못 수정되어도 guard audit이 통과할 수 있다.
+
+보강:
+
+- `raw_stt_accuracy` guard phrase를 방어 문구 중심으로 좁혔다.
+- 논문 초안에는 `본 연구는 raw STT 정확도 개선은 주장하지 않는다.`를 명시했다.
+- 유닛 테스트에 “raw STT 정확도가 개선되었다” 문장만으로는 guard가 충족되지 않는 회귀 케이스를 추가했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_paper_claim_scope_audit
+./.venv/bin/python tests/eval/dictation_ai/audit_paper_claim_scope.py \
+  --summary .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
+  --paper docs/paper/ko-revision-aware-realtime-stt.md
+./.venv/bin/python -m unittest discover -s tests/unit -p 'test_dictation_ai_sbd_*.py'
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_evidence_report.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --complete-only \
+  --summary-only
+```
+
+결과:
+
+```text
+test_dictation_ai_paper_claim_scope_audit: Ran 3 tests, OK
+paper_claim_scope_audit: ok=true, missing_guard_claims=[]
+test_dictation_ai_sbd_*: Ran 106 tests, OK
+complete_report_count=23
+paper_evidence_complete_report_count=23
+complete_experiment_stage_counts={challenge-replay:23}
+complete_claim_scope_key_counts={failure-lifecycle-tradeoff:23}
+complete_mixed_experiment_stage=false
+complete_mixed_claim_scope_key=false
+```
+
+해석:
+
+- 현재 논문 주제는 raw STT 정확도 개선이 아니라, 불안정한 STT window hypothesis를 final-only 번역 입력으로 안정화하기 위한 failure lifecycle 분석으로 고정한다.
+- audit는 이제 잘못된 raw STT 개선 주장 자체를 guard로 인정하지 않는다.
+
+### 2026-06-21 evidence summary의 representative 용어 정리
+
+문제:
+
+- `summarize_sbd_evidence_reports.py`의 `representative_reports`는 운영 평균 representative replay가 아니라, 같은 parameter axis의 중복 report 중 하나를 고르는 "축별 대표 report"였다.
+- 실험 설계에서 `representative`는 시간/세션 기반 운영 평균 표본을 뜻하도록 재정의했기 때문에, 같은 단어를 summary 내부 key로 쓰면 논문 근거 범위를 오해할 수 있다.
+
+보강:
+
+- summary JSON key를 `representative_reports`에서 `axis_representative_reports`로 변경했다.
+- Markdown 표 컬럼도 `representative_report`에서 `axis_representative_report`로 변경했다.
+- 관련 유닛 테스트의 참조 key도 같은 이름으로 정리했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_sbd_parameter_sweep
+./.venv/bin/python tests/eval/dictation_ai/summarize_sbd_evidence_reports.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --complete-only \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.md
+./.venv/bin/python -m unittest discover -s tests/unit -p 'test_dictation_ai_sbd_*.py'
+./.venv/bin/python tests/eval/dictation_ai/audit_paper_claim_scope.py \
+  --summary .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
+  --paper docs/paper/ko-revision-aware-realtime-stt.md
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_evidence_report.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --complete-only \
+  --summary-only
+```
+
+결과:
+
+```text
+test_dictation_ai_sbd_parameter_sweep: Ran 36 tests, OK
+test_dictation_ai_sbd_*: Ran 106 tests, OK
+paper_claim_scope_audit: ok=true, missing_guard_claims=[]
+complete_report_count=23
+paper_evidence_complete_report_count=23
+complete_experiment_stage_counts={challenge-replay:23}
+complete_claim_scope_key_counts={failure-lifecycle-tradeoff:23}
+complete_mixed_experiment_stage=false
+complete_mixed_claim_scope_key=false
+complete-paper-evidence-summary.md: axis_representative_report column confirmed
+```
+
+해석:
+
+- `representative replay`는 운영 평균 표본만 가리키도록 남기고, complete evidence summary의 중복 axis 선택은 `axis_representative_reports`로 분리한다.
+- 이 변경은 성능 수치 변경이 아니라 논문 근거 해석 범위를 명확히 하는 정리다.
+
+### 2026-06-21 axis representative terminology 회귀 고정
+
+문제:
+
+- 직전 정리에서 `representative_reports`를 `axis_representative_reports`로 바꿨지만, 테스트는 새 key 존재만 확인하고 기존 key 부재를 확인하지 않았다.
+- 이후 summary 출력에 `representative_reports`가 다시 추가되면 운영 평균 representative replay와 축별 대표 report가 다시 섞일 수 있다.
+
+보강:
+
+- `test_dictation_ai_sbd_parameter_sweep`에 `representative_reports`가 summary에 남지 않는다는 회귀 검사를 추가했다.
+- 실험 프로토콜의 evidence audit 설명에 `axis_representative_reports`는 중복 parameter axis report 중 하나를 고른 축별 대표 report이며, 운영 평균 표본인 `representative replay`와 다르다고 명시했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_sbd_parameter_sweep
+./.venv/bin/python tests/eval/dictation_ai/summarize_sbd_evidence_reports.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --complete-only \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.md
+./.venv/bin/python tests/eval/dictation_ai/audit_paper_claim_scope.py \
+  --summary .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
+  --paper docs/paper/ko-revision-aware-realtime-stt.md
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_evidence_report.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --complete-only \
+  --summary-only
+```
+
+결과:
+
+```text
+test_dictation_ai_sbd_parameter_sweep: Ran 36 tests, OK
+paper_claim_scope_audit: ok=true, missing_guard_claims=[]
+complete_report_count=23
+paper_evidence_complete_report_count=23
+complete_experiment_stage_counts={challenge-replay:23}
+complete_claim_scope_key_counts={failure-lifecycle-tradeoff:23}
+complete_mixed_experiment_stage=false
+complete_mixed_claim_scope_key=false
+summary axis_representative_reports present, representative_reports absent in unit contract
+```
+
+해석:
+
+- 이제 summary schema 차원에서도 `representative` 용어는 운영 평균 표본에만 남고, 축별 대표 report는 `axis_representative`로만 표현된다.
+- 논문 근거 정리에서 challenge replay, axis representative summary, representative replay를 서로 다른 층위로 읽는 계약이 더 명확해졌다.
+
+### 2026-06-21 논문 기준선 수치 audit 추가
+
+문제:
+
+- 논문 초안에는 `final_f1_avg=0.483`, `final_precision_avg=0.602`, `final_recall_avg=0.440`, `final_boundary_f1_avg=0.108` 같은 기준선 수치가 여러 곳에 직접 들어간다.
+- 기존 claim guard audit은 주장의 범위 이탈은 잡지만, 표준 evidence summary를 갱신한 뒤 논문 숫자가 오래된 값으로 남는지는 확인하지 못했다.
+
+보강:
+
+- `summarize_sbd_evidence_reports.py`가 complete report의 baseline metric을 모아 `baseline_metric_summary`를 출력하도록 했다.
+- `baseline_metric_summary`는 각 metric의 `report_count`, `consistent`, `value`, `unique_values`를 남긴다.
+- `tests/eval/dictation_ai/audit_paper_evidence_numbers.py`를 추가해 논문 초안에 있는 반올림 기준선 수치가 `baseline_metric_summary`와 일치하는지 확인한다.
+- 프로토콜 문서에 표준 summary 재생성 후 claim guard audit과 number audit을 함께 실행하는 절차를 추가했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_sbd_parameter_sweep
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_paper_evidence_number_audit
+./.venv/bin/python tests/eval/dictation_ai/summarize_sbd_evidence_reports.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --complete-only \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.md
+./.venv/bin/python tests/eval/dictation_ai/audit_paper_evidence_numbers.py \
+  --summary .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
+  --paper docs/paper/ko-revision-aware-realtime-stt.md
+./.venv/bin/python tests/eval/dictation_ai/audit_paper_claim_scope.py \
+  --summary .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
+  --paper docs/paper/ko-revision-aware-realtime-stt.md
+```
+
+결과:
+
+```text
+test_dictation_ai_sbd_parameter_sweep: Ran 36 tests, OK
+test_dictation_ai_paper_evidence_number_audit: Ran 3 tests, OK
+paper_evidence_number_audit: ok=true
+checked_metrics=[
+  final_precision_avg: 0.602,
+  final_recall_avg: 0.440,
+  final_f1_avg: 0.483,
+  final_boundary_f1_avg: 0.108,
+  finalized_per_stage_start: 0.712
+]
+paper_claim_scope_audit: ok=true, missing_guard_claims=[]
+baseline_metric_summary.consistent=true for all tracked baseline metrics
+```
+
+해석:
+
+- 논문 초안의 핵심 기준선 수치는 현재 표준 complete evidence summary의 baseline 값과 일치한다.
+- 앞으로 기준선 report를 갱신하면 summary 재생성 후 number audit으로 논문 숫자 stale 여부를 빠르게 확인한다.
+- 이 audit은 기준선 수치 일치성만 확인하며, 운영 평균 품질이나 번역 안정성 주장을 새로 허용하지 않는다.
+
+### 2026-06-21 논문 evidence 규모 수치 audit 확장
+
+문제:
+
+- 기준선 metric 숫자는 audit으로 확인되지만, 논문 초안에 직접 들어간 complete report 수, 고유 parameter axis 수, case 수, 언어별 case 수는 stale 여부를 자동 확인하지 못했다.
+- 실험 설계 해석에서 1113건 challenge replay, 1109건 expected-final case, 영어 429건, 한국어 462건, 중국어 222건은 corpus 역할을 제한하는 핵심 문맥이므로 metric과 같은 수준으로 검증해야 한다.
+
+보강:
+
+- `summarize_sbd_evidence_reports.py`가 complete report들의 `case_summary`와 `language_counts`를 모아 `case_set_summary`를 출력하도록 했다.
+- Markdown summary에도 `Case Set Summary`와 `Case Language Counts` 섹션을 추가해 논문에 옮길 corpus 규모를 표준 summary에서 바로 확인할 수 있게 했다.
+- `audit_paper_evidence_numbers.py`를 확장해 `report_count=23`, `unique_axis_count=12`, `case_count=1113`, `expected_final_case_count=1109`, `en=429`, `ko=462`, `zh=222`가 논문 초안에 남아 있는지 확인한다.
+- 실험 프로토콜 문서에는 표준 summary의 `case_set_summary`가 corpus 규모와 언어 분포 검증 기준임을 추가했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_paper_evidence_number_audit
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_sbd_parameter_sweep
+./.venv/bin/python tests/eval/dictation_ai/summarize_sbd_evidence_reports.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --complete-only \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.md
+./.venv/bin/python tests/eval/dictation_ai/audit_paper_evidence_numbers.py \
+  --summary .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
+  --paper docs/paper/ko-revision-aware-realtime-stt.md
+./.venv/bin/python tests/eval/dictation_ai/audit_paper_claim_scope.py \
+  --summary .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
+  --paper docs/paper/ko-revision-aware-realtime-stt.md
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_evidence_report.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --complete-only \
+  --summary-only
+./.venv/bin/python -m unittest discover -s tests/unit -p 'test_dictation_ai_sbd_*.py'
+git diff --check
+```
+
+결과:
+
+```text
+test_dictation_ai_paper_evidence_number_audit: Ran 4 tests, OK
+test_dictation_ai_sbd_parameter_sweep: Ran 36 tests, OK
+paper_evidence_number_audit: ok=true
+checked_counts=[
+  report_count: 23,
+  unique_axis_count: 12,
+  case_count: 1113,
+  expected_final_case_count: 1109,
+  en: 429,
+  ko: 462,
+  zh: 222
+]
+paper_claim_scope_audit: ok=true, missing_guard_claims=[]
+complete_report_count=23
+paper_evidence_complete_report_count=23
+complete_experiment_stage_counts={challenge-replay:23}
+complete_claim_scope_key_counts={failure-lifecycle-tradeoff:23}
+complete_mixed_experiment_stage=false
+complete_mixed_claim_scope_key=false
+test_dictation_ai_sbd_*: Ran 106 tests, OK
+git diff --check: OK
+```
+
+해석:
+
+- 논문 초안의 기준선 metric과 corpus 규모 숫자는 현재 표준 complete evidence summary와 일치한다.
+- 현재 실험 설계는 여전히 operating-average 주장이 아니라 `failure-enriched challenge replay` 주장을 지지한다.
+- 앞으로 case를 추가하거나 complete report를 갱신하면 summary 재생성 후 number audit으로 논문 본문 숫자가 오래된 값인지 확인한다.
+
+### 2026-06-21 논문 reference scope audit 추가
+
+문제:
+
+- 논문 초안은 외부 문헌을 직접 구현 근거가 아니라 문제 설정, 비교군, 후속 검증 필요성의 근거로 제한해서 사용해야 한다.
+- 특히 `Optimizing Sentence Segmentation for Speech Translation`은 번역 단위가 downstream 품질에 영향을 줄 수 있다는 비교 근거로는 쓸 수 있지만, 현재 파이프라인의 VAD/pause 기반 구현이나 최적 segment length 근거로 쓰면 안 된다.
+- claim guard audit과 number audit은 논문 주장 범위와 수치 stale 여부를 잡지만, 비교군/제외 문헌이 잘못 승격되는 문제는 별도로 확인하지 못했다.
+
+보강:
+
+- `tests/eval/dictation_ai/audit_paper_reference_scope.py`를 추가했다.
+- 비교군 문헌 URL이 논문 초안에 등장하면 `비교 근거`, `직접 근거로 사용하지 않는다`, `VAD/pause 기반 구현 근거`, `최적 segment length 근거로 쓰지는 않는다` 중 하나 이상의 guard phrase가 있어야 한다.
+- 원문 확보 실패 또는 범위 밖으로 분류한 turn-taking/VAD 계열 URL이 논문 초안에 들어오면 실패하도록 했다.
+- 실험 프로토콜 문서에 논문 수정 후 reference scope audit을 실행하는 절차를 추가했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_paper_reference_scope_audit
+./.venv/bin/python tests/eval/dictation_ai/audit_paper_reference_scope.py \
+  --paper docs/paper/ko-revision-aware-realtime-stt.md
+./.venv/bin/python tests/eval/dictation_ai/audit_paper_claim_scope.py \
+  --summary .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
+  --paper docs/paper/ko-revision-aware-realtime-stt.md
+./.venv/bin/python tests/eval/dictation_ai/audit_paper_evidence_numbers.py \
+  --summary .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
+  --paper docs/paper/ko-revision-aware-realtime-stt.md
+./.venv/bin/python -m unittest \
+  tests.unit.test_dictation_ai_paper_claim_scope_audit \
+  tests.unit.test_dictation_ai_paper_evidence_number_audit \
+  tests.unit.test_dictation_ai_paper_reference_scope_audit
+```
+
+결과:
+
+```text
+test_dictation_ai_paper_reference_scope_audit: Ran 3 tests, OK
+paper_reference_scope_audit: ok=true
+comparison_references=[
+  https://isl.iar.kit.edu/downloads/803_Interspeech-2007_Rao.pdf
+]
+missing_comparison_guards=[]
+excluded_references=[]
+paper_claim_scope_audit: ok=true
+paper_evidence_number_audit: ok=true
+paper audit tests: Ran 10 tests, OK
+```
+
+해석:
+
+- 현재 논문 초안은 Rao et al. 문헌을 speech translation segmentation의 비교 근거로만 사용하고 있으며, 현재 SBD/finalization 구현의 직접 근거로 승격하지 않는다.
+- 논문 근거 방어선은 세 층으로 정리된다. `claim_scope_audit`은 금지/보류 주장, `evidence_number_audit`은 표준 summary 수치, `reference_scope_audit`은 비교군/제외 문헌 오용을 확인한다.
+- 이 상태에서는 참조 논문과 현재 실험 설계가 충돌하지 않는다. 외부 문헌은 일반 원칙과 비교 기준을 제공하고, 앱의 파라미터/로직 결론은 여전히 CUDA challenge replay와 실험일지를 근거로 해석한다.
+
+### 2026-06-21 follow-up readiness audit 추가
+
+문제:
+
+- 현재 실험 설계는 challenge replay를 중심 근거로 유지하고, 운영 평균 품질과 번역 안정성은 representative replay와 translation replay가 준비될 때까지 보류한다.
+- 그러나 source audit, review packet, representative case, translation linkage가 각각 어느 단계까지 준비되었는지 한 번에 보여주는 판정 도구가 없었다.
+- 이 상태가 불명확하면 사람이 확정한 representative case가 없는데도 운영 평균 주장을 하거나, 번역 request/output 연결 없이 final-only sink의 번역 안정성을 주장할 위험이 있다.
+
+보강:
+
+- `tests/eval/dictation_ai/audit_sbd_followup_readiness.py`를 추가했다.
+- source audit의 `representative_readiness.can_seed_representative_candidates`, review packet validation의 `ready_packet_count`, representative case validator 결과를 묶어 representative 후속 실험 상태를 판정한다.
+- translation log와 translation diagnostic 존재 여부를 확인하되, final event timestamp, translation request id, translation output text, final text/request linkage가 없으면 `blocked_on_translation_replay_linkage`로 유지한다.
+- 실험 프로토콜 문서에 source/packet 검증 뒤 follow-up readiness audit을 실행하는 절차를 추가했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_sbd_followup_readiness_audit
+./.venv/bin/python tests/eval/dictation_ai/audit_sbd_followup_readiness.py \
+  --source-audit .tmp/eval/dictation-ai-sbd/representative-source-audit.json \
+  --review-packet-validation .tmp/eval/dictation-ai-sbd/representative-source-review-packets.validation.json \
+  --representative-cases tests/eval/dictation_ai/sbd_representative_cases \
+  --review-packets .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json \
+  --summary-output .tmp/eval/dictation-ai-sbd/followup-readiness.json
+```
+
+결과:
+
+```text
+test_dictation_ai_sbd_followup_readiness_audit: Ran 3 tests, OK
+representative.status=blocked_on_human_expected_final
+representative.source_can_seed_candidates=true
+representative.packet_count=5
+representative.ready_packet_count=5
+representative.case_summary.case_file_count=0
+representative.case_summary.expected_final_case_count=0
+translation.status=blocked_on_translation_replay_linkage
+translation.translation_event_count=5047
+translation.translation_diagnostic_count=5047
+paper_evidence_ready=false
+next_actions=[
+  create human-reviewed representative JSONL cases from ready review packets,
+  add final-event to translation request/output linkage before translation claims
+]
+```
+
+해석:
+
+- representative 후속 실험은 source log와 review packet 단계까지는 준비되었다. 다음 병목은 사람이 확정한 representative JSONL case 작성이다.
+- translation 후속 실험은 번역 로그 자체는 있으나 final 이벤트와 번역 request/output을 연결하는 replay artifact가 없으므로 계속 보류한다.
+- 따라서 다음 실험은 새 threshold sweep이 아니라, ready review packet 5개에서 작은 pilot representative JSONL을 사람이 확정하고 validator로 추적성을 확인하는 단계가 우선이다.
+
+### 2026-06-21 paper readiness 통합 audit 추가
+
+문제:
+
+- 논문 근거 상태를 확인하려면 complete evidence 재고, claim guard, 본문 수치, reference scope, follow-up readiness를 각각 따로 실행해야 했다.
+- 실험 반복 중 일부 audit을 빠뜨리면 논문 초안이 challenge replay 범위를 넘어서는 표현을 갖거나, 표준 summary와 다른 숫자를 유지하거나, representative/translation 준비 상태를 잘못 해석할 수 있다.
+
+보강:
+
+- `tests/eval/dictation_ai/audit_paper_readiness.py`를 추가했다.
+- 이 도구는 다음 항목을 한 JSON으로 묶는다.
+  - `validate_sbd_evidence_report.py` 기반 complete evidence inventory
+  - `audit_paper_claim_scope.py`
+  - `audit_paper_evidence_numbers.py`
+  - `audit_paper_reference_scope.py`
+  - `audit_sbd_followup_readiness.py`
+- 실험 프로토콜에는 논문 초안과 표준 evidence package를 함께 점검할 때 실행할 통합 명령을 추가했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_paper_readiness_audit
+./.venv/bin/python tests/eval/dictation_ai/audit_paper_readiness.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --summary .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
+  --paper docs/paper/ko-revision-aware-realtime-stt.md \
+  --source-audit .tmp/eval/dictation-ai-sbd/representative-source-audit.json \
+  --review-packet-validation .tmp/eval/dictation-ai-sbd/representative-source-review-packets.validation.json \
+  --representative-cases tests/eval/dictation_ai/sbd_representative_cases \
+  --review-packets .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json \
+  --summary-output .tmp/eval/dictation-ai-sbd/paper-readiness.json
+```
+
+결과:
+
+```text
+test_dictation_ai_paper_readiness_audit: Ran 2 tests, OK
+paper_readiness.ok=true
+checks={
+  evidence_inventory: true,
+  claim_scope: true,
+  evidence_numbers: true,
+  reference_scope: true
+}
+current_claim_scope=challenge-replay-only
+evidence_inventory.report_count=135
+evidence_inventory.complete_report_count=23
+evidence_inventory.paper_evidence_complete_report_count=23
+evidence_inventory.complete_experiment_stage_counts={challenge-replay:23}
+evidence_inventory.complete_claim_scope_key_counts={failure-lifecycle-tradeoff:23}
+followup_readiness.representative_status=blocked_on_human_expected_final
+followup_readiness.translation_status=blocked_on_translation_replay_linkage
+followup_readiness.paper_evidence_ready=false
+```
+
+해석:
+
+- 현재 논문 초안은 `challenge-replay-only` 범위에서는 수치, 주장 방어, reference scope가 일치한다.
+- complete paper evidence는 23개이고 모두 `challenge-replay`/`failure-lifecycle-tradeoff` 범위로만 해석된다.
+- 대표 표본과 번역 안정성은 아직 paper evidence ready가 아니므로, 다음 실험은 사람이 확정한 representative JSONL pilot 구축 또는 translation request/output linkage 추가 중 하나로 좁혀야 한다.
+
+### 2026-06-21 representative case draft workflow 추가
+
+문제:
+
+- representative corpus는 운영 평균 추정을 위한 별도 표본이므로 `expected_final`을 자동 생성하면 안 된다.
+- review packet 5개는 사람이 검토할 후보로 준비됐지만, 사람이 확정한 참조 문장이 없으므로 아직 benchmark 입력이나 논문 근거가 아니다.
+- 수작업 전사 준비를 돕되, draft가 실수로 paper evidence에 섞이지 않도록 검증 단계에서 구분할 필요가 있었다.
+
+보강:
+
+- `validate_sbd_case_files.py`는 기본적으로 representative case의 비어 있는 `expected_final`을 거부한다.
+- 단, 수작업 준비 전용으로 `allow_drafts=True`가 주어진 경우에만 `draft_expected_final_required=true` draft를 읽을 수 있게 했다.
+- `extract_sbd_representative_case_drafts.py`를 추가해 ready review packet에서 `.tmp` draft JSONL, summary JSON, Markdown을 생성한다.
+- draft에는 `expected_final=[]`, `expected_final_generated=false`, `draft_expected_final_required=true`, `paper_evidence=false`를 남긴다.
+- representative README와 실험 프로토콜에 draft는 사람이 `expected_final`과 reviewer를 채운 뒤 draft marker를 제거해야만 정식 representative case가 된다고 명시했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.unit.test_dictation_ai_sbd_representative_case_draft_extractor \
+  tests.unit.test_dictation_ai_sbd_case_validator
+```
+
+결과:
+
+```text
+Ran 25 tests
+OK
+```
+
+draft 생성:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/extract_sbd_representative_case_drafts.py \
+  .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json \
+  --jsonl-output .tmp/eval/dictation-ai-sbd/representative-case-drafts.jsonl \
+  --summary-output .tmp/eval/dictation-ai-sbd/representative-case-drafts.summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/representative-case-drafts.md
+```
+
+결과:
+
+```text
+representative_case_draft_version=1
+source_review_packet_count=5
+ready_review_packet_count=5
+draft_count=5
+paper_evidence=false
+case_generation=manual_expected_final_required
+expected_final_generated=false
+```
+
+생성된 draft:
+
+| draft | language | source log | chunks |
+| --- | --- | --- | ---: |
+| `en_representative_review_bbcd5e95a816_draft` | en | `.tmp/logs/avc-whisper.log.23` | 40 |
+| `en_representative_review_c301ee895be0_draft` | en | `.tmp/logs/avc-whisper.log.41` | 40 |
+| `ko_representative_review_5bfdc323bdae_draft` | ko | `.tmp/logs/avc-whisper.log.92` | 40 |
+| `ko_representative_review_61ba969e126b_draft` | ko | `.tmp/logs/avc-whisper.log.91` | 40 |
+| `zh_representative_review_86394ba32323_draft` | zh | `.tmp/logs/avc-whisper.log.16` | 40 |
+
+해석:
+
+- representative source 후보와 수작업 draft 준비는 가능해졌다.
+- 그러나 정식 representative corpus는 아직 0건이다. 사람이 참조 전사를 확정하지 않았기 때문에 현재 논문 근거 상태는 계속 `challenge-replay-only`다.
+- 다음 단계는 draft별로 bounded source window를 확인하고 사람이 `expected_final`, `expected_final_reviewed_by`를 채운 뒤 `tests/eval/dictation_ai/sbd_representative_cases/{en,ko,zh}/` 아래 shard로 승격하는 것이다.
+
+### 2026-06-21 representative 승격 게이트 명문화
+
+문제:
+
+- `ready_packet_count=5`는 사람 검토가 가능한 packet 수이지, 정식 representative case 수가 아니다.
+- review packet과 draft가 준비된 상태를 운영 평균 실험 준비 완료로 오해하면 challenge replay와 representative 결과가 섞일 위험이 있다.
+- 논문 초안에서도 현재 대표 표본 상태를 "수작업 표본 작성 가능"으로 제한해 표현할 필요가 있었다.
+
+정리:
+
+- `tests/eval/dictation_ai/sbd_representative_cases/README.md`에 source audit, source manifest, review packet, draft case, reviewed case의 승격 게이트를 표로 추가했다.
+- `docs/2026-06-21-dictation-ai-experiment-protocol.md`에 representative 승격 조건을 추가했다.
+- `docs/paper/ko-revision-aware-realtime-stt.md`에는 review packet 5개가 준비된 현재 상태를 "운영 평균 실험 가능"이 아니라 "수작업 대표 표본 작성 가능"으로 해석한다고 명시했다.
+
+승격 조건:
+
+- `expected_final`이 비어 있지 않아야 한다.
+- `expected_final_reviewed_by`가 비어 있지 않아야 한다.
+- `draft_expected_final_required`가 남아 있으면 안 된다.
+- `expected_final_generated=false`를 유지해야 한다.
+- `validate_sbd_case_files.py --review-packets`에서 `review_packet_id`, `source_log`, `language`가 검증된 review packet과 일치해야 한다.
+
+해석:
+
+- 이 게이트를 통과하기 전의 representative 관련 산출물은 논문 수치가 아니라 검토 준비물이다.
+- 현재 논문 claim scope는 계속 `challenge-replay-only`이며, 운영 평균 품질과 번역 안정성 주장은 계속 보류한다.
+
+### 2026-06-21 representative review packet window filter 보강
+
+문제:
+
+- representative source manifest에는 `source_started_at`과 `source_ended_at`이 있으나, review packet extractor가 source 로그 전체에서 이벤트를 수집하면 사람이 검토해야 할 표본 범위가 넓어질 수 있다.
+- 대표 표본은 시간/세션 단위로 선택된 bounded window여야 하므로, review packet과 draft의 `chunks`도 같은 범위에서 나온 STT window 결과여야 한다.
+
+보강:
+
+- `extract_sbd_representative_review_packets.py`가 manifest의 `source_started_at`/`source_ended_at` 범위 안 timestamp를 가진 이벤트만 수집하도록 수정했다.
+- 각 packet에 `source_window_filter={applied, started_at, ended_at}`를 남긴다.
+- review packet Markdown에도 `source_window_filter`를 출력해 사람이 검토할 범위가 적용됐는지 확인할 수 있게 했다.
+- `sbd_representative_cases/README.md`와 실험 프로토콜에 이 필터를 representative 승격 전 확인 항목으로 추가했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.unit.test_dictation_ai_sbd_representative_review_packet_extractor \
+  tests.unit.test_dictation_ai_sbd_representative_review_packet_validator \
+  tests.unit.test_dictation_ai_sbd_representative_case_draft_extractor
+```
+
+결과:
+
+```text
+Ran 16 tests
+OK
+```
+
+실제 packet/draft 재생성:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/extract_sbd_representative_review_packets.py \
+  .tmp/eval/dictation-ai-sbd/representative-source-review-manifest.json \
+  --output .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/representative-source-review-packets.md
+
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_representative_review_packets.py \
+  .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json \
+  --summary-output .tmp/eval/dictation-ai-sbd/representative-source-review-packets.validation.json
+
+./.venv/bin/python tests/eval/dictation_ai/extract_sbd_representative_case_drafts.py \
+  .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json \
+  --jsonl-output .tmp/eval/dictation-ai-sbd/representative-case-drafts.jsonl \
+  --summary-output .tmp/eval/dictation-ai-sbd/representative-case-drafts.summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/representative-case-drafts.md
+```
+
+결과:
+
+```text
+packet_count=5
+ready_packet_count=5
+missing_source_log_count=0
+not_ready_packet_count=0
+event_totals={raw_chunks:3789, final_events:911, transcripts:2942, performance_events:3851}
+draft_count=5
+paper_evidence=false
+expected_final_generated=false
+```
+
+해석:
+
+- review packet은 이제 선택된 source window 기준으로만 수집된다.
+- 5개 packet의 readiness와 draft 수는 유지됐다.
+- 그러나 사람이 `expected_final`을 확정하지 않았으므로 대표 표본의 논문 근거 상태는 계속 보류다.
+
+### 2026-06-21 representative review packet window filter 검증 계약 추가
+
+문제:
+
+- review packet extractor가 `source_window_filter`를 남기더라도 validator가 이를 확인하지 않으면, 오래된 packet이나 범위가 적용되지 않은 packet이 후속 representative case 작성에 사용될 수 있다.
+- 대표 표본은 시간/세션 단위 bounded window가 전제이므로, packet validation summary에서도 window filter 적용 여부가 보여야 한다.
+
+보강:
+
+- `validate_sbd_representative_review_packets.py`가 각 packet의 `source_window_filter`를 필수로 검증하도록 했다.
+- `source_started_at` 또는 `source_ended_at`이 있는 packet은 `source_window_filter.applied=true`여야 한다.
+- `source_window_filter.started_at`과 `ended_at`은 packet의 `source_started_at`/`source_ended_at`과 일치해야 한다.
+- validation summary에 `source_window_filter_applied_count`를 추가했다.
+- `audit_sbd_followup_readiness.py`도 representative readiness에 `source_window_filter_applied_count`를 포함한다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.unit.test_dictation_ai_sbd_representative_review_packet_validator \
+  tests.unit.test_dictation_ai_sbd_followup_readiness_audit \
+  tests.unit.test_dictation_ai_paper_readiness_audit \
+  tests.unit.test_dictation_ai_sbd_case_validator
+```
+
+결과:
+
+```text
+Ran 40 tests
+OK
+```
+
+실제 packet validation:
+
+```text
+packet_count=5
+ready_packet_count=5
+source_window_filter_applied_count=5
+missing_source_log_count=0
+not_ready_packet_count=0
+```
+
+paper readiness:
+
+```text
+paper_readiness.ok=true
+current_claim_scope=challenge-replay-only
+representative_status=blocked_on_human_expected_final
+translation_status=blocked_on_translation_replay_linkage
+```
+
+해석:
+
+- representative review packet 5개는 모두 bounded source window filter가 적용된 상태로 검증된다.
+- 이것은 사람이 representative `expected_final`을 작성하기 위한 입력 품질을 높이는 변경이다.
+- 정식 representative case가 생긴 것은 아니므로 논문 근거 범위는 계속 challenge replay에 제한된다.
+
+### 2026-06-21 representative draft 추적성 검증 추가
+
+문제:
+
+- `.tmp` draft는 정식 representative case가 아니지만, 사람이 `expected_final`을 채우기 전에도 review packet과 연결되는 템플릿인지 확인할 필요가 있다.
+- 기존 case validator는 representative root 아래 파일만 `--review-packets`와 함께 검증할 수 있어, 의도적으로 `.tmp`에 둔 draft의 추적성을 검사하기 어려웠다.
+- 사람이 review packet 안에서 더 좁은 구간을 선택할 수는 있어야 하지만, timestamp 형태의 case source range가 packet window 밖으로 나가면 대표 표본 계약이 깨진다.
+
+보강:
+
+- `validate_sbd_case_files.py`에 명시적 `--corpus-role representative` 옵션을 추가했다.
+- 이 옵션은 `.tmp` draft JSONL처럼 representative root 밖의 파일을 representative schema로 검증할 때만 사용한다.
+- representative case와 review packet의 `source_started_at`/`source_ended_at`이 timestamp 형식이면, case range가 packet의 `source_window_filter` 범위 안에 있는지 검증한다.
+- draft extractor는 review packet의 `source_window_filter`를 draft에도 보존한다.
+- representative README와 실험 프로토콜에 `.tmp` draft validation 명령을 추가했다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_case_files.py \
+  .tmp/eval/dictation-ai-sbd/representative-case-drafts.jsonl \
+  --corpus-role representative \
+  --allow-drafts \
+  --review-packets .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json \
+  --summary-output .tmp/eval/dictation-ai-sbd/representative-case-drafts.validation.json
+```
+
+결과:
+
+```text
+case_count=5
+corpus_role=representative
+draft_count=5
+expected_final_case_count=0
+language_counts={en:2, ko:2, zh:1}
+representative_review_packet_validation.matched_case_count=5
+representative_review_packet_validation.packet_count=5
+representative_review_packet_validation.ready_packet_count=5
+```
+
+단위 검증:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.unit.test_dictation_ai_sbd_case_validator \
+  tests.unit.test_dictation_ai_sbd_representative_case_draft_extractor \
+  tests.unit.test_dictation_ai_sbd_parameter_sweep
+```
+
+결과:
+
+```text
+Ran 63 tests
+OK
+```
+
+해석:
+
+- draft 5건은 review packet과 source 추적성이 맞고 bounded window metadata를 유지한다.
+- 그러나 `expected_final_case_count=0`이므로 여전히 논문 근거가 아니다.
+- 다음 실험 단계는 이 draft 중 일부를 사람이 확정해 `draft_expected_final_required`를 제거하고 representative root 아래 언어별 shard로 승격하는 것이다.
+
+### 2026-06-21 follow-up readiness에 representative draft 상태 연결
+
+문제:
+
+- follow-up readiness는 source packet과 정식 representative case 상태만 보여주고, `.tmp` draft가 traceable한지 여부는 별도 validation 파일을 열어봐야 했다.
+- 현재 병목을 정확히 표현하려면 "packet은 준비됨", "draft도 review packet과 traceable함", "정식 case는 아직 없음"을 한 결과에서 같이 보여야 한다.
+
+보강:
+
+- `audit_sbd_followup_readiness.py`에 optional `--representative-draft-validation` 입력을 추가했다.
+- draft validation summary가 주어지면 `draft_summary`에 `case_count`, `draft_count`, `expected_final_case_count`, `matched_case_count`, `traceable`을 포함한다.
+- traceable draft가 있으면 next action을 `fill expected_final in traceable representative drafts and promote reviewed JSONL cases`로 구체화했다.
+- `audit_paper_readiness.py`도 같은 입력을 받아 `followup_readiness.representative_draft_count`와 `representative_draft_traceable`을 출력한다.
+- 실험 프로토콜과 representative README의 readiness 명령에 `--representative-draft-validation`을 추가했다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/audit_sbd_followup_readiness.py \
+  --source-audit .tmp/eval/dictation-ai-sbd/representative-source-audit.json \
+  --review-packet-validation .tmp/eval/dictation-ai-sbd/representative-source-review-packets.validation.json \
+  --representative-cases tests/eval/dictation_ai/sbd_representative_cases \
+  --review-packets .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json \
+  --representative-draft-validation .tmp/eval/dictation-ai-sbd/representative-case-drafts.validation.json \
+  --summary-output .tmp/eval/dictation-ai-sbd/followup-readiness.json
+```
+
+결과:
+
+```text
+representative.packet_count=5
+representative.ready_packet_count=5
+representative.source_window_filter_applied_count=5
+representative.draft_summary.case_count=5
+representative.draft_summary.draft_count=5
+representative.draft_summary.expected_final_case_count=0
+representative.draft_summary.matched_case_count=5
+representative.draft_summary.traceable=true
+representative.status=blocked_on_human_expected_final
+paper_evidence_ready=false
+```
+
+paper readiness:
+
+```text
+paper_readiness.ok=true
+current_claim_scope=challenge-replay-only
+followup_readiness.representative_draft_count=5
+followup_readiness.representative_draft_traceable=true
+followup_readiness.representative_status=blocked_on_human_expected_final
+followup_readiness.translation_status=blocked_on_translation_replay_linkage
+```
+
+해석:
+
+- 현재 대표 표본 준비 상태는 "검증된 draft 5건이 있으나 사람이 확정한 case는 0건"이다.
+- 따라서 다음 작업은 새 로그 수집이나 threshold sweep이 아니라, traceable draft의 `expected_final`을 사람이 확정해 정식 representative shard로 승격하는 것이다.
+- 이 상태는 논문 근거 범위를 넓히지 않으며, `challenge-replay-only` claim scope를 유지한다.
+
+### 2026-06-21 representative reviewed case 승격 도구 추가
+
+문제:
+
+- traceable draft 5건을 사람이 채운 뒤 정식 representative shard로 옮기는 절차가 수작업으로 남아 있었다.
+- 승격 단계에서도 `expected_final` 자동 생성, draft marker 잔류, review packet 추적성 누락을 막아야 한다.
+
+보강:
+
+- `tests/eval/dictation_ai/promote_sbd_representative_cases.py`를 추가했다.
+- 이 도구는 입력 JSONL을 `validate_sbd_case_files.py`의 representative schema와 `--review-packets` 추적성으로 먼저 검증한다.
+- `draft_expected_final_required`가 남아 있거나 `expected_final`이 비어 있으면 승격을 거부한다.
+- 검증을 통과한 case만 언어별 `tests/eval/dictation_ai/sbd_representative_cases/{en,ko,zh}/reviewed-representative-{language}-{hash}.jsonl` shard로 저장한다.
+- `--dry-run`은 target shard를 보고하지만 파일을 쓰지 않는다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.unit.test_dictation_ai_sbd_representative_case_promoter \
+  tests.unit.test_dictation_ai_sbd_case_validator
+```
+
+결과:
+
+```text
+Ran 28 tests
+OK
+```
+
+전체 SBD 단위 테스트:
+
+```text
+./.venv/bin/python -m unittest discover -s tests/unit -p 'test_dictation_ai_sbd_*.py'
+```
+
+결과:
+
+```text
+Ran 121 tests
+OK
+```
+
+현재 `.tmp` draft에 대한 승격 dry-run:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/promote_sbd_representative_cases.py \
+  .tmp/eval/dictation-ai-sbd/representative-case-drafts.jsonl \
+  --review-packets .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json \
+  --output-root /tmp/avc-representative-promote-check \
+  --dry-run
+```
+
+결과:
+
+```text
+[dictation-ai-sbd-representative-promote] error: .tmp/eval/dictation-ai-sbd/representative-case-drafts.jsonl:1 representative case 'en_representative_review_bbcd5e95a816_draft' missing metadata: expected_final_reviewed_by, expected_final
+```
+
+해석:
+
+- 현재 `.tmp` draft는 아직 사람이 `expected_final`을 채우지 않았으므로 승격 거부가 정상이다.
+- 사람이 채운 reviewed JSONL만 정식 representative shard로 이동할 수 있게 되어, representative corpus 준비 흐름의 마지막 수작업 이후 게이트가 마련됐다.
+
+### 2026-06-21 representative draft worksheet 보강 및 실험 설계 재판정
+
+문제:
+
+- 현재까지의 실험은 많이 누적됐지만, 1113건 challenge replay가 실패 농축 corpus라는 점 때문에 `final_f1_avg`를 목표값까지 올리는 방식으로 해석하면 논문 주장이 흐려진다.
+- representative source packet은 준비됐지만 사람이 확정한 `expected_final`이 없어 운영 평균 품질이나 일반화 성능을 주장할 수 없다.
+- 사람이 검토할 draft JSONL은 있었지만, Markdown 산출물이 실제 라벨링 절차를 안내하기에는 부족했다.
+
+보강:
+
+- `extract_sbd_representative_case_drafts.py`의 Markdown 출력을 review worksheet 형태로 확장했다.
+- 각 draft마다 source range, `source_window_filter`, review packet id, runtime 후보, 사람이 채워야 할 JSON field, STT chunk preview를 표시한다.
+- `expected_final`은 자동 생성하지 않고, `expected_final_reviewed_by`와 `draft_expected_final_required` 제거 여부를 checklist로 남긴다.
+- `promote_sbd_representative_cases.py`는 여전히 빈 `expected_final` 또는 빈 reviewer가 있으면 승격을 거부한다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.unit.test_dictation_ai_sbd_representative_case_draft_extractor \
+  tests.unit.test_dictation_ai_sbd_representative_case_promoter
+```
+
+결과:
+
+```text
+Ran 5 tests
+OK
+```
+
+draft 재생성:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/extract_sbd_representative_case_drafts.py \
+  .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json \
+  --jsonl-output .tmp/eval/dictation-ai-sbd/representative-case-drafts.jsonl \
+  --summary-output .tmp/eval/dictation-ai-sbd/representative-case-drafts.summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/representative-case-drafts.md
+```
+
+draft validation:
+
+```text
+case_count=5
+draft_count=5
+expected_final_case_count=0
+language_counts={en:2, ko:2, zh:1}
+matched_case_count=5
+```
+
+승격 dry-run:
+
+```text
+[dictation-ai-sbd-representative-promote] error: .tmp/eval/dictation-ai-sbd/representative-case-drafts.jsonl:1 representative case 'en_representative_review_bbcd5e95a816_draft' missing metadata: expected_final_reviewed_by, expected_final
+```
+
+readiness:
+
+```text
+paper_readiness.ok=true
+current_claim_scope=challenge-replay-only
+followup_readiness.representative_draft_count=5
+followup_readiness.representative_draft_traceable=true
+followup_readiness.representative_status=blocked_on_human_expected_final
+followup_readiness.translation_status=blocked_on_translation_replay_linkage
+```
+
+해석:
+
+- 현재 실험 설계는 유효하지만, "성능 목표 달성 실험"이 아니라 "불안정한 STT partial을 final-only 번역 입력으로 만들 때의 실패 축 분리 실험"으로 읽어야 한다.
+- 1113건 challenge replay는 논문의 중심 자료로 유지하되, 운영 평균이나 보편 threshold 최적성의 근거로 쓰지 않는다.
+- threshold sweep은 더 높은 단일 점수를 찾는 주 실험이 아니라, 기본값 채택/기각과 부정 결과를 기록하는 보조 실험으로 축소한다.
+- 구조 변경 실험은 queue/revision/no-end/boundary 병목을 줄이는지 확인할 때만 제한적으로 수행한다.
+- 다음 논문 근거 확장은 새 threshold sweep이 아니라, traceable draft 5건의 `expected_final`을 사람이 확정해 representative shard로 승격하는 작업이다.
+- final-only sink의 번역 안정성 주장은 final event timestamp, translation request id, translation output text가 연결된 translation replay가 생기기 전까지 계속 보류한다.
+
+### 2026-06-21 paper readiness 실험 방법 판정 필드 추가
+
+문제:
+
+- `paper_readiness.ok=true`는 논문 초안의 금지 claim guard와 evidence number가 맞다는 뜻이지만, 현재 실험 방법을 어떤 역할로 해석해야 하는지까지 직접 말해주지는 않았다.
+- 실험을 반복할수록 `final_f1_avg` 목표 달성, threshold sweep 확대, representative 준비를 같은 우선순위로 섞어 볼 위험이 있었다.
+
+보강:
+
+- `audit_paper_readiness.py`에 `methodology_decision` 출력을 추가했다.
+- 이 필드는 challenge replay가 맡을 역할, threshold sweep의 제한된 역할, representative/translation replay의 차단 상태, 다음 실험 우선순위를 한 곳에 남긴다.
+- `docs/2026-06-21-dictation-ai-experiment-protocol.md`에 `methodology_decision` 해석 기준을 추가했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.unit.test_dictation_ai_paper_readiness_audit \
+  tests.unit.test_dictation_ai_sbd_followup_readiness_audit
+```
+
+결과:
+
+```text
+Ran 5 tests
+OK
+```
+
+실제 readiness 재생성:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/audit_paper_readiness.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --summary .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
+  --paper docs/paper/ko-revision-aware-realtime-stt.md \
+  --source-audit .tmp/eval/dictation-ai-sbd/representative-source-audit.json \
+  --review-packet-validation .tmp/eval/dictation-ai-sbd/representative-source-review-packets.validation.json \
+  --representative-cases tests/eval/dictation_ai/sbd_representative_cases \
+  --review-packets .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json \
+  --representative-draft-validation .tmp/eval/dictation-ai-sbd/representative-case-drafts.validation.json \
+  --summary-output .tmp/eval/dictation-ai-sbd/paper-readiness.json
+```
+
+결과:
+
+```text
+paper_readiness.ok=true
+current_claim_scope=challenge-replay-only
+methodology_decision.primary_interpretation=failure-enriched challenge replay lifecycle analysis
+methodology_decision.challenge_replay_valid=true
+methodology_decision.threshold_sweep_role=parameter adoption or rejection evidence, not a universal optimization claim
+methodology_decision.recommended_next_experiment=human-review representative expected_final labels
+methodology_decision.translation_next_experiment=build translation replay linkage before translation claims
+methodology_decision.blocked_claims=[
+  operating_average_quality,
+  translation_stability,
+  raw_stt_accuracy,
+  runtime_loop_equivalence
+]
+```
+
+해석:
+
+- 현재 실험 설계는 폐기 대상이 아니라 역할이 재정의된 상태다.
+- complete 23개 report는 모두 `challenge-replay`와 `failure-lifecycle-tradeoff`에 묶여 있으므로 실패 농축 replay의 lifecycle 분석 근거로 유효하다.
+- 다음 주요 실험은 threshold를 더 흔드는 것이 아니라, traceable representative draft의 `expected_final`을 사람이 확정해 운영 평균 pilot replay로 넘어가는 것이다.
+- translation replay linkage가 없으므로 final-only 번역 안정성 주장은 계속 보류한다.
+
+### 2026-06-21 paper readiness methodology check 승격
+
+문제:
+
+- `methodology_decision`은 현재 실험 방법 해석을 구조화했지만, readiness의 `ok` 계산에는 포함되지 않았다.
+- 이 상태에서는 complete report가 representative 또는 다른 claim scope로 바뀌어도, evidence inventory와 claim guard가 맞으면 challenge-only 논문 readiness가 통과할 여지가 있었다.
+
+보강:
+
+- `audit_paper_readiness.py`의 `checks`에 `methodology`를 추가했다.
+- `methodology_decision.ok`은 complete report가 모두 `experiment_stage=challenge-replay`, `claim_scope_key=failure-lifecycle-tradeoff`일 때만 true다.
+- 대표 표본 report가 단독으로 들어와 evidence inventory 자체는 complete로 보이더라도, challenge-only paper readiness의 methodology check는 실패하도록 단위 테스트를 추가했다.
+- 실험 프로토콜에 `checks.methodology`가 challenge-only 논문 범위 혼합을 막는 통과 조건임을 명시했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_paper_readiness_audit
+```
+
+결과:
+
+```text
+Ran 3 tests
+OK
+```
+
+실제 readiness 재생성:
+
+```text
+checks.methodology=true
+methodology_decision.ok=true
+methodology_decision.challenge_replay_valid=true
+complete_experiment_stage_counts={challenge-replay:23}
+complete_claim_scope_key_counts={failure-lifecycle-tradeoff:23}
+```
+
+해석:
+
+- 현재 논문 준비 상태는 계속 `challenge-replay-only`로 유효하다.
+- 단, 이 유효성은 실패 농축 challenge replay의 lifecycle 분석에 한정된다.
+- representative replay가 준비되면 같은 readiness에 섞지 않고, 별도 claim scope와 별도 표로 해석해야 한다.
+
+### 2026-06-21 논문 본문에 methodology readiness 연결
+
+문제:
+
+- `checks.methodology`가 readiness 통과 조건으로 승격됐지만, 논문 본문은 여전히 `evidence_protocol.required_evidence_fields` 중심으로만 수치 인용 조건을 설명했다.
+- 논문 표로 결과를 옮기는 사람이 complete report의 `experiment_stage`와 `claim_scope_key` 혼합 여부를 별도 readiness에서 확인해야 한다는 점이 본문에 직접 드러나지 않았다.
+
+보강:
+
+- `docs/paper/ko-revision-aware-realtime-stt.md`의 실험 방법 설명에 통합 readiness audit의 `checks.methodology`도 함께 확인해야 한다는 문장을 추가했다.
+- 의도는 논문 초안이 challenge replay 결과와 representative 결과를 같은 표로 섞지 않게 하는 것이다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/audit_paper_readiness.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --summary .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
+  --paper docs/paper/ko-revision-aware-realtime-stt.md \
+  --source-audit .tmp/eval/dictation-ai-sbd/representative-source-audit.json \
+  --review-packet-validation .tmp/eval/dictation-ai-sbd/representative-source-review-packets.validation.json \
+  --representative-cases tests/eval/dictation_ai/sbd_representative_cases \
+  --review-packets .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json \
+  --representative-draft-validation .tmp/eval/dictation-ai-sbd/representative-case-drafts.validation.json \
+  --summary-output .tmp/eval/dictation-ai-sbd/paper-readiness.json
+```
+
+결과:
+
+```text
+paper_readiness.ok=true
+checks.methodology=true
+methodology_decision.challenge_replay_valid=true
+current_claim_scope=challenge-replay-only
+```
+
+paper audit 단위 테스트:
+
+```text
+Ran 13 tests
+OK
+```
+
+해석:
+
+- 논문 본문, 프로토콜, readiness JSON이 모두 같은 기준을 가리킨다.
+- 현재 본문 수치는 challenge replay/failure lifecycle 근거로만 유지한다.
+- representative/translation 결과가 생기면 기존 표에 합치는 것이 아니라 별도 claim scope에서 새 readiness 기준을 두어야 한다.
+
+### 2026-06-21 structural lifecycle preflight 후보 재추출
+
+목적:
+
+- 대표 표본의 `expected_final`은 아직 사람이 확정하지 않았으므로 운영 평균 실험은 진행할 수 없다.
+- 다음으로 가능한 진행은 기존 CUDA challenge 기준선에서 queue/revision/boundary 병목이 큰 structural lifecycle 후보를 재현 가능하게 뽑아, 후속 구조 변경 실험의 입력을 고정하는 것이다.
+- 이 subset은 paper evidence가 아니라 구조 변경 preflight이며, 개선 주장이 보이면 전체 1113건 challenge replay를 실제 `sat + cuda + float16`로 다시 실행해야 한다.
+
+입력:
+
+```text
+.tmp/eval/dictation-ai-sbd/20260621-protocol-baseline.json
+```
+
+이 report는 1113개 case row를 포함하고 `corpus_role=challenge-replay`로 저장된 기존 CUDA 기준선이다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/select_sbd_structural_cases.py \
+  .tmp/eval/dictation-ai-sbd/20260621-protocol-baseline.json \
+  --limit 16 \
+  --case-output .tmp/eval/dictation-ai-sbd/structural-lifecycle-cases.jsonl \
+  --markdown-output .tmp/eval/dictation-ai-sbd/structural-lifecycle-cases.md
+```
+
+결과:
+
+```text
+selected_case_count=16
+language_counts={en:10, zh:6}
+expected_final_case_count=16
+corpus_role=exploratory
+paper_evidence=false
+```
+
+대표 선택 case:
+
+| rank | id | language | final F1 | boundary F1 | queue len | stage_queue_revision | stage_replace_deferred |
+| ---: | --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | `en_log_optimus_surgeons_zimbabwe_gigafactory_queue_20260620_001` | en | 0.596 | 0.000 | 16 | 64 | 85 |
+| 2 | `en_log_supply_chain_recursive_medicine_free_20260620_001` | en | 0.696 | 0.000 | 4 | 137 | 154 |
+| 3 | `en_log_replacement_rate_north_korea_underpopulation_queue_20260620_001` | en | 0.667 | 0.200 | 5 | 80 | 96 |
+| 8 | `en_log_chimps_pyramids_raptor_queue_20260620_001` | en | 0.750 | 0.000 | 10 | 37 | 57 |
+| 10 | `zh_log_draft_20260620_avc_whisper_log_11_000872` | zh | 0.750 | 0.000 | 10 | 21 | 33 |
+| 15 | `zh_log_missing_beef_flavor_preference_fragment_20260617_001` | zh | 0.462 | 0.000 | 7 | 47 | 57 |
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_case_files.py \
+  .tmp/eval/dictation-ai-sbd/structural-lifecycle-cases.jsonl \
+  --summary-output .tmp/eval/dictation-ai-sbd/structural-lifecycle-cases.validation.json
+```
+
+결과:
+
+```text
+case_count=16
+expected_final_case_count=16
+draft_count=0
+language_counts={en:10, zh:6}
+tag_counts.stage-queue=12
+tag_counts.missing-final=13
+tag_counts.translation-skip=8
+tag_counts.no-end-final=7
+tag_counts.duplicate-suppression=7
+tag_counts.false-final=6
+tag_counts.staged-residue=6
+```
+
+CUDA replay 시도:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases .tmp/eval/dictation-ai-sbd/structural-lifecycle-cases.jsonl \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/structural-lifecycle-cases-baseline.json
+```
+
+sandbox 내부 결과:
+
+```text
+[dictation-ai-sbd-benchmark] error: sentence boundary backend 'sat' initialization failed: model=sat-3l-sm device=cuda compute=float16. Fail-Fast: fix the model/device/runtime instead of falling back to regex.
+```
+
+sandbox 밖 실행 승인은 환경 정책상 거부됐다. 따라서 이번 항목에서는 새 성능 수치를 만들지 않았고, CPU/mock/smoke fallback도 사용하지 않았다.
+
+해석:
+
+- structural subset은 영어 long-context queue/revision 병목과 중국어 staged/duplicate/no-end 병목을 함께 포함한다.
+- 선택된 후보는 대부분 final F1이 완전히 0은 아니지만 boundary F1이 낮고 queue residue가 크다. 이는 현재 논문 가설인 "내용 회수와 문장 경계/생명주기 소비는 별도 병목"을 후속 구조 실험 대상으로 다시 확인해준다.
+- 다음 구조 변경 실험은 이 subset에서 빠르게 preflight할 수 있지만, 논문 성능 근거로 쓰려면 전체 1113건 challenge replay를 실제 CUDA/SaT 경로로 다시 실행해야 한다.
+
+### 2026-06-21 paper readiness에 structural preflight 요약 연결
+
+문제:
+
+- structural subset은 `.tmp/eval/dictation-ai-sbd/structural-lifecycle-cases.validation.json`으로 검증됐지만, paper readiness에는 표시되지 않았다.
+- 다음 구조 실험 후보가 준비됐는지 확인하려면 별도 파일을 열어봐야 했고, 이 subset이 paper evidence가 아니라는 점도 readiness 결과에 직접 남지 않았다.
+
+보강:
+
+- `audit_paper_readiness.py`에 optional `--structural-preflight-validation` 입력을 추가했다.
+- 입력이 있으면 `structural_preflight`에 case 수, corpus role, expected final case 수, 언어 분포, 주요 병목 태그, `paper_evidence=false`, `ready`를 출력한다.
+- 이 필드는 readiness의 `ok`를 올리지 않는다. structural subset은 exploratory preflight일 뿐이고, 논문 근거가 되려면 전체 challenge replay를 다시 실행해야 하기 때문이다.
+- 실험 프로토콜의 통합 readiness 명령에도 이 옵션과 해석을 추가했다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/audit_paper_readiness.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --summary .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
+  --paper docs/paper/ko-revision-aware-realtime-stt.md \
+  --source-audit .tmp/eval/dictation-ai-sbd/representative-source-audit.json \
+  --review-packet-validation .tmp/eval/dictation-ai-sbd/representative-source-review-packets.validation.json \
+  --representative-cases tests/eval/dictation_ai/sbd_representative_cases \
+  --review-packets .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json \
+  --representative-draft-validation .tmp/eval/dictation-ai-sbd/representative-case-drafts.validation.json \
+  --structural-preflight-validation .tmp/eval/dictation-ai-sbd/structural-lifecycle-cases.validation.json \
+  --summary-output .tmp/eval/dictation-ai-sbd/paper-readiness.json
+```
+
+결과:
+
+```text
+paper_readiness.ok=true
+checks.methodology=true
+structural_preflight.ready=true
+structural_preflight.paper_evidence=false
+structural_preflight.case_count=16
+structural_preflight.expected_final_case_count=16
+structural_preflight.language_counts={en:10, zh:6}
+structural_preflight.focus_tag_counts={
+  boundary-mismatch:4,
+  duplicate-final:4,
+  false-final:6,
+  missing-final:13,
+  no-end-final:7,
+  stage-queue:12,
+  staged-residue:6,
+  structural-lifecycle:16,
+  translation-skip:8
+}
+```
+
+단위 검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_paper_readiness_audit
+```
+
+결과:
+
+```text
+Ran 3 tests
+OK
+```
+
+해석:
+
+- paper readiness는 이제 세 종류의 후속 상태를 한 결과에서 보여준다.
+- representative는 사람이 확정한 `expected_final` 부재로 막혀 있다.
+- translation은 final event와 translation output linkage 부재로 막혀 있다.
+- structural lifecycle subset은 preflight 준비가 됐지만 논문 근거는 아니다.
+
+### 2026-06-21 다음 실험 후보 역할 분리
+
+문제:
+
+- `methodology_decision.recommended_next_experiment`는 대표 표본 라벨링을 1순위로 잘 가리키지만, 사람이 개입하기 전에도 가능한 structural preflight 실험을 함께 보여주지는 않았다.
+- 후속 작업을 모두 같은 "다음 실험"으로 표현하면, paper evidence 확장과 로직 변경 preflight가 섞여 해석될 수 있다.
+
+보강:
+
+- `audit_paper_readiness.py`의 `methodology_decision`에 `available_next_experiments`를 추가했다.
+- 각 항목은 `name`, `role`, `paper_evidence`, `blocked_by`를 가진다.
+- structural preflight가 준비된 경우 `logic-change preflight` 항목으로 표시하고 case 수를 함께 남긴다.
+- 이 항목은 `paper_evidence=false`로 유지되어, exploratory subset 결과가 논문 claim scope를 넓히지 않게 한다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/audit_paper_readiness.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --summary .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
+  --paper docs/paper/ko-revision-aware-realtime-stt.md \
+  --source-audit .tmp/eval/dictation-ai-sbd/representative-source-audit.json \
+  --review-packet-validation .tmp/eval/dictation-ai-sbd/representative-source-review-packets.validation.json \
+  --representative-cases tests/eval/dictation_ai/sbd_representative_cases \
+  --review-packets .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json \
+  --representative-draft-validation .tmp/eval/dictation-ai-sbd/representative-case-drafts.validation.json \
+  --structural-preflight-validation .tmp/eval/dictation-ai-sbd/structural-lifecycle-cases.validation.json \
+  --summary-output .tmp/eval/dictation-ai-sbd/paper-readiness.json
+```
+
+결과:
+
+```text
+available_next_experiments=[
+  {
+    name: human-review representative expected_final labels,
+    role: paper-evidence expansion,
+    paper_evidence: false,
+    blocked_by: human expected_final labels
+  },
+  {
+    name: build translation replay linkage before translation claims,
+    role: translation claim expansion,
+    paper_evidence: false,
+    blocked_by: blocked_on_translation_replay_linkage
+  },
+  {
+    name: run structural lifecycle preflight on selected exploratory cases,
+    role: logic-change preflight,
+    paper_evidence: false,
+    blocked_by: "",
+    case_count: 16
+  }
+]
+```
+
+단위 검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_paper_readiness_audit
+```
+
+결과:
+
+```text
+Ran 3 tests
+OK
+```
+
+해석:
+
+- 논문 근거 확장의 1순위는 여전히 사람이 representative `expected_final`을 확정하는 작업이다.
+- 번역 안정성 주장은 linkage가 없어서 계속 보류한다.
+- 사람이 개입하지 않고 진행할 수 있는 작업은 structural subset 기반 로직 preflight지만, 이 결과는 전체 challenge replay 재검증 전까지 논문 수치가 아니다.
+
+### 2026-06-21 structural preflight 실행 명령과 승격 조건 명시
+
+문제:
+
+- `available_next_experiments`에 structural preflight가 표시되지만, 실제 실행할 case path와 명령은 별도 문서를 확인해야 했다.
+- structural subset은 논문 근거가 아니므로, preflight 결과가 어떤 조건을 통과해야 paper evidence로 승격되는지도 readiness에 같이 남기는 편이 안전하다.
+
+보강:
+
+- `methodology_decision.available_next_experiments`의 `logic-change preflight` 항목에 `case_path`, `preflight_command`, `promotion_requirement`를 추가했다.
+- `preflight_command`는 반드시 `HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1`, `--device cuda`, `--compute-type float16`을 포함한다.
+- `promotion_requirement`는 structural preflight 결과를 논문 근거로 쓰려면 전체 1113건 challenge replay를 실제 `sat+cuda+float16`로 다시 실행해야 함을 명시한다.
+- 실험 프로토콜에도 이 필드의 의미를 추가했다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/audit_paper_readiness.py \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps \
+  --summary .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
+  --paper docs/paper/ko-revision-aware-realtime-stt.md \
+  --source-audit .tmp/eval/dictation-ai-sbd/representative-source-audit.json \
+  --review-packet-validation .tmp/eval/dictation-ai-sbd/representative-source-review-packets.validation.json \
+  --representative-cases tests/eval/dictation_ai/sbd_representative_cases \
+  --review-packets .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json \
+  --representative-draft-validation .tmp/eval/dictation-ai-sbd/representative-case-drafts.validation.json \
+  --structural-preflight-validation .tmp/eval/dictation-ai-sbd/structural-lifecycle-cases.validation.json \
+  --summary-output .tmp/eval/dictation-ai-sbd/paper-readiness.json
+```
+
+결과:
+
+```text
+available_next_experiments[2].role=logic-change preflight
+available_next_experiments[2].case_count=16
+available_next_experiments[2].case_path=.tmp/eval/dictation-ai-sbd/structural-lifecycle-cases.jsonl
+available_next_experiments[2].preflight_command=HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py --cases .tmp/eval/dictation-ai-sbd/structural-lifecycle-cases.jsonl --device cuda --compute-type float16 --output .tmp/eval/dictation-ai-sbd/structural-lifecycle-cases-baseline.json
+available_next_experiments[2].promotion_requirement=rerun the full 1113-case challenge replay with sat+cuda+float16 before using any structural preflight result as paper evidence
+```
+
+단위 검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_paper_readiness_audit
+```
+
+결과:
+
+```text
+Ran 3 tests
+OK
+```
+
+해석:
+
+- 다음에 사람이 개입하지 않고 할 수 있는 실험은 structural subset CUDA preflight다.
+- 이 preflight가 좋아 보여도 논문 수치가 아니며, 전체 challenge replay 재검증 전에는 방법 탐색 기록으로만 둔다.
+
+### 2026-06-21 structural preflight 후 전체 challenge 재검증 명령 추가
+
+문제:
+
+- `preflight_command`와 `promotion_requirement`는 있었지만, 실제 paper evidence 승격 전에 실행해야 하는 전체 1113건 challenge replay 명령은 readiness에 없었다.
+- 구조 변경 preflight가 좋아 보였을 때 전체 재검증 명령을 다시 조합하면 `--paper-evidence`, 전체 case root, CUDA/float16 조건 중 일부를 빠뜨릴 수 있다.
+
+보강:
+
+- `available_next_experiments[logic-change preflight]`에 `full_challenge_replay_command`를 추가했다.
+- 명령은 전체 `tests/eval/dictation_ai/sbd_cases` 입력, `--device cuda`, `--compute-type float16`, `--paper-evidence`를 포함한다.
+- 실험 프로토콜도 `full_challenge_replay_command`를 명시하도록 갱신했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_paper_readiness_audit
+```
+
+결과:
+
+```text
+Ran 3 tests
+OK
+```
+
+실제 readiness:
+
+```text
+available_next_experiments[2].preflight_command=HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py --cases .tmp/eval/dictation-ai-sbd/structural-lifecycle-cases.jsonl --device cuda --compute-type float16 --output .tmp/eval/dictation-ai-sbd/structural-lifecycle-cases-baseline.json
+available_next_experiments[2].full_challenge_replay_command=HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py --cases tests/eval/dictation_ai/sbd_cases --device cuda --compute-type float16 --paper-evidence --output .tmp/eval/dictation-ai-sbd/structural-lifecycle-full-challenge-replay.json
+```
+
+해석:
+
+- structural preflight와 paper evidence 재검증 절차가 readiness 결과 안에서 분리됐다.
+- subset 결과는 계속 exploratory이고, 전체 challenge replay 결과만 논문 근거 후보가 될 수 있다.
+
+### 2026-06-21 structural preflight case path를 validation source에서 도출
+
+문제:
+
+- structural preflight 명령의 `case_path`는 validation summary의 `sources`에 이미 들어 있는데, readiness는 기본 경로를 가정할 수 있는 구조였다.
+- 향후 structural subset 파일명을 바꾸면 readiness 명령이 실제 검증한 입력과 달라질 수 있다.
+
+보강:
+
+- `audit_paper_readiness.py`의 `structural_preflight.case_path`를 validation summary의 첫 번째 `sources` 값에서 도출하도록 수정했다.
+- 테스트 fixture도 실제 validation summary처럼 `sources`를 포함하게 정리했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_paper_readiness_audit
+```
+
+결과:
+
+```text
+Ran 3 tests
+OK
+```
+
+실제 readiness:
+
+```text
+structural_preflight.case_path=.tmp/eval/dictation-ai-sbd/structural-lifecycle-cases.jsonl
+available_next_experiments[2].case_path=.tmp/eval/dictation-ai-sbd/structural-lifecycle-cases.jsonl
+```
+
+해석:
+
+- structural preflight 명령은 이제 검증된 case source와 같은 파일을 참조한다.
+- 여전히 `paper_evidence=false`이며, 전체 challenge replay 재검증 전에는 논문 수치가 아니다.
+
+### 2026-06-21 테스트 코드 도메인 정리
+
+문제:
+
+- 받아쓰기 AI 앱 품질관리 유닛테스트와 논문/벤치/케이스 관리 도구 테스트가 모두 `tests/unit/`에 섞여 있었다.
+- 이 구조에서는 paper readiness audit, evidence report validator, representative case promoter 같은 실험 도구 계약 테스트가 앱 런타임 품질을 보장하는 테스트처럼 보였다.
+
+정리:
+
+- 논문/벤치/케이스 관리 도구 테스트를 `tests/eval/dictation_ai/tool_tests/`로 이동했다.
+- `tests/unit/`에는 앱 코드 품질관리 유닛테스트만 남기도록 도메인 경계를 정했다.
+- `tests/eval/dictation_ai/tool_tests/README.md`에 이 테스트가 성능 근거가 아니라 실험 도구 입출력 계약 검증임을 명시했다.
+- `AGENTS.md`와 실험 프로토콜에 같은 경계를 추가했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest discover -s tests/eval/dictation_ai/tool_tests -p 'test_*.py'
+```
+
+결과:
+
+```text
+Ran 134 tests
+OK
+```
+
+해석:
+
+- `tests/unit/`과 `tests/eval/dictation_ai/tool_tests/`의 책임이 분리됐다.
+- 실험 도구 테스트 통과는 논문/벤치 도구의 계약 안정성을 뜻하며, SBD 성능 근거는 여전히 실제 `sat + cuda + float16` benchmark report로만 판단한다.
+
+### 2026-06-21 반복 실험의 로직 변경 지점 판정
+
+질문:
+
+- 현재 실험을 반복해도 받아쓰기 AI 로직 변경이 필요한 지점을 찾지 못한 것인지 확인했다.
+
+확인한 근거:
+
+- 표준 complete paper-evidence summary는 report 23개, 고유 parameter axis 12개로 구성된다.
+- `hypothesis_status_counts={유지:2, 축소:2, 폐기:8}`이다.
+- baseline metric은 모든 complete report에서 일관된다.
+  - `final_precision_avg=0.601920572081`
+  - `final_recall_avg=0.439944451819`
+  - `final_f1_avg=0.483242163472`
+  - `final_boundary_f1_avg=0.107749021040`
+  - `finalized_per_stage_start=0.711599858106`
+- 축별 확인 결과 대부분의 confirm/max-age/forced/no-text/CJK hold 축은 0 delta 또는 0.001 미만의 작은 delta만 만들었다.
+- `SENTENCE_CONFIRM_CHUNKS=1`은 `final_f1_delta=+0.011855437952`, `recall_delta=+0.043844883342`를 만들지만 `precision_delta=-0.037215144750`이라 빠른 확정의 precision 손실이 크다.
+- `REVISION_FALLBACK_COVERAGE_MIN`, `SHORT_NO_END_FRAGMENT_UNITS`, 일부 CJK/queue 축은 key-tag 또는 language regression flag가 붙었다.
+- complete report 23개 모두 `state_machine_parity=partial`이며, text replay에는 `audio timestamp latency`, `stable_analysis.stable_internal_chars`, `stable_analysis.stable_internal_ratio`, `stable_analysis.stable_overlap_source`, `translation request/output linkage`가 없다.
+
+판정:
+
+- 현재 반복 실험은 "앱 로직 변경 지점을 찾았다"가 아니라 "단일 파라미터 튜닝으로 설명 가능한 개선축 대부분을 닫았다"는 근거다.
+- 새 로직 변경은 지금 바로 수행하기보다 structural lifecycle preflight 또는 runtime signal 보강으로 원인을 좁힌 뒤 수행해야 한다.
+- 현재 사람이 개입하지 않고 가능한 다음 작업은 16건 exploratory structural subset의 CUDA preflight다. 다만 이 결과는 `paper_evidence=false`이며, 좋아 보이더라도 전체 1113건 challenge replay 재검증 전에는 논문 수치가 아니다.
+
+해석:
+
+- `final_f1_avg`를 목표값까지 반복적으로 끌어올리는 전략은 중단한다.
+- threshold sweep은 기본값 채택/기각 근거로 축소한다.
+- 로직 변경 후보는 `stage-queue`, `staged-residue`, `boundary-mismatch`, `no-end-final`처럼 lifecycle counter가 지목한 구조 병목에 한정해 작게 검증한다.
+
+### 2026-06-21 structural lifecycle preflight 실행 보류
+
+시도:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py --cases .tmp/eval/dictation-ai-sbd/structural-lifecycle-cases.jsonl --device cuda --compute-type float16 --output .tmp/eval/dictation-ai-sbd/structural-lifecycle-cases-baseline.json
+```
+
+결과:
+
+- sandbox 밖 CUDA 실행 요청이 환경 정책에 의해 거절됐다.
+- CPU, mock, smoke benchmark는 받아쓰기 AI SBD 성능 근거로 인정하지 않으므로 대체 실행하지 않았다.
+
+판정:
+
+- `structural_preflight.ready=true`는 16건 exploratory subset과 실행 명령이 준비됐다는 뜻일 뿐, preflight 실행 완료가 아니다.
+- 현재 상태에서는 structural subset 결과가 없으므로 앱 로직 변경 필요 여부를 추가로 판단하지 않는다.
+- 다음 판단은 실제 `sat + cuda + float16` 실행이 가능한 환경에서 같은 명령을 실행한 뒤 수행한다.
+
+해석:
+
+- 이번 보류는 실험 실패가 아니라 실행 환경 제약이다.
+- 논문/실험일지에는 `not-run` 상태로만 남기며, subset 미실행 상태를 근거로 로직 변경 또는 로직 변경 불필요를 주장하지 않는다.
+
+### 2026-06-21 structural preflight 실행 상태 필드 분리
+
+문제:
+
+- `structural_preflight.ready=true`는 입력 준비 상태인데, readiness 출력만 보면 preflight 실행이 완료된 것처럼 오해할 수 있었다.
+- 문서에는 `not-run` 해석을 추가했지만 도구 출력도 같은 상태를 직접 보여줘야 한다.
+
+보강:
+
+- `audit_paper_readiness.py`의 structural preflight summary에 `sources`, `source_count`, `expected_result_path`, `result_exists`, `execution_status`를 추가했다.
+- `execution_status`는 입력이 준비되지 않았으면 `input-not-ready`, 입력은 준비됐지만 결과 파일이 없으면 `input-ready-not-run`, 결과 파일이 있으면 `result-present`로 표시한다.
+- `available_next_experiments[logic-change preflight]`에도 `expected_result_path`, `result_exists`, `execution_status`를 같이 출력하고, `preflight_command`의 `--output`도 같은 경로를 사용하게 했다.
+- `--structural-preflight-result` CLI 인자를 추가해 readiness 실행 시 기대 결과 경로를 명시할 수 있게 했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_paper_readiness_audit
+```
+
+결과:
+
+```text
+Ran 4 tests
+OK
+```
+
+해석:
+
+- 이제 `ready=true`와 `execution_status=input-ready-not-run`이 함께 나오면 입력은 준비됐지만 결과는 없다는 뜻으로 해석한다.
+- structural subset 결과가 실제로 생기기 전에는 앱 로직 변경 여부 판단을 계속 보류한다.
+
+### 2026-06-21 tests/eval 도메인 정리 검토
+
+문제:
+
+- `tests/eval/dictation_ai/` 루트에 benchmark, case loader, parameter sweep, paper audit, representative workflow, structural selector가 모두 섞여 복잡도가 높아졌다.
+- 이미 실험일지와 논문 프로토콜에서 루트 script를 직접 실행 명령으로 참조하고 있어 즉시 대규모 이동을 하면 재현성이 깨질 수 있다.
+
+정리:
+
+- `tests/eval/dictation_ai/README.md`를 추가해 현재 파일을 다음 도메인으로 분류했다.
+  - Benchmark core
+  - Case corpus
+  - Parameter sweep/evidence
+  - Paper audit
+  - Representative workflow
+  - Structural workflow
+  - Tool contract tests
+- `AGENTS.md`에 `tests/eval/dictation_ai/` 루트에는 직접 실행하는 평가 entrypoint만 두고, 새 보조 모듈은 README의 도메인 경계에 따라 하위 배치를 우선한다는 규칙을 추가했다.
+- 실험 프로토콜에도 `tests/eval/dictation_ai/README.md`를 도메인 기준 문서로 참조하도록 갱신했다.
+
+판정:
+
+- 이번 단계에서는 파일 이동을 하지 않는다.
+- 후속 이동은 `paper/`, `representative/`, `sweeps/`, `cases/` 같은 하위 패키지로 나눌 수 있지만, 실험일지 명령과 wrapper 전략을 함께 준비한 뒤 진행한다.
+
+해석:
+
+- 현재 복잡도 문제는 인정한다.
+- 다만 재현성 있는 실험 명령을 유지하는 것이 우선이므로, 우선 도메인 기준과 새 파일 배치 규칙을 고정해 추가 혼선을 막는다.
