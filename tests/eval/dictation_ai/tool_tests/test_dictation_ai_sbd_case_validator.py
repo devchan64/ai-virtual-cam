@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from tests.eval.dictation_ai.cases.sbd_case_paths import SBD_CHALLENGE_CASE_DIR
 from tests.eval.dictation_ai.cases.validate_sbd_case_files import enforce_case_thresholds, validate_case_files
 
 
@@ -103,6 +104,8 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
         self.assertEqual(summary["sources"], [str(group_dir / "reviewed-group.jsonl")])
 
     def test_challenge_root_only_loads_language_shards(self) -> None:
+        self.assertEqual(SBD_CHALLENGE_CASE_DIR.name, "sbd_cases")
+        self.assertEqual(SBD_CHALLENGE_CASE_DIR.parent.name, "dictation_ai")
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "sbd_cases"
             language_dir = root / "ko"

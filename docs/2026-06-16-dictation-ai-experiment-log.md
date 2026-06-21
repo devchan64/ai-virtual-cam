@@ -14932,6 +14932,63 @@ git diff --check
 OK
 ```
 
+후속 기각 실험:
+
+- queue residue 분석에서 queue head가 active와 독립 문장인 케이스가 349건으로 가장 많았다.
+- “생성순서대로 소비” 원칙을 더 직접 반영하기 위해 `deferred_age_chunk`가 active보다 앞선 독립 queue head를 age 동률에서도 먼저 소비하도록 실험했다.
+- CUDA 벤치 결과는 다음과 같이 크게 악화됐다.
+
+```text
+cases=1223
+finalized=3398
+stage_start=7300
+finalized_per_stage_start=0.465
+final_precision_avg=0.545
+final_recall_avg=0.324
+final_f1_avg=0.383
+final_boundary_f1_avg=0.074
+case_exact_match=7
+pending_exact_match=710
+staged_exact_match=253
+```
+
+해석:
+
+- `deferred_age_chunk` 기반 생성순서만으로 active 후보를 밀어내면, active 안정성 보호가 무너져 final recall과 precision이 함께 떨어진다.
+- 현재 `age` 비교는 단순 순서 proxy가 아니라 active 후보가 충분히 누적됐는지 보는 안정성 gate 역할도 한다.
+- 따라서 생성순서 규칙은 “무조건 더 이른 후보 우선”으로 구현하지 않는다. 독립 queue head stall은 계속 관찰하되, active 안정성보다 강한 규칙으로 승격하지 않는다.
+- 실패 패치는 되돌렸고, checked-in 기본값 재실행으로 `final_f1_avg=0.473` 복구를 확인했다.
+
+벤치 corpus role 수정:
+
+- 실제 reviewed challenge case는 `tests/eval/dictation_ai/sbd_cases/{en,ko,zh}`에 있지만, `case_corpus_role()`은 잘못된 `tests/eval/dictation_ai/cases/sbd_cases` 경로를 challenge root로 보고 있었다.
+- 이 때문에 같은 1223건 reviewed challenge corpus를 실행해도 `corpus_role=exploratory`, `claim_scope_key=no-paper-claim`으로 기록되어 실험 해석과 paper evidence guard가 과도하게 약해졌다.
+- challenge root를 실제 케이스 디렉토리로 수정한 뒤 validator와 CUDA 벤치에서 다음을 확인했다.
+
+```text
+validate-cases:
+case_count=1223
+corpus_role=challenge-replay
+draft_count=0
+expected_final_case_count=1219
+language_counts={en=429, ko=462, zh=332}
+
+cuda benchmark:
+corpus_role=challenge-replay
+claim_scope_key=failure-lifecycle-tradeoff
+cases=1223
+finalized=4723
+stage_start=9022
+finalized_per_stage_start=0.523
+final_precision_avg=0.594
+final_recall_avg=0.430
+final_f1_avg=0.473
+final_boundary_f1_avg=0.104
+```
+
+- 성능 수치는 변하지 않았고, 근거 해석만 exploratory에서 failure lifecycle trade-off challenge replay로 바로잡혔다.
+- 이 수정은 받아쓰기 확정 로직 자체의 성능 개선은 아니지만, 이후 CUDA 벤치 결과를 논문/실험 근거로 해석하기 위한 필수 평가 계약 수정이다.
+
 ### 2026-06-21 paper audit evidence contract stale summary 차단
 
 문제:

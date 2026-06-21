@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-SBD_CHALLENGE_CASE_DIR = Path(__file__).resolve().parent / "sbd_cases"
-SBD_REPRESENTATIVE_CASE_DIR = Path(__file__).resolve().parent / "sbd_representative_cases"
+SBD_CASE_ROOT = Path(__file__).resolve().parents[1]
+SBD_CHALLENGE_CASE_DIR = SBD_CASE_ROOT / "sbd_cases"
+SBD_REPRESENTATIVE_CASE_DIR = SBD_CASE_ROOT / "sbd_representative_cases"
 SBD_CHALLENGE_LANGUAGES = ("en", "ko", "zh")
 REPRESENTATIVE_REQUIRED_FIELDS = (
     "corpus_role",
