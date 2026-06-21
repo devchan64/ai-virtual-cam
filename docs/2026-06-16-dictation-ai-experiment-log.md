@@ -14370,3 +14370,24 @@ chunk=1371..1392
 - active staged 후보가 현재 chunk에서 candidate buffer로부터 승격된 경우, 같은 chunk의 replacement는 final 확정으로 처리하지 않고 새 후보를 queue에 보류하도록 변경했다.
 - 벤치 lifecycle에도 같은 규칙과 `stage_replace_deferred_same_chunk` 지표를 추가했다.
 - 이는 중국어 문구별 예외가 아니라, staged 후보가 최소 한 번의 후속 STT window를 거쳐 소비되도록 하는 일반 생명주기 규칙이다.
+
+### 2026-06-21 중국어 beef/order 구간 stage queue head stall 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 14:21:06..14:21:36
+chunk=1744..1775
+```
+
+관측:
+
+- `有牛肉，有苦椒。`, `好，炖牛肉。`, `要吃热乎乎的。`, `牛肉我就。` 같은 오래된 짧은 staged 후보가 queue head로 반복 승격됐다.
+- 후속 window에서는 `特制的那个酱料`, `生牛肉`, `章鱼`, `蛋白质满满`, `完全没有煮过的` 구간이 반복됐지만, active staged 후보와 queue revision이 먼저 소비되며 final이 늦어졌다.
+- 이 로그는 `b895de6` 적용 전 실행 중인 앱 프로세스에서 나온 것이므로 `stage_replace_deferred_same_chunk` 새 지표는 아직 관측되지 않는다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_beef_order_queue_head_stall_20260621_001` 케이스를 추가했다.
+- 로직 추가 변경은 하지 않았다. 같은 chunk stage 교체 지연 규칙 적용 후, 이 케이스에서 queue head stall과 false fragment final이 줄어드는지 실제 `sat + cuda + float16` 벤치로 비교해야 한다.
