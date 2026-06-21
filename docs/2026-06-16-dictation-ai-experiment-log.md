@@ -14750,6 +14750,52 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-21 중국어 Hongdae snow ice/iPhone 구간 queue 지연 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 15:26:46..15:27:24
+chunk=2512..2550 중심
+```
+
+감사 결과:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 15:26:46" --until "2026-06-21 15:27:24" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-zh-152646-152724.json
+```
+
+```text
+stt_raw_line_count=39
+finalize_event_count=13
+finalize_per_stt_raw=0.333
+stage_replace_deferred_count=63
+stage_replace_deferred_per_stt_raw=1.615
+stage_queue_promote_count=22
+stage_queue_promote_per_stt_raw=0.564
+duplicate_suppressed_count=61
+duplicate_suppressed_per_stt_raw=1.564
+quality_block_count=29
+quality_block_per_stt_raw=0.744
+finalize_delta_suppressed_stage_retained_count=6
+finalize_delta_suppressed_stage_dropped_count=0
+stage_queue_recent_final_suppressed_count=10
+```
+
+관측:
+
+- 기존 `快闪店`, `首尔`, `红大` 포함 케이스와 문맥이 달라 중복 케이스로 보지 않았다.
+- 초반에는 `可以，可以装一个。` stage head가 뒤 후보 확정을 막고, 이후 `也可以，我自己一个人蛮喜欢的。`가 높은 age로 승격되면서 같은 chunk 후속 후보들이 replacement defer로 밀렸다.
+- 후반에는 `虽然我每一次都会吃但是我真的觉得没有来吃雪冰我就不` 계열 stage head가 `跟大家分享这个...连锁店...红大吃...` 후보보다 앞에서 오래 유지됐다.
+- 이번 구간은 delta suppression보다는 `unconfirmed_cjk`, quality block, queue head retention, duplicate suppression이 함께 작동한 지연 패턴으로 본다. 감사 지표도 `finalize_delta_suppressed_stage_dropped_count=0`, retained 6회로 나타났다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-5-20260621.jsonl`에 `zh_log_delayed_hongdae_snow_ice_iphone_queue_20260621_001` 케이스를 추가했다.
+- 기대 문장은 반복 window에서 안정화된 문장만 지정했다.
+- `sat + cuda + float16` 벤치 결과 없이 로직 변경을 단정하지 않고, 후속 벤치 비교용 관측 케이스로 남긴다.
+
 ### 2026-06-21 중국어 room tour table/bed/fridge 구간 delta/queue 지연 케이스 추가
 
 관측 구간:
