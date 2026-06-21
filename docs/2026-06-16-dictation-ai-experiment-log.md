@@ -12876,3 +12876,35 @@ validate_sbd_case_files wrapper: help 출력 성공
 - `tests/eval/dictation_ai/` 루트는 이제 SBD 평가 기능의 단일 진입점만 가진다.
 - 하위 도메인은 실행 단위가 아니라 구현/책임 경계다.
 - 과거 실험일지의 루트 script 직접 실행 명령은 historical record로 남기되, 새 문서와 새 실행은 subcommand 기준을 따른다.
+
+### 2026-06-21 tests/eval 단일 엔트리 계약 테스트 보강
+
+문제:
+
+- 루트 wrapper를 제거하고 `sbd_benchmark.py` subcommand로 합쳤지만, subcommand 목록과 dispatch 동작을 고정하는 테스트가 없었다.
+- 이 상태에서는 후속 실험 도구가 다시 루트 실행 파일로 추가되어도 계약 테스트가 막지 못한다.
+
+정리:
+
+- `tests/eval/dictation_ai/tool_tests/test_dictation_ai_sbd_entrypoint.py`를 추가했다.
+- subcommand inventory가 현재 eval 하위 도메인 작업을 모두 포함하는지 확인한다.
+- `commands` 출력, benchmark option fallback, subcommand dispatch와 `sys.argv` 복원 동작을 검증한다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_entrypoint
+./.venv/bin/python -m unittest discover -s tests/eval/dictation_ai/tool_tests -p 'test_*.py'
+```
+
+결과:
+
+```text
+entrypoint: Ran 4 tests, OK
+tool_tests: Ran 139 tests, OK
+```
+
+해석:
+
+- `tests/eval/dictation_ai/` 루트는 `sbd_benchmark.py` 단일 엔트리라는 구조 계약을 테스트로 고정했다.
+- 새 실험 도구를 추가할 때는 하위 도메인 모듈과 subcommand 연결을 우선하고, 루트 실행 파일 추가는 피한다.
