@@ -14837,6 +14837,49 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-21 파라미터 sweep 종합과 revision reset 원칙 보강
+
+기존 실제 CUDA/SaT paper-evidence sweep을 다시 확인했다.
+
+근거:
+
+- `20260621-paper-evidence-cjk-confirm-preserve-axis`: `CJK_CONFIRM_PRESERVE_RATIO_MIN=0.65`는 전체 `final_f1_avg`를 `+0.0002`만 올리고, `0.80`은 baseline과 동일했다.
+- `20260621-paper-evidence-cjk-revision-ratio-axis`: `CJK_REVISION_RATIO_MIN=0.70`은 final F1 변화가 없고 staged residue만 줄였으며, `0.85`는 중국어 precision/F1 회귀가 있었다.
+- `20260621-paper-evidence-short-cjk-final-axis`: `SHORT_CJK_FINAL_UNITS=8`은 final F1을 `+0.0004` 올리지만 precision/boundary 손실 flag가 있었고, `12`는 final F1이 낮아졌다.
+- `20260621-paper-evidence-confirm-max-age-axis`: `SENTENCE_CONFIRM_MAX_AGE_CHUNKS=2/4`는 baseline과 동일했다.
+
+해석:
+
+- 현재 수치 변경만으로는 의미 있는 `final_f1_avg` 개선이 나오지 않는다.
+- 개선 축은 더 많은 언어별/문구별 조건이 아니라 revision lifecycle의 공통 원칙이어야 한다.
+- 특히 사용자가 관측한 "잘 누적되던 후보가 새 리비전 때문에 빨리 reset되는" 증상은 confirmation reset이 token-sentence 기준보다 punctuation/end marker 손실을 먼저 본 경우와 연결된다.
+
+반영:
+
+- `_should_reset_revision_age()`에서 token-sentence 유사도와 internal stability 확인을 종결부호 손실 reset보다 먼저 평가하도록 조정했다.
+- `_next_revision_confirmation_count()`도 같은 원칙으로, token-sentence가 같은 후보는 종결부호가 흔들려도 confirmation을 유지/증가시키도록 조정했다.
+- 이 변경은 영어/한국어/중국어 문구별 규칙이 아니라 “revision identity는 token-sentence 유사도 우선”이라는 기준 문서의 공통 원칙을 코드 순서에 반영한 것이다.
+- 실시간 파이프라인 기준 문서에도 문장부호 손실은 token-sentence/internal stability 판단 뒤에만 reset 근거로 사용한다고 명시했다.
+- `LifecycleState`는 `sbd_lifecycle_state.py`로 분리해 benchmark replay 파일이 다시 1000라인 제한에 가까워지지 않게 했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_ai_revision_reset_policy tests.unit.test_dictation_pipeline_nodes
+Ran 45 tests in 0.007s, OK
+
+./.venv/bin/python -m unittest discover tests/eval/dictation_ai/tool_tests
+Ran 161 tests in 0.050s, OK
+
+./.venv/bin/python -m py_compile src/app/dictation_transcript_logic.py tests/unit/test_dictation_pipeline_nodes.py tests/eval/dictation_ai/benchmark/sbd_lifecycle_replay.py tests/eval/dictation_ai/benchmark/sbd_lifecycle_state.py
+OK
+```
+
+제한:
+
+- 이번 턴의 sandbox에서는 `nvidia-smi`가 드라이버와 통신하지 못했고, sandbox 밖 CUDA 확인 요청도 정책상 거부됐다.
+- 따라서 이번 변경의 실제 성능 근거는 아직 기존 CUDA sweep 해석과 로컬 helper 검증까지다. 다음 유효한 검증은 같은 1113건 challenge replay 또는 최신 1223건 case set에서 `sat + cuda + float16` paper-evidence sweep으로 baseline 대비 delta를 확인하는 것이다.
+
 ### 2026-06-21 candidate buffer 순서 원칙의 benchmark replay 정합성 보강
 
 관측:
@@ -14860,6 +14903,7 @@ OK
 - benchmark replay도 chunk별 이전 window와 현재 window로 stable analysis를 계산하고, revision confirmation/reset 및 queue revision 판단에 운영과 같은 stable 값을 전달하도록 맞췄다.
 - benchmark report의 bottleneck/exemplar metric에도 `stage_finalize_deferred_for_queue_order`, `finalize_delta_fragment_preserved`, `candidate_delta_trimmed*`, `stage_revision_internal_stability_*`, `stage_revision_confirmation_preserved_internal`, `stage_revision_confirmation_reset`를 포함했다.
 - `sbd_benchmark.py`가 1000라인을 넘어 entrypoint와 lifecycle replay 책임이 섞이기 시작했으므로, replay 구현을 `tests/eval/dictation_ai/benchmark/sbd_lifecycle_replay.py`로 분리했다. 기존 entrypoint와 테스트 import 경로는 유지한다.
+- `LifecycleState`와 stable analysis helper는 `tests/eval/dictation_ai/benchmark/sbd_lifecycle_state.py`로 추가 분리해 replay 파일이 다시 1000라인 제한에 가까워지지 않게 했다.
 - 이 변경은 문장별 예외나 언어별 규칙이 아니라 “생성순서대로 소비하되 stale 후보는 되살리지 않는다”는 공통 lifecycle 원칙을 벤치 증거 경로에 맞춘 것이다.
 
 검증:
@@ -14871,7 +14915,7 @@ Ran 78 tests in 0.017s, OK
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases --max-drafts 0
 case_count=1223, expected_final_case_count=1219, en=429, ko=462, zh=332
 
-./.venv/bin/python -m py_compile tests/eval/dictation_ai/sbd_benchmark.py tests/eval/dictation_ai/benchmark/sbd_lifecycle_replay.py tests/eval/dictation_ai/benchmark/sbd_benchmark_report.py
+./.venv/bin/python -m py_compile tests/eval/dictation_ai/sbd_benchmark.py tests/eval/dictation_ai/benchmark/sbd_lifecycle_replay.py tests/eval/dictation_ai/benchmark/sbd_lifecycle_state.py tests/eval/dictation_ai/benchmark/sbd_benchmark_report.py
 OK
 
 ./.venv/bin/python -m unittest discover tests/eval/dictation_ai/tool_tests
@@ -14880,8 +14924,8 @@ Ran 161 tests in 0.049s, OK
 ./.venv/bin/python -m unittest discover tests/unit
 Ran 173 tests in 0.222s, OK
 
-wc -l tests/eval/dictation_ai/sbd_benchmark.py tests/eval/dictation_ai/benchmark/sbd_lifecycle_replay.py
-sbd_benchmark.py=250, sbd_lifecycle_replay.py=989
+wc -l tests/eval/dictation_ai/sbd_benchmark.py tests/eval/dictation_ai/benchmark/sbd_lifecycle_replay.py tests/eval/dictation_ai/benchmark/sbd_lifecycle_state.py tests/eval/dictation_ai/benchmark/sbd_benchmark_report.py
+sbd_benchmark.py=250, sbd_lifecycle_replay.py=948, sbd_lifecycle_state.py=50, sbd_benchmark_report.py=570
 
 git diff --check
 OK

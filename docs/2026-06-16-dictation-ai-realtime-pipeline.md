@@ -79,6 +79,7 @@
 - `candidateAge`가 기준에 도달하기 전에는 뒤 후보가 관측되어도 즉시 소비하지 않는다.
 - pending tail이 staged 후보의 revision/확장으로 보이면 `candidateAge` 증가는 보류하지만, 이미 누적된 age를 reset하지 않는다.
 - token-sentence(토큰센텐스) 유사도가 낮아 confirmation을 보존할 수 없는 reset 대상 revision은 active staged 후보를 즉시 덮지 않고 candidate buffer에 보류한다. 해당 대안 후보가 같은 revision 계열로 반복 관측될 때만 이후 순서에 따라 소비한다.
+- 종결부호/문장부호가 window마다 흔들려도 token-sentence가 같은 revision이면 confirmation과 age를 reset하지 않는다. 문장부호 손실은 token-sentence 유사도와 internal stability로 같은 revision이 아니라고 판단된 뒤에만 reset 근거로 사용한다.
 - candidate buffer에 active staged 후보의 더 긴 token-sentence revision이 남아 있으면, active staged 후보가 age 기준에 도달해도 fragment final로 먼저 소비하지 않는다. 단, stale 한계를 넘은 revision 후보는 흡수하지 않고 suppressed 후보로 폐기한다.
 - candidate buffer head가 active staged 후보보다 오래 관측된 다른 revision 계열이면, active staged 후보가 확정 조건을 만족해도 먼저 final로 소비하지 않고 buffer head를 먼저 재평가한다. 단, stale 한계를 넘은 buffer head는 final 순서 보류 근거가 아니라 suppressed 후보로 폐기한다.
 - candidate buffer에서 승격된 이전 후보가 짧은 과거 prefix를 끌고 온 상태이고, 같은 chunk의 새 후보가 해당 prefix 뒤 본문과 높은 token-sentence coverage로 정렬되면 새 후보를 같은 revision의 preferred candidate로 본다.

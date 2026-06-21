@@ -1803,9 +1803,6 @@ def _next_revision_confirmation_count(
 ) -> int:
     normalized_previous = _normalized_text(previous)
     normalized_preferred = _normalized_text(preferred)
-    if normalized_preferred != normalized_previous and _boundary_sentence_end_count(normalized_previous) > 0:
-        if _boundary_sentence_end_count(normalized_preferred) == 0:
-            return 1
     if preferred != _normalized_text(previous):
         if _should_preserve_revision_confirmation_by_token_sentence(previous, preferred):
             return current_confirmations + 1
@@ -1867,8 +1864,6 @@ def _should_reset_revision_age(
     normalized_preferred = _normalized_text(preferred)
     if normalized_preferred == normalized_previous:
         return False
-    if _boundary_sentence_end_count(normalized_previous) > 0 and _boundary_sentence_end_count(normalized_preferred) == 0:
-        return True
     if _should_preserve_revision_confirmation_by_token_sentence(previous, preferred):
         return False
     if _should_preserve_revision_confirmation_from_internal_stability(
@@ -1879,6 +1874,8 @@ def _should_reset_revision_age(
         stable_overlap_source,
     ):
         return False
+    if _boundary_sentence_end_count(normalized_previous) > 0 and _boundary_sentence_end_count(normalized_preferred) == 0:
+        return True
     return True
 
 
