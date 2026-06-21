@@ -14750,6 +14750,53 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-21 중국어 가족/사진/옷 걱정 구간 delta/queue 손실 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 17:56:57..17:58:34
+chunk=2055..2152 중심
+```
+
+감사 결과:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 17:56:57" --until "2026-06-21 17:58:34" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-zh-family-clothes-175657-175834.json
+```
+
+```text
+stt_raw_line_count=98
+finalize_event_count=26
+finalize_per_stt_raw=0.265
+stage_replace_deferred_count=76
+stage_replace_deferred_per_stt_raw=0.776
+stage_queue_promote_count=33
+stage_queue_promote_per_stt_raw=0.337
+duplicate_suppressed_count=137
+duplicate_suppressed_per_stt_raw=1.398
+quality_block_count=45
+quality_block_per_stt_raw=0.459
+finalize_delta_suppressed_stage_retained_count=14
+finalize_delta_suppressed_stage_dropped_count=10
+stage_queue_recent_final_suppressed_count=16
+```
+
+관측:
+
+- `开心因为我觉得我的家人他们都很包容我就是很像。`처럼 앞 문장과 다음 문장의 연결부가 premature final로 확정됐다.
+- `这样，但我自己本身不是很喜欢吃菜啦。`는 확정 시도마다 최근 final delta로 줄어든 출력이 계산되어 `delta 보류` 후 stage가 폐기됐다.
+- 이후 `可是他就会一直...`, `每次出门的时候穿短裙...`, `你快去穿件裤子啊...` 구간은 stage queue 승격, recent-final suppression, duplicate suppression이 겹치며 일부 문장이 왜곡되거나 누락됐다.
+- `就一只狗妈讲...` 같은 출력은 STT 원문 왜곡을 포함하지만, 실험 목적은 raw STT 정확도 평가가 아니라 STT window revision 상황에서 final 후보를 어떤 순서와 유사도 기준으로 소비하는지 확인하는 것이다.
+- 현재 실행 중인 앱이 직전 `SHORT_CJK_CONFIRM_EXTRA_CHUNKS` 패치를 반영한 재시작 프로세스인지 보장되지 않는다. 따라서 이 케이스는 패치 효과 주장 대신 후속 CUDA benchmark 비교용 관측 케이스로 둔다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-6-20260621.jsonl`에 `zh_log_family_photo_clothes_delta_queue_loss_20260621_001` 케이스를 추가했다.
+- 기대 문장은 가족과 사진 촬영 배려, 회사/가족 앞 말수 차이, 채소 권유, 옷차림 걱정 구간으로 나누었다.
+- 특정 단어 또는 언어별 문구 규칙은 추가하지 않고, `delta-suppressed`, `stage-drop`, `queue-head-stall`, `recent-final-delta`가 함께 발생하는 lifecycle 케이스로만 관리한다.
+
 ### 2026-06-21 중국어 花田鸟笼 음료 주문 구간 stale short stage 케이스 추가
 
 관측 구간:
