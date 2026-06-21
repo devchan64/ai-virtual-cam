@@ -16,6 +16,7 @@ from src.app.dictation_pipeline_settings import (
     delta_suppressed_stage_max_chunks,
     max_staged_sentence_queue,
     no_text_stale_stage_suppress_chunks,
+    staged_queue_max_promotion_age_chunks,
 )
 from src.app.dictation_transcript_logic import (
     _diagnostic_tail,
@@ -107,6 +108,7 @@ def run_transcribe_loop(
         while True:
             promoted = commit_buffer_node.promote_if_idle(
                 chunk_index=chunks,
+                max_promotion_age_chunks=staged_queue_max_promotion_age_chunks(),
                 count_metric=count_metric,
                 count_segment_state=count_segment_state,
             )
@@ -1055,6 +1057,10 @@ def run_transcribe_loop(
             stage_queue_promote_count = chunk_lifecycle_metrics.get("stage_queue_promote", 0)
             stage_queue_revision_count = chunk_lifecycle_metrics.get("stage_queue_revision", 0)
             stage_queue_drop_oldest_count = chunk_lifecycle_metrics.get("stage_queue_drop_oldest", 0)
+            stage_queue_stale_promote_suppressed_count = chunk_lifecycle_metrics.get(
+                "stage_queue_stale_promote_suppressed",
+                0,
+            )
             stage_queue_recent_final_suppressed_count = chunk_lifecycle_metrics.get(
                 "stage_queue_recent_final_suppressed",
                 0,
@@ -1140,6 +1146,7 @@ def run_transcribe_loop(
                 f"stage_queue_promote={stage_queue_promote_count} "
                 f"stage_queue_revision={stage_queue_revision_count} "
                 f"stage_queue_drop_oldest={stage_queue_drop_oldest_count} "
+                f"stage_queue_stale_promote_suppressed={stage_queue_stale_promote_suppressed_count} "
                 f"stage_queue_recent_final_suppressed={stage_queue_recent_final_suppressed_count} "
                 f"stage_queue_recent_final_delta_trimmed={stage_queue_recent_final_delta_trimmed_count} "
                 f"stage_replace_deferred_same_chunk={stage_replace_deferred_same_chunk_count} "

@@ -14808,6 +14808,71 @@ git diff --check
 OK
 ```
 
+### 2026-06-21 중국어 Vienna coffee/sweetness 구간 stale queue final 개선
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 18:10:10..18:10:39
+chunk=2848..2877 중심
+```
+
+감사 결과:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 18:10:10" --until "2026-06-21 18:10:39" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-zh-coffee-181010-181039.json
+```
+
+```text
+stt_raw_line_count=30
+finalize_event_count=9
+finalize_per_stt_raw=0.300
+stage_replace_deferred_count=99
+stage_replace_deferred_per_stt_raw=3.300
+stage_queue_promote_count=15
+stage_queue_promote_per_stt_raw=0.500
+stage_queue_drop_oldest 관측
+duplicate_suppressed_count=7
+quality_block_count=33
+finalize_delta_suppressed_stage_retained_count=12
+finalize_delta_suppressed_stage_dropped_count=8
+```
+
+관측:
+
+- raw window는 `维也纳咖啡`, `不是很甜`, `我也是觉得不是很甜`, `比较硬一点点`, `不要打到不够硬`, `好喝` 흐름으로 안정화됐다.
+- 실제 final은 `今天去的不是别的，是泰国。`, `我给他有一个鸡蛋...`, `我特别喜欢云南...` 같은 이전 queue 후보를 aged/replaced final로 방출했다.
+- `stage_replace_deferred_per_stt_raw=3.300`이고 queue 길이가 20에 도달하면서 `stage_queue_drop_oldest`가 발생했다. 이는 queue 크기 부족만의 문제가 아니라 오래된 queued candidate가 뒤늦게 승격되어 현재 window의 문장을 밀어내는 문제다.
+- 생성순서 소비 규칙은 유지하되, queued 후보가 지나치게 오래된 경우 현재 sliding window 문장 흐름과 멀어진 것으로 보고 승격 시 폐기하는 구조적 제한이 필요하다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-6-20260621.jsonl`에 `zh_log_vienna_coffee_sweetness_stale_queue_20260621_001` 케이스를 추가했다.
+- `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=8`을 추가했다. queue 크기는 유지하고, 승격 시 후보 age가 임계값을 넘으면 `stage_queue_stale_promote_suppressed`로 폐기한다.
+- 이 변경은 특정 언어/문구 규칙이 아니라 lifecycle queue 후보의 유효기간 제한이다. 후보 생성순서는 유지하지만, 오래된 후보가 final-only 번역 큐로 뒤늦게 들어가는 것을 줄인다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases --max-drafts 0
+case_count=1192, expected_final_case_count=1188, zh=301
+
+./.venv/bin/python -m unittest tests.unit.test_dictation_pipeline_nodes tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle
+Ran 35 tests in 0.005s, OK
+
+./.venv/bin/python -m py_compile src/app/dictation_pipeline_settings.py src/app/dictation_node_sentence_candidate_commit_buffer.py src/app/dictation_pipeline_loop.py
+OK
+
+git diff --check
+OK
+```
+
+제한:
+
+- `sat + cuda + float16` 벤치는 sandbox 내부에서 backend 초기화 fail-fast로 중단됐다.
+- sandbox 밖 CUDA 실행 승인 요청도 현재 환경 정책에서 거부됐다. CPU/mock fallback은 성능 근거로 사용하지 않는다.
+
 ### 2026-06-21 중국어 가족/사진/옷 걱정 구간 delta/queue 손실 케이스 추가
 
 관측 구간:

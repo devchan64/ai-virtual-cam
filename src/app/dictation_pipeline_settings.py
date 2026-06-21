@@ -75,6 +75,11 @@ RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS = 4
 # 줄 수 있지만 stale 후보 churn은 늘어난다.
 MAX_STAGED_SENTENCE_QUEUE = 20
 
+# queued stage 후보가 너무 늦게 승격되면 현재 sliding window와 의미상 멀어진
+# stale 문장이 final로 나갈 수 있다. sentenceFinalizeAge=3 기준 8 chunk는
+# active stage 확정 지연의 약 두 배를 넘는 backlog만 폐기하는 보수값이다.
+STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS = 8
+
 # empty/no-speech STT chunk는 final 확정 근거가 아니다. 이 임계값은 no-text
 # chunk가 반복될 때 미확정 staged 후보를 폐기하는 데만 쓰며, 이 값만으로
 # 텍스트를 final 확정해서는 안 된다.
@@ -276,6 +281,10 @@ def max_staged_sentence_queue() -> int:
     return _dictation_env_int("MAX_STAGED_SENTENCE_QUEUE", MAX_STAGED_SENTENCE_QUEUE)
 
 
+def staged_queue_max_promotion_age_chunks() -> int:
+    return max(1, _dictation_env_int("STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS", STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS))
+
+
 def no_text_stale_stage_suppress_chunks() -> int:
     return _dictation_env_int("NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS", NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS)
 
@@ -352,6 +361,7 @@ def dictation_pipeline_policy() -> dict[str, object]:
         "segment_no_speech_confidence_weight": SEGMENT_NO_SPEECH_CONFIDENCE_WEIGHT,
         "cjk_char_ranges": CJK_CHAR_RANGES,
         "max_staged_sentence_queue": max_staged_sentence_queue(),
+        "staged_queue_max_promotion_age_chunks": staged_queue_max_promotion_age_chunks(),
         "no_text_stale_stage_suppress_chunks": no_text_stale_stage_suppress_chunks(),
         "delta_suppressed_stage_max_chunks": delta_suppressed_stage_max_chunks(),
         "sentence_confirm_chunks": sentence_confirm_chunks(),
@@ -499,6 +509,16 @@ def dictation_tuning_manifest() -> list[dict[str, int | float | str]]:
             max_value=50,
             scope="lifecycle",
             intent="preserve created-order staged candidates when SBD emits multiple completed candidates before active finalization",
+        ),
+        _tuning_manifest_entry(
+            "STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS",
+            default=STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS,
+            current=staged_queue_max_promotion_age_chunks(),
+            value_type="int",
+            min_value=1,
+            max_value=30,
+            scope="lifecycle",
+            intent="drop queued staged candidates that are too old to represent the current sliding-window sentence stream",
         ),
         _tuning_manifest_entry(
             "NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS",

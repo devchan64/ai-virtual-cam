@@ -25,6 +25,7 @@ from src.app.dictation_pipeline_settings import (
     SEGMENT_LOGPROB_SCORE_OFFSET,
     SEGMENT_LOGPROB_SCORE_SCALE,
     SEGMENT_NO_SPEECH_CONFIDENCE_WEIGHT,
+    STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS,
     STT_CONDITION_ON_PREVIOUS_TEXT,
     STT_STREAM_AUDIO_DTYPE,
     STT_TRANSCRIBE_TASK,
@@ -186,6 +187,10 @@ class DictationPipelineNodeTest(unittest.TestCase):
             policy["segment_high_no_speech_override_languages"],
             sorted(SEGMENT_HIGH_NO_SPEECH_OVERRIDE_LANGUAGES),
         )
+        self.assertEqual(
+            policy["staged_queue_max_promotion_age_chunks"],
+            STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS,
+        )
 
     def test_lifecycle_policy_supports_benchmark_env_overrides(self) -> None:
         with patch.dict(
@@ -195,14 +200,57 @@ class DictationPipelineNodeTest(unittest.TestCase):
                 "AVC_DICTATION_SENTENCE_CONFIRM_CHUNKS": "4",
                 "AVC_DICTATION_SHORT_NO_END_FRAGMENT_UNITS": "6",
                 "AVC_DICTATION_SHORT_CJK_CONFIRM_EXTRA_CHUNKS": "2",
+                "AVC_DICTATION_STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS": "9",
             },
         ):
             policy = dictation_pipeline_policy()
 
         self.assertEqual(policy["max_staged_sentence_queue"], 33)
+        self.assertEqual(policy["staged_queue_max_promotion_age_chunks"], 9)
         self.assertEqual(policy["sentence_confirm_chunks"], 4)
         self.assertEqual(policy["short_no_end_fragment_units"], 6)
         self.assertEqual(policy["short_cjk_confirm_extra_chunks"], 2)
+
+    def test_commit_buffer_drops_stale_queued_candidate_before_promotion(self) -> None:
+        node = SentenceCandidateCommitBufferNode(max_size=4)
+        metrics: dict[str, int] = {}
+
+        def count_metric(name: str, amount: int = 1) -> None:
+            metrics[name] = metrics.get(name, 0) + amount
+
+        stable_analysis = SimpleNamespace(
+            stable_internal_ratio=0.0,
+            stable_internal_chars=0,
+            stable_overlap_source="none",
+        )
+        node.enqueue_or_revision(
+            candidate="stale queued sentence.",
+            forced=False,
+            chunk_index=1,
+            stable_analysis=stable_analysis,
+            count_metric=count_metric,
+            count_segment_state=count_metric,
+        )
+        node.enqueue_or_revision(
+            candidate="fresh queued sentence.",
+            forced=False,
+            chunk_index=8,
+            stable_analysis=stable_analysis,
+            count_metric=count_metric,
+            count_segment_state=count_metric,
+        )
+
+        promoted = node.promote_if_idle(
+            chunk_index=10,
+            max_promotion_age_chunks=5,
+            count_metric=count_metric,
+            count_segment_state=count_metric,
+        )
+
+        self.assertTrue(promoted)
+        self.assertEqual(node.active.sentence, "fresh queued sentence.")
+        self.assertEqual(metrics["stage_queue_stale_promote_suppressed"], 1)
+        self.assertEqual(metrics["stage_queue_promote"], 1)
 
     def test_tuning_manifest_documents_env_overrides_and_evidence_scope(self) -> None:
         with patch.dict("os.environ", {"AVC_DICTATION_SENTENCE_CONFIRM_CHUNKS": "5"}):
@@ -402,6 +450,7 @@ class DictationPipelineNodeTest(unittest.TestCase):
         self.assertEqual(len(node), 2)
         promoted = node.promote_if_idle(
             chunk_index=3,
+            max_promotion_age_chunks=99,
             count_metric=count_metric,
             count_segment_state=count_state,
         )
@@ -442,6 +491,7 @@ class DictationPipelineNodeTest(unittest.TestCase):
 
         promoted = node.promote_if_idle(
             chunk_index=25,
+            max_promotion_age_chunks=99,
             count_metric=count_metric,
             count_segment_state=count_state,
         )
@@ -488,6 +538,7 @@ class DictationPipelineNodeTest(unittest.TestCase):
 
         promoted = node.promote_if_idle(
             chunk_index=12,
+            max_promotion_age_chunks=99,
             count_metric=count_metric,
             count_segment_state=count_state,
         )
