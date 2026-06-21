@@ -103,7 +103,7 @@ Whisper 계열 모델은 강력한 오프라인 전사 성능을 보이지만, �
 - `finalized`: 후보가 final transcript로 확정된다.
 - `candidate_duplicate_suppressed`: 이미 committed된 내용과 중복되어 출력하지 않는다.
 
-일반 후보는 여러 chunk에서 재확인된 뒤 확정된다. 현재 운영 계약은 `sentenceFinalizeAge`로 staged 후보의 관찰 횟수를 정의하고, 영어/한국어/중국어 기본값 모두 3회를 기준으로 한다. 미확정 replacement는 기존 후보를 즉시 삭제하지 않고 candidate buffer에 보류한다. 같은 revision 계열에서 나중 후보가 final로 소비되면 이전 미소비 후보는 stale revision으로 폐기한다. STT text가 없는 chunk는 age 증가 근거로 쓰지 않고, 반복 no-text 구간의 미확정 후보는 final이 아니라 stale 후보로 폐기할 수 있다.
+일반 후보는 여러 chunk에서 재확인된 뒤 확정된다. 현재 운영 계약은 `sentenceFinalizeAge`로 staged 후보의 관찰 횟수를 정의하고, 영어/한국어/중국어 기본값 모두 3회를 기준으로 한다. 미확정 replacement는 기존 후보를 즉시 삭제하지 않고 candidate buffer에 보류한다. 리비전 계열 판단은 완전 문자열 일치가 아니라 token-sentence(토큰센텐스) 유사도, 공통 token run, coverage를 기준으로 한다. 다만 새 후보가 같은 발화 구간으로 보이더라도 token-sentence 기준상 confirmation을 보존할 수 없는 reset 대상이면 active staged 후보를 즉시 덮지 않고 candidate buffer에서 반복 관측을 기다린다. 같은 revision 계열에서 나중 후보가 final로 소비되면 이전 미소비 후보는 stale revision으로 폐기한다. STT text가 없는 chunk는 age 증가 근거로 쓰지 않고, 반복 no-text 구간의 미확정 후보는 final이 아니라 stale 후보로 폐기할 수 있다.
 
 ## 6. 문맥 윈도우와 확정 단위
 
@@ -300,7 +300,7 @@ Challenge replay 벤치마크는 품질 게이트가 아니라 실패 재현 기
 
 최신 lifecycle reason delta는 no-end fragment 축의 해석을 더 분명히 한다. `SHORT_NO_END_FRAGMENT_UNITS=3`은 `quality_blocked`, `no_end_marker`, `short_no_end_fragment` count를 약 490건 줄였지만 `stage_replace_deferred=+404`, `stage_queue_revision=+198`을 만들고 final precision/F1을 낮췄다. 반대로 `SHORT_NO_END_FRAGMENT_UNITS=5`는 deferred replacement와 queue revision을 줄였지만 no-end/short-fragment 차단을 약 450건 늘리고 recall/F1/boundary를 낮췄다. 즉 이 threshold는 보수성 수준을 조절하는 축이지, 현재 failure corpus에서 안정적인 성능 개선축이 아니다. 따라서 후속 실험은 no-end threshold를 더 세밀하게 탐색하는 방식보다, 같은 문장 후보가 생성순서 안에서 어떤 revision 계열로 소비되거나 보류되는지 설명하는 lifecycle 구조 검증으로 옮겨야 한다.
 
-기준선 lifecycle counter는 이 결론을 더 분명히 한다. `stage_start=5638`로 SBD 후보는 충분히 생성되지만, `stage_replace=8273`, `stage_replace_deferred=7551`, `stage_queue_enqueue=4257`, `stage_queue_revision=3961`, `stage_candidate_quality_blocked=3963`이 함께 크게 나타난다. 이는 병목이 문장 후보 부족보다는 후보가 같은 발화 구간의 revision인지, 생성순서대로 소비 가능한지, no-end fragment를 final로 볼 수 있는지 판단하는 lifecycle 소비 규칙에 있음을 뜻한다. 언어별로도 영어는 no-end와 over-final, 한국어는 under-final과 pending 잔류, 중국어는 quality-blocked와 staged/queue 잔류가 두드러진다. 따라서 현재 근거는 문장 후보가 같은 발화 구간인지 판단하는 일반 revision lifecycle 로직과 representative corpus 기반 검증이 더 중요한 다음 개선 축임을 가리킨다.
+기준선 lifecycle counter는 이 결론을 더 분명히 한다. `stage_start=5638`로 SBD 후보는 충분히 생성되지만, `stage_replace=8273`, `stage_replace_deferred=7551`, `stage_queue_enqueue=4257`, `stage_queue_revision=3961`, `stage_candidate_quality_blocked=3963`이 함께 크게 나타난다. 이는 병목이 문장 후보 부족보다는 후보가 같은 발화 구간의 revision인지, 생성순서대로 소비 가능한지, no-end fragment를 final로 볼 수 있는지 판단하는 lifecycle 소비 규칙에 있음을 뜻한다. 특히 새 revision을 발견했다는 이유만으로 active staged 후보의 age/confirmation을 즉시 reset하면, 이미 관측되던 후보 대신 충분히 반복되지 않은 token-sentence 변형이 premature final로 나갈 수 있다. 따라서 reset은 token-sentence 유사도와 반복 관측으로 보수적으로 다뤄야 하며, 현재 근거는 문장 후보가 같은 발화 구간인지 판단하는 일반 revision lifecycle 로직과 representative corpus 기반 검증이 더 중요한 다음 개선 축임을 가리킨다.
 
 Challenge replay 내부에서도 raw 입력 검토 대상과 lifecycle 실험 대상을 분리해 해석해야 한다. 기존 실제 CUDA 기준선을 새 `evidence_strata_summary`로 재분석하면 `input_contamination_review`는 5건에 불과했고, `lifecycle_without_input_review` 1108건의 `final_f1_avg=0.482`, `final_boundary_f1_avg=0.106`으로 전체 1113건 평균과 거의 같다. 따라서 낮은 기준선은 입력 오염 케이스가 대량으로 섞였기 때문이 아니라, 대부분의 실패 중심 케이스가 실제로 staged queue, deferred replacement, no-end fragment, boundary mismatch 같은 lifecycle 병목을 포함하기 때문으로 해석한다. 다만 입력 잔류, 무음, 화자 전환 검토 태그가 있는 케이스는 raw input/source 문제를 분리하기 위해 별도 stratum으로 표기하고, final lifecycle 개선 효과의 직접 근거로 쓰지 않는다.
 

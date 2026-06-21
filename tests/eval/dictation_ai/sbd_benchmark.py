@@ -45,6 +45,7 @@ from src.app.dictation_transcript_logic import (
     _word_units,
     _should_age_staged_sentence,
     _should_confirm_staged_sentence,
+    _should_defer_token_sentence_revision,
     _should_defer_unconfirmed_replacement,
     _should_finalize_before_replacement,
     _should_finalize_replaced_sentence,
@@ -490,6 +491,50 @@ def _stage_completed_sentence(
         preferred_changed = preferred != previous
         if preferred_changed:
             state.count("stage_revision_changed")
+            if _should_defer_token_sentence_revision(
+                previous,
+                preferred,
+                state.staged_confirmations,
+                state.staged_forced or forced,
+            ):
+                state.count("stage_revision_token_sentence_deferred")
+                _queue_staged_sentence(state, preferred, forced, chunk_index)
+                if state.staged_deferred_age_chunk != chunk_index:
+                    state.staged_age += 1
+                    state.staged_deferred_age_chunk = chunk_index
+                    state.count("stage_age_tick")
+                if (
+                    state.staged_age >= _sentence_max_age_chunks(state.staged_forced, sentence_finalize_age)
+                    and _should_finalize_before_replacement(
+                        state.staged_sentence,
+                        language,
+                        state.staged_confirmations,
+                        state.staged_age,
+                        sentence_finalize_age,
+                        state.staged_forced,
+                    )
+                ):
+                    state.count("stage_age_finalize")
+                    finalized = _finalize_staged_sentence(
+                        state,
+                        language,
+                        "aged_forced" if state.staged_forced else "aged",
+                        chunk_index,
+                    )
+                    _promote_next_staged_sentence(state, chunk_index)
+                    return finalized
+                if state.staged_age >= _sentence_max_age_chunks(state.staged_forced, sentence_finalize_age):
+                    state.count("stage_age_quality_blocked")
+                    state.count("segment_state_suppressed")
+                    state.staged_sentence = ""
+                    state.staged_confirmations = 0
+                    state.staged_age = 0
+                    state.staged_forced = False
+                    state.staged_deferred_age_chunk = -1
+                    state.staged_delta_suppressed_chunks = 0
+                    state.staged_delta_suppressed_chunk_index = -1
+                    _promote_next_staged_sentence(state, chunk_index)
+                return []
         state.staged_sentence = preferred
         if preferred_changed:
             state.staged_delta_suppressed_chunks = 0

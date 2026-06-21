@@ -14750,6 +14750,121 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-21 중국어 Hanfu photographer 구간 delta fragment stage drop 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 18:33:34..18:33:54
+chunk=4252..4272 중심
+```
+
+감사 결과:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 18:33:34" --until "2026-06-21 18:33:54" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-zh-hanfu-photographer-183334-183354.json
+```
+
+```text
+stt_raw_line_count=21
+finalize_event_count=4
+finalize_per_stt_raw=0.190
+stage_replace_deferred_count=11
+stage_replace_deferred_per_stt_raw=0.524
+stage_queue_promote_count=7
+duplicate_suppressed_count=3
+quality_block_count=9
+finalize_delta_suppressed_stage_retained_count=6
+finalize_delta_suppressed_stage_dropped_count=4
+```
+
+관측:
+
+- `很多摄影师呢，他就会在这个街道上，就在这里玩set。`가 경계가 있는 staged 문장으로 관측된 뒤, final 시점에 `呢 他 就 会 在 这 个 街 道 上 就 在 这 里 玩 set`처럼 경계 없는 delta fragment로 축약되어 폐기됐다.
+- `finalize_delta_fragment_preserved` 지표가 현재 로그에 없어서, 실행 중인 앱은 `e991d3c`의 delta fragment 보존 패치가 반영된 재시작 상태가 아닌 것으로 판단한다.
+- 따라서 이번 항목은 새 로직 추가 근거가 아니라, 재시작 후 동일 증상이 해소되는지 비교할 사후 벤치 케이스로 둔다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-6-20260621.jsonl`에 `zh_log_hanfu_photographer_delta_fragment_dropped_stage_20260621_001` 케이스를 추가했다.
+- 기대 문장은 여행자 사진 도움, 한복 촬영 수요, 사진사 street set, 촬영 권유 문장으로 분리했다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases --max-drafts 0
+case_count=1196, expected_final_case_count=1192, zh=305
+
+./.venv/bin/python -m unittest tests.unit.test_dictation_pipeline_nodes tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle
+Ran 37 tests in 0.007s, OK
+
+git diff --check
+OK
+```
+
+### 2026-06-21 중국어 TV scene short fragment queue 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 18:37:18..18:37:40
+chunk=42..61 중심
+```
+
+감사 결과:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 18:37:18" --until "2026-06-21 18:37:40" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-zh-tv-scene-183718-183740.json
+```
+
+```text
+stt_raw_line_count=22
+finalize_event_count=11
+finalize_per_stt_raw=0.500
+stage_replace_deferred_count=34
+stage_replace_deferred_per_stt_raw=1.545
+stage_queue_promote_count=25
+stage_queue_promote_per_stt_raw=1.136
+duplicate_suppressed_count=59
+duplicate_suppressed_per_stt_raw=2.682
+quality_block_count=31
+```
+
+관측:
+
+- `住手一下/祝少一下/祝寿一下`처럼 STT가 흔들리는 짧은 후보와 `哎，这么赏脸...` fragment가 stage queue에서 빠르게 승격됐다.
+- duplicate suppression은 뒤쪽 반복 문장을 상당수 막았지만, 앞쪽 짧은 fragment final 자체는 막지 못했다.
+- 이 케이스는 특정 어휘가 아니라 stage queue, 짧은 CJK fragment, duplicate suppression의 상호작용을 보는 replay 케이스로 둔다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-6-20260621.jsonl`에 `zh_log_tv_scene_short_fragment_queue_20260621_001` 케이스를 추가했다.
+
+### 2026-06-21 중국어 Suzhou clothes/night shoot revision reset 보류 실험
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 18:38:26..18:38:41
+chunk=108..123 중심
+```
+
+관측:
+
+- `刚好明天要拍夜配，我就可以拿着这套衣服去拍我的夜。` 후보가 staged 된 뒤, 다음 window에서 `刚好明天要拍夜拍我就可以拿着这套衣服去拍我的夜拍。`으로 token-sentence가 바뀌었다.
+- 기존 구현은 preferred revision이 바뀌면 active stage를 즉시 덮고 confirmation/age를 reset했다. 이 구간에서는 새 token-sentence 변형이 충분히 반복되기 전에 `confirmations=2/2`로 final 확정됐다.
+- 설계/논문 기준은 revision 판단을 token-sentence 유사도, common run, coverage로 다루는 것이다. 따라서 새 revision이 관측됐다는 사실만으로 active stage를 즉시 reset하는 것은 과도하다.
+
+반영:
+
+- active staged 후보에서 token-sentence 기준 confirmation을 보존할 수 없는 reset 대상 revision이 관측되면, active stage를 즉시 덮지 않고 candidate buffer에 보류하도록 변경했다.
+- 보류된 대안 후보는 기존 queue revision 경로에서 반복 관측될 때만 confirmation을 누적한다.
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-6-20260621.jsonl`에 `zh_log_suzhou_clothes_night_shoot_reset_revision_20260621_001` 케이스를 추가했다.
+- `tests/eval/dictation_ai/tool_tests/test_dictation_ai_sbd_lifecycle.py`에 reset 대상 revision이 active stage를 즉시 바꾸지 않는 lifecycle 테스트를 추가했다.
+
 ### 2026-06-21 중국어 Suzhou cafe 구간 delta fragment stage drop 개선
 
 관측 구간:

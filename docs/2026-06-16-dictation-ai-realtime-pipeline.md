@@ -67,7 +67,7 @@
 | 필드 | 의미 |
 | --- | --- |
 | `createdSequence` | 후보가 처음 관측되어 버퍼에 들어온 순서. 같은 chunk 안 후보도 모델 경계 순서대로 증가한다. |
-| `revisionHash` | 같은 발화 구간의 revision 후보를 묶는 안정 식별자. 완전 동일 텍스트가 아니라 token-sentence 유사도와 위치 맥락으로 판단한다. |
+| `revisionHash` | 같은 발화 구간의 revision 후보를 묶는 안정 식별자. 완전 동일 텍스트가 아니라 token-sentence(토큰센텐스) 유사도와 위치 맥락으로 판단한다. |
 | `candidateAge` | 후보가 소비되지 않고 버퍼에서 재관측/검증된 chunk 수. final 소비 판단의 핵심 입력이다. |
 | `consumeSequence` | final 이벤트가 외부 sink로 발행된 순서. append-only transcript와 번역 sink는 이 순서만 따른다. |
 | `candidateBuffer` | 미소비 후보를 `createdSequence` 기준으로 보존하는 제한 크기 버퍼. 누락 소비와 중복 소비를 줄이기 위한 보류 장치다. |
@@ -78,6 +78,7 @@
 - final 발행은 `consumeSequence` 순서로만 수행한다.
 - `candidateAge`가 기준에 도달하기 전에는 뒤 후보가 관측되어도 즉시 소비하지 않는다.
 - pending tail이 staged 후보의 revision/확장으로 보이면 `candidateAge` 증가는 보류하지만, 이미 누적된 age를 reset하지 않는다.
+- token-sentence(토큰센텐스) 유사도가 낮아 confirmation을 보존할 수 없는 reset 대상 revision은 active staged 후보를 즉시 덮지 않고 candidate buffer에 보류한다. 해당 대안 후보가 같은 revision 계열로 반복 관측될 때만 이후 순서에 따라 소비한다.
 - STT text가 없는 chunk는 candidateAge 증가 근거로 사용하지 않는다.
 - STT text가 없는 chunk가 반복되면 confirmation 기준을 만족하지 못한 staged 후보는 final로 승격하지 않고 stale 후보로 폐기할 수 있다.
 - 이전 pending tail이 다음 completed 후보 앞에 붙어 기존 staged 문장의 revision처럼 보이는 경우, pending tail prefix는 final 후보에서 제거하고 staged 본문 기준으로 비교한다.

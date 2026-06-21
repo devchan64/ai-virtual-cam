@@ -241,6 +241,35 @@ class DictationAiSbdLifecycleTest(unittest.TestCase):
         self.assertIn("short_mixed_latin_zh", flags)
         self.assertFalse(_should_stage_boundary_candidate("body king的。", "zh"))
 
+    def test_reset_revision_is_deferred_until_token_sentence_repeats(self) -> None:
+        state = LifecycleState(
+            language="zh",
+            staged_sentence="刚好明天要拍夜配，我就可以拿着这套衣服去拍我的夜。",
+            staged_confirmations=1,
+            staged_age=0,
+            staged_deferred_age_chunk=109,
+        )
+
+        finalized = _stage_completed_sentence(
+            state,
+            "刚好明天要拍夜拍，我就可以拿着这套衣服去拍我的夜拍。",
+            "zh",
+            forced=False,
+            sentence_finalize_age=3,
+            chunk_index=110,
+        )
+
+        self.assertEqual(finalized, [])
+        self.assertEqual(state.staged_sentence, "刚好明天要拍夜配，我就可以拿着这套衣服去拍我的夜。")
+        self.assertEqual(state.staged_age, 1)
+        self.assertEqual(len(state.staged_queue or ()), 1)
+        self.assertEqual(
+            (state.staged_queue or ())[0]["sentence"],
+            "刚好明天要拍夜拍，我就可以拿着这套衣服去拍我的夜拍。",
+        )
+        self.assertEqual(state.metrics["stage_revision_token_sentence_deferred"], 1)
+        self.assertNotIn("finalized", state.metrics)
+
     def test_longer_mixed_latin_zh_sentence_remains_stageable(self) -> None:
         sentence = "你看，我点的这个是他们家的招牌cheese。"
         flags = _final_sentence_diagnostic_flags(sentence, "zh")

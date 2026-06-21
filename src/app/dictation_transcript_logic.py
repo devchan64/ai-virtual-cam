@@ -1638,6 +1638,41 @@ def _next_revision_confirmation_count(
     return current_confirmations + 1
 
 
+def _should_defer_token_sentence_revision(
+    previous: str,
+    preferred: str,
+    current_confirmations: int,
+    staged_forced: bool,
+    stable_internal_ratio: float = 0.0,
+    stable_internal_chars: int = 0,
+    stable_overlap_source: str = "",
+) -> bool:
+    normalized_previous = _normalized_text(previous)
+    normalized_preferred = _normalized_text(preferred)
+    if normalized_previous == normalized_preferred:
+        return False
+    if _word_units(normalized_previous) == _word_units(normalized_preferred):
+        return False
+    if _should_reset_revision_age(
+        normalized_previous,
+        normalized_preferred,
+        stable_internal_ratio,
+        stable_internal_chars,
+        stable_overlap_source,
+    ):
+        return True
+    required_confirmations = _staged_sentence_required_confirmations(normalized_preferred, staged_forced)
+    next_confirmations = _next_revision_confirmation_count(
+        normalized_previous,
+        normalized_preferred,
+        current_confirmations,
+        stable_internal_ratio,
+        stable_internal_chars,
+        stable_overlap_source,
+    )
+    return current_confirmations < required_confirmations <= next_confirmations
+
+
 def _should_reset_revision_age(
     previous: str,
     preferred: str,

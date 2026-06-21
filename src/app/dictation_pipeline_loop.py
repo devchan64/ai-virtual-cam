@@ -42,6 +42,7 @@ from src.app.dictation_transcript_logic import (
     _staged_sentence_required_confirmations,
     _should_age_staged_sentence,
     _should_confirm_staged_sentence,
+    _should_defer_token_sentence_revision,
     _should_defer_unconfirmed_replacement,
     _should_finalize_before_replacement,
     _should_finalize_replaced_sentence,
@@ -428,6 +429,15 @@ def run_transcribe_loop(
             preferred_changed = preferred != staged_before
             if preferred_changed:
                 count_metric("stage_revision_changed")
+                defer_token_sentence_revision = _should_defer_token_sentence_revision(
+                    staged_before,
+                    preferred,
+                    active_stage.confirmations,
+                    active_stage.forced or forced,
+                    stable_analysis.stable_internal_ratio,
+                    stable_analysis.stable_internal_chars,
+                    stable_analysis.stable_overlap_source,
+                )
                 if _is_cjk_text(staged_before) or _is_cjk_text(preferred):
                     count_metric(
                         "stage_revision_internal_stability_"
@@ -436,16 +446,50 @@ def run_transcribe_loop(
                             stable_analysis.stable_internal_chars,
                         )
                     )
-                    if _should_preserve_revision_confirmation_from_internal_stability(
-                        staged_before,
-                        preferred,
-                        stable_analysis.stable_internal_ratio,
-                        stable_analysis.stable_internal_chars,
-                        stable_analysis.stable_overlap_source,
+                    if not defer_token_sentence_revision:
+                        if _should_preserve_revision_confirmation_from_internal_stability(
+                            staged_before,
+                            preferred,
+                            stable_analysis.stable_internal_ratio,
+                            stable_analysis.stable_internal_chars,
+                            stable_analysis.stable_overlap_source,
+                        ):
+                            count_metric("stage_revision_confirmation_preserved_internal")
+                        else:
+                            count_metric("stage_revision_confirmation_reset")
+                if defer_token_sentence_revision:
+                    count_metric("stage_revision_token_sentence_deferred")
+                    queue_staged_sentence(preferred, forced)
+                    if active_stage.deferredAgeChunk != chunks:
+                        active_stage.age += 1
+                        active_stage.deferredAgeChunk = chunks
+                        count_metric("stage_age_tick")
+                    worker._emit(
+                        "status",
+                        "받아쓰기 AI stage 리비전 token-sentence 보류: "
+                        f"chunk={chunks} staged_confirmations={active_stage.confirmations} "
+                        f"staged_age={active_stage.age} staged_tail={_diagnostic_tail(staged_before)} "
+                        f"candidate_tail={_diagnostic_tail(preferred)}",
+                        display=False,
+                    )
+                    if _should_finalize_before_replacement(
+                        active_stage.sentence,
+                        detected,
+                        active_stage.confirmations,
+                        active_stage.age,
+                        sentence_finalize_age,
+                        active_stage.forced,
                     ):
-                        count_metric("stage_revision_confirmation_preserved_internal")
-                    else:
-                        count_metric("stage_revision_confirmation_reset")
+                        max_age = _sentence_max_age_chunks(active_stage.forced, sentence_finalize_age)
+                        if active_stage.age >= max_age:
+                            count_metric("stage_age_finalize")
+                            return finalize_staged_sentence(detected, "aged_forced" if active_stage.forced else "aged")
+                    if active_stage.age >= _sentence_max_age_chunks(active_stage.forced, sentence_finalize_age):
+                        count_metric("stage_age_quality_blocked")
+                        count_segment_state("suppressed")
+                        active_stage.clear()
+                        promote_next_staged_sentence(detected)
+                    return []
             else:
                 candidate_flags = set(_final_sentence_diagnostic_flags(candidate, detected))
                 staged_flags = set(_final_sentence_diagnostic_flags(staged_before, detected))
