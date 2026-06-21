@@ -14750,6 +14750,50 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-21 중국어 Yeonnam retro cafe/meal 구간 지연 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 15:48:20..15:49:14
+chunk=3806..3860 중심
+```
+
+감사 결과:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 15:48:20" --until "2026-06-21 15:49:14" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-zh-154820-154914.json
+```
+
+```text
+stt_raw_line_count=55
+finalize_event_count=13
+finalize_per_stt_raw=0.236
+stage_replace_deferred_count=152
+stage_replace_deferred_per_stt_raw=2.764
+stage_queue_promote_count=25
+stage_queue_promote_per_stt_raw=0.455
+duplicate_suppressed_count=48
+duplicate_suppressed_per_stt_raw=0.873
+quality_block_count=31
+finalize_delta_suppressed_stage_retained_count=8
+finalize_delta_suppressed_stage_dropped_count=4
+stage_queue_recent_final_suppressed_count=10
+```
+
+관측:
+
+- `所以有没有特别的景点？`, `先盖一下。`, `嗯，所以我在网上找...` 같은 짧거나 오인식된 stage head가 오래 남아 뒤 후보를 밀었다.
+- `这是我们今天的正餐的地点。`, `辛苦一整天。`, `这一间店呢...专门吃韩菜`, `延南洞/咖啡/复古氛围`, `韩牛/泡面/套餐` 흐름이 여러 window에서 반복됐지만 stage replace deferred가 매우 높았다.
+- final은 발생하지만 `stage_replace_deferred_per_stt_raw=2.764`로 이번 관측군 중 높은 편이다.
+- 기대 문장은 고유명사/음식명 raw가 흔들리는 부분을 과하게 정답화하지 않고, 안정된 문장 단위 흐름만 지정했다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-5-20260621.jsonl`에 `zh_log_delayed_yeonnam_retro_cafe_korean_meal_queue_20260621_001` 케이스를 추가했다.
+- 현재는 케이스 축적만 수행한다. stage head 교체 정책 완화는 중복 확정 위험이 있어 CUDA 벤치에서 같은 유형의 개선 근거가 확인될 때만 진행한다.
+
 ### 2026-06-21 중국어 retro appliances/recorder 구간 지연 케이스 추가
 
 관측 구간:
