@@ -14750,6 +14750,64 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-21 중국어 photo booth/cover selection 구간 stale queue 지연 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 18:05:20..18:05:59
+chunk=2558..2597 중심
+```
+
+감사 결과:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 18:05:20" --until "2026-06-21 18:05:59" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-zh-photo-cover-180520-180559.json
+```
+
+```text
+stt_raw_line_count=40
+finalize_event_count=15
+finalize_per_stt_raw=0.375
+stage_replace_deferred_count=99
+stage_replace_deferred_per_stt_raw=2.475
+stage_queue_promote_count=22
+stage_queue_promote_per_stt_raw=0.550
+duplicate_suppressed_count=40
+quality_block_count=31
+finalize_delta_suppressed_stage_retained_count=2
+stage_queue_recent_final_suppressed_count=4
+has_runtime_metadata=false
+```
+
+관측:
+
+- 사진 부스 설명, AI 처리/출력, 표지 사진, 결제 여부, 공중계정 follow, 네 장 촬영 후 표지 선택, 재촬영, AI 변환 확인 흐름이 반복 window에 나타났다.
+- `可爱呀。`, `有点。`, `不会纯粹。`, `全身感觉...`, `的照片。` 같은 stale stage 후보가 queue head를 오래 점유했고, 후속 의미 후보는 `stage_replace_deferred=99`와 `quality_block=31` 사이에서 지연됐다.
+- 일부 후보는 `chunk=2573`, `2576`, `2577`, `2594`에서 burst final로 한꺼번에 소비됐다. 이는 문장 경계 자체보다 stale stage queue 소비와 replacement defer가 확정 지연을 만드는 패턴으로 분류한다.
+- `chunk=2558`의 `这一次是感觉怎么着皮，蛮酷的。`, `chunk=2573`의 `全身感觉有点像那个那个什么那种。`은 관측 window의 현재 raw 흐름과 어긋난 stale final로 보인다.
+- 현재 실행 중인 앱은 직전 반복 CJK 조각 차단 패치가 반영된 재시작 상태인지 확인되지 않는다. 따라서 이번 항목은 새 로직을 추가하지 않고 후속 CUDA 벤치 비교용 케이스로 남긴다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-6-20260621.jsonl`에 `zh_log_photo_booth_cover_selection_stale_queue_20260621_001` 케이스를 추가했다.
+- 기대 문장은 사진 부스 활동 설명, 표지 사진, 결제 여부, follow 조건, 표지 선택, 촬영/재촬영, AI 변환 확인 흐름으로 나누었다.
+- 특정 주제나 중국어 문구 규칙은 추가하지 않는다. 이 케이스는 stale stage queue와 replacement defer가 의미 있는 문장 확정을 지연시키는지 보는 공통 lifecycle 케이스다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases --max-drafts 0
+case_count=1191, expected_final_case_count=1187, zh=300
+
+./.venv/bin/python -m unittest tests.unit.test_dictation_pipeline_nodes tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle
+Ran 34 tests in 0.005s, OK
+
+git diff --check
+OK
+```
+
 ### 2026-06-21 중국어 가족/사진/옷 걱정 구간 delta/queue 손실 케이스 추가
 
 관측 구간:
