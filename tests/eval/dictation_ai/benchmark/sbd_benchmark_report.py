@@ -48,7 +48,6 @@ LIFECYCLE_BOTTLENECK_METRICS = (
 )
 DEFERRED_REPLACEMENT_REASONS = frozenset(
     {
-        "open_korean_clause",
         "open_latin_clause",
         "unconfirmed",
         "unconfirmed_cjk",

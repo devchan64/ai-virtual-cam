@@ -8,7 +8,7 @@
 
 ## 현재 결론
 
-현재 1113건 `tests/eval/dictation_ai/sbd_cases/{en,ko,zh}/` 집합은 일반 운영 평균을 대표하지 않는다. 이 집합은 운영 로그에서 확정 누락, 중복 확정, boundary mismatch, staged residue가 반복 관측된 구간을 모은 failure-enriched challenge replay corpus다.
+현재 1223건 `tests/eval/dictation_ai/sbd_cases/{en,ko,zh}/` 집합은 일반 운영 평균을 대표하지 않는다. 이 집합은 운영 로그에서 확정 누락, 중복 확정, boundary mismatch, staged residue가 반복 관측된 구간을 모은 failure-enriched challenge replay corpus다.
 
 따라서 이 corpus는 다음 목적에는 유효하다.
 
@@ -39,7 +39,7 @@
 | 단계 | 유지할 이유 | 산출물 | 논문 해석 |
 | --- | --- | --- | --- |
 | 로그 관측 | 실제 앱에서 반복된 확정 누락, 중복 확정, 문장 파괴를 식별한다. | 실패 후보, representative source 후보 | 문제 정의와 사례 근거 |
-| challenge replay | 같은 실패 입력 집합에서 lifecycle 변경 전후를 재현 가능하게 비교한다. | 1113건 reviewed case, CUDA/SaT benchmark report | failure lifecycle trade-off |
+| challenge replay | 같은 실패 입력 집합에서 lifecycle 변경 전후를 재현 가능하게 비교한다. | 1223건 reviewed case, CUDA/SaT benchmark report | failure lifecycle trade-off |
 | structural lifecycle check | threshold로 설명되지 않는 queue/revision/no-end/boundary 병목을 검증한다. | 구조 변경 전후 counter와 metric delta | 새 개선 후보의 제한적 근거 |
 | representative/translation replay | 운영 평균과 downstream 번역 안정성을 별도로 검증한다. | 사람이 확정한 representative case, final/translation 연결 report | 준비 전까지 보류 |
 
@@ -59,10 +59,10 @@
 
 | 가설 | 현재 상태 | 근거 | 다음 증거 |
 | --- | --- | --- | --- |
-| partial hypothesis를 바로 final로 소비하면 중복/누락/문장 파괴가 발생한다. | 유지 | 운영 로그와 1113건 challenge replay의 `missing-final`, `duplicate-final`, `stage-queue`, `boundary-mismatch` 케이스 | 새 로그 case가 늘어도 같은 실패 축이 재현되는지 확인 |
+| partial hypothesis를 바로 final로 소비하면 중복/누락/문장 파괴가 발생한다. | 유지 | 운영 로그와 1223건 challenge replay의 `missing-final`, `duplicate-final`, `stage-queue`, `boundary-mismatch` 케이스 | 새 로그 case가 늘어도 같은 실패 축이 재현되는지 확인 |
 | `raw STT`, `SBD 후보`, `revision lifecycle`, `final-only sink`를 분리 계측해야 원인을 설명할 수 있다. | 유지 | lifecycle counter, evidence strata, queue residue strata가 평균값 뒤의 병목을 분리한다. | representative corpus와 translation replay에서도 같은 계층 분리가 유효한지 확인 |
 | 단일 threshold 튜닝으로 `final_f1_avg`를 크게 끌어올릴 수 있다. | 축소 | 12개 manifest 축 대부분이 0 delta 또는 precision/recall/boundary trade-off를 만든다. | 새 구조 변경이 나오기 전까지 추가 미세 sweep 우선순위 낮음 |
-| 현재 challenge replay 평균으로 운영 평균 품질을 주장할 수 있다. | 폐기 | 1113건은 failure-enriched challenge replay이며 무작위/시간 표본이 아니다. | representative `time-window`/`session-window` corpus 필요 |
+| 현재 challenge replay 평균으로 운영 평균 품질을 주장할 수 있다. | 폐기 | 1223건은 failure-enriched challenge replay이며 무작위/시간 표본이 아니다. | representative `time-window`/`session-window` corpus 필요 |
 | final-only sink가 번역 안정성을 높인다. | 보류 | speech translation segmentation 문헌과 시스템 계약상 타당하지만 현재 수치는 SBD/finalization replay에 한정된다. | final event timestamp와 translation output replay 필요 |
 
 ## 실험 설계 재구성 판단
@@ -677,6 +677,8 @@ reason breakdown은 다음 실험 축을 좁히는 데 사용한다.
 | --- | --- | --- |
 | deferred replacement reason | `unconfirmed=4039`, `open_latin_clause=1620`, `unconfirmed_cjk=1527`, `open_korean_clause=365` | stage 보류는 단일 원인이 아니라 미확정 후보와 open clause가 섞인 결과다. |
 | quality block reason | `no_end_marker=2280`, `short_no_end_fragment=2020`, `latin_only_for_zh=873`, `trailing_ellipsis=569`, `repeated_word_ngram=504` | 후보 생성 이후 final 소비를 막는 주된 이유는 no-end/short-fragment 계열이다. |
+
+2026-06-22의 1223건 replay에서는 한국어 어미 suffix 기반 `open_korean_clause`를 폐기했다. 해당 규칙은 언어별 어미를 직접 예외로 둔 과거 흔적이었고, 제거 후 `open_korean_clause=301 -> 0`, `confirmed=4674 -> 4845`, `final_f1_avg=0.480155 -> 0.482404`, `final_boundary_f1_avg=0.111346 -> 0.112973`로 확인됐다. 따라서 이후 reason breakdown에서 한국어 열린 절은 별도 문법 예외가 아니라 일반 confirmation/revision lifecycle 결과로 해석한다.
 
 `SHORT_NO_END_FRAGMENT_UNITS=3/5` 최신 lifecycle reason delta 재검증은 이 축을 기본값 개선 후보가 아니라 trade-off 설명 축으로 분류하게 한다. `3`은 `quality_blocked=-492`, `no_end_marker=-490`, `short_no_end_fragment=-489`로 차단을 줄이지만 `stage_replace_deferred=+404`, `stage_queue_revision=+198`이 늘고 final precision/F1이 하락했다. `5`는 `stage_replace_deferred=-416`, `stage_queue_revision=-235`로 churn을 줄이지만 `quality_blocked=+456`, `no_end_marker=+450`, `short_no_end_fragment=+449`가 늘고 recall/F1/boundary가 하락했다. 따라서 no-end fragment threshold는 현 기준에서 더 세밀하게 최적화할 축이 아니라, 보수성 수준을 설명하는 폐쇄된 축으로 본다.
 

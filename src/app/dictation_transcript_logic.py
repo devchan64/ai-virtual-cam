@@ -631,9 +631,6 @@ def _stage_quality_block_age_limit(sentence: str, language: str, forced: bool, b
     return limit
 
 
-_KOREAN_FINAL_WORD_SUFFIXES = ("다", "요", "죠", "까")
-
-
 def _has_latin_words(words: list[str]) -> bool:
     return any(any("a" <= ch <= "z" for ch in word.lower()) for word in words)
 
@@ -641,21 +638,6 @@ def _has_latin_words(words: list[str]) -> bool:
 def _has_unstable_mixed_latin_for_zh(words: list[str]) -> bool:
     latin_words = [word for word in words if any("a" <= ch <= "z" for ch in word.lower())]
     return len(latin_words) >= 2 or any(len(word) >= 4 for word in latin_words)
-
-
-def _looks_like_open_korean_clause(text: str, words: list[str]) -> bool:
-    if _boundary_sentence_end_count(text) > 0:
-        return False
-    if not words or not _has_hangul_words(words):
-        return False
-    last_word = words[-1]
-    if not any("가" <= ch <= "힣" for ch in last_word):
-        return False
-    return not last_word.endswith(_KOREAN_FINAL_WORD_SUFFIXES)
-
-
-def _is_open_korean_clause(text: str) -> bool:
-    return _looks_like_open_korean_clause(text, _word_units(text))
 
 
 def _looks_like_open_latin_clause(text: str, words: list[str]) -> bool:
@@ -867,8 +849,6 @@ def _should_confirm_staged_sentence(
     staged_confirmations: int,
     staged_forced: bool,
 ) -> bool:
-    if _is_open_korean_clause(staged_sentence):
-        return False
     flags = set(_final_sentence_diagnostic_flags(staged_sentence, "zh" if _is_cjk_text(staged_sentence) else ""))
     if "repeated_word_ngram" in flags:
         return False
@@ -882,8 +862,6 @@ def _should_preserve_partial_replacement(staged_sentence: str, candidate: str) -
     staged_words = _word_units(staged_sentence)
     candidate_words = _word_units(candidate)
     if len(staged_words) < 4 or len(candidate_words) < 4:
-        return False
-    if _looks_like_open_korean_clause(staged_sentence, staged_words):
         return False
     best_i, best_j, common_run = _best_common_word_run(staged_words, candidate_words)
     if common_run < 4:
@@ -928,8 +906,6 @@ def _replacement_decision_reason(
     staged_words = _word_units(staged_sentence)
     if not staged_words:
         return "empty"
-    if _looks_like_open_korean_clause(staged_sentence, staged_words):
-        return "open_korean_clause"
     if _looks_like_open_latin_clause(staged_sentence, staged_words):
         return "open_latin_clause"
     if staged_confirmations >= _staged_sentence_required_confirmations(staged_sentence, staged_forced):
@@ -959,7 +935,6 @@ def _replacement_decision_reason(
 
 def _should_defer_unconfirmed_replacement(replacement_reason: str) -> bool:
     return replacement_reason in {
-        "open_korean_clause",
         "open_latin_clause",
         "unconfirmed",
         "unconfirmed_cjk",

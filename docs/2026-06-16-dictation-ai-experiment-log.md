@@ -15058,6 +15058,94 @@ stage_replace_deferred_delta=+33
 - 따라서 `short_mixed_latin_zh` stage 차단은 유지한다.
 - 이 규칙은 장기적으로 더 일반적인 “짧은 mixed-script fragment” 게이트로 이름과 조건을 바꿀 후보지만, 현재 근거만으로 제거하지 않는다.
 
+### 2026-06-22 한국어 open-clause suffix 예외 제거 채택
+
+목적:
+
+- 기존 `open_korean_clause`는 한국어 후보의 마지막 어절이 `다/요/죠/까`로 끝나지 않으면 열린 절로 보고 confirmation보다 replacement defer를 우선했다.
+- 이는 특정 언어 어미를 문장 확정 규칙에 직접 넣는 방식이므로, “문장 확정 규칙은 언어별 예외 없이 token-sentence lifecycle로 관리한다”는 현재 설계 기준과 맞지 않는다.
+- 다만 영어 open clause defer는 전체 제거 ablation에서 영어 F1/boundary 회귀가 확인되어 이번 변경 범위에서 유지했다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-remove-open-korean-clause-and-revision-shim.json
+```
+
+변경:
+
+- `_should_confirm_staged_sentence()`에서 한국어 어미 기반 confirmation 차단 제거.
+- `_replacement_decision_reason()`에서 `open_korean_clause` defer reason 제거.
+- `_should_preserve_partial_replacement()`에서 한국어 open-clause 예외 제거.
+- unused helper `_looks_like_open_korean_clause()`, `_is_open_korean_clause()`, `_KOREAN_FINAL_WORD_SUFFIXES` 제거.
+- 설정 통합 후 import 사용처가 없던 `src/app/dictation_revision_policy.py` 호환 shim 제거.
+
+결과:
+
+| metric | baseline | current | delta |
+| --- | ---: | ---: | ---: |
+| `finalized` | 4863 | 5042 | +179 |
+| `stage_start` | 8572 | 8552 | -20 |
+| `finalized_per_stage_start` | 0.567312 | 0.589570 | +0.022258 |
+| `final_precision_avg` | 0.591738 | 0.574751 | -0.016987 |
+| `final_recall_avg` | 0.441211 | 0.449223 | +0.008012 |
+| `final_f1_avg` | 0.480155 | 0.482404 | +0.002249 |
+| `final_similarity_coverage_avg` | 0.389603 | 0.394969 | +0.005366 |
+| `final_boundary_f1_avg` | 0.111346 | 0.112973 | +0.001627 |
+| `case_exact_match` | 21 | 21 | +0 |
+| `pending_exact_match` | 712 | 712 | +0 |
+| `staged_exact_match` | 336 | 342 | +6 |
+
+언어/strata 영향:
+
+```text
+en: final_f1_delta=+0.000000, boundary_delta=+0.000000
+ko: final_f1_delta=+0.005953, precision_delta=-0.044968, recall_delta=+0.021210, boundary_delta=+0.004308
+zh: final_f1_delta=+0.000000, boundary_delta=+0.000000
+
+queue_len_1: final_f1_delta=+0.010486, staged_residue_delta=-7
+queue_len_2_to_4: final_f1_delta=+0.014863, staged_residue_delta=-11
+```
+
+판단:
+
+- 한국어 precision은 하락했지만 recall, final F1, boundary F1, staged exact, queue residue가 개선됐다.
+- 영어/중국어 수치는 변하지 않아 이번 변경은 한국어 suffix 예외 제거 효과로 한정된다.
+- `open_korean_clause=301 -> 0`, `confirmed=4674 -> 4845`로, 어미 기반 defer가 confirmation 소비를 막던 병목이 줄었다.
+- 세부 어미 규칙을 제거하고 lifecycle confirmation으로 판단을 통합하므로 현재 설계 원칙에 맞는 정리로 채택한다.
+- 후속 개선은 precision 하락을 특정 어미 규칙으로 되돌리지 않고, 최근 final 유사도와 queue 순서 소비 정책의 공통 원칙으로 다룬다.
+
+추가 ablation:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-open-korean-removed-no-end-confirm-extra.json
+```
+
+- 한국어 precision 하락의 주요 회귀 케이스가 `final_quality_no_end_marker`를 동반해, 공통 no-end 후보의 confirmation을 1회 추가하는 실험을 했다.
+- 결과는 `final_f1_avg=0.477`, `final_precision_avg=0.572`, `final_recall_avg=0.443`, `final_boundary_f1_avg=0.113`으로 직전 채택안보다 나빴다.
+- 따라서 no-end 후보 confirmation 추가는 폐기했다. precision 회복은 종결 표지 자체를 강화하는 방식이 아니라, 잘못 붙은 prefix/revision과 최근 final 비교를 다루는 공통 원칙에서 찾아야 한다.
+
+replacement no-end final 차단 ablation:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-open-korean-removed-block-no-end-replacement-final.json
+```
+
+- direct confirmation은 유지하고, replacement 직전 `_should_finalize_before_replacement()`에서 no-end 후보 final만 차단했다.
+- baseline 대비 `final_precision_avg_delta=-0.002521`, `final_recall_avg_delta=+0.000686`, `final_f1_avg_delta=+0.000312`, `final_boundary_f1_avg_delta=+0.004516`.
+- 직전 채택안 대비로는 precision은 회복되지만 recall/F1/`finalized_per_stage_start` 이득 대부분을 잃었다.
+- `queue_len_1`은 좋아지지만 `no_queue`가 악화되어 전체 확정 성능 개선으로 보기 어렵다.
+- 따라서 replacement no-end final 차단은 폐기했다. boundary 개선만으로 채택하지 않는다.
+
 ### 2026-06-22 short no-end fragment 품질 게이트 CUDA 스윕
 
 목적:

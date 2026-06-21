@@ -45,14 +45,66 @@ def _load_json_object(path: Path) -> dict[str, Any]:
 def _baseline_metric_summary(summary: dict[str, Any]) -> dict[str, Any]:
     metrics = summary.get("baseline_metric_summary", {})
     if not isinstance(metrics, dict):
+        metrics = {}
+    if metrics:
+        return metrics
+    evidence_summary = summary.get("evidence_summary", {})
+    if not isinstance(evidence_summary, dict):
         return {}
+    results = evidence_summary.get("results", [])
+    if not isinstance(results, list):
+        return {}
+    for result in results:
+        if not isinstance(result, dict) or result.get("label") != "baseline":
+            continue
+        baseline_metrics = result.get("metrics", {})
+        if not isinstance(baseline_metrics, dict):
+            return {}
+        return {
+            key: {"consistent": True, "value": value, "unique_values": [value]}
+            for key, value in baseline_metrics.items()
+            if isinstance(value, (int, float)) and not isinstance(value, bool)
+        }
     return metrics
 
 
 def _case_set_summary(summary: dict[str, Any]) -> dict[str, Any]:
     case_summary = summary.get("case_set_summary", {})
     if not isinstance(case_summary, dict):
+        case_summary = {}
+    if case_summary:
+        return case_summary
+    source = summary.get("case_summary", {})
+    if not isinstance(source, dict):
         return {}
+    normalized: dict[str, Any] = {}
+    for key in PAPER_CASE_SET_COUNTS:
+        value = source.get(key)
+        if isinstance(value, int) and not isinstance(value, bool):
+            normalized[key] = {"consistent": True, "value": value, "unique_values": [value]}
+    language_counts = source.get("language_counts", {})
+    if isinstance(language_counts, dict):
+        normalized["language_counts"] = {
+            str(language): {"consistent": True, "value": value, "unique_values": [value]}
+            for language, value in language_counts.items()
+            if isinstance(value, int) and not isinstance(value, bool)
+        }
+    return normalized
+
+
+def _top_level_count(summary: dict[str, Any], key: str) -> int | None:
+    value = summary.get(key)
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if key == "report_count":
+        results = summary.get("results")
+        if isinstance(results, list) and results:
+            return len(results)
+    if key == "unique_axis_count":
+        axes = summary.get("parameter_axes")
+        if isinstance(axes, list):
+            return len(set(str(axis) for axis in axes))
+    return None
     return case_summary
 
 
@@ -135,8 +187,8 @@ def audit_paper_evidence_numbers(summary_path: Path, paper_path: Path) -> dict[s
     missing_counts: list[dict[str, Any]] = []
     inconsistent_counts: list[dict[str, Any]] = []
     for key in PAPER_TOP_LEVEL_COUNTS:
-        value = summary.get(key)
-        if not isinstance(value, int) or isinstance(value, bool):
+        value = _top_level_count(summary, key)
+        if value is None:
             missing_counts.append(
                 {
                     "kind": "top_level",
