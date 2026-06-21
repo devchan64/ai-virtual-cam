@@ -41,6 +41,7 @@ from src.app.dictation_transcript_logic import (
     _sentence_max_age_chunks,
     _sentence_output_delta,
     _sentences_are_revisions,
+    _stage_quality_block_age_limit,
     _staged_sentence_required_confirmations,
     _word_units,
     _should_age_staged_sentence,
@@ -165,6 +166,23 @@ def _promote_next_staged_sentence(state: LifecycleState, chunk_index: int) -> No
         state.count("stage_queue_promote")
         state.count("stage_start")
         state.count("segment_state_staged")
+        promoted_quality_flags = set(_final_sentence_diagnostic_flags(state.staged_sentence, state.language))
+        if (
+            not _should_stage_boundary_candidate(state.staged_sentence, state.language)
+            or ("no_end_marker" in promoted_quality_flags and len(state.staged_queue) > 0)
+        ):
+            state.count("stage_queue_quality_suppressed")
+            state.count("segment_state_suppressed")
+            for flag in promoted_quality_flags:
+                state.count(f"stage_queue_quality_{flag}")
+            state.staged_sentence = ""
+            state.staged_confirmations = 0
+            state.staged_age = 0
+            state.staged_forced = False
+            state.staged_deferred_age_chunk = -1
+            state.staged_delta_suppressed_chunks = 0
+            state.staged_delta_suppressed_chunk_index = -1
+            continue
         promoted_sentence, recent_source = _recent_final_output_delta(
             state.staged_sentence,
             tuple(state.final_sentences or ()),
@@ -189,6 +207,33 @@ def _promote_next_staged_sentence(state: LifecycleState, chunk_index: int) -> No
         state.count("segment_state_suppressed")
 
 
+def _prefer_queued_revision_for_active(state: LifecycleState) -> bool:
+    if not state.staged_sentence:
+        return False
+    assert state.staged_queue is not None
+    for index, entry in enumerate(state.staged_queue):
+        queued_sentence = str(entry["sentence"])
+        if not _sentences_are_revisions(state.staged_sentence, queued_sentence):
+            continue
+        preferred = _prefer_sentence_revision(state.staged_sentence, queued_sentence)
+        if preferred == state.staged_sentence:
+            continue
+        entry["sentence"] = preferred
+        state.staged_sentence = str(entry["sentence"])
+        state.staged_confirmations = int(entry["confirmations"])
+        state.staged_age = int(entry["age"])
+        state.staged_forced = bool(entry["forced"])
+        state.staged_deferred_age_chunk = int(entry["deferred_age_chunk"])
+        state.staged_delta_suppressed_chunks = 0
+        state.staged_delta_suppressed_chunk_index = -1
+        del state.staged_queue[index]
+        state.count("stage_finalize_deferred_for_queue_revision")
+        state.count("stage_revision")
+        state.count("segment_state_revised")
+        return True
+    return False
+
+
 def _queue_staged_sentence(state: LifecycleState, candidate: str, forced: bool, chunk_index: int) -> None:
     assert state.staged_queue is not None
     for entry in state.staged_queue:
@@ -197,18 +242,19 @@ def _queue_staged_sentence(state: LifecycleState, candidate: str, forced: bool, 
             continue
         preferred = _prefer_sentence_revision(queued_sentence, candidate)
         reset_age = _should_reset_revision_age(queued_sentence, preferred)
+        if reset_age:
+            state.count("stage_queue_revision_token_sentence_deferred")
+            continue
         entry["sentence"] = preferred
         entry["confirmations"] = _next_revision_confirmation_count(
             queued_sentence,
             preferred,
             int(entry["confirmations"]),
         )
-        entry["age"] = 0 if reset_age else int(entry["age"]) + 1
+        entry["age"] = int(entry["age"]) + 1
         entry["forced"] = bool(entry["forced"]) or forced
         entry["deferred_age_chunk"] = chunk_index
         state.count("stage_queue_revision")
-        if reset_age:
-            state.count("stage_queue_revision_age_reset")
         state.count("stage_age_tick")
         return
     if len(state.staged_queue) >= max_staged_sentence_queue():
@@ -338,6 +384,8 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
         return []
     state.count("finalize_attempt")
     state.count(f"finalize_reason_{reason}")
+    if _prefer_queued_revision_for_active(state):
+        return []
     staged_before = state.staged_sentence
     output_sentence = _sentence_output_delta(state.committed_text, staged_before)
     assert state.final_sentences is not None
@@ -524,7 +572,7 @@ def _stage_completed_sentence(
                     )
                     _promote_next_staged_sentence(state, chunk_index)
                     return finalized
-                if state.staged_age >= _sentence_max_age_chunks(state.staged_forced, sentence_finalize_age):
+                if state.staged_age >= _stage_quality_block_age_limit(state.staged_sentence, language, state.staged_forced, sentence_finalize_age):
                     state.count("stage_age_quality_blocked")
                     state.count("segment_state_suppressed")
                     state.staged_sentence = ""
@@ -575,7 +623,7 @@ def _stage_completed_sentence(
                 state.count("stage_finalize_before_replace")
                 reason = "next_completed"
             return _finalize_staged_sentence(state, language, reason, chunk_index)
-        if not defer_for_later_extension and state.staged_age >= _sentence_max_age_chunks(state.staged_forced, sentence_finalize_age):
+        if not defer_for_later_extension and state.staged_age >= _stage_quality_block_age_limit(state.staged_sentence, language, state.staged_forced, sentence_finalize_age):
             state.count("stage_age_quality_blocked")
             state.count("segment_state_suppressed")
             state.staged_sentence = ""
@@ -627,7 +675,7 @@ def _stage_completed_sentence(
             )
             _promote_next_staged_sentence(state, chunk_index)
             return finalized
-        if state.staged_age >= _sentence_max_age_chunks(state.staged_forced, sentence_finalize_age):
+        if state.staged_age >= _stage_quality_block_age_limit(state.staged_sentence, language, state.staged_forced, sentence_finalize_age):
             state.count("stage_age_quality_blocked")
             state.count("segment_state_suppressed")
             state.staged_sentence = ""
@@ -715,6 +763,8 @@ def _age_staged_sentence(state: LifecycleState, language: str, sentence_finalize
         state.staged_forced,
         tuple(str(entry["sentence"]) for entry in (state.staged_queue or ())),
     ):
+        if state.staged_age < _stage_quality_block_age_limit(state.staged_sentence, language, state.staged_forced, sentence_finalize_age):
+            return []
         state.count("stage_age_quality_blocked")
         state.count("segment_state_suppressed")
         state.staged_sentence = ""

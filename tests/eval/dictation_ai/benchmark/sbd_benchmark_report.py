@@ -28,6 +28,9 @@ LIFECYCLE_BOTTLENECK_METRICS = (
     "stage_replace_deferred",
     "stage_queue_enqueue",
     "stage_queue_revision",
+    "stage_queue_revision_token_sentence_deferred",
+    "stage_finalize_deferred_for_queue_revision",
+    "stage_queue_quality_suppressed",
     "stage_candidate_quality_blocked",
     "stage_candidate_quality_no_end_marker",
     "final_quality_no_end_marker",
@@ -66,6 +69,9 @@ LIFECYCLE_FOCUS_TAG_MARKERS = (
 )
 CASE_EXEMPLAR_METRICS = (
     "stage_queue_revision",
+    "stage_queue_revision_token_sentence_deferred",
+    "stage_finalize_deferred_for_queue_revision",
+    "stage_queue_quality_suppressed",
     "stage_replace_deferred",
     "stage_candidate_quality_blocked",
     "stage_candidate_quality_no_end_marker",

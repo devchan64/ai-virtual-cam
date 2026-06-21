@@ -39,6 +39,7 @@ from src.app.dictation_transcript_logic import (
     _sentence_max_age_chunks,
     _sentence_output_delta,
     _sentences_are_revisions,
+    _stage_quality_block_age_limit,
     _staged_sentence_required_confirmations,
     _should_age_staged_sentence,
     _should_confirm_staged_sentence,
@@ -116,6 +117,23 @@ def run_transcribe_loop(
             )
             if not promoted:
                 return
+            promoted_quality_flags = set(_final_sentence_diagnostic_flags(active_stage.sentence, detected))
+            if (
+                not _should_stage_boundary_candidate(active_stage.sentence, detected)
+                or ("no_end_marker" in promoted_quality_flags and len(commit_buffer_node) > 0)
+            ):
+                count_metric("stage_queue_quality_suppressed", 1)
+                count_segment_state("suppressed", 1)
+                for flag in promoted_quality_flags:
+                    count_metric(f"stage_queue_quality_{flag}", 1)
+                worker._emit(
+                    "status",
+                    "받아쓰기 AI stage 큐 품질 폐기: "
+                    f"chunk={chunks} staged_tail={_diagnostic_tail(active_stage.sentence)}",
+                    display=False,
+                )
+                active_stage.clear()
+                continue
             promoted_sentence, recent_source = _recent_final_output_delta(
                 active_stage.sentence,
                 tuple(recent_transcripts),
@@ -176,6 +194,17 @@ def run_transcribe_loop(
             return []
         count_metric("finalize_attempt")
         count_metric(f"finalize_reason_{reason}")
+        if commit_buffer_node.prefer_queued_revision_for_active(
+            count_metric=count_metric,
+            count_segment_state=count_segment_state,
+        ):
+            worker._emit(
+                "status",
+                "받아쓰기 AI 확정 전 queue revision 보류: "
+                f"chunk={chunks} reason={reason} staged_tail={_diagnostic_tail(active_stage.sentence)}",
+                display=False,
+            )
+            return []
         output_sentence = _sentence_output_delta(committed_text, active_stage.sentence)
         staged_before = active_stage.sentence
         committed_before_chars = len(_normalized_text(committed_text))
@@ -485,7 +514,7 @@ def run_transcribe_loop(
                         if active_stage.age >= max_age:
                             count_metric("stage_age_finalize")
                             return finalize_staged_sentence(detected, "aged_forced" if active_stage.forced else "aged")
-                    if active_stage.age >= _sentence_max_age_chunks(active_stage.forced, sentence_finalize_age):
+                    if active_stage.age >= _stage_quality_block_age_limit(active_stage.sentence, detected, active_stage.forced, sentence_finalize_age):
                         count_metric("stage_age_quality_blocked")
                         count_segment_state("suppressed")
                         active_stage.clear()
@@ -572,7 +601,7 @@ def run_transcribe_loop(
                     count_metric("stage_finalize_before_replace")
                     reason = "next_completed"
                 return finalize_staged_sentence(detected, reason)
-            if not defer_for_later_extension and active_stage.age >= _sentence_max_age_chunks(active_stage.forced, sentence_finalize_age):
+            if not defer_for_later_extension and active_stage.age >= _stage_quality_block_age_limit(active_stage.sentence, detected, active_stage.forced, sentence_finalize_age):
                 count_metric("stage_age_quality_blocked")
                 count_segment_state("suppressed")
                 flags = _final_sentence_diagnostic_flags(active_stage.sentence, detected)
@@ -637,7 +666,7 @@ def run_transcribe_loop(
                 finalized = finalize_staged_sentence(detected, "aged_forced" if active_stage.forced else "aged")
                 promote_next_staged_sentence(detected)
                 return finalized
-            if active_stage.age >= _sentence_max_age_chunks(active_stage.forced, sentence_finalize_age):
+            if active_stage.age >= _stage_quality_block_age_limit(active_stage.sentence, detected, active_stage.forced, sentence_finalize_age):
                 count_metric("stage_age_quality_blocked")
                 count_segment_state("suppressed")
                 worker._emit(
@@ -753,6 +782,8 @@ def run_transcribe_loop(
                 active_stage.forced,
                 commit_buffer_node.queued_sentences(),
             ):
+                if active_stage.age < _stage_quality_block_age_limit(active_stage.sentence, detected, active_stage.forced, sentence_finalize_age):
+                    return []
                 count_metric("stage_age_quality_blocked")
                 count_segment_state("suppressed")
                 flags = _final_sentence_diagnostic_flags(active_stage.sentence, detected)
@@ -1116,6 +1147,15 @@ def run_transcribe_loop(
             stage_queue_enqueue_count = chunk_lifecycle_metrics.get("stage_queue_enqueue", 0)
             stage_queue_promote_count = chunk_lifecycle_metrics.get("stage_queue_promote", 0)
             stage_queue_revision_count = chunk_lifecycle_metrics.get("stage_queue_revision", 0)
+            stage_queue_revision_token_sentence_deferred_count = chunk_lifecycle_metrics.get(
+                "stage_queue_revision_token_sentence_deferred",
+                0,
+            )
+            stage_finalize_deferred_for_queue_revision_count = chunk_lifecycle_metrics.get(
+                "stage_finalize_deferred_for_queue_revision",
+                0,
+            )
+            stage_queue_quality_suppressed_count = chunk_lifecycle_metrics.get("stage_queue_quality_suppressed", 0)
             stage_queue_drop_oldest_count = chunk_lifecycle_metrics.get("stage_queue_drop_oldest", 0)
             stage_queue_stale_promote_suppressed_count = chunk_lifecycle_metrics.get(
                 "stage_queue_stale_promote_suppressed",
@@ -1206,6 +1246,9 @@ def run_transcribe_loop(
                 f"stage_queue_enqueue={stage_queue_enqueue_count} "
                 f"stage_queue_promote={stage_queue_promote_count} "
                 f"stage_queue_revision={stage_queue_revision_count} "
+                f"stage_queue_revision_token_sentence_deferred={stage_queue_revision_token_sentence_deferred_count} "
+                f"stage_finalize_deferred_for_queue_revision={stage_finalize_deferred_for_queue_revision_count} "
+                f"stage_queue_quality_suppressed={stage_queue_quality_suppressed_count} "
                 f"stage_queue_drop_oldest={stage_queue_drop_oldest_count} "
                 f"stage_queue_stale_promote_suppressed={stage_queue_stale_promote_suppressed_count} "
                 f"stage_queue_recent_final_suppressed={stage_queue_recent_final_suppressed_count} "

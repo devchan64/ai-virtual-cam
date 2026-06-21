@@ -27,6 +27,31 @@ class SentenceCandidateCommitBufferNode:
     def queued_sentences(self) -> tuple[str, ...]:
         return tuple(str(entry["sentence"]) for entry in self._queue)
 
+    def prefer_queued_revision_for_active(
+        self,
+        *,
+        count_metric: MetricCounter,
+        count_segment_state: MetricCounter,
+    ) -> bool:
+        active_sentence = self.active.sentence
+        if not active_sentence:
+            return False
+        for index, entry in enumerate(self._queue):
+            queued_sentence = str(entry["sentence"])
+            if not _sentences_are_revisions(active_sentence, queued_sentence):
+                continue
+            preferred = _prefer_sentence_revision(active_sentence, queued_sentence)
+            if preferred == active_sentence:
+                continue
+            entry["sentence"] = preferred
+            self.active.apply_buffer_entry(entry)
+            del self._queue[index]
+            count_metric("stage_finalize_deferred_for_queue_revision", 1)
+            count_metric("stage_revision", 1)
+            count_segment_state("revised", 1)
+            return True
+        return False
+
     def enqueue_or_revision(
         self,
         *,
@@ -49,6 +74,9 @@ class SentenceCandidateCommitBufferNode:
                 stable_analysis.stable_internal_chars,
                 stable_analysis.stable_overlap_source,
             )
+            if reset_age:
+                count_metric("stage_queue_revision_token_sentence_deferred", 1)
+                continue
             entry["sentence"] = preferred
             entry["confirmations"] = _next_revision_confirmation_count(
                 queued_sentence,
@@ -58,12 +86,10 @@ class SentenceCandidateCommitBufferNode:
                 stable_analysis.stable_internal_chars,
                 stable_analysis.stable_overlap_source,
             )
-            entry["age"] = 0 if reset_age else int(entry["age"]) + 1
+            entry["age"] = int(entry["age"]) + 1
             entry["forced"] = bool(entry["forced"]) or forced
             entry["deferred_age_chunk"] = chunk_index
             count_metric("stage_queue_revision", 1)
-            if reset_age:
-                count_metric("stage_queue_revision_age_reset", 1)
             count_metric("stage_age_tick", 1)
             return
 

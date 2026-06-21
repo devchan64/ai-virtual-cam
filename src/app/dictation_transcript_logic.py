@@ -545,8 +545,8 @@ def _common_word_run(a_words: list[str], b_words: list[str]) -> int:
     return best_len
 
 
-def _cjk_revision_similarity(left_words: list[str], right_words: list[str]) -> tuple[float, int, float, int]:
-    if not left_words or not right_words or not (_has_cjk_words(left_words) and _has_cjk_words(right_words)):
+def _revision_token_sentence_similarity(left_words: list[str], right_words: list[str]) -> tuple[float, int, float, int]:
+    if not left_words or not right_words:
         return 0.0, 0, 0.0, 0
     matcher = SequenceMatcher(None, left_words, right_words, autojunk=False)
     ratio = matcher.ratio()
@@ -556,6 +556,12 @@ def _cjk_revision_similarity(left_words: list[str], right_words: list[str]) -> t
     coverage = common_run / max(shorter, 1)
     length_delta = longer - shorter
     return ratio, common_run, coverage, length_delta
+
+
+def _cjk_revision_similarity(left_words: list[str], right_words: list[str]) -> tuple[float, int, float, int]:
+    if not (_has_cjk_words(left_words) and _has_cjk_words(right_words)):
+        return 0.0, 0, 0.0, 0
+    return _revision_token_sentence_similarity(left_words, right_words)
 
 
 def _cjk_sentences_are_similar_revisions(left_words: list[str], right_words: list[str]) -> bool:
@@ -576,18 +582,22 @@ def _cjk_sentences_are_similar_revisions(left_words: list[str], right_words: lis
     return False
 
 
-def _should_preserve_cjk_confirmation_by_similarity(previous: str, preferred: str) -> bool:
+def _should_preserve_revision_confirmation_by_token_sentence(previous: str, preferred: str) -> bool:
     previous_words = _word_units(previous)
     preferred_words = _word_units(preferred)
     if not previous_words or not preferred_words:
         return False
-    ratio, common_run, coverage, length_delta = _cjk_revision_similarity(previous_words, preferred_words)
+    ratio, common_run, coverage, length_delta = _revision_token_sentence_similarity(previous_words, preferred_words)
     if length_delta > _cjk_revision_max_length_delta():
         return False
     return ratio >= _cjk_confirm_preserve_ratio_min() or (
         common_run >= _cjk_confirm_preserve_common_run_min()
         and coverage >= _cjk_confirm_preserve_coverage_min()
     )
+
+
+def _should_preserve_cjk_confirmation_by_similarity(previous: str, preferred: str) -> bool:
+    return _should_preserve_revision_confirmation_by_token_sentence(previous, preferred)
 
 
 def _sentences_are_revisions(left: str, right: str) -> bool:
@@ -614,6 +624,8 @@ def _sentences_are_revisions(left: str, right: str) -> bool:
     best_i, best_j, common_run = _best_common_word_run(left_words, right_words)
     prefix_run = _longest_prefix_revision_run(left_words, right_words)
     if _has_cjk_words(left_words) and _has_cjk_words(right_words):
+        if _is_cjk_prefixed_truncated_revision(left, right) or _is_cjk_prefixed_truncated_revision(right, left):
+            return True
         if _cjk_sentences_are_similar_revisions(left_words, right_words):
             return True
         tail_blocks = [
@@ -647,6 +659,18 @@ def _sentence_max_age_chunks(forced: bool, base_age: int | None = None) -> int:
         return _forced_sentence_confirm_max_age_chunks() if forced else _sentence_confirm_max_age_chunks()
     normalized_base_age = max(1, int(base_age))
     return normalized_base_age + 1 if forced else normalized_base_age
+
+
+def _stage_quality_block_age_limit(sentence: str, language: str, forced: bool, base_age: int | None = None) -> int:
+    limit = _sentence_max_age_chunks(forced, base_age)
+    flags = set(_final_sentence_diagnostic_flags(sentence, language))
+    if (
+        _is_cjk_text(sentence)
+        and "short_cjk" in flags
+        and not flags.intersection({"no_end_marker", "short_no_end_fragment", "low_value_cjk_fragment"})
+    ):
+        return limit + _short_cjk_replacement_hold_chunks()
+    return limit
 
 
 _KOREAN_FINAL_WORD_SUFFIXES = ("다", "요", "죠", "까")
@@ -1205,6 +1229,8 @@ def _recent_final_sentence_delta(candidate: str, recent_sentence: str, language:
         return None
     candidate_words = _word_units(normalized_candidate)
     recent_words = _word_units(normalized_recent)
+    if candidate_words and candidate_words == recent_words:
+        return ""
     extension_delta = _recent_final_prefix_extension_delta(candidate_words, recent_words, normalized_candidate)
     if extension_delta is not None:
         return extension_delta
@@ -1214,6 +1240,9 @@ def _recent_final_sentence_delta(candidate: str, recent_sentence: str, language:
     short_tail_delta = _recent_final_short_tail_echo_delta(candidate_words, recent_words)
     if short_tail_delta is not None:
         return short_tail_delta
+    tail_subset_delta = _recent_final_tail_subset_echo_delta(candidate_words, recent_words)
+    if tail_subset_delta is not None:
+        return tail_subset_delta
     if min(len(candidate_words), len(recent_words)) < 8:
         suffix_delta = _recent_final_suffix_delta(candidate_words, recent_words)
         if suffix_delta is not None:
@@ -1322,6 +1351,32 @@ def _recent_final_prefix_extension_delta(
     if _has_cjk_words(candidate_words):
         return _with_candidate_terminal(_cjk_delta_from_words(suffix_words), normalized_candidate)
     return _with_candidate_terminal(_sentence_delta_from_words(suffix_words), normalized_candidate)
+
+
+def _recent_final_tail_subset_echo_delta(candidate_words: list[str], recent_words: list[str]) -> str | None:
+    if len(candidate_words) < 8 or len(candidate_words) >= len(recent_words):
+        return None
+    if not (_has_cjk_words(candidate_words) and _has_cjk_words(recent_words)):
+        return None
+    candidate_key = "".join(candidate_words).lower()
+    if len(candidate_key) < 10:
+        return None
+    expected_start = len(recent_words) - len(candidate_words)
+    best_ratio = 0.0
+    best_end_gap = len(recent_words)
+    for start in range(
+        max(0, expected_start - 4),
+        min(len(recent_words) - len(candidate_words), expected_start + 4) + 1,
+    ):
+        recent_slice_key = "".join(recent_words[start : start + len(candidate_words)]).lower()
+        ratio = SequenceMatcher(None, recent_slice_key, candidate_key, autojunk=False).ratio()
+        end_gap = len(recent_words) - (start + len(candidate_words))
+        if ratio > best_ratio or (ratio == best_ratio and end_gap < best_end_gap):
+            best_ratio = ratio
+            best_end_gap = end_gap
+    if best_ratio >= 0.90 and best_end_gap <= 2:
+        return ""
+    return None
 
 
 def _recent_final_short_tail_echo_delta(candidate_words: list[str], recent_words: list[str]) -> str | None:
@@ -1553,6 +1608,60 @@ def _is_cjk_shifted_prefix_dangling_tail_revision(left: str, right: str) -> bool
     return len(left_words[1:-1]) >= 6
 
 
+def _is_cjk_prefixed_stale_revision(left: str, right: str) -> bool:
+    normalized_left = _normalized_text(left)
+    normalized_right = _normalized_text(right)
+    if not (_is_cjk_text(normalized_left) or _is_cjk_text(normalized_right)):
+        return False
+    if _boundary_sentence_end_count(normalized_right) == 0:
+        return False
+    left_words = _word_units(normalized_left)
+    right_words = _word_units(normalized_right)
+    if len(left_words) <= len(right_words) or len(right_words) < 8:
+        return False
+    matcher = SequenceMatcher(None, left_words, right_words, autojunk=False)
+    blocks = [block for block in matcher.get_matching_blocks() if block.size > 0]
+    if not blocks:
+        return False
+    first = blocks[0]
+    best_i, best_j, common_run = first.a, first.b, first.size
+    if best_j != 0 or not (2 <= best_i <= 10):
+        return False
+    matched_units = sum(block.size for block in blocks)
+    right_coverage = matched_units / max(len(right_words), 1)
+    left_prefix_units = left_words[:best_i]
+    if not all(_has_cjk_words([word]) for word in left_prefix_units):
+        return False
+    return common_run >= 8 and right_coverage >= 0.70
+
+
+def _is_cjk_prefixed_truncated_revision(left: str, right: str) -> bool:
+    normalized_left = _normalized_text(left)
+    normalized_right = _normalized_text(right)
+    if not (_is_cjk_text(normalized_left) or _is_cjk_text(normalized_right)):
+        return False
+    if _boundary_sentence_end_count(normalized_left) == 0 or _boundary_sentence_end_count(normalized_right) == 0:
+        return False
+    left_words = _word_units(normalized_left)
+    right_words = _word_units(normalized_right)
+    if len(left_words) < 10 or len(right_words) < 9:
+        return False
+    matcher = SequenceMatcher(None, left_words, right_words, autojunk=False)
+    blocks = [block for block in matcher.get_matching_blocks() if block.size > 0]
+    if not blocks:
+        return False
+    first = blocks[0]
+    if first.b != 0 or not (3 <= first.a <= 12):
+        return False
+    if first.a + first.size != len(left_words):
+        return False
+    left_prefix_units = left_words[: first.a]
+    right_suffix_units = right_words[first.size :]
+    if not all(_has_cjk_words([word]) for word in left_prefix_units):
+        return False
+    return first.size >= 6 and len(right_suffix_units) >= 3
+
+
 def _prefer_sentence_revision(left: str, right: str) -> str:
     right = _trim_repeated_cjk_revision_prefix(left, right)
     left_words = _word_units(left)
@@ -1567,6 +1676,10 @@ def _prefer_sentence_revision(left: str, right: str) -> str:
         return _normalized_text(left)
     if _is_cjk_text(left) or _is_cjk_text(right):
         if _is_cjk_shifted_prefix_dangling_tail_revision(left, right):
+            return _normalized_text(right)
+        if _is_cjk_prefixed_truncated_revision(left, right):
+            return _normalized_text(right)
+        if _is_cjk_prefixed_stale_revision(left, right):
             return _normalized_text(right)
         if "cjk_repeated_ngram" in right_flags and "cjk_repeated_ngram" not in left_flags:
             return _normalized_text(left)
@@ -1645,8 +1758,8 @@ def _next_revision_confirmation_count(
     if normalized_preferred != normalized_previous and _boundary_sentence_end_count(normalized_previous) > 0:
         if _boundary_sentence_end_count(normalized_preferred) == 0:
             return 1
-    if preferred != _normalized_text(previous) and (_is_cjk_text(previous) or _is_cjk_text(preferred)):
-        if _should_preserve_cjk_confirmation_by_similarity(previous, preferred):
+    if preferred != _normalized_text(previous):
+        if _should_preserve_revision_confirmation_by_token_sentence(previous, preferred):
             return current_confirmations + 1
         if _should_preserve_revision_confirmation_from_internal_stability(
             previous,
@@ -1708,9 +1821,7 @@ def _should_reset_revision_age(
         return False
     if _boundary_sentence_end_count(normalized_previous) > 0 and _boundary_sentence_end_count(normalized_preferred) == 0:
         return True
-    if not (_is_cjk_text(previous) or _is_cjk_text(preferred)):
-        return False
-    if _should_preserve_cjk_confirmation_by_similarity(previous, preferred):
+    if _should_preserve_revision_confirmation_by_token_sentence(previous, preferred):
         return False
     if _should_preserve_revision_confirmation_from_internal_stability(
         previous,

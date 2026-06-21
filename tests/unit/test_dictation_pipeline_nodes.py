@@ -37,9 +37,14 @@ from src.app.dictation_pipeline_settings import (
 from src.app.dictation_transcript_logic import (
     _final_sentence_diagnostic_flags,
     _normalized_text,
+    _prefer_sentence_revision,
     _recent_final_output_delta,
+    _sentences_are_revisions,
+    _stage_quality_block_age_limit,
     _should_confirm_staged_sentence,
+    _should_defer_token_sentence_revision,
     _should_preserve_staged_output_when_delta_fragment,
+    _should_reset_revision_age,
     _should_stage_boundary_candidate,
     _should_finalize_replaced_sentence,
     _should_suppress_delta_final,
@@ -352,6 +357,31 @@ class DictationPipelineNodeTest(unittest.TestCase):
         self.assertEqual(candidate, "它的厕所。")
         self.assertEqual(recent_source, "这里进来，这里就是。")
 
+    def test_recent_final_delta_recovers_three_unit_cjk_suffix_extension(self) -> None:
+        candidate, recent_source = _recent_final_output_delta(
+            "它有很多种的配菜，所以你可以吃到很多种不同的吃法和口味。",
+            ("它有很多种的配菜，所以你可以吃到很多种不同的吃法。",),
+            "zh",
+        )
+
+        self.assertEqual(candidate, "和口味。")
+        self.assertEqual(recent_source, "它有很多种的配菜，所以你可以吃到很多种不同的吃法。")
+
+    def test_prefer_sentence_revision_drops_stale_cjk_queue_prefix(self) -> None:
+        preferred = _prefer_sentence_revision(
+            "听得到的音乐接下来会一直搭这个很强的重梯就是往地铁方向。",
+            "接下来会一直搭这个很长的楼梯，就是往地铁方向走啊。",
+        )
+
+        self.assertEqual(preferred, "接下来会一直搭这个很长的楼梯，就是往地铁方向走啊。")
+
+    def test_prefer_sentence_revision_drops_prefixed_truncated_cjk_tail(self) -> None:
+        active = "晚上民众的部分你自己去我要。"
+        queued = "你自己去，我要去饭店休息。"
+
+        self.assertTrue(_sentences_are_revisions(active, queued))
+        self.assertEqual(_prefer_sentence_revision(active, queued), queued)
+
     def test_recent_final_delta_keeps_short_suffix_corrections_suppressed(self) -> None:
         candidate, recent_source = _recent_final_output_delta(
             "所以还是有很多小摊贩在摆摊。",
@@ -361,6 +391,66 @@ class DictationPipelineNodeTest(unittest.TestCase):
 
         self.assertEqual(candidate, "")
         self.assertEqual(recent_source, "所以还是有很多小摊贩在摆。")
+
+    def test_recent_final_delta_suppresses_fuzzy_tail_subset_echo(self) -> None:
+        candidate, recent_source = _recent_final_output_delta(
+            "走出来，然后现在往南大门的方向走。",
+            ("我们坐地铁四号线从三号出口出来，然后现在往南部大门的方向走。",),
+            "zh",
+        )
+
+        self.assertEqual(candidate, "")
+        self.assertEqual(recent_source, "我们坐地铁四号线从三号出口出来，然后现在往南部大门的方向走。")
+
+    def test_recent_final_delta_suppresses_short_token_sentence_echo(self) -> None:
+        candidate, recent_source = _recent_final_output_delta(
+            "这么好啊！",
+            ("这么好啊。",),
+            "zh",
+        )
+
+        self.assertEqual(candidate, "")
+        self.assertEqual(recent_source, "这么好啊。")
+
+    def test_korean_revision_reset_uses_token_sentence_similarity(self) -> None:
+        self.assertFalse(
+            _should_reset_revision_age(
+                "지금 3배속 이니까 1분의 1 속도로 보시면 이게 정상 속도입니다",
+                "지금 3배속 이니까 1분의 1 속도로 보시면 요게 정상 속도입니다",
+            )
+        )
+        self.assertTrue(
+            _should_reset_revision_age(
+                "지금 3배속이니까 1분의 1 속도로 보시면 이게 정상속도입니다",
+                "일단 도심도로 이런 식으로 가고요",
+            )
+        )
+
+    def test_english_revision_reset_uses_token_sentence_similarity(self) -> None:
+        self.assertFalse(
+            _should_reset_revision_age(
+                "you want to go up there and do something meaningful",
+                "you want to go up there and do something meaningful.",
+            )
+        )
+        self.assertTrue(
+            _should_defer_token_sentence_revision(
+                "you want to go up there and do something meaningful",
+                "there has to be a need",
+                1,
+                False,
+            )
+        )
+
+    def test_short_cjk_quality_block_uses_replacement_hold_limit(self) -> None:
+        self.assertEqual(
+            _stage_quality_block_age_limit("给你解腻的，是炸鸡。", "zh", False, 3),
+            5,
+        )
+        self.assertEqual(
+            _stage_quality_block_age_limit("它对面的这一家", "zh", False, 3),
+            3,
+        )
 
     def test_short_cjk_without_end_marker_is_not_stageable(self) -> None:
         self.assertIn(
@@ -562,6 +652,143 @@ class DictationPipelineNodeTest(unittest.TestCase):
         self.assertEqual(node.active.age, 1)
         self.assertEqual(node.active.deferredAgeChunk, 11)
         self.assertEqual(metrics["stage_queue_revision"], 1)
+
+    def test_commit_buffer_defers_queue_revision_when_token_sentence_would_reset_age(self) -> None:
+        metrics: dict[str, int] = {}
+        states: dict[str, int] = {}
+
+        def count_metric(name: str, amount: int = 1) -> None:
+            metrics[name] = metrics.get(name, 0) + amount
+
+        def count_state(name: str, amount: int = 1) -> None:
+            states[name] = states.get(name, 0) + amount
+
+        node = SentenceCandidateCommitBufferNode(max_size=4)
+        stable = SimpleNamespace(
+            stable_internal_ratio=0.0,
+            stable_internal_chars=0,
+            stable_overlap_source="none",
+        )
+
+        node.enqueue_or_revision(
+            candidate="old queued token sentence.",
+            forced=False,
+            chunk_index=10,
+            stable_analysis=stable,
+            count_metric=count_metric,
+            count_segment_state=count_state,
+        )
+        with (
+            patch("src.app.dictation_node_sentence_candidate_commit_buffer._sentences_are_revisions", return_value=True),
+            patch("src.app.dictation_node_sentence_candidate_commit_buffer._prefer_sentence_revision", return_value="new token sentence."),
+            patch("src.app.dictation_node_sentence_candidate_commit_buffer._should_reset_revision_age", return_value=True),
+        ):
+            node.enqueue_or_revision(
+                candidate="new token sentence.",
+                forced=False,
+                chunk_index=11,
+                stable_analysis=stable,
+                count_metric=count_metric,
+                count_segment_state=count_state,
+            )
+
+        self.assertEqual(
+            node.queued_sentences(),
+            (
+                "old queued token sentence.",
+                "new token sentence.",
+            ),
+        )
+        self.assertEqual(metrics["stage_queue_revision_token_sentence_deferred"], 1)
+        self.assertEqual(metrics["stage_queue_enqueue"], 2)
+        self.assertNotIn("stage_queue_revision", metrics)
+
+    def test_commit_buffer_prefers_queued_revision_before_active_final(self) -> None:
+        metrics: dict[str, int] = {}
+        states: dict[str, int] = {}
+
+        def count_metric(name: str, amount: int = 1) -> None:
+            metrics[name] = metrics.get(name, 0) + amount
+
+        def count_state(name: str, amount: int = 1) -> None:
+            states[name] = states.get(name, 0) + amount
+
+        node = SentenceCandidateCommitBufferNode(max_size=4)
+        node.active.start("short fragment.", forced=False, chunk_index=10)
+        node.active.confirmations = 3
+        node.active.age = 3
+        stable = SimpleNamespace(
+            stable_internal_ratio=0.0,
+            stable_internal_chars=0,
+            stable_overlap_source="none",
+        )
+        node.enqueue_or_revision(
+            candidate="short fragment with stable tail.",
+            forced=False,
+            chunk_index=11,
+            stable_analysis=stable,
+            count_metric=count_metric,
+            count_segment_state=count_state,
+        )
+
+        with (
+            patch("src.app.dictation_node_sentence_candidate_commit_buffer._sentences_are_revisions", return_value=True),
+            patch(
+                "src.app.dictation_node_sentence_candidate_commit_buffer._prefer_sentence_revision",
+                return_value="short fragment with stable tail.",
+            ),
+        ):
+            deferred = node.prefer_queued_revision_for_active(
+                count_metric=count_metric,
+                count_segment_state=count_state,
+            )
+
+        self.assertTrue(deferred)
+        self.assertEqual(node.active.sentence, "short fragment with stable tail.")
+        self.assertEqual(len(node), 0)
+        self.assertEqual(metrics["stage_finalize_deferred_for_queue_revision"], 1)
+        self.assertEqual(metrics["stage_revision"], 1)
+        self.assertEqual(states["revised"], 1)
+
+    def test_commit_buffer_prefers_queued_cjk_revision_with_stale_prefix(self) -> None:
+        metrics: dict[str, int] = {}
+        states: dict[str, int] = {}
+
+        def count_metric(name: str, amount: int = 1) -> None:
+            metrics[name] = metrics.get(name, 0) + amount
+
+        def count_state(name: str, amount: int = 1) -> None:
+            states[name] = states.get(name, 0) + amount
+
+        node = SentenceCandidateCommitBufferNode(max_size=4)
+        node.active.start("晚上民众的部分你自己去我要。", forced=False, chunk_index=737)
+        node.active.confirmations = 3
+        node.active.age = 3
+        stable = SimpleNamespace(
+            stable_internal_ratio=0.0,
+            stable_internal_chars=0,
+            stable_overlap_source="none",
+        )
+        node.enqueue_or_revision(
+            candidate="你自己去，我要去饭店休息。",
+            forced=False,
+            chunk_index=737,
+            stable_analysis=stable,
+            count_metric=count_metric,
+            count_segment_state=count_state,
+        )
+
+        deferred = node.prefer_queued_revision_for_active(
+            count_metric=count_metric,
+            count_segment_state=count_state,
+        )
+
+        self.assertTrue(deferred)
+        self.assertEqual(node.active.sentence, "你自己去，我要去饭店休息。")
+        self.assertEqual(len(node), 0)
+        self.assertEqual(metrics["stage_finalize_deferred_for_queue_revision"], 1)
+        self.assertEqual(metrics["stage_revision"], 1)
+        self.assertEqual(states["revised"], 1)
 
 
 if __name__ == "__main__":

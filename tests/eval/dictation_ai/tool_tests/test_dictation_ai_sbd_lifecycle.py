@@ -183,6 +183,44 @@ class DictationAiSbdLifecycleTest(unittest.TestCase):
         self.assertEqual(state.metrics["stage_replaced_unconfirmed"], 1)
         self.assertEqual(state.metrics["segment_state_suppressed"], 1)
 
+    def test_queue_promotion_suppresses_no_end_head_when_followed_by_candidate(self) -> None:
+        state = LifecycleState(language="zh")
+        assert state.staged_queue is not None
+        state.staged_queue.append(
+            {
+                "sentence": "的话就是比较清淡淡淡的那种药材味然后不知不觉的一直吃",
+                "confirmations": 4,
+                "age": 3,
+                "forced": False,
+                "deferred_age_chunk": 8,
+            }
+        )
+        state.staged_queue.append(
+            {
+                "sentence": "对，真的不知不觉一直吃。",
+                "confirmations": 2,
+                "age": 1,
+                "forced": False,
+                "deferred_age_chunk": 8,
+            }
+        )
+
+        finalized = _stage_completed_sentence(
+            state,
+            "两只鸡其实没有很多，因为它小小。",
+            "zh",
+            forced=False,
+            sentence_finalize_age=3,
+            chunk_index=9,
+        )
+
+        self.assertEqual(finalized, [])
+        self.assertEqual(state.staged_sentence, "对，真的不知不觉一直吃。")
+        self.assertEqual(state.metrics["stage_queue_promote"], 2)
+        self.assertEqual(state.metrics["stage_queue_quality_suppressed"], 1)
+        self.assertEqual(state.metrics["stage_queue_quality_no_end_marker"], 1)
+        self.assertEqual(state.metrics["segment_state_suppressed"], 1)
+
     def test_recent_final_suffix_recovery_runs_even_when_committed_delta_is_empty(self) -> None:
         state = LifecycleState(
             language="zh",
