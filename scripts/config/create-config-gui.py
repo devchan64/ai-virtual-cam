@@ -945,7 +945,11 @@ class ConfigGui:
             text=self._tr("button.dictation_ai_model_download", "다운로드 시작"),
             command=lambda: self._start_dictation_ai_model_download(
                 config=config,
-                on_success=(lambda: self._launch_serve_command(serve_cmd)) if serve_cmd is not None else None,
+                on_success=(
+                    lambda: self._continue_serve_after_dictation_ai_model_download(config, serve_cmd)
+                )
+                if serve_cmd is not None
+                else None,
             ),
         )
         self._dictation_ai_model_download_btn.grid(row=0, column=1, sticky="e", padx=(4, 4))
@@ -991,6 +995,11 @@ class ConfigGui:
                 running=False,
                 status_key="status.serve_stopped",
             )
+
+    def _continue_serve_after_dictation_ai_model_download(self, config: dict, serve_cmd: list[str]) -> None:
+        if not self._check_dictation_ai_models_ready_for_serve(config, serve_cmd):
+            return
+        self._launch_serve_command(serve_cmd)
 
 
     def _start_serve(self) -> None:

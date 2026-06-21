@@ -25,10 +25,12 @@ class DownloadWhisperModelsTest(unittest.TestCase):
         module = _load_module()
         asset = module.ModelAsset("stt", "qwen3-asr-transformers", "qwen3-asr-0.6b")
 
-        with patch.object(module, "is_qwen_asr_model_cached", return_value=False):
+        output = io.StringIO()
+        with patch.object(module, "is_qwen_asr_model_cached", return_value=False), contextlib.redirect_stdout(output):
             missing = module.check_model_assets([asset])
 
         self.assertEqual(missing, [asset])
+        self.assertIn("Missing model assets: stt:qwen3-asr-transformers:qwen3-asr-0.6b", output.getvalue())
 
 
     def test_check_model_assets_marks_missing_qwen_streaming_model(self) -> None:
@@ -75,6 +77,22 @@ class DownloadWhisperModelsTest(unittest.TestCase):
             text = output.getvalue()
             self.assertIn("downloaded=1.0KB", text)
             self.assertIn("total=unknown", text)
+
+    def test_asset_plan_logs_all_required_models(self) -> None:
+        module = _load_module()
+        assets = [
+            module.ModelAsset("translation", "nllb-transformers", "facebook/nllb-200-distilled-600M"),
+            module.ModelAsset("translation", "nllb-transformers", "facebook/nllb-200-distilled-1.3B"),
+        ]
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            module._log_asset_plan(assets, check_only=False)
+
+        text = output.getvalue()
+        self.assertIn("Dictation AI model pre-download asset plan: count=2", text)
+        self.assertIn("translation:nllb-transformers:facebook/nllb-200-distilled-600M", text)
+        self.assertIn("translation:nllb-transformers:facebook/nllb-200-distilled-1.3B", text)
 
 
 if __name__ == "__main__":

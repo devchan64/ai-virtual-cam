@@ -883,6 +883,10 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
                 "translationEnabled": True,
                 "translationBackend": "nllb-transformers",
                 "translationModel": "facebook/nllb-200-distilled-600M",
+                "translationBackendKo": "nllb-transformers",
+                "translationModelKo": "facebook/nllb-200-distilled-1.3B",
+                "translationBackendZh": "m2m100-transformers",
+                "translationModelZh": "facebook/m2m100_1.2B",
             },
             "whisper": {
                 "backend": "mock",
@@ -899,6 +903,8 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
         self.assertIn("sat", cmd)
         self.assertIn("--translation-backend", cmd)
         self.assertIn("nllb-transformers", cmd)
+        self.assertIn("facebook/nllb-200-distilled-1.3B", cmd)
+        self.assertIn("facebook/m2m100_1.2B", cmd)
         self.assertNotIn("mock", cmd)
 
     def test_dictation_ai_model_download_manager_populates_assets(self) -> None:
@@ -972,6 +978,30 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
 
         gui._set_dictation_ai_model_download_status.assert_called_once_with("모델 다운로드가 취소되었습니다.")
         gui._set_serve_status.assert_not_called()
+
+    def test_dictation_ai_model_download_success_rechecks_before_serve_launch(self) -> None:
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        config = {"dictationAi": {"enabled": True}}
+        serve_cmd = ["./bin/avc", "serve"]
+        gui._check_dictation_ai_models_ready_for_serve = mock.Mock(return_value=True)
+        gui._launch_serve_command = mock.Mock()
+
+        self.module.ConfigGui._continue_serve_after_dictation_ai_model_download(gui, config, serve_cmd)
+
+        gui._check_dictation_ai_models_ready_for_serve.assert_called_once_with(config, serve_cmd)
+        gui._launch_serve_command.assert_called_once_with(serve_cmd)
+
+    def test_dictation_ai_model_download_success_blocks_serve_when_recheck_fails(self) -> None:
+        gui = self.module.ConfigGui.__new__(self.module.ConfigGui)
+        config = {"dictationAi": {"enabled": True}}
+        serve_cmd = ["./bin/avc", "serve"]
+        gui._check_dictation_ai_models_ready_for_serve = mock.Mock(return_value=False)
+        gui._launch_serve_command = mock.Mock()
+
+        self.module.ConfigGui._continue_serve_after_dictation_ai_model_download(gui, config, serve_cmd)
+
+        gui._check_dictation_ai_models_ready_for_serve.assert_called_once_with(config, serve_cmd)
+        gui._launch_serve_command.assert_not_called()
 
     def test_dictation_ai_input_meter_uses_dictation_ai_config_and_geometry_key(self) -> None:
         gui = self.module.ConfigGui.__new__(self.module.ConfigGui)

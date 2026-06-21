@@ -49,6 +49,16 @@ def _asset_label(asset: ModelAsset) -> str:
     return f"{asset.kind}:{asset.backend}:{asset.model}"
 
 
+def _log_asset_plan(assets: list[ModelAsset], *, check_only: bool) -> None:
+    mode = "cache check" if check_only else "pre-download"
+    if not assets:
+        _log(f"Dictation AI model {mode} asset plan: none")
+        return
+    _log(f"Dictation AI model {mode} asset plan: count={len(assets)}")
+    for asset in assets:
+        _log(f"Dictation AI model asset: {_asset_label(asset)}")
+
+
 def _format_bytes(size: int | None) -> str:
     if size is None:
         return "unknown"
@@ -216,6 +226,8 @@ def check_model_assets(assets: list[ModelAsset]) -> list[ModelAsset]:
         else:
             _log(f"Model cache missing: {_asset_label(asset)}")
             missing.append(asset)
+    if missing:
+        _log("Missing model assets: " + ", ".join(_asset_label(asset) for asset in missing))
     return missing
 
 
@@ -369,6 +381,7 @@ def main() -> int:
             assets.append(ModelAsset("translation", backend_name, model_name))
 
     if args.check_only:
+        _log_asset_plan(assets, check_only=True)
         missing = check_model_assets(assets)
         if missing:
             _log("Dictation AI model cache check failed")
@@ -376,6 +389,7 @@ def main() -> int:
         _log("Dictation AI model cache check completed")
         return 0
 
+    _log_asset_plan(assets, check_only=False)
     for asset in assets:
         backend_name = asset.backend.strip().lower()
         if asset.kind == "stt":
