@@ -17519,6 +17519,70 @@ case_count=1223, expected_final_case_count=1219, draft_count=0
 Ran 52 tests in 0.005s, OK
 ```
 
+### 2026-06-22 same-chunk age 이후 추가 파라미터 스윕 폐기
+
+목적:
+
+- same-chunk age 반영 후 남은 병목이 `stage_candidate_quality_no_end_marker`, `stage_replace_deferred`, `stage_queue_revision_token_sentence_deferred`, `candidate_duplicate_suppressed` 쪽에 집중되는지 확인했다.
+- 세부 예외를 추가하지 않고, 이미 설정화된 핵심 축만 CUDA/SaT/float16으로 재검증했다.
+- 벤치는 모두 `tests/eval/dictation_ai/sbd_cases` challenge replay 1223건, baseline 포함, local cache/offline 모델 조건으로 실행했다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sweeps/run_sbd_parameter_sweep.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --include-baseline \
+  --param SHORT_NO_END_FRAGMENT_UNITS=3 \
+  --param SHORT_NO_END_FRAGMENT_UNITS=7 \
+  --param SHORT_NO_END_FRAGMENT_UNITS=10
+
+./.venv/bin/python tests/eval/dictation_ai/sweeps/run_sbd_parameter_sweep.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --include-baseline \
+  --param DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=1 \
+  --param DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=3 \
+  --param DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=4
+
+./.venv/bin/python tests/eval/dictation_ai/sweeps/run_sbd_parameter_sweep.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --include-baseline \
+  --param REVISION_FALLBACK_COVERAGE_MIN=0.50 \
+  --param REVISION_FALLBACK_COVERAGE_MIN=0.60 \
+  --param REVISION_FALLBACK_COVERAGE_MIN=0.65
+```
+
+short no-end fragment 결과:
+
+| candidate | final_f1_delta | precision_delta | recall_delta | boundary_delta | full_input_f1_delta | clean_f1_delta | 판단 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `SHORT_NO_END_FRAGMENT_UNITS=3` | -0.002056 | -0.012957 | +0.004967 | -0.001044 | -0.000255 | +0.000133 | precision/boundary 하락 |
+| `SHORT_NO_END_FRAGMENT_UNITS=7` | -0.008589 | +0.000082 | -0.012077 | -0.003028 | -0.006622 | -0.009040 | recall/F1 하락 |
+| `SHORT_NO_END_FRAGMENT_UNITS=10` | -0.010907 | +0.007503 | -0.018967 | -0.003322 | -0.013059 | -0.014860 | recall/F1 하락 |
+
+delta suppressed stage 결과:
+
+| candidate | final_f1_delta | precision_delta | recall_delta | boundary_delta | full_input_f1_delta | clean_f1_delta | 판단 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=1` | +0.000520 | +0.001117 | +0.000341 | -0.000245 | -0.000181 | -0.000728 | full/clean 기준 약화 |
+| `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=3` | -0.000173 | -0.000310 | -0.000117 | +0.000273 | -0.000182 | -0.000324 | 개선 없음 |
+| `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=4` | -0.000173 | -0.000310 | -0.000117 | +0.000273 | -0.000182 | -0.000324 | 개선 없음 |
+
+revision fallback coverage 결과:
+
+| candidate | final_f1_delta | precision_delta | recall_delta | boundary_delta | full_input_f1_delta | clean_f1_delta | 판단 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `REVISION_FALLBACK_COVERAGE_MIN=0.50` | -0.000678 | +0.001553 | -0.001328 | +0.000276 | -0.001084 | -0.000405 | F1 하락 |
+| `REVISION_FALLBACK_COVERAGE_MIN=0.60` | -0.000630 | -0.002457 | +0.000336 | -0.001068 | -0.001604 | +0.000935 | full-input/boundary 하락 |
+| `REVISION_FALLBACK_COVERAGE_MIN=0.65` | -0.000029 | -0.002766 | +0.001689 | -0.001353 | -0.001784 | +0.002177 | full-input/boundary 하락 |
+
+판단:
+
+- `SHORT_NO_END_FRAGMENT_UNITS`는 낮추면 no-end 후보가 더 많이 stage로 들어가 recall 일부가 오르지만 precision이 크게 떨어진다. 높이면 staged residue는 줄어 보이지만 final recall과 F1이 내려간다. 현재 기본값 `5`를 유지한다.
+- `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=1`은 전체 F1만 `+0.000520`으로 소폭 개선했지만 full-input과 clean strata가 모두 하락했고 boundary도 하락했다. “깨진 delta를 빨리 폐기한다”는 원칙은 후보로 남기되 기본값 변경 근거로는 부족하다.
+- `REVISION_FALLBACK_COVERAGE_MIN`은 precision/recall 절충만 만들고 full-input 기준 개선을 만들지 못했다. token-sentence revision fallback coverage 기본값 `0.55`를 유지한다.
+- 남은 개선은 단일 숫자 완화/강화보다, `stage_replace_deferred`와 recent-final delta가 실제 생성순서 후보를 막는 구간을 case-level로 더 분해해야 한다.
+
 ### 2026-06-21 CUDA SBD 벤치 재실행 및 confirmation 기본값 조정
 
 목적:
