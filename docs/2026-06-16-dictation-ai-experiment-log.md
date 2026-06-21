@@ -14750,6 +14750,61 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-21 중국어 花田鸟笼 음료 주문 구간 stale short stage 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 17:40:20..17:40:32
+chunk=1058..1070 중심
+```
+
+대표 raw 흐름:
+
+```text
+你点的这杯是什么？
+你点的这杯是什么？花田鸟笼。
+你点的这杯是什么？花田鸟笼。花田鸟笼。
+你点的这杯是什么？花田鸟笼。花田鸟笼。这是咩？花田鸟笼。
+```
+
+감사 결과:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 17:40:20" --until "2026-06-21 17:40:32" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-zh-flower-bird-cup-174020-174032.json
+```
+
+```text
+stt_raw_line_count=13
+finalize_event_count=2
+finalize_per_stt_raw=0.154
+duplicate_suppressed_count=30
+duplicate_suppressed_per_stt_raw=2.308
+quality_block_count=5
+quality_block_per_stt_raw=0.385
+stage_queue_promote_count=5
+stage_queue_promote_per_stt_raw=0.385
+stage_replace_deferred_count=15
+stage_replace_deferred_per_stt_raw=1.154
+```
+
+관측:
+
+- `你点的这杯是什么？花田鸟笼。花田鸟笼。` 구간은 `stable_internal_ratio=1.000`, `stable_token_ratio=1.000`으로 반복 안정성이 높게 관측됐다.
+- 하지만 앞선 짧은 후보 `哪只？`, `哪吒。`, `真不行。`, `你点呢？`가 active stage/queue head로 남아 뒤 후보의 final 진입을 지연했다.
+- `花田鸟笼。`은 duplicate suppression 이벤트로 반복 관측되지만, 기대 final로 소비되지 못하는 구간이 있었다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-6-20260621.jsonl`에 `zh_log_flower_bird_cup_stale_short_stage_20260621_001` 케이스를 추가했다.
+- 기대 문장은 `你点的这杯是什么？`, `花田鸟笼。`, `这是咩？`로 둔다.
+
+해석 제한:
+
+- 이 로그는 `deferred_age_chunk` 기반 큐 후보 age 보정 패치가 실행 중인 앱 프로세스에 반영됐는지 보장되지 않는다.
+- 따라서 새 로직 실패의 직접 근거로 보지 않고, 앱 재시작 후 같은 유형이 반복되는지 확인하기 위한 회귀/성능 케이스로 누적한다.
+
 ### 2026-06-21 중국어 자유행/跟团 구간 queue head stall 케이스 추가
 
 관측 구간:
