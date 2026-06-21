@@ -17,10 +17,10 @@ from tests.eval.dictation_ai.cases.validate_sbd_case_files import validate_case_
 
 
 TRANSLATION_REPLAY_REQUIRED_SIGNALS = (
-    "final event timestamp",
-    "translation request id",
-    "translation output text",
-    "final text to translation request linkage",
+    "final segment id",
+    "translation diagnostic segment id",
+    "translation output segment id",
+    "final/transcript/translation segment linkage",
 )
 
 
@@ -137,16 +137,39 @@ def _translation_status(source_audit: dict[str, Any]) -> dict[str, Any]:
     diagnostic_count = _marker_count(source_audit, "translation_diagnostic")
     has_translation_logs = translation_count > 0
     has_translation_diagnostics = diagnostic_count > 0
-    missing_required_signals = list(TRANSLATION_REPLAY_REQUIRED_SIGNALS)
+    segment_linkage = source_audit.get("segment_linkage", {})
+    if not isinstance(segment_linkage, dict):
+        segment_linkage = {}
+    final_segment_count = int(segment_linkage.get("finalize_segment_count", 0))
+    diagnostic_segment_count = int(segment_linkage.get("translation_diagnostic_segment_count", 0))
+    output_segment_count = int(segment_linkage.get("translation_segment_count", 0))
+    linked_output_count = int(segment_linkage.get("final_translation_linked_segment_count", 0))
+    linked_diagnostic_count = int(segment_linkage.get("final_translation_diagnostic_linked_segment_count", 0))
+    missing_required_signals: list[str] = []
+    if final_segment_count <= 0:
+        missing_required_signals.append("final segment id")
+    if diagnostic_segment_count <= 0:
+        missing_required_signals.append("translation diagnostic segment id")
+    if output_segment_count <= 0:
+        missing_required_signals.append("translation output segment id")
+    if linked_output_count <= 0:
+        missing_required_signals.append("final/transcript/translation segment linkage")
+    if linked_output_count > 0:
+        status = "ready_for_translation_replay_case_building"
+    elif linked_diagnostic_count > 0:
+        status = "blocked_on_translation_output_linkage"
+    elif has_translation_logs or has_translation_diagnostics:
+        status = "blocked_on_translation_replay_linkage"
+    else:
+        status = "blocked_on_translation_logs"
     return {
         "has_translation_logs": has_translation_logs,
         "translation_event_count": translation_count,
         "has_translation_diagnostics": has_translation_diagnostics,
         "translation_diagnostic_count": diagnostic_count,
+        "segment_linkage": segment_linkage,
         "missing_required_signals": missing_required_signals,
-        "status": "blocked_on_translation_replay_linkage"
-        if has_translation_logs or has_translation_diagnostics
-        else "blocked_on_translation_logs",
+        "status": status,
     }
 
 
@@ -183,6 +206,8 @@ def audit_followup_readiness(
         next_actions.append("fix representative source or packet readiness before paper-evidence replay")
     if translation["status"] == "blocked_on_translation_replay_linkage":
         next_actions.append("add final-event to translation request/output linkage before translation claims")
+    elif translation["status"] == "blocked_on_translation_output_linkage":
+        next_actions.append("collect segment-linked translation output logs before translation claims")
     elif translation["status"] == "blocked_on_translation_logs":
         next_actions.append("collect translation logs before translation replay")
     return {

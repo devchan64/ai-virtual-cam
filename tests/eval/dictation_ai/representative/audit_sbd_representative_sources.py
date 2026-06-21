@@ -13,6 +13,8 @@ from typing import Iterable
 TIMESTAMP_RE = re.compile(r"^\[(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]")
 LANGUAGE_RE = re.compile(r"\[(?P<language>[a-z]{2}) raw\]|language=(?P<language_kv>[a-z]{2})\b")
 KV_RE = re.compile(r"\b(?P<key>[A-Za-z_][A-Za-z0-9_]*)=(?P<value>[^\s,]+)")
+TRANSCRIPT_SEGMENT_RE = re.compile(r"Dictation AI transcript:\s+\[[a-z]{2}#(?P<segment_id>\d+)\]")
+TRANSLATION_SEGMENT_RE = re.compile(r"Dictation AI translation:\s+\[[a-z]{2}->[a-z]{2}#(?P<segment_id>\d+)\]")
 LOG_GLOB = "avc-whisper.log*"
 
 
@@ -90,6 +92,55 @@ def _line_markers(line: str) -> set[str]:
 
 def _line_key_values(line: str) -> dict[str, str]:
     return {match.group("key"): match.group("value") for match in KV_RE.finditer(line)}
+
+
+def _segment_id_from_values(values: dict[str, str]) -> int | None:
+    segment_id = values.get("segment_id")
+    if segment_id is None:
+        return None
+    try:
+        return int(segment_id)
+    except ValueError:
+        return None
+
+
+def _segment_id_from_match(pattern: re.Pattern[str], line: str) -> int | None:
+    match = pattern.search(line)
+    if not match:
+        return None
+    try:
+        return int(match.group("segment_id"))
+    except ValueError:
+        return None
+
+
+def _segment_linkage_payload(
+    *,
+    finalize_segments: set[int],
+    transcript_segments: set[int],
+    translation_diagnostic_segments: set[int],
+    translation_segments: set[int],
+) -> dict[str, object]:
+    final_transcript = finalize_segments & transcript_segments
+    final_translation_diagnostic = final_transcript & translation_diagnostic_segments
+    final_translation = final_transcript & translation_segments
+    return {
+        "finalize_segment_count": len(finalize_segments),
+        "transcript_segment_count": len(transcript_segments),
+        "translation_diagnostic_segment_count": len(translation_diagnostic_segments),
+        "translation_segment_count": len(translation_segments),
+        "final_transcript_linked_segment_count": len(final_transcript),
+        "final_translation_diagnostic_linked_segment_count": len(final_translation_diagnostic),
+        "final_translation_linked_segment_count": len(final_translation),
+        "finalize_without_transcript_count": len(finalize_segments - transcript_segments),
+        "transcript_without_finalize_count": len(transcript_segments - finalize_segments),
+        "translation_diagnostic_without_transcript_count": len(
+            translation_diagnostic_segments - transcript_segments
+        ),
+        "translation_without_transcript_count": len(translation_segments - transcript_segments),
+        "ready_for_translation_replay_linkage": bool(final_translation),
+        "ready_for_translation_diagnostic_linkage": bool(final_translation_diagnostic),
+    }
 
 
 def _add_runtime_counts(
@@ -170,6 +221,10 @@ def audit_log_file(path: Path) -> dict[str, object]:
     last_timestamp: str | None = None
     line_count = 0
     timestamped_line_count = 0
+    finalize_segments: set[int] = set()
+    transcript_segments: set[int] = set()
+    translation_diagnostic_segments: set[int] = set()
+    translation_segments: set[int] = set()
 
     with path.open("r", encoding="utf-8", errors="replace") as handle:
         for raw_line in handle:
@@ -188,6 +243,18 @@ def audit_log_file(path: Path) -> dict[str, object]:
                 if language:
                     language_counts[language] += 1
             values = _line_key_values(line)
+            segment_id = _segment_id_from_values(values)
+            if segment_id is not None:
+                if "받아쓰기 AI 문장 확정:" in line:
+                    finalize_segments.add(segment_id)
+                elif "받아쓰기 AI 번역 진단:" in line:
+                    translation_diagnostic_segments.add(segment_id)
+            transcript_segment_id = _segment_id_from_match(TRANSCRIPT_SEGMENT_RE, line)
+            if transcript_segment_id is not None:
+                transcript_segments.add(transcript_segment_id)
+            translation_segment_id = _segment_id_from_match(TRANSLATION_SEGMENT_RE, line)
+            if translation_segment_id is not None:
+                translation_segments.add(translation_segment_id)
             _add_runtime_counts(
                 line=line,
                 values=values,
@@ -227,11 +294,41 @@ def audit_log_file(path: Path) -> dict[str, object]:
         "window_seconds_counts": _counter_payload(window_counts),
         "step_seconds_counts": _counter_payload(step_counts),
         "sentence_finalize_age_counts": _counter_payload(finalize_age_counts),
+        "segment_linkage": _segment_linkage_payload(
+            finalize_segments=finalize_segments,
+            transcript_segments=transcript_segments,
+            translation_diagnostic_segments=translation_diagnostic_segments,
+            translation_segments=translation_segments,
+        ),
     }
 
 
 def _sum_marker(file_summaries: list[dict[str, object]], marker: str) -> int:
     return sum(int(dict(summary.get("marker_counts", {})).get(marker, 0)) for summary in file_summaries)
+
+
+def _sum_segment_linkage(file_summaries: list[dict[str, object]]) -> dict[str, object]:
+    numeric_keys = (
+        "finalize_segment_count",
+        "transcript_segment_count",
+        "translation_diagnostic_segment_count",
+        "translation_segment_count",
+        "final_transcript_linked_segment_count",
+        "final_translation_diagnostic_linked_segment_count",
+        "final_translation_linked_segment_count",
+        "finalize_without_transcript_count",
+        "transcript_without_finalize_count",
+        "translation_diagnostic_without_transcript_count",
+        "translation_without_transcript_count",
+    )
+    payload: dict[str, object] = {}
+    for key in numeric_keys:
+        payload[key] = sum(int(dict(summary.get("segment_linkage", {})).get(key, 0)) for summary in file_summaries)
+    payload["ready_for_translation_replay_linkage"] = int(payload["final_translation_linked_segment_count"]) > 0
+    payload["ready_for_translation_diagnostic_linkage"] = (
+        int(payload["final_translation_diagnostic_linked_segment_count"]) > 0
+    )
+    return payload
 
 
 def build_readiness(summary: dict[str, object]) -> dict[str, object]:
@@ -345,6 +442,7 @@ def audit_sources(inputs: Iterable[Path]) -> dict[str, object]:
         "window_seconds_counts": _counter_payload(window_counts),
         "step_seconds_counts": _counter_payload(step_counts),
         "sentence_finalize_age_counts": _counter_payload(finalize_age_counts),
+        "segment_linkage": _sum_segment_linkage(file_summaries),
         "stt_raw_line_count": _sum_marker(file_summaries, "stt_raw"),
         "files": file_summaries,
     }
@@ -374,6 +472,7 @@ def compact_summary(summary: dict[str, object]) -> dict[str, object]:
         "window_seconds_counts": summary.get("window_seconds_counts", {}),
         "step_seconds_counts": summary.get("step_seconds_counts", {}),
         "sentence_finalize_age_counts": summary.get("sentence_finalize_age_counts", {}),
+        "segment_linkage": summary.get("segment_linkage", {}),
         "representative_readiness": summary.get("representative_readiness", {}),
     }
 

@@ -48,6 +48,7 @@ class DictationAiSbdRepresentativeSourceAuditTest(unittest.TestCase):
                     "chunk=1 segment_id=1 final=True source_lang=en target_lang=ko backend=nllb-transformers "
                     "model=facebook/nllb-200-distilled-600M"
                 ),
+                "[2026-06-20 21:22:41] [avc] Dictation AI translation: [en->ko#1] 안녕하세요.",
             ]
         )
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -70,6 +71,24 @@ class DictationAiSbdRepresentativeSourceAuditTest(unittest.TestCase):
         self.assertEqual(summary["window_seconds_counts"], {"20.0": 1, "20.00s": 1})
         self.assertEqual(summary["step_seconds_counts"], {"1.0": 1, "1.00s": 1})
         self.assertEqual(summary["sentence_finalize_age_counts"], {"3": 1})
+        self.assertEqual(
+            summary["segment_linkage"],
+            {
+                "finalize_segment_count": 1,
+                "transcript_segment_count": 1,
+                "translation_diagnostic_segment_count": 1,
+                "translation_segment_count": 1,
+                "final_transcript_linked_segment_count": 1,
+                "final_translation_diagnostic_linked_segment_count": 1,
+                "final_translation_linked_segment_count": 1,
+                "finalize_without_transcript_count": 0,
+                "transcript_without_finalize_count": 0,
+                "translation_diagnostic_without_transcript_count": 0,
+                "translation_without_transcript_count": 0,
+                "ready_for_translation_replay_linkage": True,
+                "ready_for_translation_diagnostic_linkage": True,
+            },
+        )
         readiness = summary["representative_readiness"]
         self.assertTrue(readiness["can_seed_representative_candidates"])
         self.assertTrue(readiness["has_runtime_metadata"])

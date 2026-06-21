@@ -10,7 +10,14 @@ from tests.eval.dictation_ai.paper.audit_sbd_followup_readiness import (
 
 
 class DictationAiSbdFollowupReadinessAuditTest(unittest.TestCase):
-    def _write_source_audit(self, path: Path, *, can_seed: bool = True, translation: int = 2) -> None:
+    def _write_source_audit(
+        self,
+        path: Path,
+        *,
+        can_seed: bool = True,
+        translation: int = 2,
+        segment_linkage: dict[str, object] | None = None,
+    ) -> None:
         path.write_text(
             json.dumps(
                 {
@@ -21,6 +28,7 @@ class DictationAiSbdFollowupReadinessAuditTest(unittest.TestCase):
                         "translation": translation,
                         "translation_diagnostic": translation,
                     },
+                    "segment_linkage": segment_linkage or {},
                 },
                 ensure_ascii=False,
             ),
@@ -198,6 +206,42 @@ class DictationAiSbdFollowupReadinessAuditTest(unittest.TestCase):
         self.assertEqual(result["representative"]["case_summary"]["expected_final_case_count"], 1)
         self.assertFalse(result["paper_evidence_ready"])
         self.assertEqual(result["translation"]["status"], "blocked_on_translation_replay_linkage")
+
+    def test_reports_translation_ready_when_final_output_segments_are_linked(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source_audit = root / "source.json"
+            packet_validation = root / "packets.validation.json"
+            review_packets = root / "packets.json"
+            cases = root / "cases"
+            self._write_source_audit(
+                source_audit,
+                segment_linkage={
+                    "finalize_segment_count": 1,
+                    "transcript_segment_count": 1,
+                    "translation_diagnostic_segment_count": 1,
+                    "translation_segment_count": 1,
+                    "final_transcript_linked_segment_count": 1,
+                    "final_translation_diagnostic_linked_segment_count": 1,
+                    "final_translation_linked_segment_count": 1,
+                },
+            )
+            self._write_packet_validation(packet_validation)
+            self._write_review_packets(review_packets)
+            self._write_representative_case(cases / "rep.jsonl")
+
+            with patch("tests.eval.dictation_ai.cases.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", cases):
+                result = audit_followup_readiness(
+                    source_audit_path=source_audit,
+                    review_packet_validation_path=packet_validation,
+                    representative_cases=cases,
+                    review_packets=review_packets,
+                )
+
+        self.assertEqual(result["representative"]["status"], "ready_for_pilot_representative_replay")
+        self.assertEqual(result["translation"]["status"], "ready_for_translation_replay_case_building")
+        self.assertEqual(result["translation"]["missing_required_signals"], [])
+        self.assertTrue(result["paper_evidence_ready"])
 
     def test_reports_source_log_blocker_before_packet_or_case_work(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -12908,3 +12908,39 @@ tool_tests: Ran 139 tests, OK
 
 - `tests/eval/dictation_ai/` 루트는 `sbd_benchmark.py` 단일 엔트리라는 구조 계약을 테스트로 고정했다.
 - 새 실험 도구를 추가할 때는 하위 도메인 모듈과 subcommand 연결을 우선하고, 루트 실행 파일 추가는 피한다.
+
+### 2026-06-21 STT 비대상 성능 실험을 위한 final/translation linkage 관측 보강
+
+문제:
+
+- 현재 연구 대상은 raw STT 정확도 개선이 아니라, 부정확하거나 흔들리는 STT window 결과가 들어온 뒤 문장 확정과 final-only 번역 소비가 얼마나 안정적으로 이어지는지이다.
+- 기존 follow-up readiness는 번역 로그의 존재 여부만 판정했고, 어떤 final 세그먼트가 어떤 transcript/translation 출력으로 이어졌는지 확인하지 못했다.
+- 이 상태에서는 final 누락/중복 개선 실험과 번역 소비 실험이 STT 품질 문제와 섞여 해석될 위험이 있다.
+
+정리:
+
+- representative source audit가 `segment_id` 기반 linkage를 집계하도록 보강했다.
+- 집계 대상은 final 확정, transcript 출력, 번역 진단, 번역 출력이다.
+- follow-up readiness는 final/transcript/translation이 같은 `segment_id`로 연결된 경우에만 `ready_for_translation_replay_case_building`으로 판단한다.
+- 번역 진단까지만 연결되고 실제 번역 출력이 없으면 `blocked_on_translation_output_linkage`로 분리한다.
+
+검증:
+
+```text
+./.venv/bin/python -m py_compile tests/eval/dictation_ai/representative/audit_sbd_representative_sources.py tests/eval/dictation_ai/paper/audit_sbd_followup_readiness.py
+./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_representative_source_audit tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_followup_readiness_audit
+./.venv/bin/python -m unittest discover -s tests/eval/dictation_ai/tool_tests -p 'test_*.py'
+```
+
+결과:
+
+```text
+targeted tool tests: Ran 8 tests, OK
+tool_tests: Ran 140 tests, OK
+```
+
+해석:
+
+- STT backend/model 성능은 이번 실험 대상에서 제외한다.
+- 이번 변경은 STT 이후 생명주기 출력의 소비 가능성을 분리 측정하기 위한 관측성 보강이다.
+- 이후 성능 개선 실험은 동일한 STT window hypothesis 입력을 유지하고, final 누락/중복 및 final-only 번역 연결률을 별도 지표로 해석해야 한다.
