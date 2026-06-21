@@ -14823,6 +14823,49 @@ stage_queue_recent_final_suppressed_count=8
 - `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-5-20260621.jsonl`에 `zh_log_delayed_confidence_outfit_queue_head_stall_20260621_001` 케이스를 추가했다.
 - 현재 근거만으로 short CJK 품질 게이트를 완화하지는 않는다. 짧은 감탄/응답 문장 회수와 fragment 오확정 위험이 직접 충돌하기 때문이다.
 
+### 2026-06-21 중국어 hotel walk uphill/drink 구간 누락 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 15:59:46..16:00:20
+chunk=4492..4526 중심
+```
+
+감사 결과:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 15:59:46" --until "2026-06-21 16:00:20" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-zh-155946-160020.json
+```
+
+```text
+stt_raw_line_count=35
+finalize_event_count=6
+finalize_per_stt_raw=0.171
+stage_replace_deferred_count=16
+stage_replace_deferred_per_stt_raw=0.457
+stage_queue_promote_count=7
+stage_queue_promote_per_stt_raw=0.200
+duplicate_suppressed_count=67
+duplicate_suppressed_per_stt_raw=1.914
+quality_block_count=8
+stage_queue_recent_final_suppressed_count=2
+```
+
+관측:
+
+- `十八梯灯灯面，这个可以点。`과 `刚睡醒，我要去吃晚餐。`는 final로 확정됐다.
+- 이후 `我们在酒店下面逛逛走走先。`, `哇，这一路真的是一直在爬坡。`, `想要买一杯饮料喝，想喝一点果汁。`, `走下走下，有点口渴。` 흐름은 여러 window에서 반복됐지만 final로 소비되지 않았다.
+- `duplicate_suppressed_count=67`로 중복 억제가 매우 높고, `candidate_recent_final_delta_trimmed`가 반복되어 후반 안정 문장이 최근 final의 delta/echo로 흡수되는 경향이 보인다.
+- `你饮料喝，想喝一点果汁。` stage는 age=3에서 quality block으로 제거됐고, 뒤의 `走下走下，有点口渴。`는 duplicate suppression으로 계속 억제됐다.
+- 직접 원인은 stage queue head stall과 recent-final/delta 중복 억제가 겹쳐 안정화된 후반 문장이 final-only 번역 큐로 넘어가지 않은 것이다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-5-20260621.jsonl`에 `zh_log_missing_hotel_walk_uphill_drink_thirst_duplicate_suppression_20260621_001` 케이스를 추가했다.
+- 현재 근거만으로 recent-final 억제를 완화하지는 않는다. 중복 확정 방지와 후속 문장 회수의 충돌이 있어 CUDA 벤치에서 final F1/중복률 변화를 같이 봐야 한다.
+
 ### 2026-06-21 중국어 Seongsu last-day popup/cafe 구간 지연 케이스 추가
 
 관측 구간:
