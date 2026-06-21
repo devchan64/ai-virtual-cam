@@ -14541,3 +14541,30 @@ chunk=176..189
 
 - `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-5-20260621.jsonl`에 `zh_log_delayed_rain_exit_short_cjk_stage_head_20260621_001` 케이스를 추가했다.
 - 향후 판단 기준은 단순 길이 차단이 아니라, confirmations가 낮은 short terminal fragment가 여러 완결 후보 앞에서 queue head를 반복 점유하는 lifecycle 패턴이어야 한다.
+
+### 2026-06-21 중국어 BHC signature cheese 재확인과 glasses/outer-space 지연 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log.6
+2026-06-21 13:38:06..13:38:25
+chunk=101..112
+
+.tmp/logs/avc-whisper.log
+2026-06-21 14:51:06..14:51:54
+chunk=372..420
+```
+
+관측:
+
+- 사용자가 다시 제시한 `B H C...招牌cheese` 구간은 이미 `zh_log_missing_takeout_chicken_signature_cheese_20260621_001`로 등록되어 있다.
+- 해당 로그의 직접 원인은 `跟你们分享一下我点的一些吃的。` active stage가 broken delta를 만들며 오래 유지되고, 뒤의 `BHC...`, `哇，看起来就很好吃。`, `你看，我点的这个是他们家的招牌cheese。` 후보를 막은 것이다.
+- 이 문제는 `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=2`와 delta suppression 전용 chunk index 분리로 이미 보정 대상으로 묶었다. 따라서 같은 BHC 입력을 중복 케이스로 추가하지 않는다.
+- 이후 glasses/outer-space 구간에서 `换词。`, `不了。` 같은 짧은 CJK terminal fragment가 queue head를 점유하며 `那个是不是太大？`, `看起来很像去外太空哎。`, `太空服哥准备一件，快点来。`, `怎么回事？` 후보가 지연되는 유사 패턴을 확인했다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-5-20260621.jsonl`에 `zh_log_delayed_glasses_outer_space_short_cjk_stage_head_20260621_001` 케이스를 추가했다.
+- STT 자체가 흔들린 구간은 기대 문장에 과도하게 넣지 않고, 반복적으로 안정된 핵심 문장만 `expected_final`로 지정했다.
+- 이번 변경은 케이스 보강이다. `short_cjk` 전체 차단은 짧은 실제 문장 번역 요구와 충돌하므로 로직 변경은 보류한다.
