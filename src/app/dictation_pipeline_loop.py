@@ -122,6 +122,7 @@ def run_transcribe_loop(
             if promoted_sentence and _should_stage_boundary_candidate(promoted_sentence, detected):
                 active_stage.sentence = promoted_sentence
                 active_stage.deltaSuppressedChunks = 0
+                active_stage.deltaSuppressedChunkIndex = -1
                 count_metric("stage_queue_recent_final_delta_trimmed", 1)
                 break
             count_metric("stage_queue_recent_final_suppressed", 1)
@@ -227,9 +228,9 @@ def run_transcribe_loop(
             return []
         if _should_suppress_delta_final(staged_before, output_sentence, detected, reason):
             count_metric("finalize_delta_suppressed")
-            if active_stage.deferredAgeChunk != chunks:
+            if active_stage.deltaSuppressedChunkIndex != chunks:
                 active_stage.deltaSuppressedChunks += 1
-            active_stage.deferredAgeChunk = chunks
+            active_stage.deltaSuppressedChunkIndex = chunks
             if active_stage.deltaSuppressedChunks >= delta_suppressed_stage_max_chunks():
                 suppress_chunks = active_stage.deltaSuppressedChunks
                 active_stage.clear()
@@ -445,6 +446,7 @@ def run_transcribe_loop(
                     count_metric("stage_revision_candidate_quality_blocked")
             active_stage.sentence = preferred
             active_stage.deltaSuppressedChunks = 0
+            active_stage.deltaSuppressedChunkIndex = -1
             active_stage.confirmations = _next_revision_confirmation_count(
                 staged_before,
                 preferred,

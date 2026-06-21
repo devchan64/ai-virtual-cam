@@ -20,10 +20,32 @@ class DictationAiSbdLifecycleTest(unittest.TestCase):
         self.assertEqual(state.staged_sentence, "大家好，鸡肉拌牛肉拌，这个川菜一定要")
         self.assertEqual(state.staged_confirmations, 3)
         self.assertEqual(state.staged_age, 2)
-        self.assertEqual(state.staged_deferred_age_chunk, 9)
+        self.assertEqual(state.staged_deferred_age_chunk, 8)
+        self.assertEqual(state.staged_delta_suppressed_chunk_index, 9)
         self.assertEqual(state.metrics["finalize_delta_suppressed"], 1)
         self.assertEqual(state.metrics["finalize_delta_suppressed_stage_retained"], 1)
         self.assertNotIn("segment_state_suppressed", state.metrics)
+
+    def test_broken_delta_suppression_counts_after_same_chunk_revision(self) -> None:
+        state = LifecycleState(
+            language="zh",
+            committed_text="大家好，鸡肉拌牛肉拌，",
+            staged_sentence="大家好，鸡肉拌牛肉拌，这个川菜一定要",
+            staged_confirmations=3,
+            staged_age=3,
+            staged_deferred_age_chunk=9,
+            staged_delta_suppressed_chunk_index=8,
+        )
+
+        finalized = _finalize_staged_sentence(state, "zh", "confirmed", 9)
+
+        self.assertEqual(finalized, [])
+        self.assertEqual(state.staged_sentence, "大家好，鸡肉拌牛肉拌，这个川菜一定要")
+        self.assertEqual(state.staged_deferred_age_chunk, 9)
+        self.assertEqual(state.staged_delta_suppressed_chunk_index, 9)
+        self.assertEqual(state.staged_delta_suppressed_chunks, 1)
+        self.assertEqual(state.metrics["finalize_delta_suppressed"], 1)
+        self.assertEqual(state.metrics["finalize_delta_suppressed_stage_retained"], 1)
 
     def test_repeated_broken_delta_suppression_drops_stale_staged_candidate(self) -> None:
         state = LifecycleState(
@@ -34,6 +56,7 @@ class DictationAiSbdLifecycleTest(unittest.TestCase):
             staged_age=13,
             staged_deferred_age_chunk=8,
             staged_delta_suppressed_chunks=1,
+            staged_delta_suppressed_chunk_index=8,
         )
 
         finalized = _finalize_staged_sentence(state, "zh", "replaced_confirmed", 9)

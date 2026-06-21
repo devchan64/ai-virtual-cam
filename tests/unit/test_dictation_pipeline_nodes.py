@@ -82,6 +82,7 @@ class DictationPipelineNodeTest(unittest.TestCase):
         self.assertTrue(active.forced)
         self.assertEqual(active.deferredAgeChunk, 4)
         self.assertEqual(active.deltaSuppressedChunks, 0)
+        self.assertEqual(active.deltaSuppressedChunkIndex, -1)
 
         active.apply_buffer_entry(
             {
@@ -99,6 +100,7 @@ class DictationPipelineNodeTest(unittest.TestCase):
         self.assertFalse(active.forced)
         self.assertEqual(active.deferredAgeChunk, 9)
         self.assertEqual(active.deltaSuppressedChunks, 0)
+        self.assertEqual(active.deltaSuppressedChunkIndex, -1)
 
         active.clear()
 
@@ -108,6 +110,7 @@ class DictationPipelineNodeTest(unittest.TestCase):
         self.assertFalse(active.forced)
         self.assertEqual(active.deferredAgeChunk, -1)
         self.assertEqual(active.deltaSuppressedChunks, 0)
+        self.assertEqual(active.deltaSuppressedChunkIndex, -1)
 
     def test_speech_evidence_node_emits_recognition_hypothesis_contract(self) -> None:
         node = SpeechEvidenceToSttHypothesisNode(

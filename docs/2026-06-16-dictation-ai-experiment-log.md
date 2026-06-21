@@ -14263,3 +14263,18 @@ finalize_delta_suppressed_stage_dropped_count=0
 
 - `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_hotel_tambourine_popup_store_queue_20260621_001` 케이스를 추가했다.
 - 이번 패치에서는 앱 로직을 추가 변경하지 않았다. 다음 조정 후보는 active stage가 확정 불가 품질로 반복 보류될 때 queue 진행을 더 빨리 여는 정책이지만, premature final/중복 final 위험을 벤치로 먼저 비교해야 한다.
+
+### 2026-06-21 delta suppression 카운터 chunk index 분리
+
+추가 로그 관측:
+
+- `delta 확정 보류`가 여러 chunk에서 반복되는데 `suppress_chunks=0`으로 남는 사례를 확인했다.
+- 같은 staged 후보가 revision된 직후 `deferredAgeChunk`가 현재 chunk로 갱신되고, 이후 같은 chunk의 `_should_suppress_delta_final`이 이 값을 재사용하면서 delta suppression 카운트가 증가하지 않았다.
+- 결과적으로 `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS`가 의도보다 늦게 동작하고, active stage가 장시간 queue를 막을 수 있었다.
+
+반영:
+
+- active staged 후보에 delta suppression 전용 `deltaSuppressedChunkIndex`를 추가했다.
+- 벤치 lifecycle state에도 `staged_delta_suppressed_chunk_index`를 추가해 운영 루프와 동일하게 동작하도록 맞췄다.
+- stage age/revision용 `deferredAgeChunk`와 broken-delta 보류 카운터를 분리했다.
+- 회귀 테스트는 revision 직후 같은 chunk에서 broken delta가 발생해도 suppression 카운터가 증가하는지 확인한다.

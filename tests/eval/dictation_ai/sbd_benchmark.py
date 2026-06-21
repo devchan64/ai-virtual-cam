@@ -126,6 +126,7 @@ class LifecycleState:
     staged_forced: bool = False
     staged_deferred_age_chunk: int = -1
     staged_delta_suppressed_chunks: int = 0
+    staged_delta_suppressed_chunk_index: int = -1
     no_text_stage_skip_chunks: int = 0
     staged_queue: deque[dict[str, object]] | None = None
     final_sentences: list[str] | None = None
@@ -156,6 +157,7 @@ def _promote_next_staged_sentence(state: LifecycleState, chunk_index: int) -> No
         state.staged_forced = bool(entry["forced"])
         state.staged_deferred_age_chunk = chunk_index
         state.staged_delta_suppressed_chunks = 0
+        state.staged_delta_suppressed_chunk_index = -1
         state.count("stage_queue_promote")
         state.count("stage_start")
         state.count("segment_state_staged")
@@ -169,6 +171,7 @@ def _promote_next_staged_sentence(state: LifecycleState, chunk_index: int) -> No
         if promoted_sentence and _should_stage_boundary_candidate(promoted_sentence, state.language):
             state.staged_sentence = promoted_sentence
             state.staged_delta_suppressed_chunks = 0
+            state.staged_delta_suppressed_chunk_index = -1
             state.count("stage_queue_recent_final_delta_trimmed")
             return
         state.staged_sentence = ""
@@ -177,6 +180,7 @@ def _promote_next_staged_sentence(state: LifecycleState, chunk_index: int) -> No
         state.staged_forced = False
         state.staged_deferred_age_chunk = -1
         state.staged_delta_suppressed_chunks = 0
+        state.staged_delta_suppressed_chunk_index = -1
         state.count("stage_queue_recent_final_suppressed")
         state.count("segment_state_suppressed")
 
@@ -343,15 +347,16 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
         state.staged_forced = False
         state.staged_deferred_age_chunk = -1
         state.staged_delta_suppressed_chunks = 0
+        state.staged_delta_suppressed_chunk_index = -1
         state.count("finalize_duplicate_suppressed")
         state.count("segment_state_suppressed")
         _promote_next_staged_sentence(state, chunk_index)
         return []
     if _should_suppress_delta_final(staged_before, output_sentence, language, reason):
         state.count("finalize_delta_suppressed")
-        if state.staged_deferred_age_chunk != chunk_index:
+        if state.staged_delta_suppressed_chunk_index != chunk_index:
             state.staged_delta_suppressed_chunks += 1
-        state.staged_deferred_age_chunk = chunk_index
+        state.staged_delta_suppressed_chunk_index = chunk_index
         if state.staged_delta_suppressed_chunks >= delta_suppressed_stage_max_chunks():
             state.staged_sentence = ""
             state.staged_confirmations = 0
@@ -359,6 +364,7 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
             state.staged_forced = False
             state.staged_deferred_age_chunk = -1
             state.staged_delta_suppressed_chunks = 0
+            state.staged_delta_suppressed_chunk_index = -1
             state.count("finalize_delta_suppressed_stage_dropped")
             state.count("segment_state_suppressed")
             _promote_next_staged_sentence(state, chunk_index)
@@ -371,6 +377,7 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
     state.staged_forced = False
     state.staged_deferred_age_chunk = -1
     state.staged_delta_suppressed_chunks = 0
+    state.staged_delta_suppressed_chunk_index = -1
     state.count("finalized")
     state.count("segment_state_final")
     for flag in _final_sentence_diagnostic_flags(output_sentence, language):
@@ -447,6 +454,7 @@ def _stage_completed_sentence(
         state.staged_forced = forced
         state.staged_deferred_age_chunk = chunk_index
         state.staged_delta_suppressed_chunks = 0
+        state.staged_delta_suppressed_chunk_index = -1
         return []
     if _should_confirm_staged_sentence(
         state.staged_sentence,
@@ -468,6 +476,7 @@ def _stage_completed_sentence(
         state.staged_forced = forced
         state.staged_deferred_age_chunk = chunk_index
         state.staged_delta_suppressed_chunks = 0
+        state.staged_delta_suppressed_chunk_index = -1
         return finalized
 
     if _sentences_are_revisions(state.staged_sentence, candidate):
@@ -479,6 +488,7 @@ def _stage_completed_sentence(
             state.count("stage_revision_changed")
         state.staged_sentence = preferred
         state.staged_delta_suppressed_chunks = 0
+        state.staged_delta_suppressed_chunk_index = -1
         state.staged_confirmations = _next_revision_confirmation_count(previous, preferred, state.staged_confirmations)
         if _should_reset_revision_age(previous, preferred):
             state.staged_age = 0
@@ -522,6 +532,7 @@ def _stage_completed_sentence(
             state.staged_forced = False
             state.staged_deferred_age_chunk = -1
             state.staged_delta_suppressed_chunks = 0
+            state.staged_delta_suppressed_chunk_index = -1
             _promote_next_staged_sentence(state, chunk_index)
             return []
         return []
@@ -572,6 +583,7 @@ def _stage_completed_sentence(
             state.staged_forced = False
             state.staged_deferred_age_chunk = -1
             state.staged_delta_suppressed_chunks = 0
+            state.staged_delta_suppressed_chunk_index = -1
             _promote_next_staged_sentence(state, chunk_index)
         return []
     if _should_finalize_replaced_sentence(
@@ -604,6 +616,7 @@ def _stage_completed_sentence(
         state.staged_forced = False
         state.staged_deferred_age_chunk = -1
         state.staged_delta_suppressed_chunks = 0
+        state.staged_delta_suppressed_chunk_index = -1
     if not state.staged_sentence:
         _promote_next_staged_sentence(state, chunk_index)
     if state.staged_sentence:
@@ -617,6 +630,7 @@ def _stage_completed_sentence(
     state.staged_forced = forced
     state.staged_deferred_age_chunk = chunk_index
     state.staged_delta_suppressed_chunks = 0
+    state.staged_delta_suppressed_chunk_index = -1
     return finalized
 
 
@@ -650,6 +664,7 @@ def _age_staged_sentence(state: LifecycleState, language: str, sentence_finalize
         state.staged_forced = False
         state.staged_deferred_age_chunk = -1
         state.staged_delta_suppressed_chunks = 0
+        state.staged_delta_suppressed_chunk_index = -1
         _promote_next_staged_sentence(state, chunk_index)
         return []
     state.count("stage_age_finalize")
@@ -673,6 +688,7 @@ def _suppress_stale_no_text_stage(state: LifecycleState, chunk_index: int) -> No
     state.staged_forced = False
     state.staged_deferred_age_chunk = -1
     state.staged_delta_suppressed_chunks = 0
+    state.staged_delta_suppressed_chunk_index = -1
     state.no_text_stage_skip_chunks = 0
     _promote_next_staged_sentence(state, chunk_index)
 
