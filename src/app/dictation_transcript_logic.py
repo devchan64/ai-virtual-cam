@@ -33,6 +33,7 @@ from src.app.dictation_pipeline_settings import (
     recent_final_extension_min_suffix_units as _recent_final_extension_min_suffix_units,
     sentence_confirm_chunks as _sentence_confirm_chunks,
     sentence_confirm_max_age_chunks as _sentence_confirm_max_age_chunks,
+    short_cjk_confirm_extra_chunks as _short_cjk_confirm_extra_chunks,
     short_cjk_final_units as _short_cjk_final_units,
     short_cjk_replacement_hold_chunks as _short_cjk_replacement_hold_chunks,
     short_mixed_latin_zh_cjk_units as _short_mixed_latin_zh_cjk_units,
@@ -869,6 +870,14 @@ def _is_prior_pending_recent_final_mixed_candidate(
     return False
 
 
+def _staged_sentence_required_confirmations(staged_sentence: str, staged_forced: bool) -> int:
+    flags = set(_final_sentence_diagnostic_flags(staged_sentence, "zh" if _is_cjk_text(staged_sentence) else ""))
+    required_confirmations = _sentence_required_confirmations(staged_forced)
+    if "short_cjk" in flags and "no_end_marker" not in flags:
+        required_confirmations += _short_cjk_confirm_extra_chunks()
+    return required_confirmations
+
+
 def _should_confirm_staged_sentence(
     staged_sentence: str,
     staged_confirmations: int,
@@ -882,7 +891,7 @@ def _should_confirm_staged_sentence(
     if _is_cjk_text(staged_sentence):
         if flags.intersection({"empty", "no_end_marker", "spaced_cjk", "cjk_repeated_ngram", "latin_only_for_zh"}):
             return False
-    return staged_confirmations >= _sentence_required_confirmations(staged_forced)
+    return staged_confirmations >= _staged_sentence_required_confirmations(staged_sentence, staged_forced)
 
 
 def _should_preserve_partial_replacement(staged_sentence: str, candidate: str) -> bool:
@@ -939,7 +948,7 @@ def _replacement_decision_reason(
         return "open_korean_clause"
     if _looks_like_open_latin_clause(staged_sentence, staged_words):
         return "open_latin_clause"
-    if staged_confirmations >= _sentence_required_confirmations(staged_forced):
+    if staged_confirmations >= _staged_sentence_required_confirmations(staged_sentence, staged_forced):
         return "confirmed"
     if _has_cjk_words(staged_words):
         flags = set(_final_sentence_diagnostic_flags(staged_sentence, "zh"))
@@ -1046,7 +1055,7 @@ def _should_finalize_boundary_candidate(
     staged_confirmations: int | None = None,
     staged_forced: bool = False,
 ) -> bool:
-    if staged_confirmations is not None and staged_confirmations < _sentence_required_confirmations(staged_forced):
+    if staged_confirmations is not None and staged_confirmations < _staged_sentence_required_confirmations(sentence, staged_forced):
         return False
     return _should_stage_boundary_candidate(sentence, language)
 

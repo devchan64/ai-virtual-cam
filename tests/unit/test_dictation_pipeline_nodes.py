@@ -18,6 +18,7 @@ from src.app.dictation_pipeline_settings import (
     MIN_CJK_CHARS_FOR_NO_SPEECH_OVERRIDE,
     RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS,
     RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS,
+    SHORT_CJK_CONFIRM_EXTRA_CHUNKS,
     MIN_SEGMENT_AVG_LOGPROB,
     SEGMENT_HIGH_NO_SPEECH_OVERRIDE_LANGUAGES,
     SEGMENT_LOGPROB_CONFIDENCE_WEIGHT,
@@ -36,9 +37,11 @@ from src.app.dictation_transcript_logic import (
     _final_sentence_diagnostic_flags,
     _normalized_text,
     _recent_final_output_delta,
+    _should_confirm_staged_sentence,
     _should_stage_boundary_candidate,
     _should_suppress_delta_final,
     _should_translate_final_sentence,
+    _staged_sentence_required_confirmations,
 )
 from src.app.sentence_boundary import SentenceBoundaryResult
 
@@ -176,6 +179,7 @@ class DictationPipelineNodeTest(unittest.TestCase):
         self.assertEqual(policy["segment_logprob_score_scale"], SEGMENT_LOGPROB_SCORE_SCALE)
         self.assertEqual(policy["segment_logprob_confidence_weight"], SEGMENT_LOGPROB_CONFIDENCE_WEIGHT)
         self.assertEqual(policy["segment_no_speech_confidence_weight"], SEGMENT_NO_SPEECH_CONFIDENCE_WEIGHT)
+        self.assertEqual(policy["short_cjk_confirm_extra_chunks"], SHORT_CJK_CONFIRM_EXTRA_CHUNKS)
         self.assertEqual(policy["cjk_char_ranges"], CJK_CHAR_RANGES)
         self.assertEqual(
             policy["segment_high_no_speech_override_languages"],
@@ -189,6 +193,7 @@ class DictationPipelineNodeTest(unittest.TestCase):
                 "AVC_DICTATION_MAX_STAGED_SENTENCE_QUEUE": "33",
                 "AVC_DICTATION_SENTENCE_CONFIRM_CHUNKS": "4",
                 "AVC_DICTATION_SHORT_NO_END_FRAGMENT_UNITS": "6",
+                "AVC_DICTATION_SHORT_CJK_CONFIRM_EXTRA_CHUNKS": "2",
             },
         ):
             policy = dictation_pipeline_policy()
@@ -196,6 +201,7 @@ class DictationPipelineNodeTest(unittest.TestCase):
         self.assertEqual(policy["max_staged_sentence_queue"], 33)
         self.assertEqual(policy["sentence_confirm_chunks"], 4)
         self.assertEqual(policy["short_no_end_fragment_units"], 6)
+        self.assertEqual(policy["short_cjk_confirm_extra_chunks"], 2)
 
     def test_tuning_manifest_documents_env_overrides_and_evidence_scope(self) -> None:
         with patch.dict("os.environ", {"AVC_DICTATION_SENTENCE_CONFIRM_CHUNKS": "5"}):
@@ -307,6 +313,15 @@ class DictationPipelineNodeTest(unittest.TestCase):
             _final_sentence_diagnostic_flags("哇，看起来就很好吃。", "zh"),
         )
         self.assertTrue(_should_stage_boundary_candidate("哇，看起来就很好吃。", "zh"))
+
+    def test_short_cjk_with_end_marker_requires_extra_confirmation(self) -> None:
+        sentence = "这一家餐厅呢，他。"
+        required = _staged_sentence_required_confirmations(sentence, False)
+
+        self.assertEqual(required, 3)
+        self.assertFalse(_should_confirm_staged_sentence(sentence, 2, False))
+        self.assertTrue(_should_confirm_staged_sentence(sentence, 3, False))
+        self.assertTrue(_should_stage_boundary_candidate(sentence, "zh"))
 
     def test_hypothesis_candidate_node_preserves_boundary_contract(self) -> None:
         detector = FakeBoundaryDetector()

@@ -122,6 +122,11 @@ SHORT_CJK_FINAL_UNITS = 10
 SHORT_NO_END_FRAGMENT_UNITS = 4
 SHORT_CJK_REPLACEMENT_HOLD_CHUNKS = 2
 
+# 짧은 CJK 후보는 문장부호가 있어도 다음 window에서 긴 문장으로 확장되는
+# 경우가 많다. final을 막지는 않고 기본 confirmation보다 1회 더 관측해
+# premature fragment final을 줄인다.
+SHORT_CJK_CONFIRM_EXTRA_CHUNKS = 1
+
 # 중국어 window에서 라틴 토큰과 1~2글자 CJK suffix만 붙은 짧은 조각은
 # 고유명사/브랜드명의 불완전한 STT 후보인 경우가 많다. 전체 mixed-latin
 # 문장을 막지는 않고, active stage head를 점유하기 쉬운 매우 짧은 조각만
@@ -315,6 +320,10 @@ def short_cjk_replacement_hold_chunks() -> int:
     return _dictation_env_int("SHORT_CJK_REPLACEMENT_HOLD_CHUNKS", SHORT_CJK_REPLACEMENT_HOLD_CHUNKS)
 
 
+def short_cjk_confirm_extra_chunks() -> int:
+    return _dictation_env_int("SHORT_CJK_CONFIRM_EXTRA_CHUNKS", SHORT_CJK_CONFIRM_EXTRA_CHUNKS)
+
+
 def short_mixed_latin_zh_cjk_units() -> int:
     return _dictation_env_int("SHORT_MIXED_LATIN_ZH_CJK_UNITS", SHORT_MIXED_LATIN_ZH_CJK_UNITS)
 
@@ -360,6 +369,7 @@ def dictation_pipeline_policy() -> dict[str, object]:
         "short_cjk_final_units": short_cjk_final_units(),
         "short_no_end_fragment_units": short_no_end_fragment_units(),
         "short_cjk_replacement_hold_chunks": short_cjk_replacement_hold_chunks(),
+        "short_cjk_confirm_extra_chunks": short_cjk_confirm_extra_chunks(),
         "short_mixed_latin_zh_cjk_units": short_mixed_latin_zh_cjk_units(),
         "short_mixed_latin_zh_total_units": short_mixed_latin_zh_total_units(),
         "cjk_revision_internal_stability_min_ratio": CJK_REVISION_INTERNAL_STABILITY_MIN_RATIO,
@@ -405,6 +415,7 @@ def lifecycle_tuning_policy() -> dict[str, int]:
         "short_cjk_final_units": short_cjk_final_units(),
         "short_no_end_fragment_units": short_no_end_fragment_units(),
         "short_cjk_replacement_hold_chunks": short_cjk_replacement_hold_chunks(),
+        "short_cjk_confirm_extra_chunks": short_cjk_confirm_extra_chunks(),
     }
 
 
@@ -598,6 +609,16 @@ def dictation_tuning_manifest() -> list[dict[str, int | float | str]]:
             max_value=10,
             scope="quality-gate",
             intent="hold short CJK replacement candidates briefly before replacing existing staged content",
+        ),
+        _tuning_manifest_entry(
+            "SHORT_CJK_CONFIRM_EXTRA_CHUNKS",
+            default=SHORT_CJK_CONFIRM_EXTRA_CHUNKS,
+            current=short_cjk_confirm_extra_chunks(),
+            value_type="int",
+            min_value=0,
+            max_value=4,
+            scope="lifecycle",
+            intent="require one more observation for punctuated short CJK candidates before finalizing",
         ),
         _tuning_manifest_entry(
             "CJK_REVISION_RATIO_MIN",

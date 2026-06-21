@@ -37,8 +37,8 @@ from src.app.dictation_transcript_logic import (
     _sentence_end_count,
     _sentence_max_age_chunks,
     _sentence_output_delta,
-    _sentence_required_confirmations,
     _sentences_are_revisions,
+    _staged_sentence_required_confirmations,
     _should_age_staged_sentence,
     _should_confirm_staged_sentence,
     _should_defer_unconfirmed_replacement,
@@ -471,7 +471,7 @@ def run_transcribe_loop(
             active_stage.deferredAgeChunk = chunks
             count_metric("stage_age_tick")
             active_stage.forced = active_stage.forced or forced
-            required_confirmations = _sentence_required_confirmations(active_stage.forced)
+            required_confirmations = _staged_sentence_required_confirmations(active_stage.sentence, active_stage.forced)
             worker._emit(
                 "status",
                 "받아쓰기 AI stage 리비전: "
@@ -634,7 +634,7 @@ def run_transcribe_loop(
         else:
             count_metric("stage_replaced_unconfirmed")
             count_segment_state("suppressed")
-            required_confirmations = _sentence_required_confirmations(active_stage.forced)
+            required_confirmations = _staged_sentence_required_confirmations(active_stage.sentence, active_stage.forced)
             worker._emit(
                 "status",
                 "받아쓰기 AI stage 미확정 교체: "
@@ -712,7 +712,7 @@ def run_transcribe_loop(
         if not active_stage.sentence:
             no_text_stage_skip_chunks = 0
             return
-        required_confirmations = _sentence_required_confirmations(active_stage.forced)
+        required_confirmations = _staged_sentence_required_confirmations(active_stage.sentence, active_stage.forced)
         if active_stage.confirmations >= required_confirmations:
             return
         if no_text_stage_skip_chunks < no_text_stale_stage_suppress_chunks():

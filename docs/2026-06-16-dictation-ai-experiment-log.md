@@ -14865,6 +14865,101 @@ finalize_delta_suppressed_stage_retained_count=2
 - 이 패턴은 단순 파라미터 튜닝보다 delta suppression 이후 stage 재시작 후보가 앞 문맥을 과도하게 잃는지 확인할 필요가 있다.
 - 다만 즉시 로직을 넓히면 과잉 보정 위험이 있으므로, 우선 벤치 케이스로 누적하고 CUDA 벤치에서 같은 유형의 F1/fragment 변화를 확인한다.
 
+### 2026-06-21 중국어 餐厅/分店/市集 구간 premature short final 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 17:49:15..17:49:45
+chunk=1585..1615 중심
+```
+
+대표 raw 흐름:
+
+```text
+我的父母呢，他们讲他们想要吃饭，所以我就找了一家餐厅。
+这一家餐厅呢，它是有很多分店的。
+然后我们来到了这一家，是比较靠近那个待会我们要去的市集。
+哦，是那里一间。
+```
+
+실제 final 관측:
+
+```text
+我的父母呢，他们讲。
+他们想要吃饭所以我就找了一家。
+这一家餐厅呢，他。
+然后我们来到了这一家，是比较靠近。
+那个待会我们要去的市集。
+嗯，是那里一间。
+就找了一家餐厅，这一家餐厅呢，它是有很多分店的。
+```
+
+감사 결과:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 17:49:15" --until "2026-06-21 17:49:45" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-zh-restaurant-branch-market-174915-174945.json
+```
+
+```text
+stt_raw_line_count=31
+finalize_event_count=7
+finalize_per_stt_raw=0.226
+duplicate_suppressed_count=10
+duplicate_suppressed_per_stt_raw=0.323
+quality_block_count=33
+quality_block_per_stt_raw=1.065
+stage_queue_promote_count=2
+stage_queue_promote_per_stt_raw=0.065
+stage_replace_deferred_count=2
+stage_replace_deferred_per_stt_raw=0.065
+```
+
+관측:
+
+- 짧은 CJK 후보 `我的父母呢，他们讲。`, `这一家餐厅呢，他。`가 end marker를 갖고 있어 confirmed final로 먼저 소비됐다.
+- 이후 더 긴 문장 `他们讲他们想要吃饭...`, `它是有很多分店的`은 recent-final delta 후 suffix만 남아 `short_cjk/no_end_marker/short_no_end_fragment` 품질 차단으로 누락됐다.
+- `然后我们来到了这一家，是比较靠近...` 구간도 완성 전 `比较靠近` 조각이 먼저 확정되고, 후속 `待会我们要去的市集`이 별도 final로 분리됐다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-6-20260621.jsonl`에 `zh_log_restaurant_branch_market_premature_short_final_20260621_001` 케이스를 추가했다.
+
+후속 판단:
+
+- 기존 recent-final extension 로직은 prefix가 충분하고 suffix가 의미 있을 때 동작하지만, 이번 케이스처럼 premature short final이 여러 개 누적된 경우에는 확장 회수가 충분하지 않았다.
+- `short_cjk` 자체를 막으면 짧은 질의/응답 final까지 손상될 수 있으므로, final 금지가 아니라 confirmation을 1회 더 요구하는 보수 패치를 적용한다.
+
+적용:
+
+- `SHORT_CJK_CONFIRM_EXTRA_CHUNKS=1`을 추가했다.
+- `short_cjk`이면서 end marker가 있는 후보는 기본 `SENTENCE_CONFIRM_CHUNKS=2`가 아니라 3회 확인 후 확정한다.
+- 운영 로그의 `required` 표시, no-text stale 판단, 텍스트 벤치 lifecycle도 같은 required confirmation 계산을 사용하도록 정리했다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases --max-drafts 0
+case_count=1188, expected_final_case_count=1184, zh=297
+
+./.venv/bin/python -m unittest tests.unit.test_dictation_pipeline_nodes tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle
+Ran 33 tests in 0.005s, OK
+
+git diff --check
+OK
+```
+
+제한:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py --cases tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-6-20260621.jsonl --output .tmp/eval/dictation-ai-sbd/zh-6-20260621-benchmark-after-short-cjk-extra-confirm.json
+[dictation-ai-sbd-benchmark] error: sentence boundary backend 'sat' initialization failed: model=sat-3l-sm device=cuda compute=float16.
+```
+
+- sandbox 내부에서는 `sat + cuda + float16` 초기화가 실패했다.
+- CPU/mock fallback은 성능 근거로 사용하지 않았다.
+
 ### 2026-06-21 중국어 자유행/跟团 구간 queue head stall 케이스 추가
 
 관측 구간:

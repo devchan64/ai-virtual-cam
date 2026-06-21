@@ -40,8 +40,8 @@ from src.app.dictation_transcript_logic import (
     _replacement_decision_reason,
     _sentence_max_age_chunks,
     _sentence_output_delta,
-    _sentence_required_confirmations,
     _sentences_are_revisions,
+    _staged_sentence_required_confirmations,
     _word_units,
     _should_age_staged_sentence,
     _should_confirm_staged_sentence,
@@ -684,7 +684,7 @@ def _suppress_stale_no_text_stage(state: LifecycleState, chunk_index: int) -> No
     if not state.staged_sentence:
         state.no_text_stage_skip_chunks = 0
         return
-    required_confirmations = _sentence_required_confirmations(state.staged_forced)
+    required_confirmations = _staged_sentence_required_confirmations(state.staged_sentence, state.staged_forced)
     if state.staged_confirmations >= required_confirmations:
         return
     if state.no_text_stage_skip_chunks < no_text_stale_stage_suppress_chunks():
