@@ -1501,6 +1501,14 @@ def _prefer_sentence_revision(left: str, right: str) -> str:
             return _normalized_text(left)
         if "cjk_repeated_ngram" in left_flags and "cjk_repeated_ngram" not in right_flags:
             return _normalized_text(right)
+        if (
+            right_words
+            and len(left_words) > len(right_words)
+            and left_words[: len(right_words)] == right_words
+            and 2 <= len(left_words) - len(right_words) <= 8
+            and _boundary_sentence_end_count(right) > 0
+        ):
+            return _normalized_text(right)
     left_signature = _short_revision_signature(left_words)
     right_signature = _short_revision_signature(right_words)
     if left_signature and left_signature == right_signature:

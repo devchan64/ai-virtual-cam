@@ -14454,3 +14454,25 @@ chunk=2265..2285
 
 - `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-2-20260621.jsonl`에 `zh_log_delayed_fried_chicken_whole_chicken_queue_stage_20260621_001` 케이스를 추가했다.
 - 이 케이스는 완전 누락이 아니라 확정 지연과 false staged 노출 사례로 분류했다. 추가 로직 변경은 실제 `sat + cuda + float16` 벤치에서 동일 패턴이 남는지 확인한 뒤 판단한다.
+
+### 2026-06-21 중국어 fried chicken/next place 구간 terminal prefix revision 보강
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 14:33:15..14:33:24
+chunk=111..120
+```
+
+관측:
+
+- 최신 실행 로그에는 `stage_replace_deferred_same_chunk` 지표가 출력되어 동일 chunk stage 교체 지연 패치가 적용된 상태임을 확인했다.
+- `被吓到了想要炸鸡可能吃不下去了。`가 staged revision 과정에서 `我们来看看` tail과 붙어 `被吓到了想要炸鸡可能吃不下去了我们来看看。`로 final 확정됐다.
+- 이후 raw STT는 `好吧，我们来去一下一间。`, `本来想要再吃炸鸡，但是被吓到了...`, `我们来看看可以要吃吃些什么。`를 반복적으로 제시했지만, 앞선 합성 final 때문에 정상 경계가 recent-final/duplicate 처리로 밀렸다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-3-20260621.jsonl`에 `zh_log_missing_fried_chicken_next_place_terminal_prefix_revision_20260621_001` 케이스를 추가했다.
+- revision 선호 규칙에서 한 후보가 명확한 종결 경계를 가진 prefix 문장이고 기존 후보가 그 뒤에 짧은 tail을 붙여 하나의 문장처럼 만든 경우, 더 긴 문자열보다 종결 경계를 보존한 후보를 우선하도록 보강했다.
+- 이는 문구별 예외가 아니라 terminal-boundary prefix와 짧은 tail 결합으로 인한 sentence destruction을 줄이기 위한 lifecycle 규칙이다.
