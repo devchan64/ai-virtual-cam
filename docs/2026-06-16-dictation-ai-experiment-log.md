@@ -14750,6 +14750,67 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-21 중국어 Hongdae route/roadworks 구간 stage queue 지연 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 15:14:00..15:14:40
+chunk=1749..1783 중심
+```
+
+감사 결과:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 15:14:00" --until "2026-06-21 15:14:40" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-zh-151400-151440.json
+```
+
+```text
+stt_raw_line_count=41
+finalize_event_count=15
+finalize_per_stt_raw=0.366
+stage_replace_deferred_count=43
+stage_replace_deferred_per_stt_raw=1.049
+stage_queue_promote_count=15
+stage_queue_promote_per_stt_raw=0.366
+duplicate_suppressed_count=83
+duplicate_suppressed_per_stt_raw=2.024
+quality_block_count=13
+finalize_delta_suppressed_stage_retained_count=2
+finalize_delta_suppressed_stage_dropped_count=2
+```
+
+관측:
+
+- `喝咖啡来了。`, `这个可以点。`, `好的，我们现在要继续往下走了。` 이후 route 설명이 이어진다.
+- `八号出口`, 먹자골목, `重新修复/重新铺过`, `前阵子在施工`, `蓝色...比较平价便宜的衣服` 흐름이 여러 window에서 안정화되지만 stage queue와 duplicate suppression 사이에서 확정 지연이 관측된다.
+- 이번 구간은 broken delta suppression보다 `unconfirmed_cjk` 교체 보류와 queue head 유지가 주 원인이다.
+- `重新复购/重新铺过/重新修复`처럼 STT 단어가 흔들리므로 기대 문장은 반복적으로 안정된 최종 의미를 기준으로 수동 지정한다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-5-20260621.jsonl`에 `zh_log_delayed_hongdae_route_roadworks_queue_20260621_001` 케이스를 추가했다.
+- 현재 근거만으로 `unconfirmed_cjk` 교체 정책을 완화하지는 않는다. 짧은 실제 문장 확정과 오확정 억제의 충돌이 있으므로 누적 케이스로 유지한다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases --max-drafts 0
+case_count=1153, expected_final_case_count=1149, zh=262
+
+./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle
+Ran 10 tests in 0.009s, OK
+
+git diff --check
+OK
+```
+
+제한:
+
+- `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
+- CPU/mock fallback은 성능 근거로 사용하지 않는다.
+
 ### 2026-06-21 중국어 Hongdae cushion/tax refund 구간 delta/queue 지연 케이스 추가
 
 관측 구간:
