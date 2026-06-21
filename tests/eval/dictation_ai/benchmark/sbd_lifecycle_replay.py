@@ -816,6 +816,15 @@ def _suppress_stale_no_text_stage(state: LifecycleState, chunk_index: int) -> No
 
 def _run_lifecycle_case(case: SbdCase, detector: Any) -> dict[str, Any]:
     state = LifecycleState(language=case.language)
+    initial_final_count = 0
+    for initial_sentence in case.initial_final:
+        normalized_initial = normalized_text(initial_sentence)
+        if not normalized_initial:
+            continue
+        state.committed_text = _append_committed_text(state.committed_text, normalized_initial)
+        assert state.final_sentences is not None
+        state.final_sentences.append(normalized_initial)
+        initial_final_count += 1
     chunks: list[dict[str, Any]] = []
     for chunk_index, chunk in enumerate(case.chunks, start=1):
         prior_pending_text = state.pending_text
@@ -910,7 +919,8 @@ def _run_lifecycle_case(case: SbdCase, detector: Any) -> dict[str, Any]:
         "chunks": chunks,
         "actual_completed_last": chunks[-1]["completed"] if chunks else [],
         "actual_pending": state.pending_text,
-        "actual_final": state.final_sentences,
+        "actual_final": state.final_sentences[initial_final_count:],
+        "initial_final": state.final_sentences[:initial_final_count],
         "actual_staged": state.staged_sentence,
         "actual_staged_queue": [str(entry["sentence"]) for entry in state.staged_queue],
         "committed_text": state.committed_text,

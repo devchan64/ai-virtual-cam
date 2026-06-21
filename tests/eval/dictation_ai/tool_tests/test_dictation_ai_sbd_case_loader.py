@@ -189,6 +189,26 @@ class DictationAiSbdCaseLoaderTest(unittest.TestCase):
         self.assertEqual(cases[0].expected_final, [])
         self.assertEqual(cases[0].expected_pending, "Hello world.")
 
+    def test_loads_initial_final_context_for_mid_stream_replay(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "cases.jsonl"
+            payload = {
+                "id": "initial-final-context",
+                "language": "en",
+                "initial_final": ["Already committed."],
+                "chunks": ["Already committed. New sentence."],
+                "expected_final": ["New sentence."],
+                "expected_pending": "",
+                "sentence_finalize_age": 3,
+                "tags": ["unit"],
+            }
+            path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+
+            cases, _sources = load_cases([path])
+
+        self.assertEqual(cases[0].initial_final, ("Already committed.",))
+        self.assertEqual(cases[0].expected_final, ["New sentence."])
+
     def test_representative_benchmark_input_requires_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "sbd_representative_cases"

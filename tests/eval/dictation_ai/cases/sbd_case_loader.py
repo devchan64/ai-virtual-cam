@@ -24,6 +24,7 @@ class SbdCase:
     expected_staged: str
     tags: tuple[str, ...]
     sentence_finalize_age: int
+    initial_final: tuple[str, ...] = ()
     metadata: dict[str, object] | None = None
 
 
@@ -73,6 +74,11 @@ def _load_case_file(path: Path, *, corpus_role: str) -> list[SbdCase]:
                     expected_staged=normalized_text(str(payload.get("expected_staged", ""))),
                     tags=tuple(str(tag).strip() for tag in payload.get("tags", []) if str(tag).strip()),
                     sentence_finalize_age=int(payload.get("sentence_finalize_age", 3)),
+                    initial_final=tuple(
+                        normalized_text(item)
+                        for item in payload.get("initial_final", [])
+                        if normalized_text(item)
+                    ),
                     metadata=metadata,
                 )
             )

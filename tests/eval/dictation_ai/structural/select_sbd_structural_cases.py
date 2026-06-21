@@ -150,6 +150,7 @@ def _case_payload(case: dict[str, Any]) -> dict[str, Any]:
         "id": str(case.get("id", "")),
         "language": str(case.get("language", "en")),
         "chunks": _chunk_inputs(case),
+        "initial_final": list(case.get("initial_final", []) or []),
         "expected_final": list(case.get("expected_final", []) or []),
         "expected_pending": str(case.get("expected_pending", "") or ""),
         "expected_staged": str(case.get("expected_staged", "") or ""),

@@ -26,6 +26,10 @@ LANGUAGE_MARKDOWN_KEYS = (
 )
 TAG_MARKDOWN_KEYS = LANGUAGE_MARKDOWN_KEYS
 TAG_MARKDOWN_MAX_ROWS = 40
+CASE_DELTA_LIMIT = 8
+CASE_DELTA_PREVIEW_CHARS = 160
+CASE_FINAL_F1_REGRESSION_REVIEW_DELTA = -0.05
+CASE_BOUNDARY_F1_REGRESSION_REVIEW_DELTA = -0.05
 EVIDENCE_TAGS = (
     "missing-final",
     "stage-queue",
@@ -52,6 +56,99 @@ def _numeric_deltas(current: dict[str, Any], baseline: dict[str, Any]) -> dict[s
         if delta is not None:
             deltas[key] = delta
     return deltas
+
+
+def _preview_sentences(sentences: Any) -> str:
+    if not isinstance(sentences, list):
+        return ""
+    text = " | ".join(str(sentence) for sentence in sentences if str(sentence).strip())
+    return text[:CASE_DELTA_PREVIEW_CHARS]
+
+
+def summarize_case_scores(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep compact case-level scores for sweep regression review."""
+    summaries: list[dict[str, Any]] = []
+    for case in cases:
+        if not isinstance(case, dict):
+            continue
+        final_score = dict(case.get("final_score", {}))
+        boundary_score = dict(case.get("final_boundary_score", {}))
+        summaries.append(
+            {
+                "id": case.get("id", ""),
+                "language": case.get("language", ""),
+                "tags": list(case.get("tags", [])),
+                "final_precision": final_score.get("precision"),
+                "final_recall": final_score.get("recall"),
+                "final_f1": final_score.get("f1"),
+                "boundary_f1": boundary_score.get("f1"),
+                "expected_final_preview": _preview_sentences(case.get("expected_final")),
+                "actual_final_preview": _preview_sentences(case.get("actual_final")),
+            }
+        )
+    return summaries
+
+
+def _case_score_delta(current: dict[str, Any], baseline: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": current.get("id", ""),
+        "language": current.get("language", ""),
+        "tags": list(current.get("tags", [])),
+        "final_f1_delta": numeric_delta(current.get("final_f1"), baseline.get("final_f1")),
+        "precision_delta": numeric_delta(current.get("final_precision"), baseline.get("final_precision")),
+        "recall_delta": numeric_delta(current.get("final_recall"), baseline.get("final_recall")),
+        "boundary_f1_delta": numeric_delta(current.get("boundary_f1"), baseline.get("boundary_f1")),
+        "baseline_final_f1": baseline.get("final_f1"),
+        "current_final_f1": current.get("final_f1"),
+        "baseline_boundary_f1": baseline.get("boundary_f1"),
+        "current_boundary_f1": current.get("boundary_f1"),
+        "expected_final_preview": current.get("expected_final_preview", ""),
+        "baseline_actual_final_preview": baseline.get("actual_final_preview", ""),
+        "current_actual_final_preview": current.get("actual_final_preview", ""),
+    }
+
+
+def summarize_case_score_deltas(
+    current_cases: list[dict[str, Any]],
+    baseline_cases: list[dict[str, Any]],
+) -> dict[str, Any]:
+    baseline_by_id = {str(case.get("id", "")): case for case in baseline_cases}
+    changed: list[dict[str, Any]] = []
+    for current in current_cases:
+        baseline = baseline_by_id.get(str(current.get("id", "")))
+        if not baseline:
+            continue
+        delta = _case_score_delta(current, baseline)
+        numeric_values = [
+            delta.get("final_f1_delta"),
+            delta.get("precision_delta"),
+            delta.get("recall_delta"),
+            delta.get("boundary_f1_delta"),
+        ]
+        if any(isinstance(value, (int, float)) and not isinstance(value, bool) and abs(float(value)) > 1e-12 for value in numeric_values):
+            changed.append(delta)
+
+    def final_sort_key(item: dict[str, Any]) -> tuple[float, float, str]:
+        return (
+            float(item.get("final_f1_delta") or 0.0),
+            float(item.get("boundary_f1_delta") or 0.0),
+            str(item.get("id", "")),
+        )
+
+    def boundary_sort_key(item: dict[str, Any]) -> tuple[float, float, str]:
+        return (
+            float(item.get("boundary_f1_delta") or 0.0),
+            float(item.get("final_f1_delta") or 0.0),
+            str(item.get("id", "")),
+        )
+
+    return {
+        "changed_case_count": len(changed),
+        "worst_final_f1": sorted(changed, key=final_sort_key)[:CASE_DELTA_LIMIT],
+        "best_final_f1": sorted(changed, key=final_sort_key, reverse=True)[:CASE_DELTA_LIMIT],
+        "worst_boundary_f1": sorted(changed, key=boundary_sort_key)[:CASE_DELTA_LIMIT],
+        "best_boundary_f1": sorted(changed, key=boundary_sort_key, reverse=True)[:CASE_DELTA_LIMIT],
+    }
 
 
 def _lifecycle_bottleneck_deltas(
@@ -109,6 +206,7 @@ def attach_baseline_deltas(results: list[dict[str, Any]]) -> list[dict[str, Any]
     baseline_queue_residue = dict(baseline.get("staged_queue_residue_summary", {}))
     baseline_queue_strata = dict(baseline.get("queue_residue_strata_summary", {}))
     baseline_strata = dict(baseline.get("evidence_strata_summary", {}))
+    baseline_case_scores = list(baseline.get("case_score_summary", []))
     updated: list[dict[str, Any]] = []
     for result in results:
         item = dict(result)
@@ -150,6 +248,10 @@ def attach_baseline_deltas(results: list[dict[str, Any]]) -> list[dict[str, Any]
                 continue
             strata_deltas[stratum] = _numeric_deltas(stratum_summary, baseline_summary)
         item["evidence_strata_deltas"] = strata_deltas
+        item["case_delta_summary"] = summarize_case_score_deltas(
+            list(result.get("case_score_summary", [])),
+            baseline_case_scores,
+        )
         updated.append(item)
     return updated
 
@@ -173,6 +275,7 @@ def build_interpretation_flags(
     metric_deltas: dict[str, Any],
     language_deltas: dict[str, dict[str, Any]],
     key_tag_deltas: dict[str, dict[str, Any]],
+    case_delta_summary: dict[str, Any] | None = None,
 ) -> list[str]:
     flags: list[str] = []
     if _has_positive_delta(metric_deltas, "final_f1_avg") and _has_negative_delta(
@@ -191,6 +294,25 @@ def build_interpretation_flags(
         flags.append("key-tag-precision-regression")
     if any(_has_negative_delta(deltas, "final_boundary_f1_avg") for deltas in key_tag_deltas.values()):
         flags.append("key-tag-boundary-regression")
+    case_delta_summary = case_delta_summary or {}
+    worst_final = list(case_delta_summary.get("worst_final_f1", []))
+    if worst_final:
+        worst_final_delta = worst_final[0].get("final_f1_delta")
+        if (
+            isinstance(worst_final_delta, (int, float))
+            and not isinstance(worst_final_delta, bool)
+            and float(worst_final_delta) <= CASE_FINAL_F1_REGRESSION_REVIEW_DELTA
+        ):
+            flags.append("case-final-f1-regression")
+    worst_boundary = list(case_delta_summary.get("worst_boundary_f1", []))
+    if worst_boundary:
+        worst_boundary_delta = worst_boundary[0].get("boundary_f1_delta")
+        if (
+            isinstance(worst_boundary_delta, (int, float))
+            and not isinstance(worst_boundary_delta, bool)
+            and float(worst_boundary_delta) <= CASE_BOUNDARY_F1_REGRESSION_REVIEW_DELTA
+        ):
+            flags.append("case-boundary-regression")
     return flags
 
 
@@ -222,10 +344,12 @@ def build_evidence_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
             tag_deltas[tag] = _select_summary_values(deltas, TAG_MARKDOWN_KEYS)
 
         metric_deltas = dict(result.get("metric_deltas", {}))
+        case_delta_summary = dict(result.get("case_delta_summary", {}))
         interpretation_flags = build_interpretation_flags(
             metric_deltas=metric_deltas,
             language_deltas=language_deltas,
             key_tag_deltas=tag_deltas,
+            case_delta_summary=case_delta_summary,
         )
         has_override = bool(dict(result.get("env_overrides", {})))
         if has_override:
@@ -253,6 +377,7 @@ def build_evidence_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
                 "evidence_strata_summary": result.get("evidence_strata_summary", {}),
                 "evidence_strata_deltas": result.get("evidence_strata_deltas", {}),
                 "case_exemplar_summary": result.get("case_exemplar_summary", {}),
+                "case_delta_summary": case_delta_summary,
                 "interpretation_flags": interpretation_flags,
                 "adoption_review": adoption_review,
             }
@@ -291,6 +416,49 @@ def _format_markdown_counts(value: Any) -> str:
     if not isinstance(value, dict):
         return ""
     return ", ".join(f"{key}={count}" for key, count in sorted(value.items()))
+
+
+def _append_case_delta_markdown(lines: list[str], results: list[dict[str, Any]]) -> None:
+    lines.extend(
+        [
+            "",
+            "| label | changed_cases | worst_final_case | final_f1_delta | boundary_delta | language | tags |",
+            "| --- | ---: | --- | ---: | ---: | --- | --- |",
+        ]
+    )
+    for result in results:
+        case_deltas = dict(result.get("case_delta_summary", {}))
+        worst = list(case_deltas.get("worst_final_f1", []))
+        top = dict(worst[0]) if worst else {}
+        lines.append(
+            f"| {result.get('label', '')} | "
+            f"{_format_markdown_number(case_deltas.get('changed_case_count'))} | "
+            f"{top.get('id', '')} | "
+            f"{_format_markdown_delta(top.get('final_f1_delta'))} | "
+            f"{_format_markdown_delta(top.get('boundary_f1_delta'))} | "
+            f"{top.get('language', '')} | "
+            f"{', '.join(str(tag) for tag in list(top.get('tags', []))[:6])} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "| label | best_final_case | final_f1_delta | boundary_delta | language | tags |",
+            "| --- | --- | ---: | ---: | --- | --- |",
+        ]
+    )
+    for result in results:
+        case_deltas = dict(result.get("case_delta_summary", {}))
+        best = list(case_deltas.get("best_final_f1", []))
+        top = dict(best[0]) if best else {}
+        lines.append(
+            f"| {result.get('label', '')} | "
+            f"{top.get('id', '')} | "
+            f"{_format_markdown_delta(top.get('final_f1_delta'))} | "
+            f"{_format_markdown_delta(top.get('boundary_f1_delta'))} | "
+            f"{top.get('language', '')} | "
+            f"{', '.join(str(tag) for tag in list(top.get('tags', []))[:6])} |"
+        )
 
 
 def _append_evidence_summary_markdown(lines: list[str], evidence_summary: dict[str, Any]) -> None:
@@ -335,6 +503,8 @@ def _append_evidence_summary_markdown(lines: list[str], evidence_summary: dict[s
             f"| {result.get('label', '')} | {result.get('adoption_review', '')} | "
             f"{', '.join(str(flag) for flag in flags) or 'none'} |"
         )
+
+    _append_case_delta_markdown(lines, results)
 
     adoption_review_counts = dict(evidence_summary.get("adoption_review_counts", {}))
     if adoption_review_counts:

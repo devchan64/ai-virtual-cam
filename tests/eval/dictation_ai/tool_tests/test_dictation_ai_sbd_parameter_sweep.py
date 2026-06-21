@@ -21,6 +21,8 @@ from tests.eval.dictation_ai.sweeps.sbd_parameter_sweep_report import (
     build_evidence_summary,
     missing_required_evidence_fields,
     render_markdown_summary,
+    summarize_case_score_deltas,
+    summarize_case_scores,
 )
 from tests.eval.dictation_ai.benchmark.sbd_runtime_contract import lifecycle_replay_contract
 from tests.eval.dictation_ai.sweeps.refresh_sbd_parameter_sweep_summary import (
@@ -186,6 +188,21 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
                                 }
                             ]
                         },
+                        "cases": [
+                            {
+                                "id": "case-heavy",
+                                "language": "ko",
+                                "tags": ["missing-final"],
+                                "expected_final": ["기대 문장입니다."],
+                                "actual_final": ["실제 문장입니다."],
+                                "final_score": {
+                                    "precision": 0.5,
+                                    "recall": 0.25,
+                                    "f1": 0.3333333333,
+                                },
+                                "final_boundary_score": {"f1": 0.0},
+                            }
+                        ],
                     },
                     ensure_ascii=False,
                 ),
@@ -225,6 +242,10 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
                 summary["case_exemplar_summary"]["lifecycle_focus_top"][0]["id"],
                 "case-heavy",
             )
+            self.assertEqual(summary["case_score_summary"][0]["id"], "case-heavy")
+            self.assertEqual(summary["case_score_summary"][0]["language"], "ko")
+            self.assertAlmostEqual(summary["case_score_summary"][0]["final_f1"], 0.3333333333)
+            self.assertEqual(summary["case_score_summary"][0]["expected_final_preview"], "기대 문장입니다.")
 
     def test_attach_baseline_deltas_to_metrics_and_languages(self) -> None:
         results = [
@@ -363,6 +384,62 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
             updated[1]["queue_residue_strata_deltas"]["queue_len_2_to_4"]["metrics"]["stage_queue_revision"],
             -1.0,
         )
+
+    def test_summarizes_case_score_deltas_for_sweep_regression_review(self) -> None:
+        baseline_cases = summarize_case_scores(
+            [
+                {
+                    "id": "case-regressed",
+                    "language": "ko",
+                    "tags": ["duplicate-final"],
+                    "expected_final": ["기대 문장"],
+                    "actual_final": ["기준 문장"],
+                    "final_score": {"precision": 0.9, "recall": 0.8, "f1": 0.85},
+                    "final_boundary_score": {"f1": 0.5},
+                },
+                {
+                    "id": "case-improved",
+                    "language": "en",
+                    "tags": ["missing-final"],
+                    "expected_final": ["expected"],
+                    "actual_final": ["baseline"],
+                    "final_score": {"precision": 0.2, "recall": 0.2, "f1": 0.2},
+                    "final_boundary_score": {"f1": 0.0},
+                },
+            ]
+        )
+        current_cases = summarize_case_scores(
+            [
+                {
+                    "id": "case-regressed",
+                    "language": "ko",
+                    "tags": ["duplicate-final"],
+                    "expected_final": ["기대 문장"],
+                    "actual_final": ["나빠진 문장"],
+                    "final_score": {"precision": 0.4, "recall": 0.8, "f1": 0.55},
+                    "final_boundary_score": {"f1": 0.25},
+                },
+                {
+                    "id": "case-improved",
+                    "language": "en",
+                    "tags": ["missing-final"],
+                    "expected_final": ["expected"],
+                    "actual_final": ["better"],
+                    "final_score": {"precision": 0.8, "recall": 0.6, "f1": 0.7},
+                    "final_boundary_score": {"f1": 0.4},
+                },
+            ]
+        )
+
+        summary = summarize_case_score_deltas(current_cases, baseline_cases)
+
+        self.assertEqual(summary["changed_case_count"], 2)
+        self.assertEqual(summary["worst_final_f1"][0]["id"], "case-regressed")
+        self.assertAlmostEqual(summary["worst_final_f1"][0]["final_f1_delta"], -0.3)
+        self.assertEqual(summary["best_final_f1"][0]["id"], "case-improved")
+        self.assertAlmostEqual(summary["best_final_f1"][0]["final_f1_delta"], 0.5)
+        self.assertEqual(summary["worst_boundary_f1"][0]["id"], "case-regressed")
+        self.assertEqual(summary["best_boundary_f1"][0]["id"], "case-improved")
 
     def test_build_evidence_summary_keeps_compact_metric_language_and_key_tag_deltas(self) -> None:
         results = attach_baseline_deltas(
@@ -656,6 +733,73 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
             },
         )
         self.assertNotIn("topic-only", summary["results"][1]["key_tag_deltas"])
+
+    def test_build_evidence_summary_flags_case_level_regression(self) -> None:
+        results = attach_baseline_deltas(
+            [
+                {
+                    "label": "baseline",
+                    "env_overrides": {},
+                    "metrics": {
+                        "final_precision_avg": 0.5,
+                        "final_recall_avg": 0.5,
+                        "final_f1_avg": 0.5,
+                        "final_boundary_f1_avg": 0.5,
+                    },
+                    "language_summary": {
+                        "ko": {"final_precision_avg": 0.5, "final_f1_avg": 0.5},
+                    },
+                    "tag_summary": {
+                        "missing-final": {"final_precision_avg": 0.5, "final_f1_avg": 0.5},
+                    },
+                    "case_score_summary": [
+                        {
+                            "id": "case-regressed",
+                            "language": "ko",
+                            "tags": ["missing-final"],
+                            "final_precision": 0.9,
+                            "final_recall": 0.9,
+                            "final_f1": 0.9,
+                            "boundary_f1": 0.5,
+                        }
+                    ],
+                },
+                {
+                    "label": "delta_suppressed_stage_max_chunks-3",
+                    "env_overrides": {"AVC_DICTATION_DELTA_SUPPRESSED_STAGE_MAX_CHUNKS": "3"},
+                    "metrics": {
+                        "final_precision_avg": 0.51,
+                        "final_recall_avg": 0.51,
+                        "final_f1_avg": 0.51,
+                        "final_boundary_f1_avg": 0.51,
+                    },
+                    "language_summary": {
+                        "ko": {"final_precision_avg": 0.51, "final_f1_avg": 0.51},
+                    },
+                    "tag_summary": {
+                        "missing-final": {"final_precision_avg": 0.51, "final_f1_avg": 0.51},
+                    },
+                    "case_score_summary": [
+                        {
+                            "id": "case-regressed",
+                            "language": "ko",
+                            "tags": ["missing-final"],
+                            "final_precision": 0.4,
+                            "final_recall": 0.9,
+                            "final_f1": 0.7,
+                            "boundary_f1": 0.5,
+                        }
+                    ],
+                },
+            ]
+        )
+
+        summary = build_evidence_summary(results)
+
+        self.assertIn("case-final-f1-regression", summary["results"][1]["interpretation_flags"])
+        self.assertEqual(summary["results"][1]["adoption_review"], "review-risk")
+        self.assertEqual(summary["interpretation_flag_counts"], {"case-final-f1-regression": 1})
+        self.assertEqual(summary["results"][1]["case_delta_summary"]["changed_case_count"], 1)
 
     def test_build_evidence_protocol_marks_challenge_limitations(self) -> None:
         protocol = build_evidence_protocol(

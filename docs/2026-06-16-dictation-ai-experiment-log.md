@@ -14837,6 +14837,177 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-22 core lifecycle 파라미터 민감도 sweep
+
+목적:
+
+- 최근 structural 실험은 평균 F1이 올라도 `translation-skip`, `open-clause`, `no-end-final` 케이스 손실이 커서 폐기됐다.
+- 새 로직을 늘리기 전에 기존 핵심 파라미터만 조정해 중복/누락 균형을 개선할 수 있는지 확인했다.
+- 언어별 문구 규칙이나 regex 분기는 추가하지 않았다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py run-sweep \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-1223-core-lifecycle-sensitivity-20260622 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-1223-core-lifecycle-sensitivity-20260622/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-1223-core-lifecycle-sensitivity-20260622/summary.md \
+  --include-baseline \
+  --param RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS=5 \
+  --param RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS=12 \
+  --param RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS=1 \
+  --param RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS=5 \
+  --param STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=4 \
+  --param STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=8 \
+  --param DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=1 \
+  --param DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=3
+```
+
+기준선:
+
+```text
+cases=1223
+expected_final=1219
+finalized=5228
+stage_start=8964
+finalized_per_stage_start=0.583222
+final_precision_avg=0.582216
+final_recall_avg=0.467552
+final_f1_avg=0.496566
+final_boundary_f1_avg=0.115502
+queue_residue_total=809
+active_staged_residue_case_count=860
+```
+
+주요 결과:
+
+| variant | final_f1_delta | precision_delta | recall_delta | boundary_delta | queue_total_delta | 판단 |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS=5` | +0.000299 | +0.000347 | +0.000318 | +0.000477 | +8 | 지표는 개선되지만 queue/staged residue 증가 |
+| `RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS=12` | -0.000379 | -0.000601 | -0.000210 | -0.000223 | -6 | F1/boundary 하락 |
+| `RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS=1` | -0.000781 | -0.001153 | -0.000335 | -0.000367 | +17 | finalized 증가가 precision 손실로 나타남 |
+| `RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS=5` | -0.000228 | +0.000209 | -0.000589 | +0.000022 | -11 | recall 손실 |
+| `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=4` | -0.000078 | +0.000486 | -0.000363 | -0.000502 | +4 | boundary 손실 |
+| `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=8` | +0.000144 | +0.000058 | +0.000273 | -0.000156 | +1 | boundary 손실 |
+| `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=1` | +0.000335 | +0.000925 | +0.000165 | -0.000245 | -3 | boundary 손실 |
+| `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=3` | +0.000141 | +0.000068 | +0.000193 | +0.000063 | -1 | 전체 지표는 소폭 개선 |
+
+추가 조합 확인:
+
+```text
+AVC_DICTATION_RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS=5
+AVC_DICTATION_DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=3
+```
+
+```text
+final_f1_delta=+0.000326
+precision_delta=+0.000307
+recall_delta=+0.000394
+boundary_delta=+0.000536
+finalized_per_stage_start_delta=-0.000390
+queue_residue_total_delta=+8
+active_staged_residue_case_count_delta=+7
+staged_exact_match_delta=-7
+```
+
+판단:
+
+- `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=3`은 평균 지표와 queue total을 동시에 소폭 개선했지만, 변경 케이스가 4건뿐이었다.
+- 그중 `ko_log_draft_20260620_avc_whisper_log_1_002667`에서 final F1이 `-0.0667`, precision이 `-0.1667` 하락했다. 출력은 중복된 반도체 문장이 길게 섞여 문장 파괴 위험을 보였다.
+- `RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS=5` 조합은 boundary 개선 폭은 더 크지만 queue residue와 staged exact가 악화됐다.
+- 따라서 이번 sweep 결과만으로 운영 기본값을 바꾸지 않는다.
+- 평균 지표가 좋아져도 특정 케이스의 문장 파괴를 숨기면 안 되므로, sweep report에 compact case-level delta summary를 추가해 worst/best case를 자동 노출하도록 보강한다.
+- case-level 회귀가 `final_f1_delta <= -0.05` 또는 `boundary_f1_delta <= -0.05`이면 평균 지표와 무관하게 `review-risk`로 판정한다.
+- 이 규칙을 적용하면 `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=3`은 `language-final-f1-regression`, `language-precision-regression`, `case-final-f1-regression`으로 분류된다.
+
+후속 app 로직 후보 폐기:
+
+- 가설: staged 문장이 revision될 때마다 delta suppression counter를 리셋하는 대신, token-sentence 기준으로 age reset이 발생하는 경우에만 counter를 리셋하면 `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=3`의 회귀를 줄일 수 있다.
+- 임시 변경: `src/app/dictation_pipeline_loop.py`와 `tests/eval/dictation_ai/benchmark/sbd_lifecycle_replay.py`에서 `preferred_changed` 즉시 reset을 `revision_age_reset` 조건부 reset으로 옮겼다.
+- CUDA 결과:
+
+```text
+default:
+output=.tmp/eval/dictation-ai-sbd/current-20260622-delta-suppression-reset-on-age-reset-only.json
+changed_cases=0
+all summary deltas=0
+
+AVC_DICTATION_DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=3:
+output=.tmp/eval/dictation-ai-sbd/current-20260622-delta3-reset-on-age-reset-only.json
+changed_cases_vs_existing_delta3=0
+all summary deltas_vs_existing_delta3=0
+```
+
+- 판단: replay corpus에서 완전 no-op이므로 앱 로직에 남기지 않고 폐기했다.
+
+### 2026-06-22 중간 스트림 replay용 initial final context 지원
+
+목적:
+
+- baseline worst case 상위 다수가 `en_log_draft_* reviewed-log`였고, 입력 chunks에는 기대 문장보다 앞선 문장이 포함되어 있었다.
+- 실제 앱은 이전 final/committed text를 갖고 sliding window를 처리하지만, 벤치 replay는 빈 committed 상태로 시작했다.
+- 이 경우 app 로직 문제가 아니라 케이스 초기 상태 부재 때문에 앞문장이 false final로 집계될 수 있다.
+
+반영:
+
+- `SbdCase.initial_final` optional 필드를 추가했다.
+- `_run_lifecycle_case()`는 `initial_final`을 `committed_text`와 recent final memory에만 주입한다.
+- `initial_final`은 `actual_final` 평가 대상에 포함하지 않는다.
+- benchmark report와 structural selector가 `initial_final` 필드를 보존한다.
+- `tests/eval/dictation_ai/sbd_cases/README.md`에 중간 스트림 케이스 작성 규칙을 추가했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_case_loader \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_structural_selector
+Ran 36 tests in 0.014s, OK
+
+./.venv/bin/python -m unittest discover -s tests/eval/dictation_ai/tool_tests
+Ran 168 tests in 0.054s, OK
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases --max-drafts 0
+case_count=1223
+expected_final_case_count=1219
+
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-initial-final-context-support.json
+
+changed_cases=0
+initial_final_nonempty=0
+all summary deltas=0
+
+git diff --check
+OK
+```
+
+판단:
+
+- 기존 1223건에는 `initial_final`이 없으므로 기준선에는 완전 no-op이다.
+- 다만 중간 스트림에서 시작한 로그 케이스를 이후 보정할 수 있는 상태 모델이 생겼다.
+- 다음 케이스 정리에서는 앞문장이 이미 확정된 상태였는지 로그 근거로 확인하고, 해당하는 경우 `initial_final`을 채워야 한다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_parameter_sweep
+Ran 38 tests in 0.008s, OK
+
+./.venv/bin/python -m unittest discover -s tests/eval/dictation_ai/tool_tests
+Ran 165 tests in 0.049s, OK
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-evidence \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-1223-core-lifecycle-sensitivity-20260622/summary.refreshed.json
+missing_required_evidence_fields=[]
+
+git diff --check
+OK
+```
+
 ### 2026-06-22 deferred revision extension final 차단 제거 ablation 폐기
 
 목적:

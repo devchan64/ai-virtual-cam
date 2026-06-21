@@ -1,5 +1,6 @@
 import unittest
 
+from src.app.sentence_boundary import SentenceBoundaryResult
 from src.app.dictation_transcript_logic import (
     _final_sentence_diagnostic_flags,
     _prefer_sentence_revision,
@@ -7,10 +8,51 @@ from src.app.dictation_transcript_logic import (
     _should_stage_boundary_candidate,
 )
 from src.app.stable_token_detection import analyze_stable_window
-from tests.eval.dictation_ai.sbd_benchmark import LifecycleState, _finalize_staged_sentence, _stage_completed_sentence
+from tests.eval.dictation_ai.cases.sbd_case_loader import SbdCase
+from tests.eval.dictation_ai.sbd_benchmark import (
+    LifecycleState,
+    _finalize_staged_sentence,
+    _run_lifecycle_case,
+    _stage_completed_sentence,
+)
+
+
+class _CompletedDetector:
+    backend = "unit"
+
+    def split(self, pending_text: str, new_text: str, language: str = "en", *, boundary_confidence: float | None = None):
+        return SentenceBoundaryResult(
+            completed=[new_text],
+            pending="",
+            backend=self.backend,
+            boundary_count=1,
+            end_mark_count=1,
+        )
 
 
 class DictationAiSbdLifecycleTest(unittest.TestCase):
+    def test_initial_final_context_seeds_memory_without_counting_as_actual_final(self) -> None:
+        case = SbdCase(
+            id="initial-final-context",
+            language="en",
+            chunks=["Already committed.", "New sentence.", "New sentence."],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=["New sentence."],
+            expected_staged="",
+            tags=("unit",),
+            sentence_finalize_age=3,
+            initial_final=("Already committed.",),
+        )
+
+        lifecycle = _run_lifecycle_case(case, _CompletedDetector())
+
+        self.assertEqual(lifecycle["initial_final"], ["Already committed."])
+        self.assertEqual(lifecycle["actual_final"], ["New sentence."])
+        self.assertIn("Already committed.", lifecycle["committed_text"])
+        self.assertIn("New sentence.", lifecycle["committed_text"])
+        self.assertEqual(lifecycle["metrics"]["candidate_duplicate_suppressed"], 1)
+
     def test_broken_delta_suppression_retains_staged_candidate_for_revision(self) -> None:
         state = LifecycleState(
             language="zh",

@@ -29,6 +29,7 @@ from tests.eval.dictation_ai.sweeps.sbd_parameter_sweep_report import (
     build_evidence_summary,
     missing_required_evidence_fields,
     render_markdown_summary,
+    summarize_case_scores,
 )
 from tests.eval.dictation_ai.benchmark.sbd_runtime_contract import OFFLINE_MODEL_ENV, lifecycle_replay_contract, runtime_contract
 from tests.eval.dictation_ai.cases.validate_sbd_case_files import enforce_case_thresholds, validate_case_files
@@ -173,6 +174,7 @@ def _load_report_summary(job: SweepJob) -> dict[str, Any]:
         "queue_residue_strata_summary": report.get("queue_residue_strata_summary", {}),
         "evidence_strata_summary": report.get("evidence_strata_summary", {}),
         "case_exemplar_summary": report.get("case_exemplar_summary", {}),
+        "case_score_summary": summarize_case_scores(list(report.get("cases", []))),
     }
 
 

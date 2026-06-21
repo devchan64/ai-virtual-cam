@@ -175,6 +175,7 @@ def main() -> int:
                 "tags": list(case.tags),
                 "elapsed_ms": round(elapsed_ms, 3),
                 "expected_final": case.expected_final,
+                "initial_final": list(case.initial_final),
                 "actual_final": lifecycle["actual_final"],
                 "expected_pending": case.expected_pending,
                 "actual_pending": lifecycle["actual_pending"],
