@@ -14837,6 +14837,140 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-22 deferred revision extension final 차단 제거 ablation 폐기
+
+목적:
+
+- 최신 1223건 기준선에서 queue residue와 active staged residue가 남아 있다.
+- `_should_finalize_before_replacement()`는 queue에 더 긴 revision 후보가 있으면 active staged 문장 확정을 막는다.
+- 이 차단이 queue-head-stall을 키우는지 확인하기 위해 임시로 제거했다.
+
+임시 변경:
+
+```text
+_should_finalize_before_replacement()의 _has_deferred_revision_extension() 차단 제거
+```
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-deferred-extension-block-disabled.json
+```
+
+결과:
+
+| metric | baseline hold=0 | deferred extension block disabled | delta |
+| --- | ---: | ---: | ---: |
+| `finalized` | 5228 | 5222 | -6 |
+| `stage_start` | 8964 | 8414 | -550 |
+| `finalized_per_stage_start` | 0.583222 | 0.620632 | +0.037411 |
+| `final_precision_avg` | 0.582216 | 0.581485 | -0.000731 |
+| `final_recall_avg` | 0.467552 | 0.467274 | -0.000278 |
+| `final_f1_avg` | 0.496566 | 0.496097 | -0.000468 |
+| `final_boundary_f1_avg` | 0.115502 | 0.114682 | -0.000819 |
+| `queue_residue_total` | 809 | 820 | +11 |
+| `queue_len_ge_5` | 10 | 11 | +1 |
+| `active_staged_residue_case_count` | 860 | 861 | +1 |
+
+주요 counter 변화:
+
+```text
+stage_finalize_deferred_for_queue_revision: 754 -> 1264 (+510)
+stage_queue_revision: 3724 -> 3769 (+45)
+stage_queue_revision_token_sentence_deferred: 1241 -> 1273 (+32)
+stage_candidate_quality_blocked: 4929 -> 4921 (-8)
+candidate_duplicate_suppressed: 14591 -> 14590 (-1)
+```
+
+판단:
+
+- 차단 제거는 queue revision 소비를 늘리고 stage_start를 줄이지만, final precision/recall/F1/boundary가 모두 소폭 하락했다.
+- queue residue와 queue len >= 5도 증가했다.
+- 따라서 "queue에 더 긴 revision 후보가 있으면 active final을 막는" 현재 보호 장치는 유지한다.
+- 이 결과는 queue 병목이 단순히 deferred revision extension 차단 때문이 아님을 보여준다. 후속 구조 실험은 active no-end 후보가 completed 후보를 막는 조건처럼 더 좁은 상태 전이로 제한한다.
+
+### 2026-06-22 active no-end 후보의 completed candidate 소비 차단 완화 폐기
+
+목적:
+
+- queue residue 상위 케이스는 active staged 후보가 종결부 없는 조각으로 남아 있고, 뒤의 completed 후보들이 candidate buffer에서 지연되는 패턴이 많다.
+- 단일 threshold가 아니라 lifecycle 전이 원칙으로, "미완성 active 조각이 completed 후보 소비를 계속 막는 경우 suppress/promote를 허용한다"는 구조를 검증했다.
+- 언어별 문구 규칙은 추가하지 않았다.
+
+임시 변경:
+
+```text
+active staged 후보가 no-end marker이고,
+completed candidate가 stage 품질 기준을 통과하며,
+active 후보가 같은 chunk가 아닌 이전 chunk에서 한 번 이상 보류된 경우,
+active 후보를 suppress하고 queued completed 후보를 promote한다.
+```
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py run-sweep \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-1223-paper-baseline-active-no-end-suppress-20260622 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-1223-paper-baseline-active-no-end-suppress-20260622/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-1223-paper-baseline-active-no-end-suppress-20260622/summary.md \
+  --include-baseline
+```
+
+결과:
+
+| metric | baseline hold=0 | active no-end suppress | delta |
+| --- | ---: | ---: | ---: |
+| `finalized` | 5228 | 5265 | +37 |
+| `stage_start` | 8964 | 9109 | +145 |
+| `finalized_per_stage_start` | 0.583222 | 0.578000 | -0.005222 |
+| `final_precision_avg` | 0.582216 | 0.581911 | -0.000305 |
+| `final_recall_avg` | 0.467552 | 0.468663 | +0.001112 |
+| `final_f1_avg` | 0.496566 | 0.496933 | +0.000367 |
+| `final_boundary_f1_avg` | 0.115502 | 0.115848 | +0.000346 |
+| `staged_exact_match` | 367 | 370 | +3 |
+| `queue_residue_total` | 809 | 740 | -69 |
+| `queue_len_ge_2` | 186 | 157 | -29 |
+| `queue_len_ge_5` | 10 | 7 | -3 |
+| `active_staged_residue_case_count` | 860 | 857 | -3 |
+
+언어별 영향:
+
+| language | precision delta | recall delta | final F1 delta | boundary F1 delta | staged residue delta |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| en | -0.000735 | +0.003169 | +0.001112 | +0.001008 | -3 |
+| ko | +0.000000 | +0.000000 | +0.000000 | +0.000000 | +0 |
+| zh | -0.000174 | +0.000000 | -0.000083 | -0.000028 | +0 |
+
+주요 counter 변화:
+
+```text
+stage_active_no_end_suppressed_for_completed_candidate=406
+stage_replace_deferred: 3777 -> 3215 (-562)
+stage_queue_revision: 3724 -> 3250 (-474)
+stage_queue_revision_token_sentence_deferred: 1241 -> 1066 (-175)
+stage_finalize_deferred_for_queue_revision: 754 -> 725 (-29)
+candidate_duplicate_suppressed: 14591 -> 14987 (+396)
+```
+
+비교한 변형:
+
+| variant | 결과 | 판단 |
+| --- | --- | --- |
+| short no-end/trailing ellipsis만 suppress | 전체 지표와 baseline이 동일했다. | no-op이므로 폐기 |
+| no-end active age >= 2에서 suppress | `final_f1_avg=0.497005`로 더 높지만 `final_boundary_f1_avg=0.115122`로 baseline보다 낮았다. | boundary 손실 때문에 폐기 |
+| open-latin clause 제외 | `stage_active_no_end_suppressed_for_completed_candidate=0`으로 baseline과 동일했다. | 실제 변화가 open-latin no-end에 집중됨을 확인 |
+
+판단:
+
+- broad age>=1 조건은 recall, final F1, boundary F1, staged exact, queue residue를 함께 개선했지만 precision을 낮췄다.
+- 케이스 비교에서는 `translation-skip`, `open-clause`, `no-end-final` 태그군의 F1/precision/boundary 손실이 컸다.
+- open-latin clause를 제외하면 효과가 0이므로, 평균 개선은 주로 영어 open-latin no-end를 aggressive하게 suppress한 결과로 해석한다.
+- 이 전이는 "미완성 active 후보가 queue를 막는다"는 구조 병목을 확인하는 데는 유용했지만, final-only 번역 입력 안정화 목표에서는 no-end/open-clause 손실이 더 위험하다.
+- 따라서 앱 로직에는 반영하지 않고 폐기한다. 후속 구조 실험은 open-latin no-end를 직접 suppress하기보다, boundary evidence를 얻기 전 번역 대상 final로 소비되지 않게 하는 방향으로 좁힌다.
+
 ### 2026-06-22 ad-hoc revision/delta 예외 제거 검증
 
 목적:
