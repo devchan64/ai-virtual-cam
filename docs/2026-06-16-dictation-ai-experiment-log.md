@@ -14688,3 +14688,64 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - sandbox 밖 실행도 현재 실행 정책에서 거절되어 실제 CUDA 벤치 수치는 이번 변경에서 확보하지 못했다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
+
+### 2026-06-21 중국어 Hongdae popup/comb 구간 stage queue 지연 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 15:07:00..15:07:35
+chunk=1334..1355 중심
+```
+
+감사 결과:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 15:07:00" --until "2026-06-21 15:07:35" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-zh-150700-150735.json
+```
+
+```text
+stt_raw_line_count=36
+finalize_event_count=15
+finalize_per_stt_raw=0.417
+stage_replace_deferred_count=62
+stage_replace_deferred_per_stt_raw=1.722
+stage_queue_promote_count=19
+stage_queue_promote_per_stt_raw=0.528
+duplicate_suppressed_count=90
+duplicate_suppressed_per_stt_raw=2.500
+quality_block_count=37
+finalize_delta_suppressed_stage_retained_count=0
+finalize_delta_suppressed_stage_dropped_count=0
+```
+
+관측:
+
+- 이 구간은 broken delta suppression 병목이 아니다. `finalize_delta_suppressed_stage_retained/dropped=0`이다.
+- `好舒服的吗？`, `我就这样舒服一次。` 같은 짧거나 흔들린 stage가 queue head에 남고, 뒤의 `这些都是男生的。`, `主要是主打就是便宜...`, `男生如果想要试试看的话...` 후보가 `unconfirmed_cjk` 교체 보류와 queue 누적으로 지연됐다.
+- STT raw는 `爱心书/爱心梳`, `打字/打结`, `我一知道/性价比高`처럼 흔들리므로 raw STT 정확도 문제가 아니라 반복 window에서 안정된 확정 대상이 적시에 final로 소비되는지를 보는 케이스로 다룬다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-5-20260621.jsonl`에 `zh_log_delayed_hongdae_popup_comb_queue_20260621_001` 케이스를 추가했다.
+- 기대 문장은 반복 window에서 안정적으로 나타난 문장만 지정했다.
+- 현재 근거만으로 `unconfirmed_cjk` 교체 보류를 완화하지는 않는다. 짧은 실제 문장 번역 요구와 짧은 오확정 억제가 충돌하므로, CUDA 벤치 비교 가능한 누적 케이스로 유지한다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases --max-drafts 0
+case_count=1151, expected_final_case_count=1147, zh=260
+
+./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle
+Ran 10 tests in 0.004s, OK
+
+git diff --check
+OK
+```
+
+제한:
+
+- `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
+- CPU/mock fallback은 성능 근거로 사용하지 않는다.
