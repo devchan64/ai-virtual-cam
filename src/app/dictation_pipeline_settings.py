@@ -76,9 +76,9 @@ RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS = 3
 MAX_STAGED_SENTENCE_QUEUE = 20
 
 # queued stage 후보가 너무 늦게 승격되면 현재 sliding window와 의미상 멀어진
-# stale 문장이 final로 나갈 수 있다. sentenceFinalizeAge=3 기준 8 chunk는
-# active stage 확정 지연의 약 두 배를 넘는 backlog만 폐기하는 보수값이다.
-STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS = 8
+# stale 문장이 final로 나갈 수 있다. 6 chunk는 오래된 queue 후보만 폐기해
+# 생성순서 보존과 stale final 억제 사이의 절충을 둔다.
+STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS = 6
 
 # empty/no-speech STT chunk는 final 확정 근거가 아니다. 이 임계값은 no-text
 # chunk가 반복될 때 미확정 staged 후보를 폐기하는 데만 쓰며, 이 값만으로
@@ -124,7 +124,7 @@ SLOW_PENDING_MAX_CHARS_PER_CHUNK = 18.0
 # 이 임계값들은 낮은 가치의 조각이 stage/final 텍스트가 되는 것을 막는다.
 # 구조적 기준으로만 유지하고, 관측된 단어나 문구를 여기에 넣지 않는다.
 SHORT_CJK_FINAL_UNITS = 10
-SHORT_NO_END_FRAGMENT_UNITS = 4
+SHORT_NO_END_FRAGMENT_UNITS = 5
 SHORT_CJK_REPLACEMENT_HOLD_CHUNKS = 2
 
 # 짧은 CJK 후보는 문장부호가 있어도 다음 window에서 긴 문장으로 확장되는

@@ -14837,6 +14837,480 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-22 short no-end fragment 품질 게이트 CUDA 스윕
+
+목적:
+
+- 반복 실험에서 문장 누락의 큰 축은 `stage queue`와 `no-end fragment`가 결합될 때 발생했다.
+- 특정 언어/단어 규칙을 추가하지 않고, 종결 없는 짧은 후보를 stage/final 후보로 볼 것인지 판단하는 구조적 품질 게이트만 조정했다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sweeps/run_sbd_parameter_sweep.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/short-no-end-20260622 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/short-no-end-20260622/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/short-no-end-20260622/summary.md \
+  --include-baseline \
+  --param SHORT_NO_END_FRAGMENT_UNITS=5 \
+  --param SHORT_NO_END_FRAGMENT_UNITS=6
+```
+
+결과:
+
+```text
+baseline:
+final_precision_avg=0.5935
+final_recall_avg=0.4303
+final_f1_avg=0.4727
+final_boundary_f1_avg=0.1039
+finalized_per_stage_start=0.5235
+staged_exact_match=298
+
+SHORT_NO_END_FRAGMENT_UNITS=5:
+final_precision_avg=0.5947
+final_recall_avg=0.4328
+final_f1_avg=0.4751
+final_boundary_f1_avg=0.1043
+finalized_per_stage_start=0.5358
+staged_exact_match=332
+
+SHORT_NO_END_FRAGMENT_UNITS=6:
+final_precision_avg=0.5989
+final_recall_avg=0.4289
+final_f1_avg=0.4735
+final_boundary_f1_avg=0.1057
+finalized_per_stage_start=0.5424
+staged_exact_match=357
+```
+
+해석:
+
+- `5`는 전체 precision/recall/F1을 모두 소폭 개선했고, active staged residue를 줄이며 staged exact match를 `298 -> 332`로 개선했다.
+- 한국어 final F1은 `-0.0002`로 미세 하락했지만 recall은 유지됐고, 영어는 F1 `+0.0070` 개선, 중국어는 변화 없음으로 나타났다.
+- `6`은 precision과 boundary F1은 더 높였지만 recall을 낮췄고, 한국어 final F1 `-0.0041`, recall `-0.0076` 하락이 커졌다.
+- 따라서 `SHORT_NO_END_FRAGMENT_UNITS=5`를 기본값으로 채택하고, `6`은 과억제 리스크로 기각한다.
+
+반영:
+
+- `src/app/dictation_pipeline_settings.py`의 `SHORT_NO_END_FRAGMENT_UNITS` 기본값을 `4 -> 5`로 변경했다.
+- 이는 단어나 언어별 예외가 아니라, final-only 번역 입력을 오염시키는 짧은 no-end fragment를 stage 진입 전에 보수적으로 거르는 공통 품질 게이트 조정이다.
+
+### 2026-06-22 confirmation 강화 CUDA 스윕 기각
+
+목적:
+
+- 중복 확정을 줄이기 위해 기본 confirmation 요구 횟수를 높이는 방향이 유효한지 확인했다.
+- 이 축은 언어별 예외가 아니라 “같은 문장 후보가 몇 번 반복 관측되어야 final로 보낼 수 있는가”를 보는 핵심 생명주기 원칙이다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sweeps/run_sbd_parameter_sweep.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/sentence-confirm-20260622 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/sentence-confirm-20260622/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/sentence-confirm-20260622/summary.md \
+  --include-baseline \
+  --param SENTENCE_CONFIRM_CHUNKS=2 \
+  --param SENTENCE_CONFIRM_CHUNKS=3
+```
+
+결과:
+
+```text
+baseline:
+finalized=4735
+stage_start=8838
+finalized_per_stage_start=0.536
+final_precision_avg=0.595
+final_recall_avg=0.433
+final_f1_avg=0.475
+final_boundary_f1_avg=0.104
+staged_exact_match=332
+
+SENTENCE_CONFIRM_CHUNKS=2:
+finalized=4368
+stage_start=8503
+finalized_per_stage_start=0.514
+final_precision_avg=0.595
+final_recall_avg=0.406
+final_f1_avg=0.457
+final_boundary_f1_avg=0.101
+staged_exact_match=324
+
+SENTENCE_CONFIRM_CHUNKS=3:
+finalized=4236
+stage_start=8440
+finalized_per_stage_start=0.502
+final_precision_avg=0.587
+final_recall_avg=0.394
+final_f1_avg=0.446
+final_boundary_f1_avg=0.095
+staged_exact_match=339
+```
+
+해석:
+
+- confirmation 요구를 2 이상으로 높이면 확정 수와 recall이 크게 줄어든다.
+- `2`는 precision을 거의 유지하지만 recall `0.433 -> 0.406`, final F1 `0.475 -> 0.457`로 하락했다.
+- `3`은 recall뿐 아니라 precision과 boundary F1도 함께 하락했다.
+- 따라서 중복 억제 목적으로 confirmation 요구를 전역적으로 높이는 방향은 확정 누락을 악화시키므로 기각한다.
+- 이후 개선은 confirmation 강화보다, 이미 관측된 후보 중 낮은 가치 fragment를 보수적으로 차단하거나 queue/revision 소비 순서를 안정화하는 축에서 찾아야 한다.
+
+### 2026-06-22 delta suppression staged 유지 길이 CUDA 스윕 기각
+
+목적:
+
+- broken delta final을 보류했을 때 active staged 후보를 얼마나 오래 유지할지 조정하면 fragment 누락과 queue 막힘이 개선되는지 확인했다.
+- 이 축은 특정 언어 규칙이 아니라, delta fragment 보류 후 staged 후보를 유지/폐기하는 공통 생명주기 정책이다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sweeps/run_sbd_parameter_sweep.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/delta-suppressed-stage-20260622 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/delta-suppressed-stage-20260622/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/delta-suppressed-stage-20260622/summary.md \
+  --include-baseline \
+  --param DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=1 \
+  --param DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=3
+```
+
+결과:
+
+```text
+baseline:
+final_precision_avg=0.5947
+final_recall_avg=0.4328
+final_f1_avg=0.4751
+final_boundary_f1_avg=0.1043
+finalized_per_stage_start=0.5358
+
+DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=1:
+final_precision_avg=0.5954
+final_recall_avg=0.4327
+final_f1_avg=0.4752
+final_boundary_f1_avg=0.1041
+finalized_per_stage_start=0.5353
+
+DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=3:
+final_precision_avg=0.5947
+final_recall_avg=0.4329
+final_f1_avg=0.4752
+final_boundary_f1_avg=0.1043
+finalized_per_stage_start=0.5360
+```
+
+해석:
+
+- `1`과 `3` 모두 전체 F1 변화가 `+0.0001` 수준으로 작고, adoption review는 `review-risk`다.
+- `1`은 boundary F1과 finalized/stage 효율이 소폭 하락했고, `3`은 의미 있는 lifecycle residue 개선을 만들지 못했다.
+- top queue bottleneck case와 queue_len_ge_5 계층도 변하지 않았다.
+- 따라서 현재 bottleneck은 delta suppression 유지 길이 자체가 아니라, no-end/fragment 품질 게이트와 queue/revision 후보 소비 안정성 쪽에 더 가깝다.
+- `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=2` 기본값은 유지한다.
+
+### 2026-06-22 staged queue promotion age CUDA 스윕
+
+목적:
+
+- queue에 오래 남은 staged 후보가 나중에 승격되면 현재 sliding window와 의미상 멀어진 stale final이 될 수 있다.
+- `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS`는 생성순서 보존과 stale queue 억제 사이의 공통 생명주기 절충값이다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sweeps/run_sbd_parameter_sweep.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/staged-queue-promotion-age-20260622 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/staged-queue-promotion-age-20260622/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/staged-queue-promotion-age-20260622/summary.md \
+  --include-baseline \
+  --param STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=6 \
+  --param STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=10
+```
+
+결과:
+
+```text
+baseline:
+final_precision_avg=0.5947
+final_recall_avg=0.4328
+final_f1_avg=0.4751
+final_boundary_f1_avg=0.1043
+finalized_per_stage_start=0.5358
+queue_residue_cases=563
+queue_residue_total=1144
+queue_len_ge_5=41
+
+STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=6:
+final_precision_avg=0.5951
+final_recall_avg=0.4329
+final_f1_avg=0.4755
+final_boundary_f1_avg=0.1047
+finalized_per_stage_start=0.5363
+queue_residue_cases=560
+queue_residue_total=1133
+queue_len_ge_5=40
+
+STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=10:
+final_precision_avg=0.5948
+final_recall_avg=0.4330
+final_f1_avg=0.4753
+final_boundary_f1_avg=0.1043
+finalized_per_stage_start=0.5354
+queue_residue_cases=563
+queue_residue_total=1137
+queue_len_ge_5=39
+```
+
+해석:
+
+- `6`은 전체 precision/recall/F1/boundary F1을 모두 소폭 개선했고, queue residue도 `1144 -> 1133`으로 줄였다.
+- queue_len_ge_5 계층은 final F1 `+0.0046`, boundary F1 `+0.0069`로 개선됐다.
+- 영어 final F1 `-0.0002`와 precision `-0.0003` 미세 하락 때문에 adoption review는 `review-risk`지만, 전체/queue 계층 개선이 같은 방향으로 나타난다.
+- `10`은 recall은 소폭 오르지만 finalized/stage 효율과 queue_len_ge_5 계층 F1이 하락해 채택하지 않는다.
+
+반영:
+
+- `src/app/dictation_pipeline_settings.py`의 `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS` 기본값을 `8 -> 6`으로 변경했다.
+- 이 변경은 문구별 보정이 아니라, 오래된 queue 후보가 final-only 번역 입력을 오염시키기 전에 stale로 폐기하는 공통 queue 생명주기 정책이다.
+
+### 2026-06-22 queue order 선점 보류 ablation 및 폐기
+
+목적:
+
+- `stage_finalize_deferred_for_queue_order`는 active staged 후보보다 오래 관측된 비-revision queue head가 있으면 active final을 보류하고 queue head를 먼저 재평가하는 규칙이었다.
+- 생성순서를 보존하려는 의도였지만, 전체 challenge replay에서 이 규칙이 확정 누락/순서 보존에 실제로 도움이 되는지 확인이 필요했다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-disable-queue-order-ablation.json
+```
+
+결과:
+
+```text
+with queue order defer:
+finalized=4739
+stage_start=8836
+finalized_per_stage_start=0.536
+final_precision_avg=0.595
+final_recall_avg=0.433
+final_f1_avg=0.476
+final_boundary_f1_avg=0.105
+staged_exact_match=334
+
+queue order defer disabled:
+finalized=4837
+stage_start=8785
+finalized_per_stage_start=0.551
+final_precision_avg=0.592
+final_recall_avg=0.440
+final_f1_avg=0.479
+final_boundary_f1_avg=0.111
+staged_exact_match=335
+```
+
+해석:
+
+- queue order 선점 보류를 끄면 precision은 `0.595 -> 0.592`로 소폭 하락하지만, recall `0.433 -> 0.440`, final F1 `0.476 -> 0.479`, boundary F1 `0.105 -> 0.111`, finalized/stage 효율 `0.536 -> 0.551`이 개선됐다.
+- 오래된 queue head가 있다는 이유만으로 active staged final을 보류하는 규칙은 생성순서 보존처럼 보이지만, 실제 replay에서는 active 후보의 확정 기회를 과도하게 지연해 누락을 키웠다.
+- 생성순서는 queue enqueue/promote로 보존하되, final 직전에는 token-sentence revision으로 더 선호되는 queue 후보를 흡수하는 경우만 active final을 보류한다.
+- 따라서 `stage_finalize_deferred_for_queue_order` 로직과 관측 지표를 폐기한다.
+
+반영:
+
+- `src/app/dictation_node_sentence_candidate_commit_buffer.py`에서 queue age 기반 active final 선점 보류 로직을 제거했다.
+- `src/app/dictation_pipeline_loop.py`에서 해당 호출과 lifecycle 로그 필드를 제거했다.
+- `tests/eval/dictation_ai/benchmark/sbd_lifecycle_replay.py`와 benchmark report의 동일 replay/metric 경로도 제거했다.
+- `docs/2026-06-16-dictation-ai-realtime-pipeline.md`의 candidateBuffer 기준을 “queue age만으로 active final을 선점 보류하지 않는다”로 정리했다.
+
+### 2026-06-22 recent-final prefix 회수 기준 CUDA 스윕 기각
+
+목적:
+
+- queue-order 제거 후 recall과 boundary는 개선됐지만 precision이 소폭 내려갔다.
+- recent-final echo/delta 회수 기준을 조정해 중복 억제와 suffix 회수의 균형을 개선할 수 있는지 확인했다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sweeps/run_sbd_parameter_sweep.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/recent-final-prefix-20260622 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/recent-final-prefix-20260622/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/recent-final-prefix-20260622/summary.md \
+  --include-baseline \
+  --param RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS=6 \
+  --param RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS=10
+```
+
+결과:
+
+```text
+baseline:
+final_precision_avg=0.5919
+final_recall_avg=0.4401
+final_f1_avg=0.4795
+final_boundary_f1_avg=0.1106
+finalized_per_stage_start=0.5506
+staged_exact_match=335
+
+RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS=6:
+final_precision_avg=0.5918
+final_recall_avg=0.4402
+final_f1_avg=0.4795
+final_boundary_f1_avg=0.1103
+finalized_per_stage_start=0.5508
+staged_exact_match=333
+
+RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS=10:
+final_precision_avg=0.5916
+final_recall_avg=0.4401
+final_f1_avg=0.4794
+final_boundary_f1_avg=0.1104
+finalized_per_stage_start=0.5510
+staged_exact_match=336
+```
+
+해석:
+
+- `6`은 recall을 아주 조금 올렸지만 precision, boundary F1, staged exact가 하락했고 adoption review가 `review-risk`다.
+- `10`은 staged exact가 1개 늘지만 precision/F1/boundary가 모두 하락했다.
+- recent-final prefix 기준은 현재 병목을 의미 있게 개선하지 못한다.
+- `RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS=8` 기본값을 유지한다.
+
+### 2026-06-22 recent-final suffix 회수 기준 CUDA 스윕 기각
+
+목적:
+
+- recent-final prefix 축에서 유의미한 개선이 없어, suffix 최소 길이 기준도 확인했다.
+- suffix 기준은 이미 확정된 final 뒤에 붙은 새 의미 단위를 회수할지, 짧은 echo로 보고 억제할지 결정한다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sweeps/run_sbd_parameter_sweep.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/recent-final-suffix-20260622 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/recent-final-suffix-20260622/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/recent-final-suffix-20260622/summary.md \
+  --include-baseline \
+  --param RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS=2 \
+  --param RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS=4
+```
+
+결과:
+
+```text
+baseline:
+final_precision_avg=0.5919
+final_recall_avg=0.4401
+final_f1_avg=0.4795
+final_boundary_f1_avg=0.1106
+finalized_per_stage_start=0.5506
+staged_exact_match=335
+
+RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS=2:
+final_precision_avg=0.5917
+final_recall_avg=0.4399
+final_f1_avg=0.4793
+final_boundary_f1_avg=0.1106
+finalized_per_stage_start=0.5504
+staged_exact_match=336
+
+RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS=4:
+final_precision_avg=0.5919
+final_recall_avg=0.4400
+final_f1_avg=0.4794
+final_boundary_f1_avg=0.1104
+finalized_per_stage_start=0.5511
+staged_exact_match=336
+```
+
+해석:
+
+- `2`는 staged exact를 1개 늘렸지만 precision/recall/F1과 finalized/stage 효율이 하락했다.
+- `4`도 staged exact와 finalized/stage 효율은 소폭 오르지만 F1과 boundary F1이 하락한다.
+- 두 후보 모두 adoption review가 `review-risk`이며, recent-final suffix 기준은 현재 병목을 개선하지 못한다.
+- `RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS=3` 기본값을 유지한다.
+
+### 2026-06-22 staged queue capacity CUDA 스윕 기각
+
+목적:
+
+- queue-order 선점 보류를 제거한 뒤에도 queue residue가 남아 있어, queue capacity를 줄여 오래된 꼬리를 직접 잘라내는 방식이 유효한지 확인했다.
+- 이 축은 특정 케이스 보정이 아니라 candidate buffer가 얼마나 많은 생성순서 후보를 보존할지 정하는 공통 생명주기 정책이다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sweeps/run_sbd_parameter_sweep.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/max-staged-queue-20260622 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/max-staged-queue-20260622/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/max-staged-queue-20260622/summary.md \
+  --include-baseline \
+  --param MAX_STAGED_SENTENCE_QUEUE=8 \
+  --param MAX_STAGED_SENTENCE_QUEUE=10
+```
+
+결과:
+
+```text
+baseline:
+final_precision_avg=0.5919
+final_recall_avg=0.4401
+final_f1_avg=0.4795
+final_boundary_f1_avg=0.1106
+finalized_per_stage_start=0.5506
+queue_residue_total=1068
+queue_residue_max=11
+
+MAX_STAGED_SENTENCE_QUEUE=8:
+final_precision_avg=0.5924
+final_recall_avg=0.4397
+final_f1_avg=0.4794
+final_boundary_f1_avg=0.1101
+finalized_per_stage_start=0.5519
+queue_residue_total=1053
+queue_residue_max=8
+stage_queue_drop_oldest=112
+
+MAX_STAGED_SENTENCE_QUEUE=10:
+final_precision_avg=0.5922
+final_recall_avg=0.4401
+final_f1_avg=0.4796
+final_boundary_f1_avg=0.1103
+finalized_per_stage_start=0.5512
+queue_residue_total=1065
+queue_residue_max=10
+stage_queue_drop_oldest=31
+```
+
+해석:
+
+- `8`은 queue residue를 줄이지만 recall, final F1, boundary F1이 하락한다.
+- `10`은 final F1이 `+0.0002`로 소폭 오르지만 boundary F1은 하락하고 adoption review가 `review-risk`다.
+- capacity를 줄이면 오래된 queue tail은 줄지만, 실제 문장 후보 보존도 함께 손상된다.
+- 따라서 queue residue 문제는 단순 capacity 축보다 queue 후보 품질/소비 정책에서 다뤄야 하며, `MAX_STAGED_SENTENCE_QUEUE=20` 기본값을 유지한다.
+
 ### 2026-06-21 CUDA SBD 벤치 재실행 및 confirmation 기본값 조정
 
 목적:

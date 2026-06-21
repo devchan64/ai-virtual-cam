@@ -207,19 +207,6 @@ def run_transcribe_loop(
                 display=False,
             )
             return []
-        if commit_buffer_node.prefer_older_queued_candidate_before_active(
-            chunk_index=chunks,
-            max_promotion_age_chunks=staged_queue_max_promotion_age_chunks(),
-            count_metric=count_metric,
-            count_segment_state=count_segment_state,
-        ):
-            worker._emit(
-                "status",
-                "받아쓰기 AI 확정 전 queue 순서 보류: "
-                f"chunk={chunks} reason={reason} staged_tail={_diagnostic_tail(active_stage.sentence)}",
-                display=False,
-            )
-            return []
         output_sentence = _sentence_output_delta(committed_text, active_stage.sentence)
         staged_before = active_stage.sentence
         committed_before_chars = len(_normalized_text(committed_text))
@@ -1173,10 +1160,6 @@ def run_transcribe_loop(
                 "stage_finalize_deferred_for_queue_revision",
                 0,
             )
-            stage_finalize_deferred_for_queue_order_count = chunk_lifecycle_metrics.get(
-                "stage_finalize_deferred_for_queue_order",
-                0,
-            )
             stage_queue_quality_suppressed_count = chunk_lifecycle_metrics.get("stage_queue_quality_suppressed", 0)
             stage_queue_drop_oldest_count = chunk_lifecycle_metrics.get("stage_queue_drop_oldest", 0)
             stage_queue_stale_promote_suppressed_count = chunk_lifecycle_metrics.get(
@@ -1270,7 +1253,6 @@ def run_transcribe_loop(
                 f"stage_queue_revision={stage_queue_revision_count} "
                 f"stage_queue_revision_token_sentence_deferred={stage_queue_revision_token_sentence_deferred_count} "
                 f"stage_finalize_deferred_for_queue_revision={stage_finalize_deferred_for_queue_revision_count} "
-                f"stage_finalize_deferred_for_queue_order={stage_finalize_deferred_for_queue_order_count} "
                 f"stage_queue_quality_suppressed={stage_queue_quality_suppressed_count} "
                 f"stage_queue_drop_oldest={stage_queue_drop_oldest_count} "
                 f"stage_queue_stale_promote_suppressed={stage_queue_stale_promote_suppressed_count} "

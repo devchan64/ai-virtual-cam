@@ -169,49 +169,6 @@ def _prefer_queued_revision_for_active(state: LifecycleState, chunk_index: int) 
     return False
 
 
-def _prefer_older_queued_candidate_before_active(state: LifecycleState, chunk_index: int) -> bool:
-    if not state.staged_sentence:
-        return False
-    assert state.staged_queue is not None
-    max_promotion_age = staged_queue_max_promotion_age_chunks()
-    while state.staged_queue:
-        queued_entry = state.staged_queue[0]
-        queued_sentence = str(queued_entry["sentence"])
-        if _sentences_are_revisions(state.staged_sentence, queued_sentence):
-            return False
-        deferred_age_chunk = int(queued_entry["deferred_age_chunk"])
-        queued_age = int(queued_entry["age"])
-        if deferred_age_chunk >= 0:
-            queued_age = max(queued_age, chunk_index - deferred_age_chunk)
-        queued_entry["age"] = queued_age
-        if queued_age > max_promotion_age:
-            state.staged_queue.popleft()
-            state.count("stage_queue_stale_promote_suppressed")
-            state.count("segment_state_suppressed")
-            continue
-        if queued_age <= state.staged_age:
-            return False
-        current_entry = {
-            "sentence": state.staged_sentence,
-            "confirmations": state.staged_confirmations,
-            "age": state.staged_age,
-            "forced": state.staged_forced,
-            "deferred_age_chunk": state.staged_deferred_age_chunk,
-        }
-        state.staged_queue.popleft()
-        state.staged_sentence = queued_sentence
-        state.staged_confirmations = int(queued_entry["confirmations"])
-        state.staged_age = queued_age
-        state.staged_forced = bool(queued_entry["forced"])
-        state.staged_deferred_age_chunk = int(queued_entry["deferred_age_chunk"])
-        state.staged_delta_suppressed_chunks = 0
-        state.staged_delta_suppressed_chunk_index = -1
-        state.staged_queue.appendleft(current_entry)
-        state.count("stage_finalize_deferred_for_queue_order")
-        return True
-    return False
-
-
 def _queue_staged_sentence(state: LifecycleState, candidate: str, forced: bool, chunk_index: int) -> None:
     assert state.staged_queue is not None
     for entry in state.staged_queue:
@@ -372,8 +329,6 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
     state.count("finalize_attempt")
     state.count(f"finalize_reason_{reason}")
     if _prefer_queued_revision_for_active(state, chunk_index):
-        return []
-    if _prefer_older_queued_candidate_before_active(state, chunk_index):
         return []
     staged_before = state.staged_sentence
     output_sentence = _sentence_output_delta(state.committed_text, staged_before)
