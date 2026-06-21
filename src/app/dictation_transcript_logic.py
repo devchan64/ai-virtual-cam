@@ -988,18 +988,13 @@ def _format_transcript_metrics(metrics: dict[str, int]) -> str:
 
 def _should_translate_final_sentence(sentence: str, language: str) -> bool:
     flags = set(_final_sentence_diagnostic_flags(sentence, language))
+    # final까지 도달한 문장은 길이가 짧아도 실시간 번역의 소비 대상이다.
+    # 여기서는 환청성/공백성 final만 제외하고, stage 품질 게이트와 분리한다.
     return not flags.intersection(
         {
-            "latin_only_for_zh",
-            "mixed_latin_zh",
-            "short_cjk",
-            "short_no_end_fragment",
-            "trailing_ellipsis",
             "empty",
-            "spaced_cjk",
             "cjk_repeated_ngram",
             "repeated_word_ngram",
-            "low_value_cjk_fragment",
         }
     )
 

@@ -12944,3 +12944,35 @@ tool_tests: Ran 140 tests, OK
 - STT backend/model 성능은 이번 실험 대상에서 제외한다.
 - 이번 변경은 STT 이후 생명주기 출력의 소비 가능성을 분리 측정하기 위한 관측성 보강이다.
 - 이후 성능 개선 실험은 동일한 STT window hypothesis 입력을 유지하고, final 누락/중복 및 final-only 번역 연결률을 별도 지표로 해석해야 한다.
+
+### 2026-06-21 짧은 final 문장 번역 누락 정책 수정
+
+관측:
+
+- 중국어 final 출력에는 `我喜欢这一件。`, `耶。`, `走吧，Go。`처럼 짧지만 독립적으로 의미가 있는 문장이 포함된다.
+- 기존 번역 큐 진입 조건은 final 품질 플래그를 재사용하면서 `short_cjk`, `short_no_end_fragment`, `mixed_latin_zh`, `spaced_cjk` 같은 stage 전 품질 플래그까지 번역 생략 근거로 사용했다.
+- 그 결과 final로 확정된 짧은 문장이 번역되지 않아 final-only 번역 소비 계약과 충돌했다.
+
+정리:
+
+- STT 결과나 문장 확정 조건은 변경하지 않았다.
+- `_should_translate_final_sentence`는 final로 확정된 문장을 기본적으로 번역 대상으로 본다.
+- 번역 생략은 `empty`, `cjk_repeated_ngram`, `repeated_word_ngram`처럼 소비 불가능하거나 환청성 반복으로 볼 수 있는 final에만 제한했다.
+
+검증:
+
+```text
+./.venv/bin/python -m py_compile src/app/dictation_transcript_logic.py tests/unit/test_dictation_pipeline_nodes.py
+./.venv/bin/python -m unittest tests.unit.test_dictation_pipeline_nodes tests.unit.test_dictation_pipeline_loop tests.unit.test_dictation_window_events
+```
+
+결과:
+
+```text
+Ran 14 tests, OK
+```
+
+해석:
+
+- 이번 변경은 raw STT 성능 개선이 아니다.
+- 이미 final로 확정된 받아쓰기 결과가 번역 큐에서 과도하게 누락되는 문제를 줄이는 final-only 번역 소비 정책 보정이다.

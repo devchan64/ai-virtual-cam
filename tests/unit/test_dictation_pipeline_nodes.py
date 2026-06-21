@@ -30,6 +30,7 @@ from src.app.dictation_pipeline_settings import (
     dictation_tuning_manifest,
     dictation_tuning_protocol,
 )
+from src.app.dictation_transcript_logic import _should_translate_final_sentence
 from src.app.sentence_boundary import SentenceBoundaryResult
 
 
@@ -198,6 +199,22 @@ class DictationPipelineNodeTest(unittest.TestCase):
         self.assertIn("same reviewed case set", protocol["comparison_rule"])
         self.assertIn("language-specific phrase rules", protocol["forbidden_changes"])
         self.assertIn("final_f1_avg", protocol["primary_metrics"])
+
+    def test_final_translation_policy_keeps_short_final_sentences(self) -> None:
+        self.assertTrue(_should_translate_final_sentence("我喜欢这一件。", "zh"))
+        self.assertTrue(_should_translate_final_sentence("耶。", "zh"))
+        self.assertTrue(_should_translate_final_sentence("走吧，Go。", "zh"))
+        self.assertTrue(_should_translate_final_sentence("然 后 刚 好 就 帮 我 们 穿 好", "zh"))
+        self.assertTrue(_should_translate_final_sentence("OK", "zh"))
+
+    def test_final_translation_policy_suppresses_only_non_consumable_fragments(self) -> None:
+        self.assertFalse(_should_translate_final_sentence("", "zh"))
+        self.assertFalse(
+            _should_translate_final_sentence(
+                "一二三四五六七八一二三四五六七八一二三四五六七八一二三四五六七八一二三四五六七八。",
+                "zh",
+            )
+        )
 
     def test_hypothesis_candidate_node_preserves_boundary_contract(self) -> None:
         detector = FakeBoundaryDetector()
