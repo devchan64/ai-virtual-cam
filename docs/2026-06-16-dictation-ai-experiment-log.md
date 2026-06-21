@@ -14750,6 +14750,51 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-21 중국어 Jongno cafe/bagel 구간 짧은 stage head 지연 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 15:31:42..15:31:59
+chunk=2808..2825 중심
+```
+
+감사 결과:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 15:31:42" --until "2026-06-21 15:31:59" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-zh-153142-153159.json
+```
+
+```text
+stt_raw_line_count=18
+finalize_event_count=4
+finalize_per_stt_raw=0.222
+stage_replace_deferred_count=31
+stage_replace_deferred_per_stt_raw=1.722
+stage_queue_promote_count=9
+stage_queue_promote_per_stt_raw=0.500
+duplicate_suppressed_count=23
+duplicate_suppressed_per_stt_raw=1.278
+quality_block_count=4
+quality_block_per_stt_raw=0.222
+finalize_delta_suppressed_stage_retained_count=4
+finalize_delta_suppressed_stage_dropped_count=0
+stage_queue_recent_final_suppressed_count=2
+```
+
+관측:
+
+- 기존 `咖啡厅/贝狗` 케이스와 주제는 비슷하지만, 이번 구간은 `中路三街` 카페 진입 이후 `就在哪？`, `这在哪？`, `不过我们是咖啡。`, `不知道我们去吃那一间吧。` 같은 짧은 stage head가 뒤 후보를 막는 별도 로그 구간이다.
+- 짧은 후보는 품질 조건 때문에 바로 final로 확정되지는 않지만, stage head로 유지되는 동안 `所以他里面就蛮多人在吃早餐。`, `那我们就挑这一间吧。`, `然后我刚刚点了一个这个鲑鱼的贝狗...` 후보가 반복적으로 `unconfirmed_cjk` 또는 same-chunk replacement defer에 걸렸다.
+- 짧은 문장도 실제 번역 대상이 될 수 있으므로 단순히 짧은 CJK 후보를 제거하는 규칙은 적용하지 않는다. 이 케이스는 짧은 후보의 head-of-line blocking을 벤치에서 관찰하기 위한 근거로 남긴다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-5-20260621.jsonl`에 `zh_log_delayed_jongno_cafe_bagel_short_head_queue_20260621_001` 케이스를 추가했다.
+- 기대 문장은 안정화된 긴 후보와 실제 소비되어야 할 짧은 선택 문장만 포함하고, `这在哪？` 계열의 잔여 stage head는 기대 문장에서 제외했다.
+- `sat + cuda + float16` 벤치 결과 없이 로직 변경을 단정하지 않는다.
+
 ### 2026-06-21 중국어 Hongdae snow ice/iPhone 구간 queue 지연 케이스 추가
 
 관측 구간:
