@@ -14778,6 +14778,51 @@ chunk=102..113 중심
 - sandbox 내부에서는 CUDA backend 초기화가 실패해 현재 코드 기준 벤치 수치를 만들지 못했다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-21 중국어 confidence outfit 구간 queue head 지연 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 15:58:15..15:58:43
+chunk=4401..4429 중심
+```
+
+감사 결과:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 15:58:15" --until "2026-06-21 15:58:43" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-zh-155815-155843.json
+```
+
+```text
+stt_raw_line_count=29
+finalize_event_count=5
+finalize_per_stt_raw=0.172
+stage_replace_deferred_count=27
+stage_replace_deferred_per_stt_raw=0.931
+stage_queue_promote_count=12
+stage_queue_promote_per_stt_raw=0.414
+duplicate_suppressed_count=13
+duplicate_suppressed_per_stt_raw=0.448
+quality_block_count=9
+finalize_delta_suppressed_stage_retained_count=2
+finalize_delta_suppressed_stage_dropped_count=2
+stage_queue_recent_final_suppressed_count=8
+```
+
+관측:
+
+- `哎，是来错地方吗？`, `他的脸屌。`, `大家都很屌。`, `走。` 같은 짧은 CJK stage head가 여러 번 age quality block으로 제거되면서 queue가 뒤늦게 소비됐다.
+- `这种真的就是你根本没办法带出去。`는 chunk=4415부터 나타났지만, chunk=4428에서야 final 확정됐다.
+- `这个是要自信心爆棚...镇住全场...`도 같은 queue head stall 뒤 chunk=4428에서 final 확정됐다.
+- 최종적으로 핵심 문장은 확정됐지만, 실시간 번역 파이프라인 관점에서는 stage queue head가 짧은 후보로 막히는 지연 케이스다.
+- `没错。`, `很帅。`는 최근 final/중복 억제 경로에서 제거됐지만, 사람이 보는 최종 흐름에서는 짧은 후행 응답으로 유효할 수 있어 expected final에 남겼다. 후속 CUDA 벤치에서 short final precision/recall trade-off를 확인한다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-5-20260621.jsonl`에 `zh_log_delayed_confidence_outfit_queue_head_stall_20260621_001` 케이스를 추가했다.
+- 현재 근거만으로 short CJK 품질 게이트를 완화하지는 않는다. 짧은 감탄/응답 문장 회수와 fragment 오확정 위험이 직접 충돌하기 때문이다.
+
 ### 2026-06-21 중국어 Seongsu last-day popup/cafe 구간 지연 케이스 추가
 
 관측 구간:
