@@ -36,8 +36,18 @@
 ```text
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py commands
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases --help
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py audit-initial-final-context --help
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py run-sweep --help
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py paper-readiness --help
+```
+
+중간 스트림에서 시작한 challenge case가 이전 final/committed 상태 없이 재생되는지 확인할 때는
+`audit-initial-final-context`에 CUDA benchmark report를 함께 넘긴다.
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py audit-initial-final-context \
+  tests/eval/dictation_ai/sbd_cases \
+  --benchmark-report .tmp/eval/dictation-ai-sbd/current-20260622-short-cjk-hold-0-default.json
 ```
 
 로그 기반 감사는 패치 전후가 섞이지 않도록 시간 구간을 명시할 수 있다.

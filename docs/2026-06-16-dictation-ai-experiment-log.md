@@ -14991,7 +14991,185 @@ OK
 - 다만 중간 스트림에서 시작한 로그 케이스를 이후 보정할 수 있는 상태 모델이 생겼다.
 - 다음 케이스 정리에서는 앞문장이 이미 확정된 상태였는지 로그 근거로 확인하고, 해당하는 경우 `initial_final`을 채워야 한다.
 
+### 2026-06-22 initial final context 후보 감사 도구 추가
+
+목적:
+
+- `initial_final` 필드가 생겼지만 기존 challenge corpus에는 아직 값이 없다.
+- 첫 `expected_final`이 STT context window 중간 이후에 나타나는 케이스는 replay가 중간 스트림에서 시작했을 가능성이 있다.
+- 이 상태를 보정하지 않으면 앞문장이 false final로 집계되어 앱 로직 튜닝 방향을 왜곡할 수 있다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_benchmark.py audit-initial-final-context` subcommand를 추가했다.
+- 감사 기준은 `initial_final`이 비어 있고, 첫 `expected_final` 문장이 chunk 내부에서 일정 prefix 이후에 나타나는 케이스다.
+- 이 감사는 후보만 찾는다. prefix가 이미 확정됐다는 증거는 아니므로 케이스 파일을 자동 수정하지 않는다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py audit-initial-final-context \
+  tests/eval/dictation_ai/sbd_cases \
+  --benchmark-report .tmp/eval/dictation-ai-sbd/current-20260622-short-cjk-hold-0-default.json \
+  --summary-output .tmp/eval/dictation-ai-sbd/initial-final-context-audit-20260622.json \
+  --limit 12
+```
+
+결과:
+
+```text
+case_count=1223
+expected_final_case_count=1219
+initial_final_case_count=0
+candidate_count=227
+candidate_language_counts={"en": 166, "ko": 20, "zh": 41}
+min_prefix_units=12
+```
+
+현재 CUDA 기준선과 후보군 교차 확인:
+
+```text
+benchmark_report=.tmp/eval/dictation-ai-sbd/current-20260622-short-cjk-hold-0-default.json
+
+candidate:
+cases=227
+expected_sentences=1290
+actual_sentences=1414
+final_precision_avg=0.425839
+final_recall_avg=0.453872
+final_f1_avg=0.427711
+final_boundary_f1_avg=0.036089
+
+non_candidate:
+cases=996
+expected_sentences=4773
+actual_sentences=3814
+final_precision_avg=0.617856
+final_recall_avg=0.470669
+final_f1_avg=0.512259
+final_boundary_f1_avg=0.133601
+```
+
+그룹 우선순위:
+
+```text
+worst_groups[0]:
+language=en
+review_group_id=3ef9d3f3243e
+case_count=84
+total_case_count=205
+candidate_case_ratio=0.409756
+source_chunk=15..375
+group_source_chunk=4..375
+final_f1_avg=0.363588
+final_boundary_f1_avg=0.019215
+review_priority_score=54.439390
+expected_quality_case_count=205
+expected_quality_case_ratio=1.000000
+expected_quality_flags={
+  "all_expected_no_terminal": 7,
+  "lowercase_or_connector_start": 203,
+  "many_expected_sentences": 86,
+  "no_terminal_expected": 165,
+  "short_expected_fragment": 118
+}
+
+worst_groups[1]:
+language=en
+review_group_id=34d59ea6fb54
+case_count=65
+total_case_count=146
+candidate_case_ratio=0.445205
+source_chunk=16..373
+group_source_chunk=3..373
+final_f1_avg=0.334398
+final_boundary_f1_avg=0.022534
+review_priority_score=44.241603
+expected_quality_case_count=146
+expected_quality_case_ratio=1.000000
+expected_quality_flags={
+  "all_expected_no_terminal": 5,
+  "lowercase_or_connector_start": 144,
+  "many_expected_sentences": 78,
+  "no_terminal_expected": 108,
+  "short_expected_fragment": 92
+}
+```
+
+판단:
+
+- 전체 corpus의 약 18.6%가 중간 스트림 초기 상태 보정 후보로 잡혔다.
+- 후보군은 비후보군보다 final F1과 boundary F1이 낮다. 특히 boundary F1 차이가 커서, 일부 케이스가 앱 로직 문제가 아니라 replay 초기 상태 부재로 과대 손실 집계될 가능성이 있다.
+- 이 수치는 현재 challenge replay가 앱의 committed/recent-final state를 충분히 모델링하지 못할 수 있음을 보여준다.
+- 후보는 개별 케이스보다 그룹 단위로 검토해야 한다. 최상위 두 영어 그룹만 candidate 149건, 전체 351건을 차지하므로, 이 구간의 로그 final 이벤트와 `expected_final` 정의를 먼저 정리하는 것이 앱 로직 튜닝보다 우선이다.
+- 동시에 최상위 두 영어 그룹은 `expected_quality_case_ratio=1.0`으로 확인됐다. 기대값에 문장 fragment, 종결부호 부재, 소문자/접속어 시작, 과다 문장 수가 섞여 있으므로 현재 점수 하락을 앱 로직 문제로만 해석하면 안 된다.
+- 다음 단계는 자동 승격이 아니라 후보별 로그 근거 확인이다. 로그상 이미 final된 문장만 `initial_final`로 채우고 CUDA 기준선을 다시 산출해야 한다.
+- 앱 로직 변경은 이 보정 이후에도 남는 누락/중복 패턴을 대상으로 해야 한다.
+
+샘플 probe:
+
+```text
+source=.tmp/logs/avc-whisper.log.52
+window=2026-06-20 20:39:30..20:39:57
+cases=en_log_draft_20260620_avc_whisper_log_000023,
+      en_log_draft_20260620_avc_whisper_log_000024,
+      en_log_draft_20260620_avc_whisper_log_000032,
+      en_log_draft_20260620_avc_whisper_log_000034
+```
+
+로그 근거:
+
+- chunk 7에서 `You are at the center of the AI universe right now.`가 확정됐다.
+- chunk 14에서 `The interesting thing is that the experience`가 확정됐다.
+- chunk 20 이후에는 `The interesting thing ... smooth exponential.` 계열이 중복 문장으로 억제된다.
+- chunk 34에서 `and then zoom it goes crazy`가 transcript와 final 이벤트로 다시 나타난다.
+
+CUDA probe:
+
+```text
+original:
+cases=4
+finalized=15
+stage_start=26
+finalized_per_stage_start=0.577
+final_precision_avg=0.000
+final_recall_avg=0.000
+final_f1_avg=0.000
+final_boundary_f1_avg=0.000
+
+with_initial_final:
+cases=4
+finalized=8
+stage_start=18
+finalized_per_stage_start=0.444
+final_precision_avg=0.125
+final_recall_avg=0.125
+final_f1_avg=0.125
+final_boundary_f1_avg=0.000
+```
+
+해석:
+
+- `initial_final` 보정은 이미 확정된 앞문장 false final을 줄였다.
+- 하지만 4건 중 1건만 F1이 개선됐고 boundary F1은 여전히 0이다.
+- 일부 케이스는 `expected_final` 자체가 실제 final lifecycle보다 fragment 중심으로 정의되어 있어, 단순 상태 보정보다 케이스 기대값 재검토가 먼저 필요하다.
+- 따라서 227건 후보를 일괄 보정하지 않는다. 우선순위 후보는 로그에서 실제 final 이벤트와 expected_final 의미 단위를 함께 확인한 뒤 정식 케이스를 수정해야 한다.
+
 검증:
+
+```text
+./.venv/bin/python -m unittest discover -s tests/eval/dictation_ai/tool_tests
+Ran 171 tests in 0.058s, OK
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases --max-drafts 0
+case_count=1223
+expected_final_case_count=1219
+
+git diff --check
+OK
+```
+
+이전 검증:
 
 ```text
 ./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_parameter_sweep

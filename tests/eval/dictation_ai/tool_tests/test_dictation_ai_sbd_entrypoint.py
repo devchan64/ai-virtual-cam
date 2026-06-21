@@ -13,6 +13,7 @@ class DictationAiSbdEntrypointTest(unittest.TestCase):
         self.assertEqual(
             set(sbd_benchmark._SUBCOMMANDS),
             {
+                "audit-initial-final-context",
                 "extract-representative-drafts",
                 "extract-review-packets",
                 "followup-readiness",

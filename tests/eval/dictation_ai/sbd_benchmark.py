@@ -42,6 +42,7 @@ from tests.eval.dictation_ai.cases.validate_sbd_case_files import validate_case_
 
 _SUBCOMMANDS: dict[str, str] = {
     "validate-cases": "tests.eval.dictation_ai.cases.validate_sbd_case_files:main",
+    "audit-initial-final-context": "tests.eval.dictation_ai.cases.audit_sbd_initial_final_context:main",
     "run-sweep": "tests.eval.dictation_ai.sweeps.run_sbd_parameter_sweep:main",
     "refresh-sweep": "tests.eval.dictation_ai.sweeps.refresh_sbd_parameter_sweep_summary:main",
     "summarize-evidence": "tests.eval.dictation_ai.sweeps.summarize_sbd_evidence_reports:main",
