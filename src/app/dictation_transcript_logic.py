@@ -1490,6 +1490,22 @@ def _is_prefix_inserted_staged_tail_revision(left: str, right: str) -> bool:
     return False
 
 
+def _is_cjk_shifted_prefix_dangling_tail_revision(left: str, right: str) -> bool:
+    normalized_left = _normalized_text(left)
+    normalized_right = _normalized_text(right)
+    if not (_is_cjk_text(normalized_left) or _is_cjk_text(normalized_right)):
+        return False
+    if _boundary_sentence_end_count(normalized_left) == 0 or _boundary_sentence_end_count(normalized_right) == 0:
+        return False
+    left_words = _word_units(normalized_left)
+    right_words = _word_units(normalized_right)
+    if len(left_words) < 8 or len(left_words) != len(right_words) + 1:
+        return False
+    if left_words[1:-1] != right_words[1:]:
+        return False
+    return len(left_words[1:-1]) >= 6
+
+
 def _prefer_sentence_revision(left: str, right: str) -> str:
     right = _trim_repeated_cjk_revision_prefix(left, right)
     left_words = _word_units(left)
@@ -1503,6 +1519,8 @@ def _prefer_sentence_revision(left: str, right: str) -> str:
     if _is_prefix_inserted_staged_tail_revision(left, right):
         return _normalized_text(left)
     if _is_cjk_text(left) or _is_cjk_text(right):
+        if _is_cjk_shifted_prefix_dangling_tail_revision(left, right):
+            return _normalized_text(right)
         if "cjk_repeated_ngram" in right_flags and "cjk_repeated_ngram" not in left_flags:
             return _normalized_text(left)
         if "cjk_repeated_ngram" in left_flags and "cjk_repeated_ngram" not in right_flags:

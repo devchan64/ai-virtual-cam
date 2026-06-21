@@ -127,6 +127,33 @@ class DictationAiSbdLifecycleTest(unittest.TestCase):
         self.assertEqual(state.metrics["stage_replace_deferred_same_chunk"], 1)
         self.assertNotIn("finalize_reason_replaced_confirmed", state.metrics)
 
+    def test_revised_queue_candidate_can_finalize_after_promotion(self) -> None:
+        state = LifecycleState(language="zh")
+        assert state.staged_queue is not None
+        state.staged_queue.append(
+            {
+                "sentence": "可以下一个就是裤子啦。",
+                "confirmations": 3,
+                "age": 2,
+                "forced": False,
+                "deferred_age_chunk": 8,
+            }
+        )
+
+        finalized = _stage_completed_sentence(
+            state,
+            "因为我发现网上没有买到这种加绒的运动裤。",
+            "zh",
+            forced=False,
+            sentence_finalize_age=3,
+            chunk_index=9,
+        )
+
+        self.assertEqual(finalized, ["可以下一个就是裤子啦。"])
+        self.assertIn("可以下一个就是裤子啦。", state.final_sentences or [])
+        self.assertEqual(state.metrics["stage_queue_promote"], 1)
+        self.assertNotIn("stage_replace_deferred_same_chunk", state.metrics)
+
     def test_recent_final_suffix_recovery_runs_even_when_committed_delta_is_empty(self) -> None:
         state = LifecycleState(
             language="zh",
@@ -169,6 +196,14 @@ class DictationAiSbdLifecycleTest(unittest.TestCase):
         )
 
         self.assertEqual(preferred, "被吓到了想要炸鸡可能吃不下去了。")
+
+    def test_shifted_cjk_revision_drops_single_dangling_tail(self) -> None:
+        preferred = _prefer_sentence_revision(
+            "炒饭粒粒分明，好香啊，它。",
+            "他饭粒粒分明，好香啊！",
+        )
+
+        self.assertEqual(preferred, "他饭粒粒分明，好香啊！")
 
     def test_short_mixed_latin_zh_fragment_is_not_stageable(self) -> None:
         flags = _final_sentence_diagnostic_flags("body king的。", "zh")

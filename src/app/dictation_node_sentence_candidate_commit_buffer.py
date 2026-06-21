@@ -89,7 +89,8 @@ class SentenceCandidateCommitBufferNode:
         if self.active.sentence or not self._queue:
             return False
         entry = self._queue.popleft()
-        entry["deferred_age_chunk"] = chunk_index
+        if int(entry["deferred_age_chunk"]) < 0:
+            entry["deferred_age_chunk"] = chunk_index
         self.active.apply_buffer_entry(entry)
         count_metric("stage_queue_promote", 1)
         count_metric("stage_start", 1)
