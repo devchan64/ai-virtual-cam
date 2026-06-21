@@ -432,6 +432,26 @@ class DictationPipelineNodeTest(unittest.TestCase):
         self.assertEqual(candidate, "没有玻璃杯，只有这种保温杯。")
         self.assertIsNone(recent_source)
 
+    def test_recent_final_delta_trims_recent_tail_anchor_before_new_cjk_clause(self) -> None:
+        candidate, recent_source = _recent_final_output_delta(
+            "过哎五个铜钱，真一点点五个铜钱。",
+            ("这个冬粉最贵，五个铜钱。",),
+            "zh",
+        )
+
+        self.assertEqual(candidate, "真一点点五个铜钱。")
+        self.assertEqual(recent_source, "这个冬粉最贵，五个铜钱。")
+
+    def test_recent_final_delta_keeps_cjk_clause_without_recent_tail_anchor(self) -> None:
+        candidate, recent_source = _recent_final_output_delta(
+            "然后还点了一杯咖啡。",
+            ("这个冬粉最贵，五个铜钱。",),
+            "zh",
+        )
+
+        self.assertEqual(candidate, "然后还点了一杯咖啡。")
+        self.assertIsNone(recent_source)
+
     def test_korean_revision_reset_uses_token_sentence_similarity(self) -> None:
         self.assertFalse(
             _should_reset_revision_age(

@@ -14837,6 +14837,49 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-21 중국어 coin/coffee 구간 recent final tail anchor 보강
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 20:58:43..20:59:14
+chunk=252..279 중심
+```
+
+관측:
+
+- `这个冬粉最贵，五个铜钱。`가 final로 확정된 뒤 후속 후보에서 `过哎五个铜钱，真一点点五个铜钱。`가 별도 final로 확정됐다.
+- 앞의 `过哎五个铜钱`은 최근 final tail인 `五个铜钱`이 작은 prefix noise와 함께 다시 붙은 형태이고, 실제 새 정보는 뒤의 `真一点点五个铜钱。`이다.
+- 기존 recent-final delta는 전체 후보가 최근 final의 suffix echo이거나, 최근 final 전체가 후보 prefix인 경우를 주로 다뤘다. 최근 final tail이 후보 앞쪽 anchor로 섞인 뒤 새 문장이 이어지는 구조는 충분히 줄이지 못했다.
+- 같은 구간에서 `然后还点了一杯咖啡。`, `这个是现金买的咖啡。`, `好，这不重点，重点是你要看那个吸管，看截面。`, `有爱心的哦，有没有粉红泡泡？` 등 후속 문장이 queue/stage를 거치며 지연 또는 조각 확정되는 양상도 함께 관측됐다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-6-20260621.jsonl`에 `zh_log_coin_coffee_tail_anchor_fragment_20260621_001` 케이스를 추가했다.
+- CJK 후보 앞쪽 0..4 unit 안에서 최근 final tail 4..8 unit이 재등장하고, 그 뒤에 4 unit 이상의 새 suffix가 있으면 최근 final tail anchor를 제거하고 suffix만 남기는 `_recent_final_tail_anchor_delta()`를 추가했다.
+- 조건은 최근 final과 후보가 모두 8 unit 이상인 CJK일 때만 동작하도록 제한했다. 특정 단어/문구 규칙은 추가하지 않았다.
+- `过哎五个铜钱，真一点点五个铜钱。`는 `真一点点五个铜钱。`으로 줄이고, `然后还点了一杯咖啡。` 같은 독립 후속 문장은 유지하는 회귀 테스트를 추가했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_pipeline_nodes tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report
+Ran 66 tests in 0.037s, OK
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases --max-drafts 0
+case_count=1222, expected_final_case_count=1218, en=429, ko=462, zh=331
+
+git diff --check
+OK
+```
+
+제한:
+
+- shard 벤치 명령은 sandbox 내부에서 `sat + cuda + float16` 초기화 fail-fast로 중단됐다.
+- 동일 명령의 sandbox 밖 실행 요청은 환경 정책에서 거부됐다.
+- CPU/mock fallback은 성능 근거가 아니므로 사용하지 않았다.
+
 ### 2026-06-21 리비전 reset 기준 token-sentence 공통화
 
 확인:

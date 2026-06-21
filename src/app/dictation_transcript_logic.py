@@ -1234,6 +1234,9 @@ def _recent_final_sentence_delta(candidate: str, recent_sentence: str, language:
     extension_delta = _recent_final_prefix_extension_delta(candidate_words, recent_words, normalized_candidate)
     if extension_delta is not None:
         return extension_delta
+    tail_anchor_delta = _recent_final_tail_anchor_delta(candidate_words, recent_words, normalized_candidate)
+    if tail_anchor_delta is not None:
+        return tail_anchor_delta
     compact_delta = _compact_recent_final_delta(candidate_words, recent_words)
     if compact_delta is not None:
         return compact_delta
@@ -1354,6 +1357,29 @@ def _recent_final_prefix_extension_delta(
     if _has_cjk_words(candidate_words):
         return _with_candidate_terminal(_cjk_delta_from_words(suffix_words), normalized_candidate)
     return _with_candidate_terminal(_sentence_delta_from_words(suffix_words), normalized_candidate)
+
+
+def _recent_final_tail_anchor_delta(
+    candidate_words: list[str],
+    recent_words: list[str],
+    normalized_candidate: str,
+) -> str | None:
+    if len(candidate_words) < 8 or len(recent_words) < 8:
+        return None
+    if not (_has_cjk_words(candidate_words) and _has_cjk_words(recent_words)):
+        return None
+    max_tail_len = min(8, len(recent_words), len(candidate_words) - 4)
+    for tail_len in range(max_tail_len, 3, -1):
+        recent_tail = recent_words[-tail_len:]
+        max_start = min(4, len(candidate_words) - tail_len - 4)
+        for start in range(0, max_start + 1):
+            if candidate_words[start : start + tail_len] != recent_tail:
+                continue
+            suffix_words = candidate_words[start + tail_len :]
+            if len(suffix_words) < 4:
+                return ""
+            return _with_candidate_terminal(_cjk_delta_from_words(suffix_words), normalized_candidate)
+    return None
 
 
 def _recent_final_tail_subset_echo_delta(candidate_words: list[str], recent_words: list[str]) -> str | None:
