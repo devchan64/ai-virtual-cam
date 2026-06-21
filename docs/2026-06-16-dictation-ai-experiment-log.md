@@ -14279,6 +14279,33 @@ finalize_delta_suppressed_stage_dropped_count=0
 - stage age/revision용 `deferredAgeChunk`와 broken-delta 보류 카운터를 분리했다.
 - 회귀 테스트는 revision 직후 같은 chunk에서 broken delta가 발생해도 suppression 카운터가 증가하는지 확인한다.
 
+### 2026-06-21 중국어 hair styling 구간 stale stage queue 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 14:11:49..14:12:04
+chunk=1187..1202
+```
+
+사용자 목표 맥락:
+
+- STT raw 정확도 자체가 아니라, 불안정한 sliding-window STT 후보에서 final 확정 lifecycle이 의미 있는 문장을 놓치지 않는지가 평가 대상이다.
+- 이번 구간은 `BHC` broken-delta 병목과 다르게, 완결 부호가 붙은 미완성 staged 후보가 queue를 막는 변형이다.
+
+로그 추적:
+
+- `现在结束。`, `把你的包包，然后给你换上相似的衣服。`, `上面是夹子，然后下面就。` 같은 후보가 active stage/queue에 들어갔다.
+- 후속 window에서는 `上面是夹起，然后下面就有一点点卷。`, `头发前面呢，他还帮我做了一个非常蓬松的刘海。`가 반복됐지만, 앞선 stale stage가 age 소진 또는 품질 차단까지 머무르며 확정이 지연됐다.
+- `上面是夹子，然后下面就。`는 형식상 종결 부호가 있어 단순 no-end fragment 차단으로 걸러지지 않는다. 따라서 이 케이스는 “완결 부호가 붙은 미완성 후보”가 stage queue를 오염시키는지를 관찰하는 데이터로 둔다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_hair_styling_stale_stage_queue_20260621_001` 케이스를 추가했다.
+- 즉시 앱 로직은 변경하지 않았다. 언어별 문구 또는 정규식으로 `然后下面就。` 같은 표현을 막으면 과적합 위험이 크다.
+- 다음 비교 대상은 기존 `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS`와 stage queue 품질 차단이 이 케이스에서 final 지연을 얼마나 줄이는지이며, 실제 `sat + cuda + float16` 벤치에서 확인해야 한다.
+
 ### 2026-06-21 recent final 짧은 CJK suffix 확장 회수
 
 관측 구간:
