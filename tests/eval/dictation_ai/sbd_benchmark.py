@@ -509,11 +509,12 @@ def _stage_completed_sentence(
                         state.staged_sentence,
                         language,
                         state.staged_confirmations,
-                        state.staged_age,
-                        sentence_finalize_age,
-                        state.staged_forced,
-                    )
-                ):
+                    state.staged_age,
+                    sentence_finalize_age,
+                    state.staged_forced,
+                    tuple(str(entry["sentence"]) for entry in (state.staged_queue or ())),
+                )
+            ):
                     state.count("stage_age_finalize")
                     finalized = _finalize_staged_sentence(
                         state,
@@ -564,6 +565,7 @@ def _stage_completed_sentence(
             state.staged_age,
             sentence_finalize_age,
             state.staged_forced,
+            tuple(str(entry["sentence"]) for entry in (state.staged_queue or ())),
         ):
             max_age = _sentence_max_age_chunks(state.staged_forced, sentence_finalize_age)
             if state.staged_age >= max_age:
@@ -613,6 +615,7 @@ def _stage_completed_sentence(
                 state.staged_age,
                 sentence_finalize_age,
                 state.staged_forced,
+                tuple(str(entry["sentence"]) for entry in (state.staged_queue or ())),
             )
         ):
             state.count("stage_age_finalize")
@@ -657,6 +660,7 @@ def _stage_completed_sentence(
         state.staged_age,
         sentence_finalize_age,
         state.staged_forced,
+        tuple(str(entry["sentence"]) for entry in (state.staged_queue or ())),
     ):
         state.count("stage_finalize_before_replace")
         finalized = _finalize_staged_sentence(state, language, "next_completed", chunk_index)
@@ -709,6 +713,7 @@ def _age_staged_sentence(state: LifecycleState, language: str, sentence_finalize
         state.staged_age,
         sentence_finalize_age,
         state.staged_forced,
+        tuple(str(entry["sentence"]) for entry in (state.staged_queue or ())),
     ):
         state.count("stage_age_quality_blocked")
         state.count("segment_state_suppressed")

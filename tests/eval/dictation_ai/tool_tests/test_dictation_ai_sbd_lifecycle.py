@@ -270,6 +270,39 @@ class DictationAiSbdLifecycleTest(unittest.TestCase):
         self.assertEqual(state.metrics["stage_revision_token_sentence_deferred"], 1)
         self.assertNotIn("finalized", state.metrics)
 
+    def test_deferred_revision_extension_blocks_aged_fragment_final(self) -> None:
+        state = LifecycleState(
+            language="zh",
+            staged_sentence="像是松板的部分口感上那真的就是一个。",
+            staged_confirmations=1,
+            staged_age=2,
+            staged_deferred_age_chunk=60,
+        )
+        assert state.staged_queue is not None
+        state.staged_queue.append(
+            {
+                "sentence": "像是松板的部分口感上那真的就是一个脆嫩带。",
+                "confirmations": 1,
+                "age": 0,
+                "forced": False,
+                "deferred_age_chunk": 60,
+            }
+        )
+
+        finalized = _stage_completed_sentence(
+            state,
+            "是清蒸牛排的猪肉，你真的也是感受不到任何一丝的猪肉烧味，反而。",
+            "zh",
+            forced=False,
+            sentence_finalize_age=3,
+            chunk_index=61,
+        )
+
+        self.assertEqual(finalized, [])
+        self.assertEqual(state.staged_sentence, "像是松板的部分口感上那真的就是一个脆嫩带。")
+        self.assertEqual(state.metrics["stage_age_quality_blocked"], 1)
+        self.assertNotIn("finalized", state.metrics)
+
     def test_longer_mixed_latin_zh_sentence_remains_stageable(self) -> None:
         sentence = "你看，我点的这个是他们家的招牌cheese。"
         flags = _final_sentence_diagnostic_flags(sentence, "zh")

@@ -14750,6 +14750,48 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-21 중국어 pork texture 구간 deferred revision extension 보류 실험
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 18:54:05..18:54:19
+chunk=53..67 중심
+```
+
+관측:
+
+- `股淡淡的咸香。`, `像是松板的部分口感上那真的就是一个。`처럼 뒤 window에서 더 긴 revision으로 확장되는 fragment가 age 기준에 먼저 도달했다.
+- 해당 시점에 candidate buffer에는 `股淡淡的咸香跟猪肉的油脂感融合在一起。`, `像是松板的部分口感上那真的就是一个脆嫩带。`처럼 active staged의 더 긴 token-sentence revision이 있었다.
+- 기존 로직은 deferred replacement가 들어온 상황에서 active staged 자체의 품질만 보고 age final을 허용했다. 이 때문에 더 긴 revision 후보가 반복 관측되기 전에 fragment final이 먼저 소비될 수 있었다.
+
+반영:
+
+- candidate buffer에 active staged 후보의 더 긴 token-sentence revision이 있으면 `_should_finalize_before_replacement`가 age final을 허용하지 않도록 보수적으로 막았다.
+- active와 queued 후보를 병합하지 않는다. active fragment를 final로 소비하지 않고 기존 stale/suppress + queue promote 경로로 넘겨, 반복 관측된 queued revision이 순서대로 소비되도록 했다.
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-6-20260621.jsonl`에 `zh_log_pork_texture_deferred_revision_extension_20260621_001` 케이스를 추가했다.
+- `tests/eval/dictation_ai/tool_tests/test_dictation_ai_sbd_lifecycle.py`에 queued extension이 active fragment의 age final을 막는 lifecycle 테스트를 추가했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle tests.unit.test_dictation_pipeline_nodes
+Ran 39 tests in 0.017s, OK
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases --max-drafts 0
+case_count=1199, expected_final_case_count=1195, zh=308
+
+./.venv/bin/python -m py_compile src/app/dictation_transcript_logic.py src/app/dictation_pipeline_loop.py src/app/dictation_node_sentence_candidate_commit_buffer.py tests/eval/dictation_ai/sbd_benchmark.py tests/eval/dictation_ai/tool_tests/test_dictation_ai_sbd_lifecycle.py
+OK
+```
+
+제한:
+
+- `sat + cuda + float16` shard 벤치 명령은 sandbox 내부에서 fail-fast로 중단됐다.
+- sandbox 밖 CUDA 벤치 실행 승인은 환경 정책상 거부됐다.
+- 따라서 이번 항목은 성능 수치 개선 주장 없이, 로그 기반 누락 케이스 추가와 lifecycle 로직 검증까지만 근거로 삼는다.
+
 ### 2026-06-21 중국어 Hanfu photographer 구간 delta fragment stage drop 케이스 추가
 
 관측 구간:

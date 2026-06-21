@@ -479,6 +479,7 @@ def run_transcribe_loop(
                         active_stage.age,
                         sentence_finalize_age,
                         active_stage.forced,
+                        commit_buffer_node.queued_sentences(),
                     ):
                         max_age = _sentence_max_age_chunks(active_stage.forced, sentence_finalize_age)
                         if active_stage.age >= max_age:
@@ -561,6 +562,7 @@ def run_transcribe_loop(
                 active_stage.age,
                 sentence_finalize_age,
                 active_stage.forced,
+                commit_buffer_node.queued_sentences(),
             ):
                 max_age = _sentence_max_age_chunks(active_stage.forced, sentence_finalize_age)
                 if active_stage.age >= max_age:
@@ -620,6 +622,7 @@ def run_transcribe_loop(
                     active_stage.age,
                     sentence_finalize_age,
                     active_stage.forced,
+                    commit_buffer_node.queued_sentences(),
                 )
             ):
                 count_metric("stage_age_finalize")
@@ -685,6 +688,7 @@ def run_transcribe_loop(
             active_stage.age,
             sentence_finalize_age,
             active_stage.forced,
+            commit_buffer_node.queued_sentences(),
         ):
             count_metric("stage_finalize_before_replace")
             finalized = finalize_staged_sentence(detected, "next_completed")
@@ -747,6 +751,7 @@ def run_transcribe_loop(
                 active_stage.age,
                 sentence_finalize_age,
                 active_stage.forced,
+                commit_buffer_node.queued_sentences(),
             ):
                 count_metric("stage_age_quality_blocked")
                 count_segment_state("suppressed")

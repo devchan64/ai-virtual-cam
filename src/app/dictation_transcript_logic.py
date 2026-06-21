@@ -1069,7 +1069,10 @@ def _should_finalize_before_replacement(
     staged_age: int = 0,
     sentence_finalize_age: int | None = None,
     staged_forced: bool = False,
+    deferred_revision_sentences: tuple[str, ...] = (),
 ) -> bool:
+    if _has_deferred_revision_extension(sentence, deferred_revision_sentences):
+        return False
     flags = set(_final_sentence_diagnostic_flags(sentence, language))
     if flags.intersection(
         {
@@ -1100,6 +1103,25 @@ def _should_finalize_before_replacement(
     ):
         return False
     return True
+
+
+def _has_deferred_revision_extension(sentence: str, deferred_revision_sentences: tuple[str, ...]) -> bool:
+    normalized_sentence = _normalized_text(sentence)
+    sentence_words = _word_units(normalized_sentence)
+    if not sentence_words:
+        return False
+    for deferred in deferred_revision_sentences:
+        normalized_deferred = _normalized_text(deferred)
+        if normalized_deferred == normalized_sentence:
+            continue
+        deferred_words = _word_units(normalized_deferred)
+        if len(deferred_words) <= len(sentence_words):
+            continue
+        if not _sentences_are_revisions(normalized_sentence, normalized_deferred):
+            continue
+        if _prefer_sentence_revision(normalized_sentence, normalized_deferred) == normalized_deferred:
+            return True
+    return False
 
 
 def _should_suppress_delta_final(staged_sentence: str, output_sentence: str, language: str, reason: str) -> bool:

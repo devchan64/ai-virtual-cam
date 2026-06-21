@@ -24,6 +24,9 @@ class SentenceCandidateCommitBufferNode:
     def __len__(self) -> int:
         return len(self._queue)
 
+    def queued_sentences(self) -> tuple[str, ...]:
+        return tuple(str(entry["sentence"]) for entry in self._queue)
+
     def enqueue_or_revision(
         self,
         *,
