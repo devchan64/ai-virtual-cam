@@ -46,6 +46,7 @@ from src.app.dictation_transcript_logic import (
     _should_finalize_before_replacement,
     _should_finalize_replaced_sentence,
     _should_preserve_revision_confirmation_from_internal_stability,
+    _should_preserve_staged_output_when_delta_fragment,
     _should_reset_revision_age,
     _should_split_terminal_tail_revision,
     _should_stage_boundary_candidate,
@@ -177,6 +178,16 @@ def run_transcribe_loop(
         output_sentence = _sentence_output_delta(committed_text, active_stage.sentence)
         staged_before = active_stage.sentence
         committed_before_chars = len(_normalized_text(committed_text))
+        if _should_preserve_staged_output_when_delta_fragment(staged_before, output_sentence, detected):
+            count_metric("finalize_delta_fragment_preserved")
+            worker._emit(
+                "status",
+                "받아쓰기 AI 확정 delta 조각 보존: "
+                f"chunk={chunks} reason={reason} staged_tail={_diagnostic_tail(staged_before)} "
+                f"delta={output_sentence!r}",
+                display=False,
+            )
+            output_sentence = staged_before
         if not output_sentence:
             active_stage.clear()
             count_metric("finalize_duplicate_suppressed")
@@ -1095,6 +1106,7 @@ def run_transcribe_loop(
                 "finalize_delta_suppressed_stage_dropped",
                 0,
             )
+            delta_fragment_preserved_count = chunk_lifecycle_metrics.get("finalize_delta_fragment_preserved", 0)
             delta_trimmed_count = chunk_lifecycle_metrics.get("candidate_delta_trimmed", 0)
             stable_prefix_chars = chunk_lifecycle_metrics.get("stable_prefix_chars", 0)
             unstable_tail_chars = chunk_lifecycle_metrics.get("unstable_tail_chars", 0)
@@ -1163,6 +1175,7 @@ def run_transcribe_loop(
                 f"recent_echo_suppressed={recent_echo_suppressed_count} "
                 f"finalize_delta_suppressed_stage_retained={delta_suppressed_stage_retained_count} "
                 f"finalize_delta_suppressed_stage_dropped={delta_suppressed_stage_dropped_count} "
+                f"finalize_delta_fragment_preserved={delta_fragment_preserved_count} "
                 f"delta_trimmed={delta_trimmed_count} "
                 f"stable_prefix_chars={stable_prefix_chars} unstable_tail_chars={unstable_tail_chars} "
                 f"stable_internal_chars={stable_internal_chars} "

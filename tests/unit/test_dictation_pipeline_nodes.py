@@ -39,6 +39,7 @@ from src.app.dictation_transcript_logic import (
     _normalized_text,
     _recent_final_output_delta,
     _should_confirm_staged_sentence,
+    _should_preserve_staged_output_when_delta_fragment,
     _should_stage_boundary_candidate,
     _should_finalize_replaced_sentence,
     _should_suppress_delta_final,
@@ -251,6 +252,18 @@ class DictationPipelineNodeTest(unittest.TestCase):
         self.assertEqual(node.active.sentence, "fresh queued sentence.")
         self.assertEqual(metrics["stage_queue_stale_promote_suppressed"], 1)
         self.assertEqual(metrics["stage_queue_promote"], 1)
+
+    def test_preserve_staged_output_when_delta_loses_sentence_boundary(self) -> None:
+        staged = "这家咖啡店还蛮可爱的，它是叫做世影。"
+        delta = "还 蛮 可 爱 的 它 是 叫 做 世 影"
+
+        self.assertTrue(_should_preserve_staged_output_when_delta_fragment(staged, delta, "zh"))
+
+    def test_preserve_staged_output_keeps_exact_duplicate_delta_suppression(self) -> None:
+        staged = "这家咖啡店还蛮可爱的，它是叫做世影。"
+
+        self.assertFalse(_should_preserve_staged_output_when_delta_fragment(staged, "", "zh"))
+        self.assertFalse(_should_preserve_staged_output_when_delta_fragment(staged, staged, "zh"))
 
     def test_tuning_manifest_documents_env_overrides_and_evidence_scope(self) -> None:
         with patch.dict("os.environ", {"AVC_DICTATION_SENTENCE_CONFIRM_CHUNKS": "5"}):

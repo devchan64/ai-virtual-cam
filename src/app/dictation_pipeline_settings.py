@@ -465,6 +465,7 @@ def dictation_tuning_protocol() -> dict[str, object]:
             "language_summary residual counters",
             "tag_summary symptom counters",
             "duplicate suppression counters",
+            "finalize_delta_fragment_preserved",
         ),
     }
 

@@ -87,7 +87,7 @@
 - 현재 chunk에서 candidate buffer로부터 승격된 staged 후보는 같은 chunk 안의 후속 replacement로 즉시 final 확정하지 않는다. 최소 다음 STT window에서 재평가해 stale queue burst가 false final로 소비되는 경로를 막는다.
 - 같은 `revisionHash` 계열에서 나중 후보가 final로 소비되면, 이전 미소비 후보는 stale revision으로 폐기한다.
 - 다른 revision 계열이라도 뒤 후보가 앞 후보의 의미 구간을 포함하거나 대체한 것이 확인되면, 앞 후보는 중복 소비 방지를 위해 폐기한다.
-- 최근 final과 새 후보가 prefix 관계이고 새 suffix가 충분히 길면, 이미 final된 prefix는 다시 확정하지 않고 suffix만 새 후보로 회수할 수 있다. 짧은 suffix 보정은 echo로 보고 기존 중복 억제를 유지한다.
+- 최근 final과 새 후보가 prefix 관계이고 새 suffix가 충분히 길면, 이미 final된 prefix는 다시 확정하지 않고 suffix만 새 후보로 회수할 수 있다. 짧은 suffix 보정은 echo로 보고 기존 중복 억제를 유지한다. 다만 이미 독립 staged 문장으로 확인된 후보를 committed-text delta가 종결부 없는 조각으로 만들면, append-only final 단위를 보존하기 위해 staged 원문을 final 후보로 유지한다.
 - 버퍼 초과는 강제 final 승격 사유가 아니다. age, revisionHash, recent final delta, 품질 기준을 만족하지 못한 오래된 후보는 suppressed로 폐기한다.
 - 생성순서 buffering은 누락 소비를 줄이기 위한 장치이며 append-only 소비 순서를 깨는 근거가 될 수 없다.
 
@@ -112,7 +112,7 @@
 | `RecognitionHypothesis` 안정성 | `stable_token_ratio`, `stable_internal_chars`, `raw_without_final` | raw 가설이 계속 나오는데 final이 없으면 인식/후보/커밋 경계 중 병목을 추적한다. |
 | `SentenceCandidateSet` 경계 품질 | `boundary_end_marks`, `boundary_right_context_starts`, `segment_state_pending`, `pending_quality_*` | completed/pending 분포와 경계 신호가 후보 생성 계약을 만족하는지 본다. |
 | `candidateBuffer` 동작 | `stage_queue_enqueue`, `stage_queue_promote`, `stage_queue_revision`, `stage_queue_drop_oldest`, `stage_queue_recent_final_suppressed`, `stage_queue_recent_final_delta_trimmed`, `stage_replace_deferred`, `stage_replaced_unconfirmed`, `stage_age_finalize`, `stage_age_hold`, `stage_age_no_text_skipped`, `stage_no_text_stale_suppressed`, `candidate_prior_pending_prefix_trimmed` | 생성순서 보존, revision 갱신, 미확정 replacement 보류, 버퍼 소비 흐름이 의도대로 발생하는지 본다. `stage_replaced_unconfirmed`가 많이 발생하면 확정 전 후보 삭제로 인한 누락 가능성을 우선 검토한다. `stage_queue_recent_final_suppressed`는 이미 final된 이전 revision이 뒤늦게 queue에서 승격되지 않고 폐기된 관측값이다. `stage_queue_recent_final_delta_trimmed`는 queue 후보 중 recent final prefix 뒤의 의미 있는 suffix만 회수된 관측값이다. `stage_age_finalize`는 충분히 오래 관측된 staged 후보가 후속 후보보다 먼저 final로 소비된 관측값이다. `stage_age_hold`는 pending 확장으로 age 증가가 보류된 관측값이다. `stage_no_text_stale_suppressed`는 STT text가 없는 반복 구간에서 미확정 staged 후보가 final로 가지 않고 폐기된 관측값이다. `candidate_prior_pending_prefix_trimmed`는 pending prefix 오염 제거 관측값이다. |
-| 커밋 품질 | `finalized_per_stage_start`, `segment_state_final`, `segment_state_suppressed`, `final_quality_*`, `candidate_recent_final_delta_trimmed`, `finalize_delta_suppressed_stage_retained`, `finalize_delta_suppressed_stage_dropped` | final 전환 비율과 suppressed 사유로 중복/오염 후보 차단 여부를 본다. 최근 final prefix 뒤의 긴 suffix가 회수되는지와 짧은 echo 보정이 억제되는지도 함께 본다. delta가 broken fragment로 계산되면 active staged 후보를 잠시 유지하되, 반복 보류가 누락을 만들면 폐기하고 다음 후보로 진행한다. |
+| 커밋 품질 | `finalized_per_stage_start`, `segment_state_final`, `segment_state_suppressed`, `final_quality_*`, `candidate_recent_final_delta_trimmed`, `finalize_delta_suppressed_stage_retained`, `finalize_delta_suppressed_stage_dropped`, `finalize_delta_fragment_preserved` | final 전환 비율과 suppressed 사유로 중복/오염 후보 차단 여부를 본다. 최근 final prefix 뒤의 긴 suffix가 회수되는지와 짧은 echo 보정이 억제되는지도 함께 본다. delta가 broken fragment로 계산되면 active staged 후보를 잠시 유지하되, 반복 보류가 누락을 만들면 폐기하고 다음 후보로 진행한다. 단, 독립 staged 문장이 committed-text delta 때문에 종결부 없는 조각으로 바뀌는 경우는 `finalize_delta_fragment_preserved`로 관측하고 staged 원문을 보존한다. |
 | final-only sink | `translation_skip_final_quality`, 번역 입력의 `final=true` 여부 | 번역 sink가 `CommittedTranscriptEvent` 외 입력을 소비하지 않는지 본다. |
 
 ### 불변 계약

@@ -14750,6 +14750,78 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-21 중국어 Suzhou cafe 구간 delta fragment stage drop 개선
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 18:26:37..18:27:00
+chunk=3835..3858 중심
+```
+
+감사 결과:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 18:26:37" --until "2026-06-21 18:27:00" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-zh-suzhou-cafe-182637-182700.json
+```
+
+```text
+stt_raw_line_count=24
+finalize_event_count=8
+finalize_per_stt_raw=0.333
+stage_replace_deferred_count=30
+stage_replace_deferred_per_stt_raw=1.25
+stage_queue_promote_count=11
+stage_queue_promote_per_stt_raw=0.458
+duplicate_suppressed_count=76
+duplicate_suppressed_per_stt_raw=3.167
+quality_block_count=17
+finalize_delta_suppressed_stage_retained_count=4
+finalize_delta_suppressed_stage_dropped_count=2
+```
+
+관측:
+
+- `我们在还没有进那个拙政园之前呢，我们就经过了一家咖啡店。` 확정 뒤 `这家咖啡店还蛮可爱的，它是叫做世影。`가 staged 후보로 올라왔다.
+- 다음 window에서 더 앞쪽 후보 `对，我们现在已经到了苏州。`가 replacement로 들어오면서 기존 staged 후보가 `replaced_confirmed` 확정 경로를 탔다.
+- 이때 committed-text delta가 `这家咖啡店` prefix를 제거해 `还 蛮 可 爱 的 它 是 叫 做 世 影`처럼 종결부 없는 조각을 만들었고, `finalize_delta_suppressed_stage_dropped`로 stage 전체가 폐기됐다.
+- 원인은 raw STT 정확도 문제가 아니라, 이미 독립 staged 문장으로 확인된 후보를 final 직전 delta가 문장 경계 없는 조각으로 바꾼 것이다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-6-20260621.jsonl`에 `zh_log_suzhou_cafe_delta_fragment_dropped_stage_20260621_001` 케이스를 추가했다.
+- `src/app/dictation_transcript_logic.py`에 `_should_preserve_staged_output_when_delta_fragment`를 추가했다.
+- final 직전 `_sentence_output_delta` 결과가 stage 원문보다 문장 경계를 잃은 조각이면, staged 원문을 final 후보로 보존한다.
+- 새 관측 지표 `finalize_delta_fragment_preserved`를 안정성 로그와 tuning policy의 diagnostic metrics에 추가했다.
+- 언어별 문구/정규식 예외가 아니라, staged 원문과 delta 결과의 문장 경계 보존 여부만 보는 공통 규칙이다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_pipeline_nodes tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle
+Ran 37 tests in 0.007s, OK
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases --max-drafts 0
+case_count=1195, expected_final_case_count=1191, zh=304
+
+./.venv/bin/python -m py_compile src/app/dictation_pipeline_loop.py src/app/dictation_transcript_logic.py src/app/dictation_pipeline_settings.py
+OK
+
+git diff --check
+OK
+```
+
+제한:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py --cases tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-6-20260621.jsonl --output .tmp/eval/dictation-ai-sbd/sbd-benchmark-zh-6-20260621-delta-preserve.json
+[dictation-ai-sbd-benchmark] error: sentence boundary backend 'sat' initialization failed: model=sat-3l-sm device=cuda compute=float16. Fail-Fast: fix the model/device/runtime instead of falling back to regex.
+```
+
+- sandbox 밖 CUDA 벤치 실행 승인은 환경 정책상 거부됐다.
+- CPU/mock/smoke fallback은 성능 근거로 사용하지 않았다.
+
 ### 2026-06-21 중국어 Huaihai/Chenghuangmiao 구간 fragment final 케이스 추가
 
 관측 구간:

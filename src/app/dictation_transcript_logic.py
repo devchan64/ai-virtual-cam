@@ -1125,6 +1125,20 @@ def _should_suppress_delta_final(staged_sentence: str, output_sentence: str, lan
     return "no_end_marker" in flags
 
 
+def _should_preserve_staged_output_when_delta_fragment(staged_sentence: str, output_sentence: str, language: str) -> bool:
+    staged = _normalized_text(staged_sentence)
+    output = _normalized_text(output_sentence)
+    if not staged or not output or staged == output:
+        return False
+    if _sentence_end_count(staged) <= _sentence_end_count(output):
+        return False
+    staged_flags = set(_final_sentence_diagnostic_flags(staged, language))
+    if staged_flags.intersection({"empty", "spaced_cjk", "cjk_internal_gap", "cjk_repeated_ngram", "repeated_word_ngram"}):
+        return False
+    output_flags = set(_final_sentence_diagnostic_flags(output, language))
+    return bool(output_flags.intersection({"no_end_marker", "short_no_end_fragment", "trailing_ellipsis"}))
+
+
 def _is_recent_final_echo(candidate: str, recent_sentence: str, _language: str) -> bool:
     candidate_words = _word_units(candidate)
     recent_words = _word_units(recent_sentence)
