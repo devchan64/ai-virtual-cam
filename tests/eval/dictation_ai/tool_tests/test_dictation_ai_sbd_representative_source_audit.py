@@ -74,6 +74,7 @@ class DictationAiSbdRepresentativeSourceAuditTest(unittest.TestCase):
         self.assertEqual(
             summary["segment_linkage"],
             {
+                "translation_enabled_source_count": 1,
                 "finalize_segment_count": 1,
                 "transcript_segment_count": 1,
                 "translation_diagnostic_segment_count": 1,
@@ -85,6 +86,10 @@ class DictationAiSbdRepresentativeSourceAuditTest(unittest.TestCase):
                 "transcript_without_finalize_count": 0,
                 "translation_diagnostic_without_transcript_count": 0,
                 "translation_without_transcript_count": 0,
+                "translation_enabled_finalize_segment_count": 1,
+                "translation_enabled_final_translation_linked_segment_count": 1,
+                "translation_enabled_untranslated_final_segment_count": 0,
+                "translation_enabled_final_translation_linked_ratio": 1.0,
                 "ready_for_translation_replay_linkage": True,
                 "ready_for_translation_diagnostic_linkage": True,
             },

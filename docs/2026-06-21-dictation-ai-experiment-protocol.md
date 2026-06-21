@@ -227,7 +227,7 @@
 
 `current_claim_scope=challenge-replay-only`이면 현재 초안은 failure lifecycle trade-off 범위의 논문 근거로만 해석한다. 이 상태에서 `followup_readiness.paper_evidence_ready=false`가 함께 나오면 representative/translation 관련 성능 주장은 계속 보류한다. `representative_draft_traceable=true`는 사람이 채울 draft 템플릿이 준비됐다는 뜻이지, representative paper evidence가 준비됐다는 뜻이 아니다.
 
-통합 audit의 `methodology_decision`은 현재 실험 방법을 어떻게 읽어야 하는지 구조화해 남긴다. `primary_interpretation=failure-enriched challenge replay lifecycle analysis`이고 `challenge_replay_valid=true`이면 현재 complete report는 실패 농축 challenge replay의 lifecycle trade-off 근거로는 유효하다. 이 판정은 `checks.methodology`에도 포함되므로, complete report의 `experiment_stage`나 `claim_scope_key`가 challenge-only 논문 범위와 섞이면 readiness는 실패해야 한다. 동시에 `recommended_next_experiment=human-review representative expected_final labels`이면 다음 주요 실험은 새 threshold sweep이 아니라 사람이 확정한 representative case 승격이다. `translation_next_experiment=build translation replay linkage before translation claims`가 남아 있는 동안 final-only sink의 번역 안정성은 시스템 계약과 후속 실험 필요성으로만 다룬다.
+통합 audit의 `methodology_decision`은 현재 실험 방법을 어떻게 읽어야 하는지 구조화해 남긴다. `primary_interpretation=failure-enriched challenge replay lifecycle analysis`이고 `challenge_replay_valid=true`이면 현재 complete report는 실패 농축 challenge replay의 lifecycle trade-off 근거로는 유효하다. 이 판정은 `checks.methodology`에도 포함되므로, complete report의 `experiment_stage`나 `claim_scope_key`가 challenge-only 논문 범위와 섞이면 readiness는 실패해야 한다. 동시에 `recommended_next_experiment=human-review representative expected_final labels`이면 다음 주요 실험은 새 threshold sweep이 아니라 사람이 확정한 representative case 승격이다. `translation_next_experiment=build translation replay linkage before translation claims`가 남아 있는 동안 final-only sink의 번역 안정성은 시스템 계약과 후속 실험 필요성으로만 다룬다. `translation_next_experiment=run translation replay`이면 final/translation 연결은 준비된 상태지만, 아직 번역 안정성 성능 주장으로 승격된 것은 아니다.
 
 `structural_preflight.ready=true`이면 queue/revision/boundary 병목을 빠르게 재현할 exploratory subset이 준비됐다는 뜻이다. 이 값은 `paper_evidence=false`로 유지되며 readiness의 `ok`를 올리거나 논문 claim scope를 넓히지 않는다. 구조 변경 후보가 이 subset에서 좋아 보이면 전체 1113건 challenge replay를 실제 `sat + cuda + float16`로 다시 실행해 paper evidence로 승격할지 판단한다.
 
@@ -254,7 +254,7 @@ structural preflight 결과는 다음 게이트를 모두 통과해야만 전체
 | 승격 조건 | subset에서 좋아 보여도 전체 1113건 challenge replay를 `--paper-evidence`로 다시 실행하기 전에는 논문 수치가 아니다. |
 | 실패 처리 | CUDA 접근 불가, 모델 cache 불일치, runtime contract 위반은 결과 없음으로 기록하고 대체 벤치를 만들지 않는다. |
 
-`methodology_decision.available_next_experiments`는 후속 작업을 역할별로 분리한다. `paper-evidence expansion`은 사람이 representative `expected_final`을 확정해야 진행되고, `translation claim expansion`은 final event와 translation output linkage가 있어야 진행된다. `logic-change preflight`는 structural exploratory subset이 준비됐을 때 사람 라벨링 없이도 시작할 수 있지만, 이 결과는 전체 challenge replay 재실행 전까지 논문 성능 근거가 아니다. 이 항목에는 `case_path`, `preflight_command`, `full_challenge_replay_command`, `promotion_requirement`를 함께 남겨 어떤 입력으로 preflight를 실행하고, 어떤 전체 재검증을 통과해야 paper evidence로 승격할 수 있는지 명확히 한다.
+`methodology_decision.available_next_experiments`는 후속 작업을 역할별로 분리한다. `paper-evidence expansion`은 사람이 representative `expected_final`을 확정해야 진행되고, `translation claim expansion`은 final event와 translation output linkage가 있어야 진행된다. linkage가 준비되면 `blocked_by`가 비고 다음 실험 이름은 `run translation replay`가 된다. `logic-change preflight`는 structural exploratory subset이 준비됐을 때 사람 라벨링 없이도 시작할 수 있지만, 이 결과는 전체 challenge replay 재실행 전까지 논문 성능 근거가 아니다. 이 항목에는 `case_path`, `preflight_command`, `full_challenge_replay_command`, `promotion_requirement`를 함께 남겨 어떤 입력으로 preflight를 실행하고, 어떤 전체 재검증을 통과해야 paper evidence로 승격할 수 있는지 명확히 한다.
 
 ## Representative 승격 조건
 
@@ -469,7 +469,7 @@ source audit과 review packet 검증 뒤에는 follow-up readiness audit으로 �
   --summary-output .tmp/eval/dictation-ai-sbd/followup-readiness.json
 ```
 
-이 audit의 representative status가 `blocked_on_human_expected_final`이면 source/packet은 준비되었지만 사람이 확정한 representative JSONL case가 없다는 뜻이다. `ready_for_pilot_representative_replay`가 되더라도 translation status가 `blocked_on_translation_replay_linkage`라면 운영 평균 finalization pilot만 가능하고, final-only sink의 번역 안정성 주장은 여전히 보류한다.
+이 audit의 representative status가 `blocked_on_human_expected_final`이면 source/packet은 준비되었지만 사람이 확정한 representative JSONL case가 없다는 뜻이다. `ready_for_pilot_representative_replay`가 되더라도 translation status가 `blocked_on_translation_replay_linkage`라면 운영 평균 finalization pilot만 가능하고, final-only sink의 번역 안정성 주장은 여전히 보류한다. translation status가 `ready_for_translation_replay_case_building`이면 final/transcript/translation이 같은 segment id로 연결된 로그가 있다는 뜻이며, 다음 단계는 번역 안정성 replay case를 구성하는 것이다.
 
 사람이 `expected_final`을 확정해 representative JSONL case를 작성한 뒤에는 case validator에 review packet을 함께 넘겨 source 추적성을 확인한다.
 
@@ -502,6 +502,8 @@ final-only sink가 번역 안정성을 높인다는 주장은 현재 challenge r
 - translation output text
 - 같은 source 구간에서 duplicate translation, delayed translation, missing translation을 계산할 수 있는 로그
 - final이 아닌 staged/pending이 번역 큐에 들어가지 않았다는 sink 계약 검증
+
+현재 로그 감사는 `segment_id` 기준 final/transcript/translation 연결을 확인한다. 번역이 켜진 세션의 final 중 실제 번역 출력까지 연결된 비율은 `segment_linkage.translation_enabled_final_translation_linked_ratio`로 본다. 이 값은 STT 정확도 지표가 아니라 final-only sink 소비율 지표다.
 
 Translation replay는 SBD/finalization replay와 다른 실험이다. SBD replay는 `expected_final`과 final transcript의 유사성을 본다. Translation replay는 final 이벤트가 번역 입력으로 들어간 뒤 downstream churn이 줄었는지 본다. 따라서 translation replay가 준비되기 전에는 `final-only sink`를 시스템 계약과 문제 설정으로만 주장하고, 번역 품질 개선 수치로 주장하지 않는다.
 

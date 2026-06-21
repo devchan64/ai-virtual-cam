@@ -81,7 +81,18 @@ class DictationAiPaperReadinessAuditTest(unittest.TestCase):
             encoding="utf-8",
         )
 
-    def _write_source_audit(self, path: Path) -> None:
+    def _write_source_audit(self, path: Path, *, translation_linked: bool = False) -> None:
+        segment_linkage = {}
+        if translation_linked:
+            segment_linkage = {
+                "finalize_segment_count": 1,
+                "transcript_segment_count": 1,
+                "translation_diagnostic_segment_count": 1,
+                "translation_segment_count": 1,
+                "final_transcript_linked_segment_count": 1,
+                "final_translation_diagnostic_linked_segment_count": 1,
+                "final_translation_linked_segment_count": 1,
+            }
         path.write_text(
             json.dumps(
                 {
@@ -92,6 +103,7 @@ class DictationAiPaperReadinessAuditTest(unittest.TestCase):
                         "translation": 1,
                         "translation_diagnostic": 1,
                     },
+                    "segment_linkage": segment_linkage,
                 },
                 ensure_ascii=False,
             ),
@@ -290,6 +302,7 @@ class DictationAiPaperReadinessAuditTest(unittest.TestCase):
         missing_guard: bool = False,
         report_corpus_role: str = "challenge-replay",
         write_structural_result: bool = False,
+        translation_linked: bool = False,
     ) -> dict[str, object]:
         summary = root / "summary.json"
         paper = root / "paper.md"
@@ -304,7 +317,7 @@ class DictationAiPaperReadinessAuditTest(unittest.TestCase):
         cases.mkdir()
         self._write_summary(summary)
         self._write_paper(paper, missing_guard=missing_guard)
-        self._write_source_audit(source)
+        self._write_source_audit(source, translation_linked=translation_linked)
         self._write_packet_validation(packet_validation)
         self._write_review_packets(review_packets)
         self._write_draft_validation(draft_validation)
@@ -388,6 +401,31 @@ class DictationAiPaperReadinessAuditTest(unittest.TestCase):
         )
         self.assertTrue(result["methodology_decision"]["ok"])
         self.assertTrue(result["structural_preflight"]["ready"])
+
+    def test_readiness_audit_reports_translation_replay_when_segment_linkage_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = self._run_audit(Path(tmpdir), translation_linked=True)
+
+        self.assertEqual(
+            result["followup_readiness"]["translation_status"],
+            "ready_for_translation_replay_case_building",
+        )
+        self.assertEqual(
+            result["methodology_decision"]["translation_next_experiment"],
+            "run translation replay",
+        )
+        self.assertEqual(
+            result["methodology_decision"]["translation_role"],
+            "translation replay linkage is ready; run translation replay before stability claims",
+        )
+        self.assertIn(
+            "run translation replay before final-only translation stability claims",
+            result["methodology_decision"]["method_reconstruction"],
+        )
+        self.assertEqual(
+            result["methodology_decision"]["available_next_experiments"][1]["blocked_by"],
+            "",
+        )
         self.assertEqual(result["structural_preflight"]["source_count"], 1)
         self.assertFalse(result["structural_preflight"]["result_exists"])
         self.assertEqual(result["structural_preflight"]["execution_status"], "input-ready-not-run")

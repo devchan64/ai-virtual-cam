@@ -120,11 +120,15 @@ def _segment_linkage_payload(
     transcript_segments: set[int],
     translation_diagnostic_segments: set[int],
     translation_segments: set[int],
+    translation_enabled: bool,
 ) -> dict[str, object]:
     final_transcript = finalize_segments & transcript_segments
     final_translation_diagnostic = final_transcript & translation_diagnostic_segments
     final_translation = final_transcript & translation_segments
+    translation_enabled_finalize_count = len(finalize_segments) if translation_enabled else 0
+    translation_enabled_translation_count = len(final_translation) if translation_enabled else 0
     return {
+        "translation_enabled": translation_enabled,
         "finalize_segment_count": len(finalize_segments),
         "transcript_segment_count": len(transcript_segments),
         "translation_diagnostic_segment_count": len(translation_diagnostic_segments),
@@ -138,6 +142,12 @@ def _segment_linkage_payload(
             translation_diagnostic_segments - transcript_segments
         ),
         "translation_without_transcript_count": len(translation_segments - transcript_segments),
+        "translation_enabled_finalize_segment_count": translation_enabled_finalize_count,
+        "translation_enabled_final_translation_linked_segment_count": translation_enabled_translation_count,
+        "translation_enabled_untranslated_final_segment_count": max(
+            translation_enabled_finalize_count - translation_enabled_translation_count,
+            0,
+        ),
         "ready_for_translation_replay_linkage": bool(final_translation),
         "ready_for_translation_diagnostic_linkage": bool(final_translation_diagnostic),
     }
@@ -225,6 +235,7 @@ def audit_log_file(path: Path) -> dict[str, object]:
     transcript_segments: set[int] = set()
     translation_diagnostic_segments: set[int] = set()
     translation_segments: set[int] = set()
+    translation_enabled = False
 
     with path.open("r", encoding="utf-8", errors="replace") as handle:
         for raw_line in handle:
@@ -243,6 +254,8 @@ def audit_log_file(path: Path) -> dict[str, object]:
                 if language:
                     language_counts[language] += 1
             values = _line_key_values(line)
+            if values.get("translation_enabled") == "True":
+                translation_enabled = True
             segment_id = _segment_id_from_values(values)
             if segment_id is not None:
                 if "받아쓰기 AI 문장 확정:" in line:
@@ -299,6 +312,7 @@ def audit_log_file(path: Path) -> dict[str, object]:
             transcript_segments=transcript_segments,
             translation_diagnostic_segments=translation_diagnostic_segments,
             translation_segments=translation_segments,
+            translation_enabled=translation_enabled,
         ),
     }
 
@@ -320,14 +334,27 @@ def _sum_segment_linkage(file_summaries: list[dict[str, object]]) -> dict[str, o
         "transcript_without_finalize_count",
         "translation_diagnostic_without_transcript_count",
         "translation_without_transcript_count",
+        "translation_enabled_finalize_segment_count",
+        "translation_enabled_final_translation_linked_segment_count",
+        "translation_enabled_untranslated_final_segment_count",
     )
     payload: dict[str, object] = {}
     for key in numeric_keys:
         payload[key] = sum(int(dict(summary.get("segment_linkage", {})).get(key, 0)) for summary in file_summaries)
+    payload["translation_enabled_source_count"] = sum(
+        1 for summary in file_summaries if bool(dict(summary.get("segment_linkage", {})).get("translation_enabled", False))
+    )
     payload["ready_for_translation_replay_linkage"] = int(payload["final_translation_linked_segment_count"]) > 0
     payload["ready_for_translation_diagnostic_linkage"] = (
         int(payload["final_translation_diagnostic_linked_segment_count"]) > 0
     )
+    enabled_final_count = int(payload["translation_enabled_finalize_segment_count"])
+    if enabled_final_count > 0:
+        payload["translation_enabled_final_translation_linked_ratio"] = (
+            int(payload["translation_enabled_final_translation_linked_segment_count"]) / enabled_final_count
+        )
+    else:
+        payload["translation_enabled_final_translation_linked_ratio"] = None
     return payload
 
 

@@ -149,10 +149,15 @@ def _methodology_decision(
     if translation_status in {
         "blocked_on_translation_replay_linkage",
         "blocked_on_translation_logs",
+        "blocked_on_translation_output_linkage",
     }:
         translation_next_experiment = "build translation replay linkage before translation claims"
+        translation_role = "blocked until final-event to translation output linkage exists"
+        translation_method_note = "add translation replay linkage before final-only translation stability claims"
     else:
         translation_next_experiment = "run translation replay"
+        translation_role = "translation replay linkage is ready; run translation replay before stability claims"
+        translation_method_note = "run translation replay before final-only translation stability claims"
     available_next_experiments = [
         {
             "name": recommended_next_experiment,
@@ -171,6 +176,7 @@ def _methodology_decision(
             in {
                 "blocked_on_translation_replay_linkage",
                 "blocked_on_translation_logs",
+                "blocked_on_translation_output_linkage",
             }
             else "",
         },
@@ -223,7 +229,7 @@ def _methodology_decision(
         "challenge_replay_valid": challenge_replay_valid,
         "threshold_sweep_role": "parameter adoption or rejection evidence, not a universal optimization claim",
         "representative_role": "blocked until human expected_final labels are promoted",
-        "translation_role": "blocked until final-event to translation output linkage exists",
+        "translation_role": translation_role,
         "blocked_claims": blocked_claims,
         "recommended_next_experiment": recommended_next_experiment,
         "translation_next_experiment": translation_next_experiment,
@@ -232,7 +238,7 @@ def _methodology_decision(
             "keep challenge replay for observed failure lifecycle trade-off",
             "do not interpret challenge replay averages as operating average quality",
             "promote traceable human-reviewed representative cases before operating-average claims",
-            "add translation replay linkage before final-only translation stability claims",
+            translation_method_note,
         ],
         "ok": challenge_replay_valid,
     }

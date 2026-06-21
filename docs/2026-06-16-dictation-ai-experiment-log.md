@@ -12976,3 +12976,63 @@ Ran 14 tests, OK
 
 - 이번 변경은 raw STT 성능 개선이 아니다.
 - 이미 final로 확정된 받아쓰기 결과가 번역 큐에서 과도하게 누락되는 문제를 줄이는 final-only 번역 소비 정책 보정이다.
+
+### 2026-06-21 final-only 번역 소비율 감사 지표 보강
+
+문제:
+
+- 반복 실험의 다음 대상은 raw STT 정확도가 아니라 STT 이후 final 출력이 번역 sink로 안정적으로 소비되는지이다.
+- 기존 segment linkage 지표는 전체 로그의 final/translation 연결 개수만 보여 주므로, 번역이 꺼진 세션의 final까지 분모에 섞일 수 있었다.
+- paper readiness도 translation linkage가 준비된 상태를 `run translation replay`로 해석하면서도 설명 문구에는 여전히 blocked 상태를 남겼다.
+
+정리:
+
+- representative source audit의 `segment_linkage`에 번역이 켜진 source 기준 지표를 추가했다.
+- 추가 지표:
+  - `translation_enabled_source_count`
+  - `translation_enabled_finalize_segment_count`
+  - `translation_enabled_final_translation_linked_segment_count`
+  - `translation_enabled_untranslated_final_segment_count`
+  - `translation_enabled_final_translation_linked_ratio`
+- paper readiness의 `methodology_decision.translation_role`과 `method_reconstruction`은 translation status에 따라 blocked/ready 문구를 다르게 출력한다.
+- 실험 프로토콜에는 `ready_for_translation_replay_case_building`과 `translation_enabled_final_translation_linked_ratio`의 해석을 추가했다.
+
+검증:
+
+```text
+./.venv/bin/python -m py_compile tests/eval/dictation_ai/representative/audit_sbd_representative_sources.py tests/eval/dictation_ai/paper/audit_paper_readiness.py
+./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_representative_source_audit tests.eval.dictation_ai.tool_tests.test_dictation_ai_paper_readiness_audit tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_followup_readiness_audit
+./.venv/bin/python -m unittest discover -s tests/eval/dictation_ai/tool_tests -p 'test_*.py'
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit.json
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py paper-readiness --summary-output .tmp/eval/dictation-ai-sbd/paper-readiness.json
+```
+
+결과:
+
+```text
+targeted readiness/source tests: Ran 13 tests, OK
+tool_tests: Ran 141 tests, OK
+representative source audit:
+  source_count=96
+  finalize_segment_count=109
+  final_translation_linked_segment_count=74
+  translation_enabled_source_count=42
+  translation_enabled_finalize_segment_count=109
+  translation_enabled_final_translation_linked_segment_count=74
+  translation_enabled_untranslated_final_segment_count=35
+  translation_enabled_final_translation_linked_ratio=0.6788990825688074
+paper readiness:
+  translation_status=ready_for_translation_replay_case_building
+  translation_next_experiment=run translation replay
+```
+
+관측:
+
+- 11:50 이전 로그에는 `short_cjk`, `spaced_cjk` 등 final 품질 플래그로 번역 생략된 segment가 남아 있다.
+- 짧은 final 문장 번역 누락 수정 이후 11:53 이후 로그에서는 `这样子。`, `很纪念的。`, spaced CJK final이 번역 요청/진단/출력으로 연결되는 사례가 확인된다.
+
+해석:
+
+- `translation_enabled_final_translation_linked_ratio`는 STT 성능 지표가 아니라 final-only sink 소비율 지표다.
+- 현재 누적 로그 전체의 0.6789는 패치 이전 생략 로그가 섞인 과거 누적값이므로 개선 수치로 해석하지 않는다.
+- 다음 반복에서는 패치 이후 source window만 분리해 같은 지표를 다시 산출해야 한다.
