@@ -14520,3 +14520,24 @@ chunk=342..355
 - `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-5-20260621.jsonl`에 `zh_log_delayed_martin_king_hat_short_stage_head_20260621_001` 케이스를 추가했다.
 - `short_mixed_latin_zh` 품질 플래그를 추가했다. 중국어 후보에서 라틴 토큰과 1~2개 CJK 단위만 결합된 매우 짧은 조각만 stage 진입 전에 차단한다.
 - `mixed_latin_zh` 전체를 stage 차단하지는 않는다. `你看，我点的这个是他们家的招牌cheese。`처럼 긴 문장형 mixed-latin 후보는 계속 stage 가능해야 한다.
+
+### 2026-06-21 중국어 rain/exit 구간 짧은 CJK stage head 지연 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 14:47:50..14:48:03
+chunk=176..189
+```
+
+관측:
+
+- `心。`, `都追加四。`, `啊，有红。`, `好多看。` 같은 짧은 CJK terminal fragment가 active stage 또는 queue head를 점유했다.
+- 뒤의 실제 구간인 `在三号出口一出来...可以来看看。`, `下大雨啦。`, `而且下超大超粗的那种，我的妈！救命啊！`는 여러 window에서 반복됐지만, 앞선 짧은 후보들의 age/queue 소비를 기다리며 지연됐다.
+- `short_cjk` 전체를 stage 차단하면 `嗯，是的。`, `好开心！`, `加油！`처럼 실제로 번역해야 하는 짧은 문장까지 누락될 수 있다. 따라서 이번에는 로직을 더 좁히지 않고 케이스로 고정한다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-5-20260621.jsonl`에 `zh_log_delayed_rain_exit_short_cjk_stage_head_20260621_001` 케이스를 추가했다.
+- 향후 판단 기준은 단순 길이 차단이 아니라, confirmations가 낮은 short terminal fragment가 여러 완결 후보 앞에서 queue head를 반복 점유하는 lifecycle 패턴이어야 한다.
