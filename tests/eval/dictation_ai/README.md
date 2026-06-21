@@ -40,4 +40,14 @@
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py paper-readiness --help
 ```
 
+로그 기반 감사는 패치 전후가 섞이지 않도록 시간 구간을 명시할 수 있다.
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources \
+  .tmp/logs \
+  --since "2026-06-21 12:02:00" \
+  --until "2026-06-21 12:04:00" \
+  --compact
+```
+
 새 코드에서 import할 때는 루트가 아니라 하위 도메인 경로를 사용한다. 예를 들어 paper readiness 구현은 `tests.eval.dictation_ai.paper.audit_paper_readiness`에서 가져온다.

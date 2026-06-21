@@ -64,6 +64,12 @@ CJK_CHAR_RANGES = (("\u3400", "\u9fff"), ("\uf900", "\ufaff"))
 RECENT_TRANSCRIPT_WINDOW = 8
 MAX_RECENT_SHORT_TEXT_REPEATS = 2
 
+# 이미 확정된 final이 후속 window에서 더 긴 문장 prefix로 다시 등장할 때
+# 긴 suffix만 새 후보로 회수하는 보수 조건이다. suffix가 짧으면 단순 표기
+# 보정이나 echo일 가능성이 커서 기존 중복 억제를 유지한다.
+RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS = 8
+RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS = 6
+
 # MAX_STAGED_SENTENCE_QUEUE는 현재 active staged 문장을 아직 소비할 수 없을
 # 때 생성순서 후보를 보존한다. 값을 키우면 SBD 출력이 몰릴 때 final 누락은
 # 줄 수 있지만 stale 후보 churn은 늘어난다.
@@ -257,6 +263,14 @@ def no_text_stale_stage_suppress_chunks() -> int:
     return _dictation_env_int("NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS", NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS)
 
 
+def recent_final_extension_min_prefix_units() -> int:
+    return _dictation_env_int("RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS", RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS)
+
+
+def recent_final_extension_min_suffix_units() -> int:
+    return _dictation_env_int("RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS", RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS)
+
+
 def sentence_confirm_chunks() -> int:
     return max(1, _dictation_env_int("SENTENCE_CONFIRM_CHUNKS", SENTENCE_CONFIRM_CHUNKS))
 
@@ -292,6 +306,8 @@ def dictation_pipeline_policy() -> dict[str, object]:
         "stt_condition_on_previous_text": STT_CONDITION_ON_PREVIOUS_TEXT,
         "stt_stream_audio_dtype": STT_STREAM_AUDIO_DTYPE,
         "recent_transcript_window": RECENT_TRANSCRIPT_WINDOW,
+        "recent_final_extension_min_prefix_units": recent_final_extension_min_prefix_units(),
+        "recent_final_extension_min_suffix_units": recent_final_extension_min_suffix_units(),
         "segment_high_no_speech_override_languages": sorted(SEGMENT_HIGH_NO_SPEECH_OVERRIDE_LANGUAGES),
         "min_segment_avg_logprob": MIN_SEGMENT_AVG_LOGPROB,
         "max_segment_no_speech_prob": MAX_SEGMENT_NO_SPEECH_PROB,
@@ -454,6 +470,26 @@ def dictation_tuning_manifest() -> list[dict[str, int | float | str]]:
             max_value=30,
             scope="lifecycle",
             intent="suppress stale unconfirmed staged candidates after repeated no-text chunks without treating silence as final evidence",
+        ),
+        _tuning_manifest_entry(
+            "RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS",
+            default=RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS,
+            current=recent_final_extension_min_prefix_units(),
+            value_type="int",
+            min_value=1,
+            max_value=40,
+            scope="duplicate-suppression",
+            intent="require enough recent-final prefix evidence before recovering a later suffix extension as a new candidate",
+        ),
+        _tuning_manifest_entry(
+            "RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS",
+            default=RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS,
+            current=recent_final_extension_min_suffix_units(),
+            value_type="int",
+            min_value=1,
+            max_value=40,
+            scope="duplicate-suppression",
+            intent="recover only meaningful suffix extensions while keeping tiny echo corrections suppressed",
         ),
         _tuning_manifest_entry(
             "SENTENCE_CONFIRM_CHUNKS",

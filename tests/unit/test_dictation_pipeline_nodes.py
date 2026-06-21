@@ -16,6 +16,8 @@ from src.app.dictation_pipeline_settings import (
     MAX_SEGMENT_NO_SPEECH_CJK_OVERRIDE_PROB,
     MAX_SEGMENT_NO_SPEECH_PROB,
     MIN_CJK_CHARS_FOR_NO_SPEECH_OVERRIDE,
+    RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS,
+    RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS,
     MIN_SEGMENT_AVG_LOGPROB,
     SEGMENT_HIGH_NO_SPEECH_OVERRIDE_LANGUAGES,
     SEGMENT_LOGPROB_CONFIDENCE_WEIGHT,
@@ -30,7 +32,13 @@ from src.app.dictation_pipeline_settings import (
     dictation_tuning_manifest,
     dictation_tuning_protocol,
 )
-from src.app.dictation_transcript_logic import _should_translate_final_sentence
+from src.app.dictation_transcript_logic import (
+    _normalized_text,
+    _recent_final_output_delta,
+    _should_stage_boundary_candidate,
+    _should_suppress_delta_final,
+    _should_translate_final_sentence,
+)
 from src.app.sentence_boundary import SentenceBoundaryResult
 
 
@@ -145,6 +153,14 @@ class DictationPipelineNodeTest(unittest.TestCase):
         self.assertEqual(policy["stt_without_timestamps"], STT_WITHOUT_TIMESTAMPS)
         self.assertEqual(policy["stt_condition_on_previous_text"], STT_CONDITION_ON_PREVIOUS_TEXT)
         self.assertEqual(policy["stt_stream_audio_dtype"], STT_STREAM_AUDIO_DTYPE)
+        self.assertEqual(
+            policy["recent_final_extension_min_prefix_units"],
+            RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS,
+        )
+        self.assertEqual(
+            policy["recent_final_extension_min_suffix_units"],
+            RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS,
+        )
         self.assertEqual(policy["min_segment_avg_logprob"], MIN_SEGMENT_AVG_LOGPROB)
         self.assertEqual(policy["max_segment_no_speech_prob"], MAX_SEGMENT_NO_SPEECH_PROB)
         self.assertEqual(policy["max_segment_no_speech_cjk_override_prob"], MAX_SEGMENT_NO_SPEECH_CJK_OVERRIDE_PROB)
@@ -215,6 +231,51 @@ class DictationPipelineNodeTest(unittest.TestCase):
                 "zh",
             )
         )
+
+    def test_delta_final_policy_suppresses_broken_cjk_delta_fragments(self) -> None:
+        self.assertEqual(_normalized_text("这 个 川 菜 一 定 要"), "这个川菜一定要")
+        self.assertTrue(
+            _should_suppress_delta_final(
+                "大家好，鸡肉拌牛肉拌，这个川菜一定要牛肉，牛肉拌。",
+                "这 个 川 菜 一 定 要",
+                "zh",
+                "replaced_confirmed",
+            )
+        )
+        self.assertTrue(
+            _should_suppress_delta_final(
+                "大家好，鸡肉拌牛肉拌，这个川菜一定要牛肉，牛肉拌。",
+                "这个川菜一定要",
+                "zh",
+                "replaced_confirmed",
+            )
+        )
+
+    def test_cjk_space_artifact_normalization_preserves_stageable_sentences(self) -> None:
+        sentence = "如 果 你 们 要 找 吃 的 话 呢，你 们 就 可 以 到 大 众 点 评。"
+
+        self.assertEqual(_normalized_text(sentence), "如果你们要找吃的话呢，你们就可以到大众点评。")
+        self.assertTrue(_should_stage_boundary_candidate(sentence, "zh"))
+
+    def test_recent_final_delta_recovers_meaningful_suffix_extensions(self) -> None:
+        candidate, recent_source = _recent_final_output_delta(
+            "来之前的时候，我查了一下这个白象居，它现在是一个网红居民楼嘛。",
+            ("来之前的时候，我查了一下这个白象居，它。",),
+            "zh",
+        )
+
+        self.assertEqual(candidate, "现在是一个网红居民楼嘛。")
+        self.assertEqual(recent_source, "来之前的时候，我查了一下这个白象居，它。")
+
+    def test_recent_final_delta_keeps_short_suffix_corrections_suppressed(self) -> None:
+        candidate, recent_source = _recent_final_output_delta(
+            "所以还是有很多小摊贩在摆摊。",
+            ("所以还是有很多小摊贩在摆。",),
+            "zh",
+        )
+
+        self.assertEqual(candidate, "")
+        self.assertEqual(recent_source, "所以还是有很多小摊贩在摆。")
 
     def test_hypothesis_candidate_node_preserves_boundary_contract(self) -> None:
         detector = FakeBoundaryDetector()

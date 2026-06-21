@@ -44,6 +44,14 @@ class DictationAiSbdRepresentativeSourceAuditTest(unittest.TestCase):
                     "chunk=1 language=en boundary_backend=sat window=20.00s step=1.00s"
                 ),
                 (
+                    "[2026-06-20 21:22:40] [avc] Dictation AI status: 받아쓰기 AI 안정성 지표: "
+                    "chunk=1 stage_queue_recent_final_suppressed=2 "
+                    "stage_queue_recent_final_delta_trimmed=1 "
+                    "finalize_delta_suppressed_stage_retained=1 "
+                    "lifecycle_metrics=stage_queue_recent_final_suppressed=99,"
+                    "stage_queue_recent_final_delta_trimmed=88"
+                ),
+                (
                     "[2026-06-20 21:22:40] [avc] Dictation AI status: 받아쓰기 AI 번역 진단: "
                     "chunk=1 segment_id=1 final=True source_lang=en target_lang=ko backend=nllb-transformers "
                     "model=facebook/nllb-200-distilled-600M"
@@ -71,6 +79,12 @@ class DictationAiSbdRepresentativeSourceAuditTest(unittest.TestCase):
         self.assertEqual(summary["window_seconds_counts"], {"20.0": 1, "20.00s": 1})
         self.assertEqual(summary["step_seconds_counts"], {"1.0": 1, "1.00s": 1})
         self.assertEqual(summary["sentence_finalize_age_counts"], {"3": 1})
+        self.assertEqual(summary["marker_counts"]["stage_queue_recent_final_suppressed"], 2)
+        self.assertEqual(summary["marker_counts"]["stage_queue_recent_final_delta_trimmed"], 1)
+        self.assertEqual(summary["marker_counts"]["finalize_delta_suppressed_stage_retained"], 1)
+        self.assertEqual(summary["finalization_observation"]["stage_queue_recent_final_suppressed_count"], 2)
+        self.assertEqual(summary["finalization_observation"]["stage_queue_recent_final_delta_trimmed_count"], 1)
+        self.assertEqual(summary["finalization_observation"]["finalize_delta_suppressed_stage_retained_count"], 1)
         self.assertEqual(
             summary["segment_linkage"],
             {
@@ -117,6 +131,53 @@ class DictationAiSbdRepresentativeSourceAuditTest(unittest.TestCase):
         self.assertIn("STT backend markers are missing", readiness["blockers"])
         self.assertIn("STT model markers are missing", readiness["blockers"])
 
+    def test_audit_filters_selected_time_range(self) -> None:
+        log_text = "\n".join(
+            [
+                (
+                    "[2026-06-20 21:22:39] [avc] Dictation AI status: 받아쓰기 AI 전사 루프 시작: "
+                    "step_seconds=1.0 window_seconds=20.0 language=en stt_backend=faster-whisper "
+                    "stt_model=large-v3 translation_enabled=True sentence_finalize_age=3"
+                ),
+                "[2026-06-20 21:22:39] [avc] Dictation AI stt_raw: [en raw] Earlier window.",
+                (
+                    "[2026-06-20 21:22:39] [avc] Dictation AI status: 받아쓰기 AI 문장 확정: "
+                    "chunk=1 segment_id=1 reason=confirmed text='Earlier window.'"
+                ),
+                "[2026-06-20 21:22:39] [avc] Dictation AI transcript: [en#1] Earlier window.",
+                "[2026-06-20 21:22:40] [avc] Dictation AI stt_raw: [en raw] Selected window.",
+                (
+                    "[2026-06-20 21:22:40] [avc] Dictation AI status: 받아쓰기 AI 문장 확정: "
+                    "chunk=2 segment_id=2 reason=confirmed text='Selected window.'"
+                ),
+                "[2026-06-20 21:22:40] [avc] Dictation AI transcript: [en#2] Selected window.",
+            ]
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "avc-whisper.log"
+            path.write_text(log_text + "\n", encoding="utf-8")
+
+            summary = audit_sources(
+                [path],
+                since="2026-06-20 21:22:40",
+                until="2026-06-20 21:22:40",
+            )
+
+        self.assertEqual(summary["time_filter"]["applied"], True)
+        self.assertEqual(summary["line_count"], 3)
+        self.assertEqual(summary["first_timestamp"], "2026-06-20 21:22:40")
+        self.assertEqual(summary["last_timestamp"], "2026-06-20 21:22:40")
+        self.assertEqual(summary["marker_counts"]["stt_raw"], 1)
+        self.assertEqual(summary["stt_backend_counts"], {"faster-whisper": 1})
+        self.assertEqual(summary["stt_model_counts"], {"large-v3": 1})
+        self.assertEqual(summary["sentence_finalize_age_counts"], {"3": 1})
+        self.assertEqual(summary["segment_linkage"]["finalize_segment_count"], 1)
+        self.assertEqual(summary["segment_linkage"]["transcript_segment_count"], 1)
+        self.assertEqual(summary["files"][0]["segment_linkage"]["translation_enabled"], True)
+        self.assertEqual(summary["finalization_observation"]["stt_raw_line_count"], 1)
+        self.assertEqual(summary["finalization_observation"]["finalize_event_count"], 1)
+        self.assertEqual(summary["finalization_observation"]["finalize_per_stt_raw"], 1.0)
+
     def test_compact_summary_omits_per_file_payload(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "avc-whisper.log"
@@ -129,6 +190,7 @@ class DictationAiSbdRepresentativeSourceAuditTest(unittest.TestCase):
 
         self.assertIn("source_count", compact)
         self.assertIn("representative_readiness", compact)
+        self.assertIn("finalization_observation", compact)
         self.assertNotIn("files", compact)
 
 

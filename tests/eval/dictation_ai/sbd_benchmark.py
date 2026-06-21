@@ -115,6 +115,7 @@ def _dispatch_subcommand() -> int | None:
 
 @dataclass
 class LifecycleState:
+    language: str = ""
     committed_text: str = ""
     pending_text: str = ""
     pending_chunks: int = 0
@@ -145,17 +146,34 @@ def _promote_next_staged_sentence(state: LifecycleState, chunk_index: int) -> No
     if state.staged_sentence:
         return
     assert state.staged_queue is not None
-    if not state.staged_queue:
-        return
-    entry = state.staged_queue.popleft()
-    state.staged_sentence = str(entry["sentence"])
-    state.staged_confirmations = int(entry["confirmations"])
-    state.staged_age = int(entry["age"])
-    state.staged_forced = bool(entry["forced"])
-    state.staged_deferred_age_chunk = chunk_index
-    state.count("stage_queue_promote")
-    state.count("stage_start")
-    state.count("segment_state_staged")
+    while state.staged_queue:
+        entry = state.staged_queue.popleft()
+        state.staged_sentence = str(entry["sentence"])
+        state.staged_confirmations = int(entry["confirmations"])
+        state.staged_age = int(entry["age"])
+        state.staged_forced = bool(entry["forced"])
+        state.staged_deferred_age_chunk = chunk_index
+        state.count("stage_queue_promote")
+        state.count("stage_start")
+        state.count("segment_state_staged")
+        promoted_sentence, recent_source = _recent_final_output_delta(
+            state.staged_sentence,
+            tuple(state.final_sentences or ()),
+            state.language,
+        )
+        if recent_source is None:
+            return
+        if promoted_sentence and _should_stage_boundary_candidate(promoted_sentence, state.language):
+            state.staged_sentence = promoted_sentence
+            state.count("stage_queue_recent_final_delta_trimmed")
+            return
+        state.staged_sentence = ""
+        state.staged_confirmations = 0
+        state.staged_age = 0
+        state.staged_forced = False
+        state.staged_deferred_age_chunk = -1
+        state.count("stage_queue_recent_final_suppressed")
+        state.count("segment_state_suppressed")
 
 
 def _queue_staged_sentence(state: LifecycleState, candidate: str, forced: bool, chunk_index: int) -> None:
@@ -311,23 +329,28 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
     output_sentence = _sentence_output_delta(state.committed_text, staged_before)
     assert state.final_sentences is not None
     output_sentence, recent_source = _recent_final_output_delta(output_sentence, tuple(state.final_sentences), language)
-    state.staged_sentence = ""
-    state.staged_confirmations = 0
-    state.staged_age = 0
-    state.staged_forced = False
-    state.staged_deferred_age_chunk = -1
     if recent_source is not None and output_sentence:
         state.count("finalize_recent_delta_trimmed")
     if not output_sentence:
+        state.staged_sentence = ""
+        state.staged_confirmations = 0
+        state.staged_age = 0
+        state.staged_forced = False
+        state.staged_deferred_age_chunk = -1
         state.count("finalize_duplicate_suppressed")
         state.count("segment_state_suppressed")
         _promote_next_staged_sentence(state, chunk_index)
         return []
     if _should_suppress_delta_final(staged_before, output_sentence, language, reason):
         state.count("finalize_delta_suppressed")
-        state.count("segment_state_suppressed")
-        _promote_next_staged_sentence(state, chunk_index)
+        state.count("finalize_delta_suppressed_stage_retained")
+        state.staged_deferred_age_chunk = chunk_index
         return []
+    state.staged_sentence = ""
+    state.staged_confirmations = 0
+    state.staged_age = 0
+    state.staged_forced = False
+    state.staged_deferred_age_chunk = -1
     state.count("finalized")
     state.count("segment_state_final")
     for flag in _final_sentence_diagnostic_flags(output_sentence, language):
@@ -360,26 +383,15 @@ def _stage_completed_sentence(
         if stripped_candidate != candidate:
             candidate = stripped_candidate
             state.count("candidate_prior_pending_prefix_trimmed")
-    if candidate and candidate != normalized_sentence:
-        assert state.final_sentences is not None
-        recent_candidate, recent_source = _recent_final_output_delta(
-            normalized_sentence,
-            tuple(state.final_sentences),
-            language,
-        )
-        if recent_source is not None and recent_candidate != candidate:
-            candidate = recent_candidate
-            state.count("candidate_recent_final_delta_trimmed")
-    elif candidate:
-        assert state.final_sentences is not None
-        recent_candidate, recent_source = _recent_final_output_delta(
-            normalized_sentence,
-            tuple(state.final_sentences),
-            language,
-        )
-        if recent_source is not None and recent_candidate != candidate:
-            candidate = recent_candidate
-            state.count("candidate_recent_final_delta_trimmed")
+    assert state.final_sentences is not None
+    recent_candidate, recent_source = _recent_final_output_delta(
+        normalized_sentence,
+        tuple(state.final_sentences),
+        language,
+    )
+    if recent_source is not None and recent_candidate != candidate:
+        candidate = recent_candidate
+        state.count("candidate_recent_final_delta_trimmed")
     if not candidate:
         state.count("candidate_duplicate_suppressed")
         state.count("segment_state_suppressed")
@@ -415,7 +427,11 @@ def _stage_completed_sentence(
         state.staged_forced = forced
         state.staged_deferred_age_chunk = chunk_index
         return []
-    if _should_split_terminal_tail_revision(state.staged_sentence, candidate):
+    if _should_confirm_staged_sentence(
+        state.staged_sentence,
+        state.staged_confirmations,
+        state.staged_forced,
+    ) and _should_split_terminal_tail_revision(state.staged_sentence, candidate):
         state.count("stage_revision_terminal_tail_split")
         finalized = _finalize_staged_sentence(state, language, "terminal_tail_revision_split", chunk_index)
         if not state.staged_sentence:
@@ -632,7 +648,7 @@ def _suppress_stale_no_text_stage(state: LifecycleState, chunk_index: int) -> No
 
 
 def _run_lifecycle_case(case: SbdCase, detector: Any) -> dict[str, Any]:
-    state = LifecycleState()
+    state = LifecycleState(language=case.language)
     chunks: list[dict[str, Any]] = []
     for chunk_index, chunk in enumerate(case.chunks, start=1):
         prior_pending_text = state.pending_text

@@ -53,6 +53,16 @@ def _first_non_empty(current: str | None, candidate: str | None) -> str | None:
     return current
 
 
+def _timestamp_in_range(timestamp: str | None, since: str | None, until: str | None) -> bool:
+    if timestamp is None:
+        return since is None and until is None
+    if since is not None and timestamp < since:
+        return False
+    if until is not None and timestamp > until:
+        return False
+    return True
+
+
 def _line_markers(line: str) -> set[str]:
     markers: set[str] = set()
     if "Dictation AI stt_raw:" in line:
@@ -213,7 +223,13 @@ def _add_runtime_counts(
         finalize_age_counts[values["sentenceFinalizeAge"]] += 1
 
 
-def audit_log_file(path: Path) -> dict[str, object]:
+def _merge_context_counter(target: Counter[str], context: Counter[str]) -> None:
+    if target or not context:
+        return
+    _merge_counter(target, context)
+
+
+def audit_log_file(path: Path, *, since: str | None = None, until: str | None = None) -> dict[str, object]:
     marker_counts: Counter[str] = Counter()
     language_counts: Counter[str] = Counter()
     backend_counts: Counter[str] = Counter()
@@ -236,15 +252,43 @@ def audit_log_file(path: Path) -> dict[str, object]:
     translation_diagnostic_segments: set[int] = set()
     translation_segments: set[int] = set()
     translation_enabled = False
+    context_stt_backend_counts: Counter[str] = Counter()
+    context_stt_model_counts: Counter[str] = Counter()
+    context_boundary_backend_counts: Counter[str] = Counter()
+    context_boundary_model_counts: Counter[str] = Counter()
+    context_window_counts: Counter[str] = Counter()
+    context_step_counts: Counter[str] = Counter()
+    context_finalize_age_counts: Counter[str] = Counter()
+    context_translation_enabled = False
 
     with path.open("r", encoding="utf-8", errors="replace") as handle:
         for raw_line in handle:
-            line_count += 1
             line = raw_line.rstrip("\n")
             timestamp_match = TIMESTAMP_RE.match(line)
-            if timestamp_match:
+            timestamp = timestamp_match.group("timestamp") if timestamp_match else None
+            if since is not None and timestamp is not None and timestamp < since:
+                values = _line_key_values(line)
+                if values.get("translation_enabled") == "True":
+                    context_translation_enabled = True
+                _add_runtime_counts(
+                    line=line,
+                    values=values,
+                    stt_backend_counts=context_stt_backend_counts,
+                    stt_model_counts=context_stt_model_counts,
+                    boundary_backend_counts=context_boundary_backend_counts,
+                    boundary_model_counts=context_boundary_model_counts,
+                    translation_backend_counts=Counter(),
+                    translation_model_counts=Counter(),
+                    window_counts=context_window_counts,
+                    step_counts=context_step_counts,
+                    finalize_age_counts=context_finalize_age_counts,
+                )
+                continue
+            if not _timestamp_in_range(timestamp, since, until):
+                continue
+            line_count += 1
+            if timestamp:
                 timestamped_line_count += 1
-                timestamp = timestamp_match.group("timestamp")
                 first_timestamp = _first_non_empty(first_timestamp, timestamp)
                 last_timestamp = timestamp
             marker_counts.update(_line_markers(line))
@@ -254,6 +298,15 @@ def audit_log_file(path: Path) -> dict[str, object]:
                 if language:
                     language_counts[language] += 1
             values = _line_key_values(line)
+            chunk_values = _line_key_values(line.split(" lifecycle_metrics=", 1)[0])
+            for metric_name in (
+                "stage_queue_recent_final_suppressed",
+                "stage_queue_recent_final_delta_trimmed",
+                "finalize_delta_suppressed_stage_retained",
+            ):
+                metric_value = chunk_values.get(metric_name)
+                if metric_value and metric_value.isdigit():
+                    marker_counts[metric_name] += int(metric_value)
             if values.get("translation_enabled") == "True":
                 translation_enabled = True
             segment_id = _segment_id_from_values(values)
@@ -287,9 +340,25 @@ def audit_log_file(path: Path) -> dict[str, object]:
                 elif key == "model":
                     model_counts[value] += 1
 
+    if line_count > 0:
+        if context_translation_enabled:
+            translation_enabled = True
+        _merge_context_counter(stt_backend_counts, context_stt_backend_counts)
+        _merge_context_counter(stt_model_counts, context_stt_model_counts)
+        _merge_context_counter(boundary_backend_counts, context_boundary_backend_counts)
+        _merge_context_counter(boundary_model_counts, context_boundary_model_counts)
+        _merge_context_counter(window_counts, context_window_counts)
+        _merge_context_counter(step_counts, context_step_counts)
+        _merge_context_counter(finalize_age_counts, context_finalize_age_counts)
+
     return {
         "path": str(path),
         "bytes": path.stat().st_size,
+        "time_filter": {
+            "since": since,
+            "until": until,
+            "applied": since is not None or until is not None,
+        },
         "line_count": line_count,
         "timestamped_line_count": timestamped_line_count,
         "first_timestamp": first_timestamp,
@@ -358,6 +427,41 @@ def _sum_segment_linkage(file_summaries: list[dict[str, object]]) -> dict[str, o
     return payload
 
 
+def _finalization_observation_payload(marker_counts: Counter[str]) -> dict[str, float | int | None]:
+    stt_raw = int(marker_counts.get("stt_raw", 0))
+    finalize_events = int(marker_counts.get("finalize_event", 0))
+    deferred = int(marker_counts.get("stage_replace_deferred", 0))
+    quality_blocks = int(marker_counts.get("quality_block", 0))
+    duplicate_suppressed = int(marker_counts.get("duplicate_suppressed", 0))
+    queue_promotes = int(marker_counts.get("stage_queue_promote", 0))
+    queue_recent_suppressed = int(marker_counts.get("stage_queue_recent_final_suppressed", 0))
+    queue_recent_trimmed = int(marker_counts.get("stage_queue_recent_final_delta_trimmed", 0))
+    delta_suppressed_stage_retained = int(marker_counts.get("finalize_delta_suppressed_stage_retained", 0))
+    return {
+        "stt_raw_line_count": stt_raw,
+        "finalize_event_count": finalize_events,
+        "stage_replace_deferred_count": deferred,
+        "quality_block_count": quality_blocks,
+        "duplicate_suppressed_count": duplicate_suppressed,
+        "stage_queue_promote_count": queue_promotes,
+        "stage_queue_recent_final_suppressed_count": queue_recent_suppressed,
+        "stage_queue_recent_final_delta_trimmed_count": queue_recent_trimmed,
+        "finalize_delta_suppressed_stage_retained_count": delta_suppressed_stage_retained,
+        "finalize_per_stt_raw": (finalize_events / stt_raw) if stt_raw else None,
+        "stage_replace_deferred_per_stt_raw": (deferred / stt_raw) if stt_raw else None,
+        "quality_block_per_stt_raw": (quality_blocks / stt_raw) if stt_raw else None,
+        "duplicate_suppressed_per_stt_raw": (duplicate_suppressed / stt_raw) if stt_raw else None,
+        "stage_queue_promote_per_stt_raw": (queue_promotes / stt_raw) if stt_raw else None,
+        "stage_queue_recent_final_suppressed_per_stt_raw": (queue_recent_suppressed / stt_raw) if stt_raw else None,
+        "stage_queue_recent_final_delta_trimmed_per_stt_raw": (queue_recent_trimmed / stt_raw) if stt_raw else None,
+        "finalize_delta_suppressed_stage_retained_per_stt_raw": (
+            delta_suppressed_stage_retained / stt_raw
+        )
+        if stt_raw
+        else None,
+    }
+
+
 def build_readiness(summary: dict[str, object]) -> dict[str, object]:
     marker_counts = dict(summary.get("marker_counts", {}))
     language_counts = dict(summary.get("language_counts", {}))
@@ -414,11 +518,22 @@ def build_readiness(summary: dict[str, object]) -> dict[str, object]:
     }
 
 
-def audit_sources(inputs: Iterable[Path]) -> dict[str, object]:
+def audit_sources(
+    inputs: Iterable[Path],
+    *,
+    since: str | None = None,
+    until: str | None = None,
+) -> dict[str, object]:
     paths = iter_log_paths(inputs)
     if not paths:
         raise ValueError("no Dictation AI source logs matched")
-    file_summaries = [audit_log_file(path) for path in paths]
+    file_summaries = [
+        summary
+        for path in paths
+        if (summary := audit_log_file(path, since=since, until=until))["line_count"]
+    ]
+    if not file_summaries:
+        raise ValueError("no Dictation AI source log lines matched the selected time range")
     marker_counts: Counter[str] = Counter()
     language_counts: Counter[str] = Counter()
     backend_counts: Counter[str] = Counter()
@@ -451,6 +566,11 @@ def audit_sources(inputs: Iterable[Path]) -> dict[str, object]:
     last_timestamps = [str(summary["last_timestamp"]) for summary in file_summaries if summary["last_timestamp"]]
     summary: dict[str, object] = {
         "source_count": len(file_summaries),
+        "time_filter": {
+            "since": since,
+            "until": until,
+            "applied": since is not None or until is not None,
+        },
         "total_bytes": sum(int(summary.get("bytes", 0)) for summary in file_summaries),
         "line_count": sum(int(summary.get("line_count", 0)) for summary in file_summaries),
         "timestamped_line_count": sum(int(summary.get("timestamped_line_count", 0)) for summary in file_summaries),
@@ -473,6 +593,7 @@ def audit_sources(inputs: Iterable[Path]) -> dict[str, object]:
         "stt_raw_line_count": _sum_marker(file_summaries, "stt_raw"),
         "files": file_summaries,
     }
+    summary["finalization_observation"] = _finalization_observation_payload(marker_counts)
     summary["representative_readiness"] = build_readiness(summary)
     return summary
 
@@ -481,6 +602,7 @@ def compact_summary(summary: dict[str, object]) -> dict[str, object]:
     """Return a small report suitable for logs and experiment notes."""
     return {
         "source_count": summary.get("source_count"),
+        "time_filter": summary.get("time_filter", {}),
         "total_bytes": summary.get("total_bytes"),
         "line_count": summary.get("line_count"),
         "timestamped_line_count": summary.get("timestamped_line_count"),
@@ -500,6 +622,7 @@ def compact_summary(summary: dict[str, object]) -> dict[str, object]:
         "step_seconds_counts": summary.get("step_seconds_counts", {}),
         "sentence_finalize_age_counts": summary.get("sentence_finalize_age_counts", {}),
         "segment_linkage": summary.get("segment_linkage", {}),
+        "finalization_observation": summary.get("finalization_observation", {}),
         "representative_readiness": summary.get("representative_readiness", {}),
     }
 
@@ -509,10 +632,12 @@ def main() -> int:
     parser.add_argument("sources", nargs="+", type=Path, help="Dictation AI log files or directories.")
     parser.add_argument("--summary-output", type=Path, default=None)
     parser.add_argument("--compact", action="store_true", help="Print aggregate fields only; summary-output stays complete.")
+    parser.add_argument("--since", default=None, help="Include timestamped lines at or after YYYY-MM-DD HH:MM:SS.")
+    parser.add_argument("--until", default=None, help="Include timestamped lines at or before YYYY-MM-DD HH:MM:SS.")
     args = parser.parse_args()
 
     try:
-        summary = audit_sources(args.sources)
+        summary = audit_sources(args.sources, since=args.since, until=args.until)
     except ValueError as exc:
         print(f"[dictation-ai-sbd-source-audit] error: {exc}", file=sys.stderr)
         return 1

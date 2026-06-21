@@ -103,13 +103,35 @@ def run_transcribe_loop(
         if normalized:
             recent_transcripts.append(normalized)
     def promote_next_staged_sentence(detected: str) -> None:
-        promoted = commit_buffer_node.promote_if_idle(
-            chunk_index=chunks,
-            count_metric=count_metric,
-            count_segment_state=count_segment_state,
-        )
-        if not promoted:
-            return
+        while True:
+            promoted = commit_buffer_node.promote_if_idle(
+                chunk_index=chunks,
+                count_metric=count_metric,
+                count_segment_state=count_segment_state,
+            )
+            if not promoted:
+                return
+            promoted_sentence, recent_source = _recent_final_output_delta(
+                active_stage.sentence,
+                tuple(recent_transcripts),
+                detected,
+            )
+            if recent_source is None:
+                break
+            if promoted_sentence and _should_stage_boundary_candidate(promoted_sentence, detected):
+                active_stage.sentence = promoted_sentence
+                count_metric("stage_queue_recent_final_delta_trimmed", 1)
+                break
+            count_metric("stage_queue_recent_final_suppressed", 1)
+            count_segment_state("suppressed", 1)
+            worker._emit(
+                "status",
+                "받아쓰기 AI stage 큐 최근 final 중복 폐기: "
+                f"chunk={chunks} recent_tail={_diagnostic_tail(recent_source)} "
+                f"staged_tail={_diagnostic_tail(active_stage.sentence)}",
+                display=False,
+            )
+            active_stage.clear()
         worker._emit(
             "status",
             "받아쓰기 AI stage 큐 승격: "
@@ -150,8 +172,8 @@ def run_transcribe_loop(
         output_sentence = _sentence_output_delta(committed_text, active_stage.sentence)
         staged_before = active_stage.sentence
         committed_before_chars = len(_normalized_text(committed_text))
-        active_stage.clear()
         if not output_sentence:
+            active_stage.clear()
             count_metric("finalize_duplicate_suppressed")
             count_segment_state("suppressed")
             worker._emit(
@@ -178,6 +200,7 @@ def run_transcribe_loop(
                 )
                 output_sentence = recent_adjusted_sentence
             else:
+                active_stage.clear()
                 count_metric("finalize_recent_echo_suppressed")
                 count_segment_state("suppressed")
                 worker._emit(
@@ -189,6 +212,7 @@ def run_transcribe_loop(
                 promote_next_staged_sentence(detected)
                 return []
         if not output_sentence:
+            active_stage.clear()
             count_metric("finalize_recent_echo_suppressed")
             count_segment_state("suppressed")
             worker._emit(
@@ -201,7 +225,8 @@ def run_transcribe_loop(
             return []
         if _should_suppress_delta_final(staged_before, output_sentence, detected, reason):
             count_metric("finalize_delta_suppressed")
-            count_segment_state("suppressed")
+            count_metric("finalize_delta_suppressed_stage_retained")
+            active_stage.deferredAgeChunk = chunks
             worker._emit(
                 "status",
                 "받아쓰기 AI delta 확정 보류: "
@@ -209,8 +234,8 @@ def run_transcribe_loop(
                 f"output={output_sentence!r}",
                 display=False,
             )
-            promote_next_staged_sentence(detected)
             return []
+        active_stage.clear()
         count_metric("finalized")
         count_segment_state("final")
         segment_id = next_final_segment_id
@@ -268,15 +293,14 @@ def run_transcribe_loop(
             count_metric("candidate_delta_trimmed")
             if _is_cjk_text(normalized_sentence):
                 count_metric("candidate_delta_trimmed_cjk")
-        if candidate:
-            recent_candidate, recent_source = _recent_final_output_delta(
-                normalized_sentence,
-                tuple(recent_transcripts),
-                detected,
-            )
-            if recent_source is not None and recent_candidate != candidate:
-                candidate = recent_candidate
-                count_metric("candidate_recent_final_delta_trimmed")
+        recent_candidate, recent_source = _recent_final_output_delta(
+            normalized_sentence,
+            tuple(recent_transcripts),
+            detected,
+        )
+        if recent_source is not None and recent_candidate != candidate:
+            candidate = recent_candidate
+            count_metric("candidate_recent_final_delta_trimmed")
         if not candidate:
             count_metric("candidate_duplicate_suppressed")
             count_segment_state("suppressed")
@@ -338,7 +362,11 @@ def run_transcribe_loop(
             )
             worker._emit("transcript", active_stage.sentence, log_text=f"[{detected}] {active_stage.sentence}", final=False)
             return []
-        if _should_split_terminal_tail_revision(active_stage.sentence, candidate):
+        if _should_confirm_staged_sentence(
+            active_stage.sentence,
+            active_stage.confirmations,
+            active_stage.forced,
+        ) and _should_split_terminal_tail_revision(active_stage.sentence, candidate):
             count_metric("stage_revision_terminal_tail_split")
             finalized = finalize_staged_sentence(detected, "terminal_tail_revision_split")
             if not active_stage.sentence:
@@ -990,6 +1018,14 @@ def run_transcribe_loop(
             stage_queue_promote_count = chunk_lifecycle_metrics.get("stage_queue_promote", 0)
             stage_queue_revision_count = chunk_lifecycle_metrics.get("stage_queue_revision", 0)
             stage_queue_drop_oldest_count = chunk_lifecycle_metrics.get("stage_queue_drop_oldest", 0)
+            stage_queue_recent_final_suppressed_count = chunk_lifecycle_metrics.get(
+                "stage_queue_recent_final_suppressed",
+                0,
+            )
+            stage_queue_recent_final_delta_trimmed_count = chunk_lifecycle_metrics.get(
+                "stage_queue_recent_final_delta_trimmed",
+                0,
+            )
             stage_finalize_before_replace_count = chunk_lifecycle_metrics.get("stage_finalize_before_replace", 0)
             stage_age_finalize_count = chunk_lifecycle_metrics.get("stage_age_finalize", 0)
             stage_age_quality_blocked_count = chunk_lifecycle_metrics.get("stage_age_quality_blocked", 0)
@@ -1004,6 +1040,10 @@ def run_transcribe_loop(
             duplicate_suppressed_count = chunk_lifecycle_metrics.get("candidate_duplicate_suppressed", 0)
             prior_pending_prefix_trimmed_count = chunk_lifecycle_metrics.get("candidate_prior_pending_prefix_trimmed", 0)
             recent_echo_suppressed_count = chunk_lifecycle_metrics.get("finalize_recent_echo_suppressed", 0)
+            delta_suppressed_stage_retained_count = chunk_lifecycle_metrics.get(
+                "finalize_delta_suppressed_stage_retained",
+                0,
+            )
             delta_trimmed_count = chunk_lifecycle_metrics.get("candidate_delta_trimmed", 0)
             stable_prefix_chars = chunk_lifecycle_metrics.get("stable_prefix_chars", 0)
             unstable_tail_chars = chunk_lifecycle_metrics.get("unstable_tail_chars", 0)
@@ -1055,6 +1095,8 @@ def run_transcribe_loop(
                 f"stage_queue_promote={stage_queue_promote_count} "
                 f"stage_queue_revision={stage_queue_revision_count} "
                 f"stage_queue_drop_oldest={stage_queue_drop_oldest_count} "
+                f"stage_queue_recent_final_suppressed={stage_queue_recent_final_suppressed_count} "
+                f"stage_queue_recent_final_delta_trimmed={stage_queue_recent_final_delta_trimmed_count} "
                 f"stage_queue_len={len(commit_buffer_node)} "
                 f"finalize_before_replace={stage_finalize_before_replace_count} "
                 f"age_finalize={stage_age_finalize_count} "
@@ -1066,6 +1108,7 @@ def run_transcribe_loop(
                 f"duplicate_suppressed={duplicate_suppressed_count} "
                 f"prior_pending_prefix_trimmed={prior_pending_prefix_trimmed_count} "
                 f"recent_echo_suppressed={recent_echo_suppressed_count} "
+                f"finalize_delta_suppressed_stage_retained={delta_suppressed_stage_retained_count} "
                 f"delta_trimmed={delta_trimmed_count} "
                 f"stable_prefix_chars={stable_prefix_chars} unstable_tail_chars={unstable_tail_chars} "
                 f"stable_internal_chars={stable_internal_chars} "

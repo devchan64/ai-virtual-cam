@@ -29,6 +29,8 @@ from src.app.dictation_pipeline_settings import (
     revision_similarity_policy as _revision_similarity_policy,
     revision_tail_best_j_max as _revision_tail_best_j_max,
     revision_tail_common_run_min as _revision_tail_common_run_min,
+    recent_final_extension_min_prefix_units as _recent_final_extension_min_prefix_units,
+    recent_final_extension_min_suffix_units as _recent_final_extension_min_suffix_units,
     sentence_confirm_chunks as _sentence_confirm_chunks,
     sentence_confirm_max_age_chunks as _sentence_confirm_max_age_chunks,
     short_cjk_final_units as _short_cjk_final_units,
@@ -41,8 +43,21 @@ from src.app.sentence_boundary import (
 )
 
 
+def _compact_cjk_internal_spaces(text: str) -> str:
+    chars = list(text)
+    compacted: list[str] = []
+    for index, char in enumerate(chars):
+        if char == " " and compacted and index + 1 < len(chars):
+            left = compacted[-1]
+            right = chars[index + 1]
+            if "\u3400" <= left <= "\u9fff" and "\u3400" <= right <= "\u9fff":
+                continue
+        compacted.append(char)
+    return "".join(compacted)
+
+
 def _normalized_text(text: str) -> str:
-    return " ".join(str(text).split())
+    return _compact_cjk_internal_spaces(" ".join(str(text).split()))
 
 
 def _text_units(text: str) -> tuple[list[str], str]:
@@ -1072,7 +1087,9 @@ def _should_suppress_delta_final(staged_sentence: str, output_sentence: str, lan
     if not staged or not output or staged == output:
         return False
     flags = set(_final_sentence_diagnostic_flags(output, language))
-    if flags.intersection({"short_no_end_fragment", "trailing_ellipsis"}):
+    if flags.intersection({"short_no_end_fragment", "trailing_ellipsis", "cjk_internal_gap", "spaced_cjk"}):
+        return True
+    if _is_cjk_text(output) and "no_end_marker" in flags:
         return True
     if reason not in {"next_completed", "confirmed", "confirmed_forced"}:
         return False
@@ -1133,6 +1150,9 @@ def _recent_final_sentence_delta(candidate: str, recent_sentence: str, language:
         return None
     candidate_words = _word_units(normalized_candidate)
     recent_words = _word_units(normalized_recent)
+    extension_delta = _recent_final_prefix_extension_delta(candidate_words, recent_words, normalized_candidate)
+    if extension_delta is not None:
+        return extension_delta
     compact_delta = _compact_recent_final_delta(candidate_words, recent_words)
     if compact_delta is not None:
         return compact_delta
@@ -1228,6 +1248,25 @@ def _recent_final_sentence_delta(candidate: str, recent_sentence: str, language:
         return ""
     delta = _cjk_delta_from_words(suffix_words) if _has_cjk_words(candidate_words) else _sentence_delta_from_words(suffix_words)
     return _with_candidate_terminal(delta, normalized_candidate)
+
+
+def _recent_final_prefix_extension_delta(
+    candidate_words: list[str],
+    recent_words: list[str],
+    normalized_candidate: str,
+) -> str | None:
+    if len(candidate_words) <= len(recent_words) or not recent_words:
+        return None
+    if len(recent_words) < _recent_final_extension_min_prefix_units():
+        return None
+    if not _is_subsequence_at(candidate_words, recent_words, 0):
+        return None
+    suffix_words = candidate_words[len(recent_words) :]
+    if len(suffix_words) < _recent_final_extension_min_suffix_units():
+        return ""
+    if _has_cjk_words(candidate_words):
+        return _with_candidate_terminal(_cjk_delta_from_words(suffix_words), normalized_candidate)
+    return _with_candidate_terminal(_sentence_delta_from_words(suffix_words), normalized_candidate)
 
 
 def _recent_final_short_tail_echo_delta(candidate_words: list[str], recent_words: list[str]) -> str | None:

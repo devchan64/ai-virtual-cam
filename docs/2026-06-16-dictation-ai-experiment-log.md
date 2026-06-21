@@ -13036,3 +13036,1085 @@ paper readiness:
 - `translation_enabled_final_translation_linked_ratio`는 STT 성능 지표가 아니라 final-only sink 소비율 지표다.
 - 현재 누적 로그 전체의 0.6789는 패치 이전 생략 로그가 섞인 과거 누적값이므로 개선 수치로 해석하지 않는다.
 - 다음 반복에서는 패치 이후 source window만 분리해 같은 지표를 다시 산출해야 한다.
+
+### 2026-06-21 final 확정 성능 관측 구간 분리
+
+문제:
+
+- 이번 개선 대상은 raw STT 정확도나 번역 품질이 아니라 받아쓰기 final 확정 성능이다.
+- 누적 로그 전체를 감사하면 패치 전/후, 모델 준비 실패 세션, 번역 정책 변경 전 로그가 섞여 final lifecycle 병목을 판단하기 어렵다.
+- 최신 중국어 로그에서는 확정 자체보다 `stage_replace_deferred`, `quality_block`, `stage_queue_promote`가 많이 발생해 active staged 후보와 queue 소비 정책이 병목으로 보였다.
+
+정리:
+
+- representative source audit에 `--since`, `--until` 시간 구간 필터를 추가했다.
+- 구간 안에 런타임 시작 라인이 없더라도 구간 직전 runtime context를 보충해 STT backend/model, SBD model, `sentence_finalize_age`를 함께 해석할 수 있게 했다.
+- final 확정 성능 사전 관측값으로 `finalization_observation`을 추가했다.
+  - `finalize_per_stt_raw`
+  - `stage_replace_deferred_per_stt_raw`
+  - `quality_block_per_stt_raw`
+  - `duplicate_suppressed_per_stt_raw`
+  - `stage_queue_promote_per_stt_raw`
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_representative_source_audit
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 12:02:00" --until "2026-06-21 12:04:00" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-20260621-1202-1204.json
+```
+
+결과:
+
+```text
+tool test: Ran 5 tests, OK
+source window: 2026-06-21 12:02:00..12:04:00
+language=zh
+stt_raw=120
+finalize_event=22
+transcript=75
+stage_replace_deferred=164
+quality_block=42
+stage_queue_promote=46
+duplicate_suppressed=46
+finalize_per_stt_raw=0.1833
+stage_replace_deferred_per_stt_raw=1.3667
+quality_block_per_stt_raw=0.3500
+duplicate_suppressed_per_stt_raw=0.3833
+stage_queue_promote_per_stt_raw=0.3833
+representative_readiness.blockers=[]
+```
+
+해석:
+
+- 이 수치는 정답 기반 `final_f1`이 아니며 성능 개선을 주장하는 지표가 아니다.
+- STT/번역 품질을 배제하고, 선택한 로그 구간에서 final 확정 생명주기가 어떤 방식으로 막히는지 보는 사전 관측 지표다.
+- 현재 구간은 raw window 대비 final 확정률이 낮고, `stage_replace_deferred_per_stt_raw`가 1을 넘으므로 후보 교체 보류와 queue 소비 정책을 다음 구조 실험 대상으로 삼는 것이 타당하다.
+- CUDA benchmark는 sandbox 안에서 SaT CUDA 초기화가 실패했고, 정책상 CPU/mock으로 대체하지 않았다. 동일 케이스의 실제 `sat + cuda + float16` replay 결과는 sandbox 밖 실행 가능한 세션에서 별도로 기록해야 한다.
+
+### 2026-06-21 중국어 street-food 구간 누락 추적과 broken delta final 억제
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log.1
+2026-06-21 12:02:43..12:04:02
+chunk=50..129
+```
+
+사용자 관측:
+
+- `尝一尝街边的味道。` 이후 `香辣兔头`, `南瓜在哪里`, `要萝卜`, `鸡肉饭/牛肉饭` 구간에서 누락이 많다.
+- raw window에는 유사한 구간이 반복되지만 final로 소비되지 않거나 늦게 소비된다.
+
+로그 추적:
+
+- chunk 50에서 `尝一尝街边的味道。`가 completed candidate로 들어왔지만 active staged가 `网红。`이고 `decision=unconfirmed_cjk`라서 교체 보류됐다.
+- chunk 51에서 queue가 밀려 승격되면서 `你要把就把石子扔上去。`, `老同学董元明。`, `那好吧试试嘛。` 같은 앞 후보가 먼저 소비됐다. 이때 `尝一尝街边的味道。`는 candidate로 있었지만 active staged 교체/queue 소비 순서 때문에 final로 직접 확정되지 않았다.
+- chunk 119~129에서는 `要萝卜...重庆`, `鸡肉饭/牛肉饭` 계열 후보가 오래 queue에 남았다가 chunk 120, 126, 129에서 뒤늦게 소비됐다.
+- 이 구간의 누적 lifecycle counter는 `stage_replace_decision_unconfirmed_cjk=166`, `stage_replace_deferred=166`, `stage_queue_revision=130`, `stage_queue_promote=46`, `raw_without_final=109`까지 올라갔다. 누락의 주 원인은 STT/번역이 아니라 active staged 후보와 queue 소비 지연이다.
+
+추가로 확인한 결함:
+
+- chunk 120에서 staged 후보는 `大家好，鸡肉拌牛肉拌，这个川菜一定要牛肉，牛肉拌。`였지만 final 출력은 `这 个 川 菜 一 定 要`로 잘려 나갔다.
+- 같은 라인에 `quality_flags=short_cjk,cjk_internal_gap,no_end_marker`가 남았으므로, 이 출력은 사람이 기대한 final 문장이 아니라 delta 계산 중 생긴 깨진 CJK fragment다.
+- 기존 `_should_suppress_delta_final`은 `reason=replaced_confirmed`에서 이런 CJK 내부 공백/no-end delta를 충분히 막지 못했다.
+
+반영:
+
+- `_should_suppress_delta_final`에서 delta 출력 후보가 `cjk_internal_gap`, `spaced_cjk`, 또는 CJK `no_end_marker`이면 final 확정을 보류하도록 보강했다.
+- 이 변경은 raw STT나 번역 품질 개선이 아니라, revision lifecycle이 깨진 delta fragment를 final transcript로 누출하지 않게 하는 보수적 품질 게이트다.
+
+검증:
+
+```text
+./.venv/bin/python -m py_compile src/app/dictation_transcript_logic.py tests/unit/test_dictation_pipeline_nodes.py tests/eval/dictation_ai/representative/audit_sbd_representative_sources.py
+./.venv/bin/python -m unittest tests.unit.test_dictation_pipeline_nodes tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_representative_source_audit
+```
+
+결과:
+
+```text
+Ran 16 tests, OK
+```
+
+남은 판단:
+
+- 이번 패치는 깨진 delta final 누출을 줄이는 조치다.
+- `尝一尝街边的味道。` 자체의 누락과 `香辣兔头/南瓜在哪里` 계열의 지연은 여전히 queue/revision 소비 정책 문제로 남는다.
+- 다음 구조 실험은 active staged가 낮은 안정도 또는 오래된 CJK 단문으로 막혀 있을 때, queue 안의 고확인 후보를 어떤 조건에서 먼저 소비할지에 집중해야 한다.
+
+### 2026-06-21 중국어 ice tangyuan 구간 challenge case 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log.1 / .tmp/logs/avc-whisper.log
+2026-06-21 12:04:53..12:05:30
+```
+
+사용자 관측:
+
+- `红糖冰汤圆`, `带醪糟`, `趁热吃`, `手搓现做`, `嚼劲`, `没有嚼劲` 구간에서 다수 문장 누락이 보였다.
+- raw STT window는 유사한 문장을 반복 포함하지만 final 소비는 늦거나 조각난다.
+
+로그 추적:
+
+- chunk 196 전후부터 `红糖冰汤圆，小雨点的冰汤圆是带醪糟的。` 계열 window가 반복됐다.
+- chunk 210~214에서 active staged가 `你先尝一尝，这个冰汤圆一看就是手搓现做的，嚼劲。`, `那里很有嚼劲的，两口冰的，两口热的。`로 오래 남아 `stage_replace_deferred`가 계속 증가했다.
+- chunk 211과 chunk 214에서 일부 aged final이 발생했지만, 기대 문장 전체를 안정적으로 순서 소비하지 못했다.
+- chunk 217에서는 staged `现做的，嚼劲，你能明白吗？`에서 output이 `你 能 明 白 吗`로 잘리는 broken CJK delta final이 다시 관측됐다. 이 증상은 앞선 broken delta final 억제 패치의 직접 회귀 대상이다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_ice_tangyuan_chewy_fragment_20260621_001` 케이스를 추가했다.
+- 이 케이스는 STT 정확도 평가가 아니라 final lifecycle의 누락, queue 지연, premature fragment final을 재현하는 challenge case다.
+- 주요 태그는 `missing-final`, `stage-queue`, `cjk-internal-gap`, `premature-fragment-final`, `ice-tangyuan`이다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl --require-expected-final --max-drafts 0
+./.venv/bin/python -m unittest tests.unit.test_dictation_pipeline_nodes tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_representative_source_audit
+./.venv/bin/python -m py_compile src/app/dictation_transcript_logic.py tests/unit/test_dictation_pipeline_nodes.py tests/eval/dictation_ai/representative/audit_sbd_representative_sources.py
+```
+
+결과:
+
+```text
+validate-cases: case_count=10, expected_final_case_count=10, draft_count=0
+unit/tool tests: Ran 16 tests, OK
+```
+
+### 2026-06-21 중국어 hotpot base / red sugar ciba 구간 누락 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 12:06:16..12:06:25
+chunk=263..272
+```
+
+사용자 관측:
+
+- `超级的脆`, `锅底浓郁`, `不用蘸底料`, `红糖糍粑`, `重庆吃火锅为什么需要这个` 구간에서 문장 누락이 확인됐다.
+- raw STT window에는 `然后这时候再来一个红糖糍粑。`가 반복 포함됐지만 final transcript는 `然后这时候再来。`로 잘려 확정됐다.
+
+로그 추적:
+
+- chunk 263~264에서 `它这个锅底浓郁的...非常有味道了。`와 `然后这时候再来一个红糖糍粑。` 후보가 들어왔지만 active staged가 `对，桃子脆。`로 남아 있어 `decision=unconfirmed_cjk` 교체 보류가 반복됐다.
+- chunk 265에서 queue 승격으로 `超级的脆，它这个锅底浓郁的...非常有味道了。`는 final segment 67로 확정됐다.
+- 같은 chunk에서 다음 staged가 `然后这时候再来。`로 승격됐고, chunk 266에서 `reason=confirmed`, `quality_flags=short_cjk`로 final segment 68이 됐다.
+- 이때 실제 반복 window의 안정 문장은 `然后这时候再来一个红糖糍粑。`였으므로, 확정 후보가 너무 짧게 소비되며 `一个红糖糍粑`가 누락됐다.
+- chunk 270~272에서는 `再最后。` → `再最后那些重庆吃。` → `再最后那些重庆吃火锅为什么需要这个。`으로 staged revision은 진행됐지만 final 확정은 되지 않았다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_hotpot_base_red_sugar_ciba_20260621_001` 케이스를 추가했다.
+- 기대 final은 STT 원문 정확도 평가가 아니라 sliding window 결과에서 안정적으로 반복된 문장 확정 여부를 보기 위한 기준이다.
+- 이 케이스는 `stage-queue`, `missing-final`, `premature-fragment-final` 계열의 challenge case로 관리한다.
+
+### 2026-06-21 중국어 changtou / gongcai 구간 누락과 terminal tail split 보수화
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 12:06:47..12:07:01
+chunk=294..308
+```
+
+사용자 관측:
+
+- `厚厚的一块长头，非常有嚼劲，就长头在嘴里跳舞。来个贡菜，净化一下口腔。` 구간에서 문장 누락이 확인됐다.
+- raw STT window에는 후반 문장들이 반복됐지만 final transcript는 짧거나 파괴된 조각으로 먼저 확정됐다.
+
+로그 추적:
+
+- chunk 294에서 `小哥哥那一块香猪肠头，还能拉丝呢。`가 staged로 시작됐다.
+- chunk 295에서 다음 후보가 `小哥哥拿一块香猪肠头，还能拉丝呢，真有那。`로 이어졌는데, `terminal_tail_revision_split`이 즉시 작동해 staged confirmation 1회 상태의 후보가 final segment 74로 확정됐다.
+- chunk 301에서는 `小萝卜，那一块香肉，长头，还能拉丝儿呢。`가 `reason=aged`로 final segment 76이 됐다.
+- chunk 303에서는 최근 final 중복 제거가 `小萝卜，来一块香肚，长头，还能拉丝呢，真有拉丝，厚厚的一块长头。`에서 앞부분을 잘라 `真有拉丝厚厚的一块长头。`만 final segment 77로 확정했다.
+- chunk 304~308에서는 `真有拉丝，厚厚的一块长头，非常有嚼劲，就长头在嘴里跳舞。`가 반복됐지만 이미 recent final trim과 duplicate suppression 흐름에 걸려 별도 final로 회수되지 않았다.
+- `来个贡菜，净化一下口腔。`은 chunk 306에서 final segment 78로 회수됐지만, 앞 문장의 핵심 내용은 파괴된 짧은 final로 남았다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_pulled_changtou_gongcai_20260621_001` 케이스를 추가했다.
+- 앱 루프와 벤치 replay 양쪽에서 `terminal_tail_revision_split`을 수행하기 전에 `_should_confirm_staged_sentence`를 먼저 통과하도록 보수화했다.
+- 이 변경은 언어별 문구 규칙이 아니라, terminal tail split으로 final을 만들 때도 일반 staged confirmation/품질 정책을 우선 적용하게 하는 생명주기 일관성 보정이다.
+- 기대 효과는 한 번 관측된 짧은 staged 후보가 terminal tail split으로 조기 final 처리되어 이후 recent final trim이 긴 문장을 잘라먹는 경로를 줄이는 것이다.
+
+### 2026-06-21 중국어 makeup remover / dual tube cleanser 구간 누락 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log.1
+2026-06-21 12:07:52..12:08:14
+chunk=359..381
+```
+
+사용자 관측:
+
+- `现在准备卸妆了，今天就早点休息，早点养精蓄锐。`
+- `卸好妆了，最后用C卡的这个双管洗面奶。`
+- `我好喜欢他们家的双管设计，里面呢是白泥复配氨基酸。`
+- `通过扭动盖子...调节不同的清洁模式`
+
+위 구간에서 여러 문장이 final로 안정적으로 회수되지 않거나 짧게 잘려 확정됐다.
+
+로그 추적:
+
+- chunk 361에서 staged 후보 `现在准备卸妆了，今天就早点休息，早点。`가 `reason=confirmed`로 final segment 94가 됐다.
+- chunk 362~363에서는 더 완성된 `现在准备卸妆了，今天就早点休息，早点养精蓄锐。`가 반복됐지만 recent final duplicate로 무시됐다.
+- chunk 368~371에서는 active staged가 `卸好妆，乐的最后。`처럼 짧은 오인식 후보에 묶였고, `卸好妆了，最后用C卡的这个双管洗面奶...` 후보가 `unconfirmed_cjk`로 보류되다가 queue 승격 후 final segment 95가 됐다.
+- chunk 372~373에서는 `我好喜欢他们家的双管设计，里面呢是白泥复配氨基酸。`가 recent final/duplicate suppression 경로에 걸려 별도 final로 회수되지 않았다.
+- chunk 377에서는 `我今天就早点休息，早点养精蓄锐。`가 뒤늦게 final segment 96으로 확정됐지만, 이미 앞에서 잘린 final segment 94가 존재한다.
+- chunk 379~380에서는 `而且它这个是通过扭动盖子...像是白泥呢。`와 `能够深入清洁我们毛孔里的。`가 각각 짧게 final segment 97, 98로 나뉘었다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_makeup_remover_dual_tube_cleanser_20260621_001` 케이스를 추가했다.
+- 이 케이스는 STT 정확도가 아니라 final lifecycle 관점에서 premature final, recent-final trim, duplicate suppression, stage queue 지연을 함께 추적한다.
+- 현재 즉시 추가 로직은 보류한다. 중복 억제는 echo 방지에 필수이므로, 최근 final의 확장 문장을 살리는 조건은 기존 중복 억제 회귀와 함께 별도 실험해야 한다.
+
+### 2026-06-21 중국어 Chongqing rainforest / landmark 구간 누락 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log.1
+2026-06-21 12:08:44..12:09:08
+chunk=411..435
+```
+
+사용자 관측:
+
+- `昨天的时候就看这个树，感觉特别像热带雨林。`
+- `亚罗布恩，早上好，今天是第二天了。`
+- `今天的第一站呢，要去重庆的灵魂地标，大家有知道的吗？`
+- `重庆的路有点魔幻，我有点看不懂了。`
+
+위 구간에서 앞 문장이 너무 짧게 확정된 뒤 후속 window의 완성 문장이 중복으로 억제되어 누락되는 흐름이 확인됐다.
+
+로그 추적:
+
+- chunk 412에서 `亚罗波恩早。`가 staged로 시작됐다.
+- chunk 413에서 `亚罗波恩，早上好，今天。`이 confirmations 2/2로 확정됐고 `quality_flags=short_cjk`가 기록됐다.
+- chunk 414~417에서는 더 완성된 `亚罗波恩，早上好，今天是第二天了。`가 반복됐지만, 이미 확정된 짧은 final과 유사한 후보로 판단되어 `중복 문장 무시` 경로에 들어갔다.
+- chunk 418에서는 `今天的第一站呢，要去重庆的灵魂地标。`가 final segment 109로 확정됐지만, 같은 window 안의 `大家有知道的吗？`는 별도 staged로 밀렸다.
+- chunk 427~428에서는 `重庆的路有点魔幻，我有点看不懂了。禁止通行。`이 `亚罗宾，重庆的路有点魔幻...禁止通行。` 형태로 한 번에 staged/final 처리됐다.
+- chunk 428 이후의 `重庆的路有点魔幻，我有点看不懂了。`, `禁止通行。`, `这样通过天桥...` 후보들은 최근 final과 겹친다고 판단되어 duplicate suppression으로 빠졌다.
+- chunk 434~435에서 `大家有知道的吗？`가 뒤늦게 final segment 115로 확정됐다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_chongqing_rainforest_landmark_20260621_001` 케이스를 추가했다.
+- 기대 final은 원음 정답 교정이 아니라 STT window에서 반복 관측된 문장 후보가 final lifecycle을 통해 안정적으로 회수되는지 확인하기 위한 기준이다.
+- 원인 후보는 `premature short final` 이후 `recent-final/duplicate suppression`이 완성형 확장 문장까지 제거하는 경로다.
+- 즉시 로직 변경은 보류한다. 최근 final 억제는 중복 확정을 막기 위한 핵심 장치이므로, 확장 문장 회수 조건은 중복 억제 케이스와 함께 비교 벤치로 검증한 뒤 조정해야 한다.
+
+### 2026-06-21 중국어 Xiefangbei / yogurt shop 구간 누락 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log.1
+2026-06-21 12:09:35..12:09:56
+chunk=462..483
+```
+
+사용자 관측:
+
+- `荒碑与潮流商圈的碰撞。`
+- `这里的国际友人也不少，大家都围坐在这里，看着也蛮是舒服的。`
+- `路过一家美食城，然后刚好这家酸奶店是我想打卡的。`
+
+위 구간에서 짧은 후보가 먼저 final로 나간 뒤, 후속 window의 완성 문장이 duplicate suppression으로 제거되는 흐름이 확인됐다.
+
+로그 추적:
+
+- chunk 462에서 `这里的国际友人也不少，大家。`가 confirmations 2/2로 final segment 119가 됐다.
+- chunk 463~466에서는 `这里的国际友人也不少，大家都围坐在...`와 `看着也蛮是舒服的。`까지 확장된 후보가 반복됐지만, segment 119와 겹친다고 판단되어 `中복 문장 무시`로 빠졌다.
+- chunk 470에서 `路过一家美食城，然后刚好这家酸奶店是我想打卡的。`가 final segment 120으로 확정됐다.
+- chunk 471~478에서는 `打算尝尝他们家的这个新品——桑葚的桑葚白糯米。`가 붙은 완성형 후보가 반복됐지만, segment 120과 겹치는 긴 후보로 처리되어 duplicate suppression이 반복됐다.
+- chunk 477에서 `大家都围坐在这里，看着也蛮是舒服的。`가 뒤늦게 final segment 121로 회수됐지만, 앞선 segment 119의 짧은 final은 이미 별도로 남았다.
+- chunk 480에서 `打算尝尝他们家的这个新品——桑葚的桑葚白糯米。`는 final segment 123으로 회수됐지만, `路过一家美食城...想打卡的` 확장 문장은 chunk 471~478 동안 계속 중복으로 억제됐다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_chongqing_xiefangbei_yogurt_shop_20260621_001` 케이스를 추가했다.
+- 이 케이스는 STT 정확도보다 final lifecycle의 조기 확정, duplicate suppression, stage queue 지연이 문장 회수를 어떻게 방해하는지 보는 challenge case다.
+- 원인 후보는 앞선 `Chongqing rainforest / landmark` 케이스와 동일하게 `premature short final` 이후 후속 확장 후보가 최근 final과 과도하게 동일시되는 경로다.
+- 즉시 로직 변경은 보류한다. 같은 패턴이 누적되고 있으므로 다음 구조 실험은 “최근 final과 접두부가 겹치지만 suffix가 의미 있게 증가한 후보를 어떻게 회수할지”를 중복 억제 회귀와 함께 비교해야 한다.
+
+### 2026-06-21 중국어 vendor / plaza layer 구간 누락 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log.2
+2026-06-21 12:10:30..12:10:42
+chunk=517..529
+```
+
+사용자 관측:
+
+- `这是什么东西啊？这是什么？`
+- `这里还是有很多小摊贩在摆摊。`
+- `我感觉我就是在一层的一个大广场上，结果我往下看，我实际现在在二十二层哎。`
+
+위 구간에서 짧거나 미완성된 후보가 먼저 확정된 뒤, 후속 window에서 더 완성된 문장이 반복되어도 final로 회수되지 않았다.
+
+로그 추적:
+
+- chunk 517에서 `所以还是有很多想。`가 staged로 시작됐다.
+- chunk 518에서 staged revision을 통해 `所以还是有很多小摊贩在摆。`가 final segment 131로 확정됐다.
+- chunk 519 이후에는 `所以还是有很多小摊贩在摆摊。`, `这里还是有很多小摊贩在摆摊。`, `所以还是有很多小摊贩还在摆摊。`이 반복됐지만 segment 131과 유사한 최근 final로 판단되어 `중복 문장 무시` 경로에 들어갔다.
+- chunk 523에서는 `我感觉我就是在一层的一个大广场上。`가 final segment 133으로 확정됐다.
+- chunk 524 이후에는 `我感觉我就是在一层的一个大广场上，结果我忘。`, `...结果我往下看。`, `...我实际现在在二十二层哎。`처럼 suffix가 계속 확장됐지만, 이미 확정된 segment 133과 겹쳐 duplicate suppression으로 제거됐다.
+- `这` 단독 후보는 `low_value_cjk_fragment`와 `no_end_marker` 품질 차단으로 억제됐다. 이 자체는 단독 글자 final 누출 방지에는 맞지만, `这是什么？` 같은 짧은 질문 문장이 안정적으로 회수되는지 별도 관찰이 필요하다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_chongqing_vendor_plaza_layer_20260621_001` 케이스를 추가했다.
+- 이 케이스의 핵심은 raw STT 정확도가 아니라, 이미 final 처리된 prefix와 후속 suffix 확장 후보를 lifecycle이 어떻게 구분하는지다.
+- 즉시 로직 변경은 보류한다. 최근 final 중복 억제는 중복 확정 방지에 필수이므로, suffix extension recovery 규칙은 누락 개선과 중복 회귀를 함께 보는 벤치 결과를 근거로 조정해야 한다.
+
+### 2026-06-21 중국어 Baixiangju / ropeway 구간 누락 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log.2
+2026-06-21 12:14:40..12:14:52
+chunk=24..36
+```
+
+사용자 관측:
+
+- `前面那个好像是长江索道哎。`
+- `白象居。`
+- `来之前的时候，我查了一下这个白象居，它...`
+
+위 구간에서 장소명과 설명 문장이 후속 window에서 계속 확장됐지만 final transcript에는 짧은 조각과 미완성 문장 위주로 남았다.
+
+로그 추적:
+
+- chunk 24에서 `白。`가 staged로 시작됐고, chunk 25에서 `白象居。`로 revision됐다.
+- chunk 26에서는 `白象居来之前的时候，我查了一下。`로 revision됐으나 아직 final은 아니었다.
+- chunk 27에서 `来之前的时候，我查了一下这个白象居，它。`가 confirmations 2/2로 final segment 4가 됐다. 이 시점의 문장은 끝맺음 표식은 있지만 의미상 뒤 suffix가 남은 premature final이다.
+- chunk 28~32에서는 `来之前的时候，我查了一下这个白象居，它现在是一个网红居民楼嘛...`로 문장이 계속 확장됐지만, segment 4와 유사한 최근 final로 판단되어 `중복 문장 무시`가 반복됐다.
+- chunk 33~34에서는 `然后它是一个二十四层无电梯的一个老楼...`이 새 staged/final로 회수됐지만, chunk 35 이후 `出来全是马路` suffix는 다시 segment 5와 중복으로 억제됐다.
+- `白象居。`와 `有道哎。` 같은 짧은 후보가 stage queue에 남아 active staged 소비 순서를 흐리는 현상도 함께 관측됐다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_chongqing_baixiangju_ropeway_20260621_001` 케이스를 추가했다.
+- 이 케이스는 `premature final + recent-final duplicate suppression + suffix extension loss` 패턴을 대표한다.
+- 즉시 로직 변경은 보류한다. 같은 패턴이 누적되고 있으므로 다음 개선 실험은 최근 final과 후보가 prefix 관계일 때, suffix 길이와 boundary confidence를 이용해 확장 후보를 별도 final 후보로 되살릴 수 있는지 검증해야 한다.
+
+### 2026-06-21 최근 final suffix extension 회수 패치
+
+문제:
+
+- `Xiefangbei`, `vendor / plaza layer`, `Baixiangju` 케이스에서 같은 원인이 반복됐다.
+- 앞부분이 먼저 final 처리된 뒤 후속 window에서 같은 prefix 뒤에 긴 suffix가 붙어도 `_recent_final_sentence_delta`가 후보 전체를 최근 final echo로 처리해 빈 delta를 반환했다.
+- 이 때문에 `它。` 뒤의 `现在是一个网红居民楼嘛。`, `大广场上。` 뒤의 `结果我往下看...二十二层哎。` 같은 확장 정보가 final 후보로 회수되지 않았다.
+
+변경:
+
+- `RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS=8`, `RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS=6`을 추가했다.
+- 최근 final이 새 후보의 정확한 prefix이고, prefix와 suffix가 각각 임계 길이를 만족할 때만 suffix를 새 candidate delta로 회수한다.
+- suffix가 짧으면 기존처럼 중복/echo로 억제한다. 예를 들어 `摆。` -> `摆摊。` 같은 1글자 보정은 별도 final로 만들지 않는다.
+- 이 변경은 final append-only 원칙을 유지한다. 이미 발행된 final을 수정하지 않고, 새로 관측된 suffix만 다음 final 후보로 staging한다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_pipeline_nodes
+./.venv/bin/python -m unittest tests.unit.test_dictation_pipeline_nodes tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_representative_source_audit
+./.venv/bin/python -m py_compile src/app/dictation_pipeline_settings.py src/app/dictation_transcript_logic.py src/app/dictation_pipeline_loop.py tests/eval/dictation_ai/sbd_benchmark.py tests/unit/test_dictation_pipeline_nodes.py tests/eval/dictation_ai/representative/audit_sbd_representative_sources.py
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl --require-expected-final --max-drafts 0
+```
+
+결과:
+
+```text
+unit: Ran 13 tests, OK
+unit/tool: Ran 18 tests, OK
+validate-cases: case_count=17, expected_final_case_count=17, draft_count=0
+py_compile: OK
+```
+
+CUDA 벤치 상태:
+
+- `./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py --cases tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl --output .tmp/eval/dictation-ai-sbd/zh-reviewed-suffix-extension-summary.json` 실행은 sandbox 내부에서 `sentence boundary backend 'sat' initialization failed: model=sat-3l-sm device=cuda compute=float16`로 fail-fast 중단됐다.
+- sandbox 밖 CUDA 실행은 현재 환경 정책에서 escalated execution이 거부되어 수행하지 못했다.
+- 정책상 CPU/mock/smoke로 대체하지 않았다. 따라서 이번 패치는 단위 계약과 케이스 유효성만 검증됐고, 실제 `sat + cuda + float16` 벤치 수치는 별도 실행 가능한 세션에서 기록해야 한다.
+
+### 2026-06-21 중국어 travel app / Dianping 구간 누락 케이스와 CJK 공백 정규화
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 12:41:02..12:41:08
+chunk=1605..1611
+```
+
+사용자 관측:
+
+- `如果大家就是在中国旅游要看地图的话呢，你们可以下载一个app叫做高德地图。`
+- `如果你们要找吃的话呢，你们就可以到大众点评。`
+- `另外一个就是小红书。`
+- `我刷到了一些餐厅之后呢，我会到大众点评去看一下评语，然后再决定要不要去吃那一家餐厅。`
+
+로그 추적:
+
+- chunk 1606에서 `如果大家...高德地图。`는 이미 확정된 문장과 중복으로 억제됐다.
+- 같은 chunk에서 `找 吃 的 话 呢 你 们 就 可 以 到 大 众 点 评` 형태의 CJK 문자 사이 공백 artefact가 발생했고, `spaced_cjk`, `cjk_internal_gap`, `no_end_marker` 품질 차단으로 final 후보가 되지 못했다.
+- chunk 1607~1611에서 `大众点评`, `小红书`, `餐厅评语` 구간이 반복됐지만, active staged와 stage queue가 앞선 후보를 소비하는 동안 후속 문장 일부가 계속 품질 차단 또는 지연됐다.
+- 이 구간은 STT 정확도 문제가 아니라, no-space 문자에 삽입된 공백 artefact를 품질 게이트가 broken CJK 후보로 판단해 누락시키는 경로를 보여준다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_china_travel_map_reviews_20260621_001` 케이스를 추가했다.
+- `_normalized_text`에서 CJK 문자 사이의 공백만 제거하도록 했다. Latin/숫자 token 경계는 유지한다.
+- 이 변경은 과거 pending tail overlap 접합을 되살리는 것이 아니다. 후보 의미를 재작성하지 않고, STT tokenization artefact를 품질 판단 전에 표준화하는 최소 정규화다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl --require-expected-final --max-drafts 0
+./.venv/bin/python -m unittest tests.unit.test_dictation_pipeline_nodes tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_representative_source_audit
+./.venv/bin/python -m py_compile src/app/dictation_pipeline_settings.py src/app/dictation_transcript_logic.py src/app/dictation_pipeline_loop.py tests/eval/dictation_ai/sbd_benchmark.py tests/unit/test_dictation_pipeline_nodes.py tests/eval/dictation_ai/representative/audit_sbd_representative_sources.py
+```
+
+결과:
+
+```text
+validate-cases: case_count=18, expected_final_case_count=18, draft_count=0
+unit/tool: Ran 19 tests, OK
+py_compile: OK
+```
+
+CUDA 벤치 상태:
+
+- 실제 `sat + cuda + float16` 벤치는 sandbox 내부에서 `sentence boundary backend 'sat' initialization failed: model=sat-3l-sm device=cuda compute=float16`로 fail-fast 중단됐다.
+- sandbox 밖 실행 승인 요청도 현재 환경 정책에서 거부됐다.
+- CPU/mock/smoke fallback은 사용하지 않았다.
+
+### 2026-06-21 중국어 Shibati / rain 구간과 queue stale 승격 방지
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 12:46:52..12:47:24
+chunk=1956..1988
+```
+
+사용자 관측 후보:
+
+- `想跟大家说呢，这个十八梯这里呢，它的建筑物呢是比较古色古香的。`
+- `可是我今天来到呢，因为下雨，下雨的话就是走楼梯有点点危险。`
+- `它这里呢有一些就是咖啡店啊，然后有一些重庆菜馆，还有一些火锅之类的。`
+- `可是现在真的很不方便。`
+- `我刚还有这种茶馆都没有开，因为下雨的关系。`
+
+로그 추적:
+
+- chunk 1958에서 `想跟大家说呢，这个十八梯这里呢，它的。`가 segment 492로 조기 final됐다.
+- 이후 chunk 1959~1961의 `...建筑物呢是比较古色古香的。` 확장 후보는 최근 final과 겹치는 후보로 처리되어 중복 억제됐다.
+- chunk 1972에서 `建筑物呢是比较古色古香的。`가 terminal-tail split으로 뒤늦게 회수됐지만, 이미 앞 조각 final이 남아 문장이 분리됐다.
+- chunk 1972~1975에서는 `呐然后有一些重庆菜馆。`, `啊然后有一些重庆菜馆还有一些火锅之类的。`처럼 같은 구간의 revision 후보가 queue와 active staged 사이를 오갔다.
+- chunk 1985에서 `我刚还有这种茶馆都没有开，因为下雨的关系。`가 final 된 직후, queue에 남아 있던 더 짧은 `我刚还有这种茶馆都没有。`가 stage로 승격됐다. chunk 1988에서 aged final 시도는 recent final 중복으로 막혔지만, 이미 final된 이전 revision이 stage로 다시 올라오는 위험이 확인됐다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_chongqing_shibati_rain_queue_revision_20260621_001` 케이스를 추가했다.
+- queue 승격 시점에도 recent final delta를 확인하도록 했다.
+- queue 후보가 최근 final과 같은 echo이면 active staged로 올리지 않고 즉시 suppressed 처리한다.
+- queue 후보가 최근 final의 안정 prefix 뒤에 의미 있는 suffix를 가진 경우에는 suffix만 staged 후보로 올린다.
+- 운영 로그 지표에 `stage_queue_recent_final_suppressed`, `stage_queue_recent_final_delta_trimmed`를 추가했다. 벤치 lifecycle도 같은 지표를 기록한다.
+
+의미:
+
+- 이 변경은 생성순서 소비 원칙을 유지하되, 이미 final로 소비된 revision 계열의 오래된 queue 항목이 뒤늦게 active staged가 되는 경로를 줄인다.
+- append-only final은 유지한다. 이미 확정된 문장을 수정하지 않고, queue 승격 전에 recent final과의 관계만 다시 확인한다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl --require-expected-final --max-drafts 0
+./.venv/bin/python -m unittest tests.unit.test_dictation_pipeline_nodes tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_representative_source_audit
+./.venv/bin/python -m py_compile src/app/dictation_pipeline_settings.py src/app/dictation_transcript_logic.py src/app/dictation_pipeline_loop.py tests/eval/dictation_ai/sbd_benchmark.py tests/unit/test_dictation_pipeline_nodes.py tests/eval/dictation_ai/representative/audit_sbd_representative_sources.py
+```
+
+결과:
+
+```text
+validate-cases: case_count=19, expected_final_case_count=19, draft_count=0
+unit/tool: Ran 19 tests, OK
+py_compile: OK
+```
+
+CUDA 벤치 상태:
+
+- `./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py --cases tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl --output .tmp/eval/dictation-ai-sbd/zh-reviewed-queue-stale-summary.json` 실행은 sandbox 내부에서 `sentence boundary backend 'sat' initialization failed: model=sat-3l-sm device=cuda compute=float16`로 fail-fast 중단됐다.
+- sandbox 밖 실행 승인 요청도 현재 환경 정책에서 거부됐다.
+- CPU/mock/smoke fallback은 사용하지 않았다.
+
+### 2026-06-21 중국어 Raffles mall / mixed Latin 구간 누락 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 12:51:14..12:51:59
+chunk=2218..2263
+```
+
+관측 내용:
+
+- `我本来呢是要带大家陪我一起去那个解放碑...来福士商场。` 구간이 여러 chunk에서 반복됐지만, CJK 공백 artefact 때문에 `spaced_cjk`, `cjk_internal_gap`, `no_end_marker` 품질 차단이 누적됐다.
+- `没有记错的话呢...architecture...MBS...architecture。` 구간은 중국어 안에 Latin token이 섞인 문장으로 관측됐다.
+- chunk 2230에서 `没有记错的话呢，看大家说呢，这个商场它的那个 architecter跟。`가 `mixed_latin_zh` 품질 플래그를 가진 채 final 됐다. 이는 STT 오류 자체보다, 불완전한 mixed Latin 후보가 final sink로 나가는 위험을 보여준다.
+- chunk 2238에서 `我现在是在那个商场的里面，待会呢，就在你们。`가 aged final 되었고, 바로 뒤 chunk에서 `...就带你们出去外面逛逛。`으로 완성형이 관측됐다.
+- chunk 2249와 2252에서는 queue에 남은 `我现在是在那个商场的里面待会呢就带`, `待会呢就带` 같은 이전 revision 후보가 stage로 다시 올라왔다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_raffles_mall_mixed_latin_queue_20260621_001` 케이스를 추가했다.
+- 즉시 추가 로직 변경은 보류했다. CJK 공백 정규화와 queue recent-final 필터가 아직 실행 중 프로세스에 반영되지 않은 상태의 로그이므로, 우선 같은 케이스를 벤치 입력으로 남겨 실제 `sat + cuda + float16` 재실행 시 개선 여부를 비교한다.
+- mixed Latin final suppression은 과도하게 적용하면 `MBS`, `architecture` 같은 실제 발화 token을 잃을 수 있다. 현재는 품질 플래그 관측 케이스로 남기고, 누적 벤치 결과에서 별도 정책 필요성을 판단한다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl --require-expected-final --max-drafts 0
+./.venv/bin/python -m unittest tests.unit.test_dictation_pipeline_nodes tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_representative_source_audit
+./.venv/bin/python -m py_compile src/app/dictation_pipeline_settings.py src/app/dictation_transcript_logic.py src/app/dictation_pipeline_loop.py tests/eval/dictation_ai/sbd_benchmark.py tests/unit/test_dictation_pipeline_nodes.py tests/eval/dictation_ai/representative/audit_sbd_representative_sources.py
+```
+
+결과:
+
+```text
+validate-cases: case_count=20, expected_final_case_count=20, draft_count=0
+unit/tool: Ran 19 tests, OK
+py_compile: OK
+```
+
+### 2026-06-21 중국어 yogurt / Didi / restaurant 구간 누락 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 12:54:28..12:54:48
+chunk=105..125
+```
+
+관측 내용:
+
+- `刚刚那个店员呢...五十的刚刚好。`, `如果你是跟我一样...你们可以点五十。`, `这是我有史以来喝过最好喝的酸奶。` 같은 앞 문장은 recent final 중복으로 안정적으로 억제됐다.
+- 이후 `零五八。`, `零五五八。` 같은 짧은 숫자성 CJK 후보가 staged/final 흐름에 들어왔다.
+- chunk 113에서 `零五八。`가 short CJK final로 확정됐고, queue에 `零五五八。`가 남아 다음 staged로 올라왔다.
+- chunk 116~122에서는 `OK，我现在搭着弟弟去吃晚餐。`, `我现在去的这一家餐厅呢，它叫做老干家。`, `其实呢...分店...总店...` 구간이 같은 queue 안에서 뒤섞였다.
+- chunk 119에서 `OK，我现在带着弟弟去吃晚餐，我先要去。`가 final 됐고, chunk 122에서 `小喝的算了，我看后面小桌排队。` 같은 이전 window 조각이 aged final 됐다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_yogurt_didi_restaurant_queue_numeric_20260621_001` 케이스를 추가했다.
+- 짧은 문장도 번역 대상이어야 한다는 기존 요구가 있으므로, `short_cjk`나 숫자성 조각을 즉시 전역 차단하는 로직은 추가하지 않았다.
+- 대신 `numeric-fragment`, `short-cjk-fragment`, `stage-queue-stale` 태그로 별도 추적한다.
+
+관측 도구 보강:
+
+- 대표 source audit의 `finalization_observation`에 `stage_queue_recent_final_suppressed_count`, `stage_queue_recent_final_delta_trimmed_count`와 raw당 비율을 추가했다.
+- 안정성 지표의 `=0` 라인이 이벤트로 오인되지 않도록 numeric value 기반으로만 누적한다.
+- `lifecycle_metrics=`의 누적값을 다시 합산하면 과대계수되므로, chunk 단위 안정성 지표 구간만 읽도록 수정했다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl --require-expected-final --max-drafts 0
+./.venv/bin/python -m unittest tests.unit.test_dictation_pipeline_nodes tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_representative_source_audit
+./.venv/bin/python -m py_compile src/app/dictation_pipeline_settings.py src/app/dictation_transcript_logic.py src/app/dictation_pipeline_loop.py tests/eval/dictation_ai/sbd_benchmark.py tests/unit/test_dictation_pipeline_nodes.py tests/eval/dictation_ai/representative/audit_sbd_representative_sources.py tests/eval/dictation_ai/tool_tests/test_dictation_ai_sbd_representative_source_audit.py
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 12:54:00" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-1254.json
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py --cases tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl --output .tmp/eval/dictation-ai-sbd/zh-reviewed-impact-after-queue-filter-summary.json
+```
+
+결과:
+
+```text
+validate-cases: case_count=21, expected_final_case_count=21, draft_count=0
+unit/tool: Ran 19 tests, OK
+py_compile: OK
+representative-source-audit since 12:54: stt_raw_line_count=297, finalize_event_count=77, finalize_per_stt_raw=0.259, duplicate_suppressed_per_stt_raw=1.764, stage_queue_recent_final_suppressed_count=20, stage_queue_recent_final_delta_trimmed_count=0
+```
+
+벤치테스트 상태:
+
+- 로직 수정 후 전체 `zh/reviewed-context-zh-f.jsonl` 케이스에 대해 실제 벤치테스트를 실행했다.
+- sandbox 내부 실행은 `sentence boundary backend 'sat' initialization failed: model=sat-3l-sm device=cuda compute=float16`로 fail-fast 중단됐다.
+- sandbox 밖 실행 승인 요청도 현재 환경 정책에서 거부됐다.
+- CPU/mock/smoke fallback은 사용하지 않았다.
+- 따라서 이번 변경은 케이스/유닛/문법/audit 검증은 완료됐지만, 실제 `sat + cuda + float16` 전체 케이스 영향 수치는 별도 실행 가능한 환경에서 다시 기록해야 한다.
+
+### 2026-06-21 중국어 haircut / Korea day3 itinerary 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 12:59:47..13:00:17
+chunk=424..454
+```
+
+관측 내용:
+
+- `刚剪完头发，超喜欢的，好开心哦。` 뒤에 `咔嚓咪哒！`, `吓死！`, `觉得他其实不是` 같은 짧은 fragment가 queue에서 승격되고 일부는 final로 나갔다.
+- 후속 window에서 `韩国人，剪头发真是一流的，超级好看，然后又超级轻盈...` 완성 후보가 반복됐지만, 앞선 짧은 fragment와 queue 흐름 때문에 final 회수가 지연됐다.
+- 이후 `韩屋村那边走走逛逛然后。`이 final로 나간 뒤, `然后希望等一下可以吃到...盐面包`으로 이어지는 완성형 일정 문장이 recent final과 겹치며 억제됐다.
+- `然后。`처럼 접속부가 붙은 문장 확정은 누락을 만들 수 있지만, 언어별 접속사 규칙을 즉시 추가하면 과도한 보정이 될 수 있으므로 이번에는 케이스와 태그로만 기록한다.
+
+반영:
+
+- `zh_log_missing_haircut_short_fragment_queue_20260621_001` 케이스를 추가했다.
+- `zh_log_missing_korea_day3_itinerary_connector_final_20260621_001` 케이스를 추가했다.
+- `short-cjk-fragment`, `stage-queue-stale`, `connector-tail-final` 태그로 후속 분석 축을 분리했다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl --require-expected-final --max-drafts 0
+./.venv/bin/python -m unittest tests.unit.test_dictation_pipeline_nodes tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_representative_source_audit
+./.venv/bin/python -m py_compile src/app/dictation_pipeline_settings.py src/app/dictation_transcript_logic.py src/app/dictation_pipeline_loop.py tests/eval/dictation_ai/sbd_benchmark.py tests/unit/test_dictation_pipeline_nodes.py tests/eval/dictation_ai/representative/audit_sbd_representative_sources.py tests/eval/dictation_ai/tool_tests/test_dictation_ai_sbd_representative_source_audit.py
+```
+
+결과:
+
+```text
+validate-cases: case_count=23, expected_final_case_count=23, draft_count=0
+unit/tool: Ran 19 tests, OK
+py_compile: OK
+```
+
+로직 변경 여부:
+
+- 이번 항목에서는 pipeline 로직을 추가 변경하지 않았다.
+- 따라서 추가 벤치테스트 의무는 발생하지 않는다. 직전 queue recent-final 로직 변경에 대한 전체 벤치테스트는 이미 실행 시도했고, CUDA 초기화 실패 및 sandbox 밖 실행 거부로 수치 확보가 막힌 상태다.
+
+### 2026-06-21 중국어 radish kimchi / bossam 구간 누락 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 13:04:05..13:04:23
+chunk=682..700
+```
+
+관측 내용:
+
+- `大家来这里的话，一定要来试试看它这一个萝卜泡菜。`
+- `我觉得一定会很适合台湾人的口味，因为它没有说很辣。`
+- `因为大部分的泡菜都很酸很辣嘛。`
+- `我觉得这个还蛮好下口的，这个好吃。`
+- `我们吃饱了，刚刚吃饱。`
+- `那个菜包肉真是超级超级好吃的，推荐大家一定要去。`
+- `因为它真的没有很贵，但它环境超好的，而且是在那种韩屋里面吃饭。`
+
+위 후보들이 여러 window에서 반복됐지만, stale queue 후보와 최근 final 억제 때문에 일부가 짧게 확정되거나 별도 final로 회수되지 않았다.
+
+로그 추적:
+
+- chunk 682~684에서 `大家来这里的话，一定要来试试看它这一个萝卜泡菜。`는 이미 최근 final과 겹친다고 판단되어 중복 억제됐다.
+- chunk 684에서 active staged `长发也是变化，然后会发很多来。`가 aged final로 확정됐고, queue에서 `特别好吃，我觉得很会搭配过来。`가 승격됐다.
+- chunk 687에서는 aged 확정 시도 결과가 `吃 我 觉 得 很` 같은 broken CJK delta로 계산되어 `delta 확정 보류`됐다.
+- chunk 690에서 `因为大部分的泡菜都很酸很辣嘛，我觉得这个还蛮好下口的，这个好吃。`와 `因为它没有说很辣。`가 확정됐지만, 순서가 원래 STT window 흐름과 다르고 queue에 오래 머문 후보가 한꺼번에 소비됐다.
+- chunk 691에서 `我们吃饱了，刚刚吃饱，那个菜包肉真是超级超级好吃，推荐大家一定要吃。`가 확정된 뒤, 더 완성된 `推荐大家一定要去，因为它真的没有很贵。` 후보는 최근 final 중복으로 폐기됐다.
+- chunk 697~700에서 `因为它真的没有很贵...韩屋里面吃饭...很赞。`이 반복됐지만, `那个菜包肉...推荐大家一定要去。`는 계속 중복 억제됐고 후반부만 staged로 남았다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_korea_radish_kimchi_bossam_queue_20260621_001` 케이스를 추가했다.
+- 이 케이스는 `stage-queue-stale`, `recent-final-trim`, `duplicate-suppression`, `premature-fragment-final` 복합 증상을 추적한다.
+
+구간 audit:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 13:04:05" --until "2026-06-21 13:04:23" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-radish-kimchi-bossam.json
+```
+
+결과:
+
+```text
+stt_raw_line_count=19
+finalize_event_count=5
+finalize_per_stt_raw=0.263
+duplicate_suppressed_count=24
+duplicate_suppressed_per_stt_raw=1.263
+stage_replace_deferred_count=26
+stage_replace_deferred_per_stt_raw=1.368
+stage_queue_promote_count=6
+stage_queue_recent_final_suppressed_count=4
+quality_block_count=7
+translation_enabled_final_translation_linked_ratio=1.0
+```
+
+로직 변경 여부:
+
+- 이번 항목에서는 pipeline 로직을 추가 변경하지 않았다.
+- 동일 계열 증상이 반복되지만, 현재 근거만으로 특정 중국어 표현이나 음식명에 대한 ad-hoc 규칙을 추가하지 않는다.
+- 다음 로직 후보는 언어별 규칙이 아니라 stale queue 후보가 오래 active를 점유할 때의 일반 lifecycle 정책으로 검토해야 한다.
+
+### 2026-06-21 중국어 hat / cookie / cash-only 구간 누락 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 13:07:03..13:07:38
+chunk=860..895
+```
+
+관측 내용:
+
+- `买一顶帽子，我很喜欢这个可爱的，叫什么灯芯绒。`
+- `找到了，就是这一间，好想要买这个饼干。`
+- `好可爱哟。虽然大家都是游客，但是我还是想要吃吃看。`
+- `买到了，本来要买两盒的。`
+- `但是他们今天只收现金，所以我现金不够，只购买了一盒。`
+- `太好笑了，早上逛着逛着不见，就跑到对面去喝啤酒。`
+- `我们回去住宿的地方啦。`
+
+위 문장들이 여러 window에서 순서대로 확장됐지만, 앞부분은 최근 final 중복으로 억제되고 후반부는 짧은 staged 후보와 queue 승격 흐름에 의해 조각나거나 늦게 회수됐다.
+
+로그 추적:
+
+- chunk 860에서 `最近在圣水的MIS是七点半关门，来逛逛，想要买个帽子。`가 final 됐고, 같은 window의 `买顶帽子...灯芯绒。`는 중복으로 무시됐다.
+- chunk 867~869에서는 active staged가 `灯芯绒。`에 묶인 상태에서 `找到了，就是这一件...饼干。`, `好可爱哟...` 후보가 뒤로 밀렸다.
+- chunk 893에서는 `所以我现金不够只购买了一盒。` 확정 시도가 `金 不 够 只 购 买 了 一 盒` broken CJK delta로 계산되어 보류됐다.
+- chunk 894~895에서는 `我们回去住宿。`가 `我们回去住宿的地方吗？`로 revision/final 됐고, queue에 있던 `店只收现金，所以我现金不够，只购买了一盒。`가 뒤늦게 승격됐다.
+- 전체적으로 최근 final 억제, stale queue 승격, 짧은 staged revision, broken CJK delta 보류가 함께 나타났다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_korea_hat_cookie_cash_queue_20260621_001` 케이스를 추가했다.
+- 이 케이스는 `stage-queue-stale`, `recent-final-trim`, `duplicate-suppression`, `short-cjk-fragment`, `premature-fragment-final` 복합 증상을 추적한다.
+
+구간 audit:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 13:07:03" --until "2026-06-21 13:07:38" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-hat-cookie-cash.json
+```
+
+결과:
+
+```text
+stt_raw_line_count=36
+finalize_event_count=11
+finalize_per_stt_raw=0.306
+duplicate_suppressed_count=82
+duplicate_suppressed_per_stt_raw=2.278
+stage_replace_deferred_count=11
+stage_replace_deferred_per_stt_raw=0.306
+stage_queue_promote_count=6
+stage_queue_recent_final_delta_trimmed_count=2
+quality_block_count=6
+translation_enabled_final_translation_linked_ratio=1.0
+```
+
+로직 변경 여부:
+
+- 이번 항목에서는 pipeline 로직을 추가 변경하지 않았다.
+- 동일한 stale queue 계열 증상이 추가로 관측됐으므로, 다음 구조 검토에서는 특정 문구가 아니라 queue 후보의 생존 시간과 recent-final extension 회수 조건을 일반 정책으로만 검토한다.
+
+### 2026-06-21 중국어 白象居 / 长江索道 구간 재관측
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log.5
+2026-06-21 12:14:36..12:14:52
+chunk=20..36
+```
+
+이미 등록된 정규 케이스:
+
+```text
+tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl
+id=zh_log_missing_chongqing_baixiangju_ropeway_20260621_001
+```
+
+관측 내용:
+
+- `前面那个好像是长江索道哎。`
+- `白象居。`
+- `来之前的时候，我查了一下这个白象居，它现在是一个网红居民楼嘛。`
+- `然后它是一个二十四层、无电梯的一个老楼。`
+
+로그 추적:
+
+- chunk 24에서 `白。`가 staged로 시작되고 chunk 25에서 `白象居。`로 revision됐다.
+- chunk 26에서 `白象居来之前的时候，我查了一下。`로 revision됐고, chunk 27에서 `来之前的时候，我查了一下这个白象居，它。`가 confirmations 2/2로 final 됐다.
+- chunk 28 이후에는 실제 발화가 `它现在是一个网红居民楼嘛...`로 확장됐지만, 이전 final `它。`와의 최근 final 중복 판단 때문에 긴 후보가 반복 suppress됐다.
+- 원인은 특정 중국어 표현이 아니라, 최근 final의 끝 문장부호가 다음 window에서 사라지고 뒤 suffix가 붙는 경우를 prefix extension으로 회수하지 못한 데 있다.
+
+구간 audit:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 12:14:36" --until "2026-06-21 12:14:52" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-baixiangju-ropeway-current.json
+```
+
+결과:
+
+```text
+stt_raw_line_count=17
+finalize_event_count=3
+finalize_per_stt_raw=0.176
+duplicate_suppressed_count=25
+duplicate_suppressed_per_stt_raw=1.471
+stage_replace_deferred_count=4
+stage_queue_promote_count=3
+quality_block_count=2
+translation_enabled_final_translation_linked_ratio=1.0
+```
+
+반영:
+
+- 정규 케이스는 이미 존재하므로 중복 추가하지 않았다.
+- 현재 로직의 `recent-final prefix extension` 경로는 `来之前的时候，我查了一下这个白象居，它。` 뒤에 `现在是一个网红居民楼嘛。`가 붙는 후보를 의미 있는 suffix로 회수해야 한다.
+- 이 동작은 `tests/unit/test_dictation_pipeline_nodes.py`의 `test_recent_final_delta_recovers_meaningful_suffix_extensions`로 고정한다.
+
+### 2026-06-21 중국어 Hongdae / Olive Young / Black Friday 구간 누락 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 13:14:13..13:14:47
+chunk=1290..1324
+```
+
+관측 내용:
+
+- `出门。`
+- `我们现在去那个宏大超方便的，都不用换车，从江南过去。`
+- `三号出口出来，我们要去逛Olive Young。`
+- `我又来啦，这次要看一下十一月的优惠。`
+- `买完了，超级超级多人的，又花了大概一百澳币吧。`
+- `这次是黑五的活动，然后有几个面膜，终于买到了。`
+- `恒大这里好漂亮哦，银杏越来越黄了。`
+- `超开心的，刚买到这个独岛的面膜，一次买了八片。`
+- `它没有一盒的，但是刚好十一月特价卖，好像是两千韩元。`
+- `因为昨天看还是十月嘛，昨天十月三十一号的时候，它还是原价没有打折。`
+
+로그 추적:
+
+- chunk 1290에서 `三号出口出来，我们要去广州。`가 final로 확정됐다. 이후 window에서는 `逛Olivian/Olivier/Olive Young` 계열로 계속 관측되지만 recent final 중복 억제로 다시 소비되지 않는다.
+- chunk 1295에서 `我又来啦，这次要看一下十一月的优惠。`가 final 된 뒤 `朋友，出门。` 같은 짧은 후보가 queue에서 승격됐다.
+- chunk 1299에서 `买完了，超级超级多人的，又花了大概。`가 premature final로 확정됐고, 이후 `一百澳币吧` suffix가 붙은 더 완성된 후보는 중복 억제됐다.
+- chunk 1304에서는 `这是。`, chunk 1309에서는 `好，大家好。`, chunk 1313에서는 `超开心的，刚买。` 같은 짧은 staged 후보가 품질 차단되거나 queue 흐름을 지연시켰다.
+- chunk 1315에서 `超开心的...但是刚好十。`가 premature final로 확정됐고, 이후 `十一月特价卖，好像是两千韩元。`가 별도 조각으로 확정되는 흐름이 나타났다.
+
+구간 audit:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 13:14:13" --until "2026-06-21 13:14:32" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-hongdae-oliveyoung-blackfriday.json
+```
+
+결과:
+
+```text
+stt_raw_line_count=20
+finalize_event_count=4
+finalize_per_stt_raw=0.200
+duplicate_suppressed_count=54
+duplicate_suppressed_per_stt_raw=2.700
+stage_replace_deferred_count=9
+stage_replace_deferred_per_stt_raw=0.450
+stage_queue_promote_count=4
+quality_block_count=6
+translation_enabled_final_translation_linked_ratio=1.0
+```
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_hongdae_oliveyoung_blackfriday_queue_20260621_001` 케이스를 추가했다.
+- 이 케이스는 `stage-queue-stale`, `recent-final-trim`, `duplicate-suppression`, `premature-fragment-final`, `mixed-latin-zh`가 함께 나타나는 성능 벤치 케이스다.
+- 현재 개선 방향은 특정 브랜드명이나 한중 혼합 표기를 별도 규칙으로 다루지 않고, premature final 뒤 suffix 회수와 stale queue 후보 처리의 일반 lifecycle 정책으로만 검토한다.
+
+### 2026-06-21 중국어 Mangwon market / hotcake 구간 누락 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 13:18:15..13:18:36
+chunk=1532..1553
+```
+
+관측 내용:
+
+- `十五分钟，我们到了望远市场。`
+- `然后它另外一边好像有，找到这个有名的糖饼。`
+- `哇，我点了黄豆粉，这个好好吃哦。`
+- `大家来一定要点这两个，我觉得一个是。`
+
+로그 추적:
+
+- chunk 1532와 1534에서 `然后它另外一边好像有。`가 confirmation 조건을 만족했지만, committed delta가 `另 外 一 边` 형태의 broken CJK fragment로 계산되어 `delta 확정 보류`됐다.
+- chunk 1537에서 `然后它另外一边好像有找到这个有名的糖饼。`가 final 됐지만, 이후 관련 window는 recent final 중복으로 억제됐다.
+- chunk 1538~1544에서는 `阿喵。`, `啊娘，那脖子。`, `啊呀！` 같은 짧은 후보가 final 또는 staged queue로 소비됐다.
+- chunk 1543~1553에서는 `Let me see` 혼합 언어 구간과 짧은 CJK 후보가 품질 차단되면서 stage queue가 누적됐고, `哇，我点了黄豆粉...` 구간이 늦게 회수됐다.
+
+구간 audit:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 13:18:15" --until "2026-06-21 13:18:36" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-mangwon-market-hotcake.json
+```
+
+결과:
+
+```text
+stt_raw_line_count=22
+finalize_event_count=7
+finalize_per_stt_raw=0.318
+duplicate_suppressed_count=12
+duplicate_suppressed_per_stt_raw=0.545
+stage_replace_deferred_count=19
+stage_replace_deferred_per_stt_raw=0.864
+stage_queue_promote_count=6
+stage_queue_recent_final_suppressed_count=2
+quality_block_count=19
+quality_block_per_stt_raw=0.864
+translation_enabled_final_translation_linked_ratio=1.0
+```
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_mangwon_market_hotcake_queue_20260621_001` 케이스를 추가했다.
+- 이 케이스는 `delta-suppressed`, `stage-queue-stale`, `short-cjk-fragment`, `mixed-latin-zh`가 함께 나타나는 성능 벤치 케이스다.
+- 현재 로직 변경 후보는 특정 음식명/영어 문구 예외가 아니라, broken delta 보류 후 동일 의미 후보가 후속 window에서 어떻게 회수되는지와 짧은 staged 후보의 queue 점유를 일반 lifecycle 정책으로 보는 방향이다.
+
+### 2026-06-21 delta 확정 보류 후 staged 후보 소실 방지
+
+재관측:
+
+- 사용자 관측 `前面那个好像是长江索道哎。白象居...` 구간은 기존 `zh_log_missing_chongqing_baixiangju_ropeway_20260621_001` 케이스와 같은 누락 패턴이다.
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에는 이미 해당 구간의 window 흐름과 expected final이 등록되어 있다.
+- 직전 Mangwon market / hotcake 구간에서도 `然后它另外一边好像有。`가 confirmed/aged 조건을 만족했으나, committed overlap delta가 `另 外 一 边` 같은 broken CJK fragment로 계산되어 `delta 확정 보류`가 발생했다.
+
+원인 판단:
+
+- 기존 구현은 `finalize_staged_sentence()`에서 active staged 후보를 먼저 clear한 뒤 delta 품질을 검사했다.
+- delta가 broken fragment로 판정되면 final을 막는 것은 맞지만, active staged 후보도 함께 사라져 후속 window revision으로 회복할 기회를 잃었다.
+- 이는 append-only final 계약을 지키기 위한 suppression이 누락 회복을 방해하는 구조적 병목이다.
+
+반영:
+
+- delta 품질 보류 시 active staged 후보를 폐기하지 않고 `deferredAgeChunk`만 현재 chunk로 갱신하여 같은 chunk 재확정을 막고 다음 window revision을 기다리도록 변경했다.
+- 런타임과 벤치 lifecycle mirror에 동일하게 적용했다.
+- 관측 지표 `finalize_delta_suppressed_stage_retained`를 추가했다.
+
+기대 효과:
+
+- broken delta 자체는 final로 내보내지 않는다.
+- 후보 문장 전체가 아직 의미 있는 경우 후속 STT window에서 revision 또는 suffix recovery를 통해 final로 회복될 가능성을 남긴다.
+- 특정 언어/문구 규칙을 추가하지 않고 lifecycle 순서와 후보 보존 정책만 보정한다.
+
+### 2026-06-21 중국어 red wine / shirt cleanup 구간 누락 케이스와 recovery 순서 보정
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 13:28:35..13:28:55
+chunk=2152..2172
+```
+
+사용자 관측 맥락:
+
+- 최신 로그에서 `红酒`, `衣服`, `清理` 구간의 문장이 sliding window 안에서 반복 확장됐지만 final transcript는 짧은 prefix와 fragment 중심으로 소비됐다.
+- raw STT 정확도 자체가 아니라, 이미 나온 window 후보들이 final lifecycle에서 누락되는지를 본다.
+
+로그 추적:
+
+- chunk 2158에서 `嗨，各位，welcome back to my channel.`가 final segment 528로 확정됐다.
+- chunk 2159에서 `给你们看一下我的衣服。`와 `刚呢，我就见有这个狗蹲老鼠的后。`가 연속 final 됐다.
+- chunk 2163에서 `然后我本来想要拿一杯红酒的时候就不小心倒到我的衣服圈。`이 final segment 531이 됐다.
+- chunk 2164~2169에서는 더 완성된 `...不小心倒到我的衣服，全部都是这里这里...` 후보가 반복됐지만 `中복 문장 무시` 경로로 빠졌다.
+- chunk 2170에서는 `花了很长时间在请，可是还是请，你不敢请。`가 final 됐고, chunk 2175에서는 `椅子全部都是这里这里还有后面。`, `清理不干净。`처럼 분리된 fragment가 final 됐다.
+
+구간 audit:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs/avc-whisper.log --since "2026-06-21 13:28:35" --until "2026-06-21 13:28:55" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-red-wine-shirt.json
+```
+
+결과:
+
+```text
+stt_raw_line_count=21
+finalize_event_count=6
+finalize_per_stt_raw=0.286
+duplicate_suppressed_count=24
+duplicate_suppressed_per_stt_raw=1.143
+stage_replace_deferred_count=14
+stage_replace_deferred_per_stt_raw=0.667
+stage_queue_promote_count=6
+stage_queue_recent_final_suppressed_count=2
+quality_block_count=6
+quality_block_per_stt_raw=0.286
+translation_enabled_final_translation_linked_ratio=1.0
+```
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_red_wine_shirt_cleanup_20260621_001` 케이스를 추가했다.
+- `_sentence_output_delta()`가 long committed context 기준으로 후보를 이미 포함된 문장으로 보고 빈 delta를 반환하더라도, 최근 final 기준 suffix recovery를 먼저 시도하도록 순서를 보정했다.
+- 런타임과 벤치 lifecycle mirror에 동일하게 적용했다.
+
+원인 판단:
+
+- 기존 순서는 committed context에서 `candidate == ""`가 되면 즉시 duplicate suppression으로 종료했다.
+- 그러나 최근 final이 premature fragment인 경우에는 `recent_final_output_delta()`가 `全部都是这里这里。` 같은 suffix를 회수할 수 있다.
+- 따라서 duplicate suppression 전에 recent-final suffix recovery를 실행해야 한다.
+
+검증 예정:
+
+- 신규 케이스 JSONL validate
+- lifecycle tool test
+- 실제 `sat + cuda + float16` 벤치 시도
+
+### 2026-06-21 중국어 Pet Friendly / dessert wait 구간 누락 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log.1
+2026-06-21 13:32:42..13:33:14
+chunk=2400..2432
+```
+
+사용자 관측 맥락:
+
+- `Pet Friendly`, `可以带狗狗来`, `这两个东西呢，它吃起来都很有开胃力`, `推荐你们买一个`, `等食物的话...` 구간에서 sliding window 후보는 반복 확장됐지만 final transcript는 누락되거나 조각난다.
+- raw STT 정확도 자체가 아니라, 이미 관측된 window 후보가 final lifecycle에서 순서대로 회수되는지 확인하는 케이스다.
+
+로그 추적:
+
+- 초반 window는 `城市中的小森林的感觉`, `意大利面`, `菜单选择其实没有很多`, `面包...full out`까지 긴 후보로 이어졌다.
+- 후속 window에서는 `哎，这个地方也是Pet Friendly的，可以带狗狗来。`가 반복됐고, 이후 `这两个东西呢，它吃起来都很有开胃力。`, `推荐你们买一个。`, `可是如果等食物的话，可能要等比较久一点点。`까지 확장됐다.
+- 이 패턴은 최근에 반복 관측된 `premature final + recent-final duplicate suppression + suffix extension loss` 계열이다. 짧은 prefix 또는 앞 문장이 먼저 소비되면, 뒤 window에서 붙은 의미 있는 suffix가 중복 억제와 queue 지연 사이에서 누락된다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_pet_friendly_dessert_wait_queue_20260621_001` 케이스를 추가했다.
+- 이 케이스는 STT/번역 품질 평가가 아니라 final 확정 lifecycle의 누락, queue 지연, recent-final trim 회귀를 관찰하는 정규 케이스다.
+- 즉시 별도 로직은 추가하지 않는다. 현재 패치의 핵심은 최근 final suffix recovery와 broken delta 보류이며, 이 케이스는 그 변경이 실제 누락 패턴에 유효한지 CUDA 벤치에서 확인할 근거로 둔다.
