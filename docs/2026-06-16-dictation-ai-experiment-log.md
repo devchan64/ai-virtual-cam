@@ -14810,6 +14810,48 @@ OK
 - sandbox 밖 실행 요청도 현재 환경 정책으로 거절됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-21 중국어 小凤姐/天主教堂 구간 오염 stage 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 17:37:40..17:38:00
+chunk=898..918 중심
+```
+
+감사 결과:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 17:37:40" --until "2026-06-21 17:38:00" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-zh-church-xiaofeng-173740-173800.json
+```
+
+```text
+stt_raw_line_count=21
+finalize_event_count=3
+finalize_per_stt_raw=0.143
+stage_replace_deferred_count=62
+stage_replace_deferred_per_stt_raw=2.952
+stage_queue_promote_count=13
+stage_queue_promote_per_stt_raw=0.619
+quality_block_count=16
+quality_block_per_stt_raw=0.762
+duplicate_suppressed_count=23
+duplicate_suppressed_per_stt_raw=1.095
+```
+
+관측:
+
+- `小凤姐是刚刚她有介绍这个天主教堂。`, `她说今天是她到上海的第三天。`, `啊，然后就来这个教堂看看。`가 여러 window에서 반복됐다.
+- 하지만 오래된 queued stage가 승격된 뒤 `这个是，还有这个呢...小凤姐...天主教堂，嗯。`처럼 앞선 잡음이 붙은 긴 문장으로 확정됐다.
+- 뒤쪽에서도 `的第三天，嗯啊，然后就来这个教堂看看...哈哈哈哈...`처럼 prefix가 잘린 오염 stage가 final로 소비됐다.
+- 이 관측은 방금 적용한 queue age 보존 패치가 실행 중 앱 프로세스에 반영되기 전 로그일 수 있다. 따라서 추가 로직 변경의 직접 근거로 삼기보다, 앱 재시작 후 같은 유형이 재현되는지 보는 회귀 케이스로 둔다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-6-20260621.jsonl`에 `zh_log_church_xiaofeng_contaminated_stage_queue_20260621_001` 케이스를 추가했다.
+- 기대 문장은 STT window에서 반복 안정화된 교회 소개, 상하이 3일차, 교회 방문, 후속 대화 문장으로 나누었다.
+
 ### 2026-06-21 중국어 足浴/中式按摩 구간 connector tail suppress 케이스 추가
 
 관측 구간:
