@@ -14750,6 +14750,52 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-21 중국어 book scent/manga 구간 짧은 stage head 지연 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 15:41:07..15:41:26
+chunk=3373..3392 중심
+```
+
+감사 결과:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 15:41:07" --until "2026-06-21 15:41:26" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-zh-154107-154126.json
+```
+
+```text
+stt_raw_line_count=20
+finalize_event_count=5
+finalize_per_stt_raw=0.250
+stage_replace_deferred_count=19
+stage_replace_deferred_per_stt_raw=0.950
+stage_queue_promote_count=7
+stage_queue_promote_per_stt_raw=0.350
+duplicate_suppressed_count=47
+duplicate_suppressed_per_stt_raw=2.350
+quality_block_count=22
+quality_block_per_stt_raw=1.100
+finalize_delta_suppressed_stage_retained_count=0
+finalize_delta_suppressed_stage_dropped_count=0
+stage_queue_recent_final_suppressed_count=4
+```
+
+관측:
+
+- `拍摄这么多年`, `人文素养`, `书的香气`, `漫画店` 조합은 기존 케이스와 겹치지 않았다.
+- `就是拍片的地方，好像。`, `你在搞不搞？` 같은 짧은 stage head가 유지되면서 `人文素养`, `书的香气`, `漫画店` 후보가 반복적으로 `unconfirmed_cjk`와 quality block 주변에서 지연됐다.
+- 이 구간은 delta suppression보다 duplicate suppression과 quality block 비중이 높다. 감사 지표도 `duplicate_suppressed_per_stt_raw=2.350`, `quality_block_per_stt_raw=1.100`으로 나타났다.
+- `OK OK`, `好`, `会` 같은 응답형 단문은 실제 대화에서는 의미가 있을 수 있으나, 여기서는 뒤 긴 문장의 final 소비 지연을 관찰하기 위한 케이스로 둔다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-5-20260621.jsonl`에 `zh_log_delayed_book_scent_manga_short_head_queue_20260621_001` 케이스를 추가했다.
+- 기대 문장은 반복 window에서 안정화된 주요 의미 단위만 지정했다.
+- `sat + cuda + float16` 벤치 결과 없이 로직 변경을 단정하지 않는다.
+
 ### 2026-06-21 중국어 exhibition/iPhone photo 구간 delta/queue 지연 케이스 추가
 
 관측 구간:
