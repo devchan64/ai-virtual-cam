@@ -465,8 +465,47 @@ def _stage_completed_sentence(
     if not _should_stage_boundary_candidate(candidate, language):
         state.count("stage_candidate_quality_blocked")
         state.count("segment_state_suppressed")
-        for flag in _final_sentence_diagnostic_flags(candidate, language):
+        candidate_quality_flags = _final_sentence_diagnostic_flags(candidate, language)
+        for flag in candidate_quality_flags:
             state.count(f"stage_candidate_quality_{flag}")
+        if "no_end_marker" in candidate_quality_flags:
+            if state.staged_sentence:
+                state.count("stage_candidate_quality_no_end_marker_with_active_stage")
+            if state.staged_queue:
+                state.count("stage_candidate_quality_no_end_marker_with_queue")
+            if not state.staged_sentence and not state.staged_queue:
+                state.count("stage_candidate_quality_no_end_marker_without_blocker")
+        for blocking_flag in ("short_no_end_fragment", "trailing_ellipsis"):
+            if blocking_flag not in candidate_quality_flags:
+                continue
+            if state.staged_sentence:
+                state.count(f"stage_candidate_quality_{blocking_flag}_with_active_stage")
+            if state.staged_queue:
+                state.count(f"stage_candidate_quality_{blocking_flag}_with_queue")
+            if not state.staged_sentence and not state.staged_queue:
+                state.count(f"stage_candidate_quality_{blocking_flag}_without_blocker")
+        active_stage_flags = set(_final_sentence_diagnostic_flags(state.staged_sentence, language)) if state.staged_sentence else set()
+        if (
+            "short_no_end_fragment" in candidate_quality_flags
+            and active_stage_flags.intersection({"no_end_marker", "short_cjk"})
+            and state.staged_deferred_age_chunk != chunk_index
+        ):
+            state.staged_age += 1
+            state.staged_deferred_age_chunk = chunk_index
+            state.count("stage_blocked_short_no_end_aged_active_stage")
+            state.count("stage_age_tick")
+            if state.staged_age >= _stage_quality_block_age_limit(state.staged_sentence, language, state.staged_forced, sentence_finalize_age):
+                state.count("stage_blocked_short_no_end_active_stage_quality_suppressed")
+                state.count("stage_age_quality_blocked")
+                state.count("segment_state_suppressed")
+                state.staged_sentence = ""
+                state.staged_confirmations = 0
+                state.staged_age = 0
+                state.staged_forced = False
+                state.staged_deferred_age_chunk = -1
+                state.staged_delta_suppressed_chunks = 0
+                state.staged_delta_suppressed_chunk_index = -1
+                _promote_next_staged_sentence(state, chunk_index)
         return []
     if not state.staged_sentence:
         _promote_next_staged_sentence(state, chunk_index)

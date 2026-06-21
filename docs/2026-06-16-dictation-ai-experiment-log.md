@@ -17519,6 +17519,250 @@ case_count=1223, expected_final_case_count=1219, draft_count=0
 Ran 52 tests in 0.005s, OK
 ```
 
+### 2026-06-22 recent-final terminal fragment echo 보강
+
+목적:
+
+- same-chunk age 반영 뒤에도 최근 final의 일부 tail이 다음 window에서 짧은 후보로 다시 stage/final 경로에 들어오는 사례가 남았다.
+- 단어/문구별 예외가 아니라, 최근 final보다 짧은 후보의 대부분이 recent-final token-sentence 연속 run으로 설명되는 경우만 echo로 억제하는 공통 규칙을 검토했다.
+- no-end 후보를 억제하면 영어 valid fragment recall이 떨어지는 것이 확인되어, fragment echo 억제는 문장 종료 표지가 있는 후보에만 적용했다. 문장 종료 표지가 없는 후보는 stage/age 판단에 맡긴다.
+
+변경:
+
+- `RECENT_FINAL_FRAGMENT_ECHO_*` 설정값을 `dictation_pipeline_settings.py`에 추가했다.
+- `_recent_final_sentence_delta()`에서 compact delta 이후, short-tail/tail-subset/fuzzy-suffix 이전에 terminal fragment echo를 검사한다.
+- 후보가 recent final보다 상당히 짧고, 후보 대부분이 하나의 recent-final token-sentence run으로 설명되며, 그 run이 후보의 시작 또는 끝에 닿을 때만 `""` delta로 suppressed 처리한다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle
+Ran 21 tests in 0.010s, OK
+
+./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_parameter_sweep
+Ran 38 tests in 0.008s, OK
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-recent-final-terminal-fragment-echo.json
+```
+
+same-chunk age 기준 대비:
+
+| metric | same-chunk age | terminal fragment echo | delta |
+| --- | ---: | ---: | ---: |
+| `final_f1_avg` | 0.502246666 | 0.502461436 | +0.000214771 |
+| `final_precision_avg` | 0.576080463 | 0.576652244 | +0.000571782 |
+| `final_recall_avg` | 0.481212481 | 0.481136231 | -0.000076250 |
+| `final_boundary_f1_avg` | 0.117969501 | 0.118047199 | +0.000077698 |
+| `final_similarity_coverage_avg` | 0.415422382 | 0.415505706 | +0.000083323 |
+| `finalized_per_stage_start` | 0.547052325 | 0.546148438 | -0.000903887 |
+| `finalized` | 5447 | 5438 | -9 |
+
+strata:
+
+| stratum | final_f1_delta | precision_delta | recall_delta | boundary_delta | 판단 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `full_input_evidence` | +0.000332119 | +0.000731799 | -0.000216870 | -0.000000497 | precision 중심 개선 |
+| `without_expected_quality_review` | +0.000231160 | +0.000809061 | +0.000000000 | +0.000231160 | clean 기준 개선 |
+
+언어별:
+
+| language | final_f1_delta | precision_delta | recall_delta | boundary_delta |
+| --- | ---: | ---: | ---: | ---: |
+| `en` | +0.000195012 | +0.000282125 | +0.000074000 | +0.000030471 |
+| `ko` | +0.000000000 | +0.000000000 | +0.000000000 | +0.000000000 |
+| `zh` | +0.000539170 | +0.001741739 | -0.000376506 | +0.000246845 |
+
+판단:
+
+- 개선 폭은 작지만 전체, full-input, clean strata가 모두 양수이고 precision/boundary가 개선됐다.
+- 종료 표지가 없는 후보까지 억제한 첫 시도는 전체 F1이 `-0.000131444` 하락하고 영어 no-end valid fragment를 누락시켰으므로 폐기했다.
+- no-end 후보를 suppression하지 않는다는 파이프라인 원칙과 맞고, 최근 final 메모리를 이용한 중복 확정 억제 범위를 보수적으로 확장한다.
+
+후속 상수 스윕:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sweeps/run_sbd_parameter_sweep.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/recent-final-fragment-echo-20260622 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/recent-final-fragment-echo-20260622/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/recent-final-fragment-echo-20260622/summary.md \
+  --include-baseline \
+  --param RECENT_FINAL_FRAGMENT_ECHO_MIN_UNITS=4 \
+  --param RECENT_FINAL_FRAGMENT_ECHO_MIN_UNITS=6 \
+  --param RECENT_FINAL_FRAGMENT_ECHO_MIN_UNITS=7 \
+  --param RECENT_FINAL_FRAGMENT_ECHO_COVERAGE_MIN=0.50 \
+  --param RECENT_FINAL_FRAGMENT_ECHO_COVERAGE_MIN=0.70 \
+  --param RECENT_FINAL_FRAGMENT_ECHO_COVERAGE_MIN=0.75 \
+  --param RECENT_FINAL_FRAGMENT_ECHO_MAX_UNMATCHED_UNITS=2 \
+  --param RECENT_FINAL_FRAGMENT_ECHO_MAX_UNMATCHED_UNITS=6 \
+  --param RECENT_FINAL_FRAGMENT_ECHO_MAX_LENGTH_RATIO=0.45 \
+  --param RECENT_FINAL_FRAGMENT_ECHO_MAX_LENGTH_RATIO=0.65
+```
+
+terminal fragment echo 기본값 기준 대비:
+
+| candidate | final_f1_delta | precision_delta | recall_delta | boundary_delta | full_input_f1_delta | clean_f1_delta | 판단 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `RECENT_FINAL_FRAGMENT_ECHO_MIN_UNITS=4` | +0.000039790 | +0.000204415 | -0.000081766 | +0.000000000 | -0.000135999 | +0.000000000 | full-input 하락 |
+| `RECENT_FINAL_FRAGMENT_ECHO_MIN_UNITS=6` | -0.000077601 | -0.000364289 | +0.000102208 | -0.000067009 | +0.000000771 | -0.000231160 | clean/boundary 하락 |
+| `RECENT_FINAL_FRAGMENT_ECHO_MIN_UNITS=7` | -0.000172646 | -0.000448460 | -0.000014601 | -0.000067009 | -0.000269553 | -0.000231160 | 전반 하락 |
+| `RECENT_FINAL_FRAGMENT_ECHO_COVERAGE_MIN=0.50` | +0.000033545 | +0.000093447 | +0.000000000 | +0.000000000 | +0.000000000 | +0.000000000 | 영향 미미 |
+| `RECENT_FINAL_FRAGMENT_ECHO_COVERAGE_MIN=0.70` | -0.000122179 | -0.000138898 | -0.000116809 | -0.000056390 | -0.000347501 | +0.000000000 | full-input 하락 |
+| `RECENT_FINAL_FRAGMENT_ECHO_COVERAGE_MIN=0.75` | -0.000186623 | -0.000466497 | -0.000014601 | -0.000067009 | -0.000309306 | -0.000231160 | 전반 하락 |
+| `RECENT_FINAL_FRAGMENT_ECHO_MAX_UNMATCHED_UNITS=2` | -0.000122179 | -0.000138898 | -0.000116809 | -0.000056390 | -0.000347501 | +0.000000000 | full-input 하락 |
+| `RECENT_FINAL_FRAGMENT_ECHO_MAX_UNMATCHED_UNITS=6` | -0.000032970 | -0.000016033 | -0.000058404 | +0.000009891 | -0.000093773 | +0.000000000 | 개선 없음 |
+| `RECENT_FINAL_FRAGMENT_ECHO_MAX_LENGTH_RATIO=0.45` | +0.000055435 | -0.000017165 | +0.000193059 | -0.000010688 | +0.000157669 | +0.000000000 | 채택 |
+| `RECENT_FINAL_FRAGMENT_ECHO_MAX_LENGTH_RATIO=0.65` | -0.000678994 | -0.000650236 | -0.000613246 | +0.000000000 | -0.001550388 | -0.001213592 | 폐기 |
+
+후속 판단:
+
+- `MAX_LENGTH_RATIO=0.45`는 전체 F1과 full-input F1을 더 올리면서 same-chunk age 기준 precision 이득은 유지한다.
+- 더 좁은 length ratio는 “최근 final보다 상당히 짧은 후보만 fragment echo로 본다”는 일반 원칙에도 더 잘 맞는다.
+- 최종 기본값은 `RECENT_FINAL_FRAGMENT_ECHO_MAX_LENGTH_RATIO=0.45`로 정리한다.
+
+최종 checked-in 기본값 검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-recent-final-terminal-fragment-echo-ratio045.json
+```
+
+same-chunk age 기준 대비 최종값:
+
+| metric | same-chunk age | final default | delta |
+| --- | ---: | ---: | ---: |
+| `final_f1_avg` | 0.502246666 | 0.502516872 | +0.000270206 |
+| `final_precision_avg` | 0.576080463 | 0.576635080 | +0.000554617 |
+| `final_recall_avg` | 0.481212481 | 0.481329290 | +0.000116809 |
+| `final_boundary_f1_avg` | 0.117969501 | 0.118036510 | +0.000067009 |
+| `final_similarity_coverage_avg` | 0.415422382 | 0.415539078 | +0.000116696 |
+| `finalized_per_stage_start` | 0.547052325 | 0.546385542 | -0.000666783 |
+| `finalized` | 5447 | 5442 | -5 |
+
+최종 strata:
+
+| stratum | final_f1_delta | precision_delta | recall_delta | boundary_delta |
+| --- | ---: | ---: | ---: | ---: |
+| `full_input_evidence` | +0.000489787 | +0.000682980 | +0.000332226 | -0.000030897 |
+| `without_expected_quality_review` | +0.000231160 | +0.000809061 | +0.000000000 | +0.000231160 |
+
+후속 병목 재분류:
+
+최종 리포트:
+
+```text
+.tmp/eval/dictation-ai-sbd/current-20260622-recent-final-terminal-fragment-echo-ratio045.json
+```
+
+저점 케이스 기준:
+
+```text
+expected_final 존재 + final_f1 < 0.6: 724 / 1219 cases
+```
+
+저점 케이스의 주요 metric 가중 합:
+
+| metric | weighted | total | cases |
+| --- | ---: | ---: | ---: |
+| `candidate_duplicate_suppressed` | 5109.8 | 8222 | 597 |
+| `stage_queue_enqueue` | 2593.4 | 4065 | 590 |
+| `stage_candidate_quality_blocked` | 2433.2 | 3235 | 615 |
+| `stage_queue_promote` | 2207.3 | 3489 | 567 |
+| `candidate_recent_final_delta_trimmed` | 2045.5 | 3287 | 559 |
+| `stage_candidate_quality_no_end_marker` | 1370.1 | 1976 | 548 |
+| `stage_replace_deferred` | 1115.6 | 1772 | 335 |
+| `stage_age_quality_blocked` | 968.3 | 1511 | 514 |
+| `stage_queue_revision` | 826.6 | 1313 | 414 |
+| `stage_queue_revision_token_sentence_deferred` | 288.4 | 427 | 204 |
+| `stage_finalize_deferred_for_queue_revision` | 202.8 | 301 | 213 |
+
+queue residue bucket:
+
+| bucket | count | avg_f1 | avg_queue | avg_stage_defer | avg_no_end_block |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `none` | 522 | 0.3028 | 0.0 | 1.79 | 2.72 |
+| `q1` | 152 | 0.3314 | 1.0 | 2.97 | 2.68 |
+| `q2_4` | 48 | 0.3376 | 2.29 | 7.29 | 2.94 |
+| `q5p` | 2 | 0.3664 | 6.5 | 18.0 | 3.5 |
+
+판단:
+
+- queue residue가 있는 저점 케이스는 replacement defer가 강하지만, 저점 케이스의 다수는 queue residue가 없다. 따라서 queue 크기나 stale 한계만 조정하는 것은 보편 개선 축으로 보기 어렵다.
+- `candidate_duplicate_suppressed`, `candidate_recent_final_delta_trimmed`, `stage_candidate_quality_no_end_marker`가 넓게 분포하므로 다음 분석은 중복 억제와 no-end 후보의 stage/age 처리 사이 trade-off를 분해해야 한다.
+- no-end 후보를 단순 완화하는 방향은 앞선 `SHORT_NO_END_FRAGMENT_UNITS` 스윕에서 precision/boundary 회귀가 확인됐다. 다음 후보는 “no-end를 final로 보내는 규칙”이 아니라, no-end 때문에 active stage/queue가 막히는 경로를 관측 지표로 더 분리하는 쪽이 우선이다.
+
+no-end blocker 관측 metric 추가:
+
+- `stage_candidate_quality_no_end_marker_with_active_stage`
+- `stage_candidate_quality_no_end_marker_with_queue`
+- `stage_candidate_quality_no_end_marker_without_blocker`
+- `stage_candidate_quality_short_no_end_fragment_with_active_stage`
+- `stage_candidate_quality_short_no_end_fragment_with_queue`
+- `stage_candidate_quality_short_no_end_fragment_without_blocker`
+- `stage_candidate_quality_trailing_ellipsis_with_active_stage`
+- `stage_candidate_quality_trailing_ellipsis_with_queue`
+- `stage_candidate_quality_trailing_ellipsis_without_blocker`
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-no-end-blocking-flag-observation-v2.json
+```
+
+최종 기본값 리포트 대비 동작 지표 변화:
+
+```text
+final_f1_avg delta=0.0
+final_precision_avg delta=0.0
+final_recall_avg delta=0.0
+final_boundary_f1_avg delta=0.0
+finalized delta=0
+stage_start delta=0
+```
+
+관측 결과:
+
+| metric | total | low_f1 total | low_f1 cases |
+| --- | ---: | ---: | ---: |
+| `stage_candidate_quality_no_end_marker` | 3182 | 1976 | 548 |
+| `stage_candidate_quality_no_end_marker_with_active_stage` | 2320 | 1430 | 436 |
+| `stage_candidate_quality_no_end_marker_with_queue` | 1152 | 707 | 275 |
+| `stage_candidate_quality_no_end_marker_without_blocker` | 862 | 546 | 296 |
+| `stage_candidate_quality_short_no_end_fragment` | 2932 | 1766 | 488 |
+| `stage_candidate_quality_short_no_end_fragment_with_active_stage` | 2208 | 1338 | 391 |
+| `stage_candidate_quality_short_no_end_fragment_with_queue` | 1121 | 683 | 260 |
+| `stage_candidate_quality_short_no_end_fragment_without_blocker` | 724 | 428 | 249 |
+| `stage_candidate_quality_trailing_ellipsis` | 553 | 363 | 231 |
+| `stage_candidate_quality_trailing_ellipsis_with_active_stage` | 406 | 273 | 184 |
+| `stage_candidate_quality_trailing_ellipsis_with_queue` | 256 | 179 | 131 |
+| `stage_candidate_quality_trailing_ellipsis_without_blocker` | 147 | 90 | 78 |
+
+언어별 total:
+
+| language | no_end | with_active_stage | with_queue | without_blocker |
+| --- | ---: | ---: | ---: | ---: |
+| `en` | 1670 | 1332 | 666 | 338 |
+| `ko` | 883 | 482 | 188 | 401 |
+| `zh` | 629 | 506 | 298 | 123 |
+
+판단:
+
+- no-end 품질 차단의 다수는 active staged 후보가 있는 상태에서 발생한다.
+- 실제 blocking flag는 `short_no_end_fragment`가 대부분이며, `trailing_ellipsis`는 보조 축이다.
+- queue도 영향이 있지만 `with_active_stage`가 더 넓게 나타나므로, 다음 후보는 queue 크기 조정보다 active staged 후보가 no-end replacement와 충돌할 때 어떤 상태로 남는지 분해하는 쪽이 우선이다.
+- 관측 metric 추가는 replay 지표를 바꾸지 않았으므로 성능 개선 패치가 아니라 다음 최적화 후보를 좁히는 측정 보강으로 분류한다.
+
 ### 2026-06-22 same-chunk age 이후 추가 파라미터 스윕 폐기
 
 목적:

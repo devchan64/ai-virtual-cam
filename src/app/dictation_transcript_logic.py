@@ -31,6 +31,10 @@ from src.app.dictation_pipeline_settings import (
     revision_tail_common_run_min as _revision_tail_common_run_min,
     recent_final_extension_min_prefix_units as _recent_final_extension_min_prefix_units,
     recent_final_extension_min_suffix_units as _recent_final_extension_min_suffix_units,
+    recent_final_fragment_echo_coverage_min as _recent_final_fragment_echo_coverage_min,
+    recent_final_fragment_echo_max_length_ratio as _recent_final_fragment_echo_max_length_ratio,
+    recent_final_fragment_echo_max_unmatched_units as _recent_final_fragment_echo_max_unmatched_units,
+    recent_final_fragment_echo_min_units as _recent_final_fragment_echo_min_units,
     sentence_confirm_chunks as _sentence_confirm_chunks,
     sentence_confirm_max_age_chunks as _sentence_confirm_max_age_chunks,
     short_cjk_confirm_extra_chunks as _short_cjk_confirm_extra_chunks,
@@ -1162,6 +1166,9 @@ def _recent_final_sentence_delta(candidate: str, recent_sentence: str, language:
     compact_delta = _compact_recent_final_delta(candidate_words, recent_words)
     if compact_delta is not None:
         return compact_delta
+    fragment_echo_delta = _recent_final_fragment_echo_delta(normalized_candidate, candidate_words, recent_words)
+    if fragment_echo_delta is not None:
+        return fragment_echo_delta
     short_tail_delta = _recent_final_short_tail_echo_delta(candidate_words, recent_words)
     if short_tail_delta is not None:
         return short_tail_delta
@@ -1328,6 +1335,35 @@ def _recent_final_tail_subset_echo_delta(candidate_words: list[str], recent_word
     if best_ratio >= 0.90 and best_end_gap <= 2:
         return ""
     return None
+
+
+def _recent_final_fragment_echo_delta(
+    normalized_candidate: str,
+    candidate_words: list[str],
+    recent_words: list[str],
+) -> str | None:
+    if _boundary_sentence_end_count(normalized_candidate) <= 0:
+        return None
+    if not candidate_words or len(candidate_words) >= len(recent_words):
+        return None
+    min_units = _recent_final_fragment_echo_min_units()
+    if len(candidate_words) < min_units or len(recent_words) < min_units + 3:
+        return None
+    max_candidate_len = max(min_units, int(len(recent_words) * _recent_final_fragment_echo_max_length_ratio()))
+    if len(candidate_words) > max_candidate_len:
+        return None
+    _best_i, best_j, common_run = _best_common_word_run(recent_words, candidate_words)
+    if common_run < min_units:
+        return None
+    unmatched = len(candidate_words) - common_run
+    if unmatched > _recent_final_fragment_echo_max_unmatched_units():
+        return None
+    if common_run / max(len(candidate_words), 1) < _recent_final_fragment_echo_coverage_min():
+        return None
+    candidate_run_touches_edge = best_j <= 1 or best_j + common_run >= len(candidate_words) - 1
+    if not candidate_run_touches_edge:
+        return None
+    return ""
 
 
 def _recent_final_fuzzy_suffix_echo_delta(candidate_words: list[str], recent_words: list[str]) -> str | None:

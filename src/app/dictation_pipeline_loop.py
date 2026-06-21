@@ -402,6 +402,38 @@ def run_transcribe_loop(
             candidate_quality_flags = _final_sentence_diagnostic_flags(candidate, detected)
             for flag in candidate_quality_flags:
                 count_metric(f"stage_candidate_quality_{flag}")
+            if "no_end_marker" in candidate_quality_flags:
+                if active_stage.sentence:
+                    count_metric("stage_candidate_quality_no_end_marker_with_active_stage")
+                if commit_buffer_node.queued_sentences():
+                    count_metric("stage_candidate_quality_no_end_marker_with_queue")
+                if not active_stage.sentence and not commit_buffer_node.queued_sentences():
+                    count_metric("stage_candidate_quality_no_end_marker_without_blocker")
+            for blocking_flag in ("short_no_end_fragment", "trailing_ellipsis"):
+                if blocking_flag not in candidate_quality_flags:
+                    continue
+                if active_stage.sentence:
+                    count_metric(f"stage_candidate_quality_{blocking_flag}_with_active_stage")
+                if commit_buffer_node.queued_sentences():
+                    count_metric(f"stage_candidate_quality_{blocking_flag}_with_queue")
+                if not active_stage.sentence and not commit_buffer_node.queued_sentences():
+                    count_metric(f"stage_candidate_quality_{blocking_flag}_without_blocker")
+            active_stage_flags = set(_final_sentence_diagnostic_flags(active_stage.sentence, detected)) if active_stage.sentence else set()
+            if (
+                "short_no_end_fragment" in candidate_quality_flags
+                and active_stage_flags.intersection({"no_end_marker", "short_cjk"})
+                and active_stage.deferredAgeChunk != chunks
+            ):
+                active_stage.age += 1
+                active_stage.deferredAgeChunk = chunks
+                count_metric("stage_blocked_short_no_end_aged_active_stage")
+                count_metric("stage_age_tick")
+                if active_stage.age >= _stage_quality_block_age_limit(active_stage.sentence, detected, active_stage.forced, sentence_finalize_age):
+                    count_metric("stage_blocked_short_no_end_active_stage_quality_suppressed")
+                    count_metric("stage_age_quality_blocked")
+                    count_segment_state("suppressed")
+                    active_stage.clear()
+                    promote_next_staged_sentence(detected)
             worker._emit(
                 "status",
                 "받아쓰기 AI stage 후보 품질 차단: "
