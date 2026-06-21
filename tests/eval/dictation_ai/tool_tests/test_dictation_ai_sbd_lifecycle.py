@@ -6,6 +6,7 @@ from src.app.dictation_transcript_logic import (
     _recent_final_output_delta,
     _should_stage_boundary_candidate,
 )
+from src.app.stable_token_detection import analyze_stable_window
 from tests.eval.dictation_ai.sbd_benchmark import LifecycleState, _finalize_staged_sentence, _stage_completed_sentence
 
 
@@ -75,7 +76,7 @@ class DictationAiSbdLifecycleTest(unittest.TestCase):
         self.assertEqual(state.metrics["segment_state_suppressed"], 1)
         self.assertNotIn("finalize_delta_suppressed_stage_retained", state.metrics)
 
-    def test_unchanged_revision_preserves_delta_suppression_counter(self) -> None:
+    def test_delta_fragment_preservation_matches_runtime_lifecycle(self) -> None:
         state = LifecycleState(
             language="zh",
             committed_text="因为蛮多教学的，跟你们分享一下，",
@@ -96,11 +97,32 @@ class DictationAiSbdLifecycleTest(unittest.TestCase):
             chunk_index=67,
         )
 
-        self.assertEqual(finalized, [])
+        self.assertEqual(finalized, ["跟你们分享一下我点的一些吃的。"])
         self.assertEqual(state.staged_sentence, "")
         self.assertEqual(state.metrics["stage_revision"], 1)
-        self.assertEqual(state.metrics["finalize_delta_suppressed"], 1)
-        self.assertEqual(state.metrics["finalize_delta_suppressed_stage_dropped"], 1)
+        self.assertEqual(state.metrics["finalize_delta_fragment_preserved"], 1)
+        self.assertEqual(state.metrics["finalized"], 1)
+        self.assertNotIn("finalize_delta_suppressed", state.metrics)
+        self.assertNotIn("finalize_delta_suppressed_stage_dropped", state.metrics)
+
+    def test_recent_final_echo_suppression_matches_runtime_lifecycle_metric(self) -> None:
+        state = LifecycleState(
+            language="zh",
+            staged_sentence="今天就早点休息，早点养精蓄锐。",
+            staged_confirmations=3,
+            staged_age=2,
+            staged_deferred_age_chunk=20,
+        )
+        assert state.final_sentences is not None
+        state.final_sentences.append("今天就早点休息，早点养精蓄锐。")
+
+        finalized = _finalize_staged_sentence(state, "zh", "confirmed", 21)
+
+        self.assertEqual(finalized, [])
+        self.assertEqual(state.staged_sentence, "")
+        self.assertEqual(state.metrics["finalize_recent_echo_suppressed"], 1)
+        self.assertEqual(state.metrics["segment_state_suppressed"], 1)
+        self.assertNotIn("finalize_duplicate_suppressed", state.metrics)
 
     def test_same_chunk_promoted_stage_does_not_finalize_on_replacement(self) -> None:
         state = LifecycleState(
@@ -246,6 +268,55 @@ class DictationAiSbdLifecycleTest(unittest.TestCase):
         self.assertEqual(state.staged_sentence, "全部都是这里这里。")
         self.assertEqual(state.metrics["candidate_recent_final_delta_trimmed"], 1)
         self.assertNotIn("candidate_duplicate_suppressed", state.metrics)
+
+    def test_candidate_committed_prefix_delta_trim_is_counted(self) -> None:
+        state = LifecycleState(
+            language="zh",
+            committed_text="刚呢，我就见到这个狗墩老鼠，然后",
+        )
+
+        finalized = _stage_completed_sentence(
+            state,
+            "刚呢，我就见到这个狗墩老鼠，然后我本来想要拿一杯红酒的时候。",
+            "zh",
+            forced=False,
+            sentence_finalize_age=3,
+            chunk_index=1,
+        )
+
+        self.assertEqual(finalized, [])
+        self.assertEqual(state.staged_sentence, "我本来想要拿一杯红酒的时候。")
+        self.assertEqual(state.metrics["candidate_delta_trimmed"], 1)
+        self.assertEqual(state.metrics["candidate_delta_trimmed_cjk"], 1)
+
+    def test_internal_stability_preserves_revision_confirmation_in_replay(self) -> None:
+        previous = "甲这个锅底浓郁的我感觉都不用蘸底料了直接吃就非常有味道了然后这时候再来一个红糖糍粑。"
+        candidate = "乙这个锅底浓郁的我感觉都不用蘸底料了直接吃就非常有味道了然后这时候再来一个红糖糍粑再最后。"
+        state = LifecycleState(
+            language="zh",
+            staged_sentence=previous,
+            staged_confirmations=2,
+            staged_age=2,
+            staged_deferred_age_chunk=6,
+            stable_analysis=analyze_stable_window("甲" + previous, "乙" + candidate, "zh"),
+        )
+
+        finalized = _stage_completed_sentence(
+            state,
+            candidate,
+            "zh",
+            forced=False,
+            sentence_finalize_age=3,
+            chunk_index=7,
+        )
+
+        self.assertEqual(finalized, [candidate])
+        self.assertEqual(state.staged_sentence, "")
+        self.assertEqual(state.final_sentences, [candidate])
+        self.assertEqual(state.metrics["stage_revision_internal_stability_high"], 1)
+        self.assertEqual(state.metrics["stage_revision_confirmation_preserved_internal"], 1)
+        self.assertEqual(state.metrics["finalized"], 1)
+        self.assertNotIn("stage_revision_age_reset", state.metrics)
 
     def test_recent_final_internal_match_can_recover_following_sentence(self) -> None:
         candidate = "所以要先去吃个东西，来补充一下体力。也要逛街才有力气。"

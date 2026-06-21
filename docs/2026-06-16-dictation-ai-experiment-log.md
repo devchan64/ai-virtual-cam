@@ -14837,6 +14837,62 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-21 candidate buffer 순서 원칙의 benchmark replay 정합성 보강
+
+관측:
+
+- 운영 코드는 `stage_finalize_deferred_for_queue_order`를 추가해 active staged 후보보다 오래 관측된 queue head가 남아 있으면 active final을 보류하도록 보강했다.
+- 그러나 `tests/eval/dictation_ai/sbd_benchmark.py`의 lifecycle replay에는 같은 원칙이 아직 반영되지 않아, 벤치 결과가 운영 후보 버퍼 소비 순서를 정확히 재현하지 못할 수 있었다.
+- 특히 queue 후보의 `age`를 현재 chunk 기준으로 재계산해 stale 후보를 suppress하는 규칙도 replay의 queue promotion/finalize 직전 경로에 일부 빠져 있었다.
+- 운영 finalization에는 recent/committed delta 계산으로 문장 끝 punctuation이 사라진 fragment가 생기면 staged 문장 전체를 보존하는 `finalize_delta_fragment_preserved` 규칙이 있었지만, benchmark replay에는 빠져 있었다.
+- recent final과 유사해 확정 후보가 빈 문자열이 되는 경우 운영은 `finalize_recent_echo_suppressed`로 계측하지만, benchmark replay는 `finalize_duplicate_suppressed`로 계측해 중복/echo 원인 해석이 어긋날 수 있었다.
+- committed prefix 제거로 후보가 delta로 잘리는 경우 운영은 `candidate_delta_trimmed`, CJK 구간은 `candidate_delta_trimmed_cjk`를 계측하지만, benchmark replay에는 해당 metric이 없어 prefix 제거/후보 회수 원인 해석이 빠질 수 있었다.
+- 운영은 sliding window 간 `analyze_stable_window()` 결과를 revision confirmation/reset 판단에 넣지만, benchmark replay는 stable 값을 0으로 두고 있어 internal stability로 유지되어야 할 CJK revision confirmation을 reset으로 해석할 수 있었다.
+
+반영:
+
+- benchmark replay의 queue promotion에서 현재 chunk 기준 age를 재계산하고 `staged_queue_max_promotion_age_chunks()` 초과 후보를 `stage_queue_stale_promote_suppressed`로 폐기하도록 맞췄다.
+- final 직전 queue revision 흡수 경로도 현재 chunk 기준 stale suppress를 적용하도록 맞췄다.
+- active staged 후보보다 오래 관측된 비-revision queue head가 있으면 active final을 보류하고 queue head를 먼저 재평가하도록 `stage_finalize_deferred_for_queue_order`를 replay에 추가했다.
+- final delta가 문장 일부 조각으로 계산되는 경우 운영과 같이 staged 문장 전체를 보존하도록 `finalize_delta_fragment_preserved` replay를 맞췄다.
+- recent final echo로 비게 된 확정 후보는 benchmark replay에서도 `finalize_recent_echo_suppressed`로 계측하도록 맞췄다.
+- committed prefix delta trimming도 benchmark replay와 report에서 `candidate_delta_trimmed`, `candidate_delta_trimmed_cjk`로 볼 수 있게 맞췄다.
+- benchmark replay도 chunk별 이전 window와 현재 window로 stable analysis를 계산하고, revision confirmation/reset 및 queue revision 판단에 운영과 같은 stable 값을 전달하도록 맞췄다.
+- benchmark report의 bottleneck/exemplar metric에도 `stage_finalize_deferred_for_queue_order`, `finalize_delta_fragment_preserved`, `candidate_delta_trimmed*`, `stage_revision_internal_stability_*`, `stage_revision_confirmation_preserved_internal`, `stage_revision_confirmation_reset`를 포함했다.
+- `sbd_benchmark.py`가 1000라인을 넘어 entrypoint와 lifecycle replay 책임이 섞이기 시작했으므로, replay 구현을 `tests/eval/dictation_ai/benchmark/sbd_lifecycle_replay.py`로 분리했다. 기존 entrypoint와 테스트 import 경로는 유지한다.
+- 이 변경은 문장별 예외나 언어별 규칙이 아니라 “생성순서대로 소비하되 stale 후보는 되살리지 않는다”는 공통 lifecycle 원칙을 벤치 증거 경로에 맞춘 것이다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_pipeline_nodes tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_entrypoint
+Ran 78 tests in 0.017s, OK
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases --max-drafts 0
+case_count=1223, expected_final_case_count=1219, en=429, ko=462, zh=332
+
+./.venv/bin/python -m py_compile tests/eval/dictation_ai/sbd_benchmark.py tests/eval/dictation_ai/benchmark/sbd_lifecycle_replay.py tests/eval/dictation_ai/benchmark/sbd_benchmark_report.py
+OK
+
+./.venv/bin/python -m unittest discover tests/eval/dictation_ai/tool_tests
+Ran 161 tests in 0.049s, OK
+
+./.venv/bin/python -m unittest discover tests/unit
+Ran 173 tests in 0.222s, OK
+
+wc -l tests/eval/dictation_ai/sbd_benchmark.py tests/eval/dictation_ai/benchmark/sbd_lifecycle_replay.py
+sbd_benchmark.py=250, sbd_lifecycle_replay.py=989
+
+git diff --check
+OK
+```
+
+제한:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-6-20260621.jsonl` 단일 shard CUDA 벤치를 시도했지만 sandbox 내부에서는 `sat-3l-sm device=cuda compute=float16` 초기화가 fail-fast로 중단됐다.
+- sandbox 밖 실행 승인은 현재 환경 정책에서 거절됐다. CPU/mock fallback은 성능 근거로 사용하지 않는다.
+- 따라서 이번 변경의 성능 채택 여부는 로컬 CUDA 환경에서 같은 shard 또는 전체 corpus를 다시 실행해 final F1, queue residue, `stage_finalize_deferred_for_queue_order`, `stage_queue_stale_promote_suppressed` 증감을 확인해야 한다.
+
 ### 2026-06-21 중국어 climbing 구간 candidate buffer 소비 순서 원칙 보강
 
 관측 구간:
