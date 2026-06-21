@@ -14217,3 +14217,49 @@ representative_readiness.blockers=["transcript lines are missing", "finalize eve
 - `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_takeout_chicken_signature_cheese_20260621_001` 케이스를 추가했다.
 - 원인은 앞선 BHC takeout 케이스와 동일하다. `跟你们分享一下我点的一些吃的。` active stage가 broken delta `我 点 的 一 些 吃 的`만 만들며 반복 보류되고, 후속 후보들이 queue에서 소비되지 않는다.
 - 별도 로직을 추가하지 않고, 직전 `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS` 보정의 회귀 케이스로 관리한다.
+
+### 2026-06-21 중국어 Tambourine/Pop-up Store 구간 stage replace deferred 관측
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 13:50:55..13:51:25
+chunk=421..428
+```
+
+사용자 관측:
+
+- `自己揪一下...BHC...招牌cheese` 구간과 유사하게 장시간 final이 발생하지 않는 증상이 이어졌다.
+- 패치 후 최신 구간에서는 `我现在回到了酒店...`, `Tambourine Event...`, `Bobble/Pop Up Store...` 후보가 반복되며 stage queue가 뒤로 밀렸다.
+
+구간 audit:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 13:50:55" --until "2026-06-21 13:51:25" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-bhc-tambourine-window.json
+```
+
+결과:
+
+```text
+stt_raw_line_count=23
+finalize_event_count=2
+finalize_per_stt_raw=0.087
+stage_replace_deferred_count=10
+stage_replace_deferred_per_stt_raw=0.435
+quality_block_count=2
+finalize_delta_suppressed_stage_retained_count=0
+finalize_delta_suppressed_stage_dropped_count=0
+```
+
+해석:
+
+- BHC delta suppression 보정 이후에는 broken delta 보류가 이 구간의 직접 병목이 아니었다.
+- 병목은 `unconfirmed_cjk` 교체 보류가 누적되면서 active stage가 품질 차단될 때까지 후속 후보를 기다리게 만드는 경로다.
+- `回到了酒店` 같은 짧은 stale stage가 먼저 소비되고, 이후 `Bob Hop Store`류의 불안정 후보가 다시 active가 되면서 queue가 순차 지연된다.
+- 이 문제는 개별 정규식이나 언어별 예외로 처리하지 않고, stage lifecycle의 후보 순서 보존과 stale 후보 소비 비용 사이의 절충으로 다뤄야 한다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_hotel_tambourine_popup_store_queue_20260621_001` 케이스를 추가했다.
+- 이번 패치에서는 앱 로직을 추가 변경하지 않았다. 다음 조정 후보는 active stage가 확정 불가 품질로 반복 보류될 때 queue 진행을 더 빨리 여는 정책이지만, premature final/중복 final 위험을 벤치로 먼저 비교해야 한다.
