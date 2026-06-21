@@ -303,6 +303,7 @@ def audit_log_file(path: Path, *, since: str | None = None, until: str | None = 
                 "stage_queue_recent_final_suppressed",
                 "stage_queue_recent_final_delta_trimmed",
                 "finalize_delta_suppressed_stage_retained",
+                "finalize_delta_suppressed_stage_dropped",
             ):
                 metric_value = chunk_values.get(metric_name)
                 if metric_value and metric_value.isdigit():
@@ -437,6 +438,7 @@ def _finalization_observation_payload(marker_counts: Counter[str]) -> dict[str, 
     queue_recent_suppressed = int(marker_counts.get("stage_queue_recent_final_suppressed", 0))
     queue_recent_trimmed = int(marker_counts.get("stage_queue_recent_final_delta_trimmed", 0))
     delta_suppressed_stage_retained = int(marker_counts.get("finalize_delta_suppressed_stage_retained", 0))
+    delta_suppressed_stage_dropped = int(marker_counts.get("finalize_delta_suppressed_stage_dropped", 0))
     return {
         "stt_raw_line_count": stt_raw,
         "finalize_event_count": finalize_events,
@@ -447,6 +449,7 @@ def _finalization_observation_payload(marker_counts: Counter[str]) -> dict[str, 
         "stage_queue_recent_final_suppressed_count": queue_recent_suppressed,
         "stage_queue_recent_final_delta_trimmed_count": queue_recent_trimmed,
         "finalize_delta_suppressed_stage_retained_count": delta_suppressed_stage_retained,
+        "finalize_delta_suppressed_stage_dropped_count": delta_suppressed_stage_dropped,
         "finalize_per_stt_raw": (finalize_events / stt_raw) if stt_raw else None,
         "stage_replace_deferred_per_stt_raw": (deferred / stt_raw) if stt_raw else None,
         "quality_block_per_stt_raw": (quality_blocks / stt_raw) if stt_raw else None,
@@ -456,6 +459,11 @@ def _finalization_observation_payload(marker_counts: Counter[str]) -> dict[str, 
         "stage_queue_recent_final_delta_trimmed_per_stt_raw": (queue_recent_trimmed / stt_raw) if stt_raw else None,
         "finalize_delta_suppressed_stage_retained_per_stt_raw": (
             delta_suppressed_stage_retained / stt_raw
+        )
+        if stt_raw
+        else None,
+        "finalize_delta_suppressed_stage_dropped_per_stt_raw": (
+            delta_suppressed_stage_dropped / stt_raw
         )
         if stt_raw
         else None,

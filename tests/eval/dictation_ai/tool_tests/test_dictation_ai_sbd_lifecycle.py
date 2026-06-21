@@ -25,6 +25,27 @@ class DictationAiSbdLifecycleTest(unittest.TestCase):
         self.assertEqual(state.metrics["finalize_delta_suppressed_stage_retained"], 1)
         self.assertNotIn("segment_state_suppressed", state.metrics)
 
+    def test_repeated_broken_delta_suppression_drops_stale_staged_candidate(self) -> None:
+        state = LifecycleState(
+            language="zh",
+            committed_text="大家好，鸡肉拌牛肉拌，",
+            staged_sentence="大家好，鸡肉拌牛肉拌，这个川菜一定要",
+            staged_confirmations=14,
+            staged_age=13,
+            staged_deferred_age_chunk=8,
+            staged_delta_suppressed_chunks=1,
+        )
+
+        finalized = _finalize_staged_sentence(state, "zh", "replaced_confirmed", 9)
+
+        self.assertEqual(finalized, [])
+        self.assertEqual(state.staged_sentence, "")
+        self.assertEqual(state.staged_delta_suppressed_chunks, 0)
+        self.assertEqual(state.metrics["finalize_delta_suppressed"], 1)
+        self.assertEqual(state.metrics["finalize_delta_suppressed_stage_dropped"], 1)
+        self.assertEqual(state.metrics["segment_state_suppressed"], 1)
+        self.assertNotIn("finalize_delta_suppressed_stage_retained", state.metrics)
+
     def test_recent_final_suffix_recovery_runs_even_when_committed_delta_is_empty(self) -> None:
         state = LifecycleState(
             language="zh",

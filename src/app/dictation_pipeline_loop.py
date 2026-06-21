@@ -13,6 +13,7 @@ from src.app.dictation_pipeline_settings import (
     MAX_RECENT_SHORT_TEXT_REPEATS,
     RECENT_TRANSCRIPT_WINDOW,
     SAMPLE_RATE,
+    delta_suppressed_stage_max_chunks,
     max_staged_sentence_queue,
     no_text_stale_stage_suppress_chunks,
 )
@@ -120,6 +121,7 @@ def run_transcribe_loop(
                 break
             if promoted_sentence and _should_stage_boundary_candidate(promoted_sentence, detected):
                 active_stage.sentence = promoted_sentence
+                active_stage.deltaSuppressedChunks = 0
                 count_metric("stage_queue_recent_final_delta_trimmed", 1)
                 break
             count_metric("stage_queue_recent_final_suppressed", 1)
@@ -225,11 +227,28 @@ def run_transcribe_loop(
             return []
         if _should_suppress_delta_final(staged_before, output_sentence, detected, reason):
             count_metric("finalize_delta_suppressed")
-            count_metric("finalize_delta_suppressed_stage_retained")
+            if active_stage.deferredAgeChunk != chunks:
+                active_stage.deltaSuppressedChunks += 1
             active_stage.deferredAgeChunk = chunks
+            if active_stage.deltaSuppressedChunks >= delta_suppressed_stage_max_chunks():
+                suppress_chunks = active_stage.deltaSuppressedChunks
+                active_stage.clear()
+                count_metric("finalize_delta_suppressed_stage_dropped")
+                count_segment_state("suppressed")
+                worker._emit(
+                    "status",
+                    "받아쓰기 AI delta 보류 stage 폐기: "
+                    f"chunk={chunks} reason={reason} suppress_chunks={suppress_chunks} "
+                    f"staged_tail={_diagnostic_tail(staged_before)} output={output_sentence!r}",
+                    display=False,
+                )
+                promote_next_staged_sentence(detected)
+                return []
+            count_metric("finalize_delta_suppressed_stage_retained")
             worker._emit(
                 "status",
                 "받아쓰기 AI delta 확정 보류: "
+                f"suppress_chunks={active_stage.deltaSuppressedChunks} "
                 f"chunk={chunks} reason={reason} staged_tail={_diagnostic_tail(staged_before)} "
                 f"output={output_sentence!r}",
                 display=False,
@@ -425,6 +444,7 @@ def run_transcribe_loop(
                 ):
                     count_metric("stage_revision_candidate_quality_blocked")
             active_stage.sentence = preferred
+            active_stage.deltaSuppressedChunks = 0
             active_stage.confirmations = _next_revision_confirmation_count(
                 staged_before,
                 preferred,
@@ -1044,6 +1064,10 @@ def run_transcribe_loop(
                 "finalize_delta_suppressed_stage_retained",
                 0,
             )
+            delta_suppressed_stage_dropped_count = chunk_lifecycle_metrics.get(
+                "finalize_delta_suppressed_stage_dropped",
+                0,
+            )
             delta_trimmed_count = chunk_lifecycle_metrics.get("candidate_delta_trimmed", 0)
             stable_prefix_chars = chunk_lifecycle_metrics.get("stable_prefix_chars", 0)
             unstable_tail_chars = chunk_lifecycle_metrics.get("unstable_tail_chars", 0)
@@ -1109,6 +1133,7 @@ def run_transcribe_loop(
                 f"prior_pending_prefix_trimmed={prior_pending_prefix_trimmed_count} "
                 f"recent_echo_suppressed={recent_echo_suppressed_count} "
                 f"finalize_delta_suppressed_stage_retained={delta_suppressed_stage_retained_count} "
+                f"finalize_delta_suppressed_stage_dropped={delta_suppressed_stage_dropped_count} "
                 f"delta_trimmed={delta_trimmed_count} "
                 f"stable_prefix_chars={stable_prefix_chars} unstable_tail_chars={unstable_tail_chars} "
                 f"stable_internal_chars={stable_internal_chars} "

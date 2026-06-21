@@ -14118,3 +14118,102 @@ chunk=2400..2432
 - `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_pet_friendly_dessert_wait_queue_20260621_001` 케이스를 추가했다.
 - 이 케이스는 STT/번역 품질 평가가 아니라 final 확정 lifecycle의 누락, queue 지연, recent-final trim 회귀를 관찰하는 정규 케이스다.
 - 즉시 별도 로직은 추가하지 않는다. 현재 패치의 핵심은 최근 final suffix recovery와 broken delta 보류이며, 이 케이스는 그 변경이 실제 누락 패턴에 유효한지 CUDA 벤치에서 확인할 근거로 둔다.
+
+### 2026-06-21 중국어 BHC takeout 구간 stale delta suppression 케이스와 폐기 임계값 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 13:38:00..13:39:59
+chunk=86..206
+```
+
+사용자 목표 맥락:
+
+- STT 정확도나 번역 품질이 아니라 final 확정 lifecycle의 누락을 줄이는 것이 목표다.
+- 직전 패치에서 broken delta final을 보류하고 active staged 후보를 유지하도록 했지만, 최신 로그에서 이 보류가 지나치게 오래 유지되는 회귀가 확인됐다.
+
+로그 추적:
+
+- active staged 후보 `跟你们分享一下我点的一些吃的。`가 `staged_confirmations=14`, `staged_age=13`까지 유지됐다.
+- 매 chunk에서 새 후보는 `因为他们今天也是蛮早吃完餐。`, `BHC是其中一个...`, `哇，看起来就很好吃。`, `我今天的任务呢...`처럼 계속 바뀌었지만, 기존 active stage를 `replaced_confirmed`로 확정하려는 과정에서 delta가 `我 点 的 一 些 吃 的`처럼 CJK 내부 공백 fragment로 계산됐다.
+- 새 품질 게이트는 이 broken delta를 final로 내보내지 않는 데 성공했지만, active staged 후보를 계속 유지하면서 후속 후보를 모두 막았다.
+- chunk 138의 안정성 지표만 보아도 `finalize_delta_suppressed_stage_retained=5`, 누적 `finalize_delta_suppressed_stage_retained=241`, `finalized=22`, `raw_without_final=116`으로, 보류가 누락의 직접 원인이 된 상태다.
+
+반영:
+
+- `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=2`를 `dictation_pipeline_settings.py`에 추가했다.
+- broken delta 보류는 chunk 단위로 카운트한다. 같은 chunk 안의 여러 completed candidate 때문에 카운터가 과증가하지 않도록 chunk가 바뀐 경우에만 증가한다.
+- 같은 staged 후보가 설정값 이상 반복 보류되면 `finalize_delta_suppressed_stage_dropped`로 suppressed 처리하고 다음 queue 후보로 진행한다.
+- 런타임과 벤치 lifecycle mirror에 동일하게 반영했다.
+- representative source audit과 안정성 로그에 `finalize_delta_suppressed_stage_dropped` 지표를 추가했다.
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_takeout_chicken_delta_suppressed_stale_stage_20260621_001` 케이스를 추가했다.
+
+구간 audit:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 13:38:00" --until "2026-06-21 13:40:00" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-bhc-delta-suppressed-stale-stage.json
+```
+
+결과:
+
+```text
+stt_raw_line_count=122
+finalize_event_count=0
+finalize_per_stt_raw=0.0
+finalize_delta_suppressed_stage_retained_count=748
+finalize_delta_suppressed_stage_retained_per_stt_raw=6.131
+finalize_delta_suppressed_stage_dropped_count=0
+stage_queue_promote_count=0
+representative_readiness.blockers=["transcript lines are missing", "finalize event lines are missing"]
+```
+
+해석:
+
+- broken delta를 즉시 final로 내보내면 문장 파괴가 발생한다.
+- broken delta를 무제한 보류하면 active staged 후보가 queue를 막아 대량 누락이 발생한다.
+- 따라서 보류는 짧은 회복 기회로만 사용하고, 반복 보류는 suppression으로 소비해 생성순서 queue가 다음 후보를 처리하게 해야 한다.
+- 위 audit은 패치 전 로그 기반이므로 dropped가 0인 것이 정상이다. 패치 적용 후 같은 증상이 반복되면 `finalize_delta_suppressed_stage_dropped`가 증가하고 final 흐름이 재개되는지 비교해야 한다.
+
+### 2026-06-21 중국어 BHC signature cheese 구간 누락 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log.1
+2026-06-21 13:38:06..13:38:25
+chunk=101..112
+```
+
+사용자 관측:
+
+- `B H C是其中一个，就在韩国最好吃的炸鸡。`
+- `哇，看起来就很好吃。`
+- `你看，我点的这个是他们家的招牌cheese。`
+
+위 후보들이 반복됐지만 장시간 final이 발생하지 않았다.
+
+구간 audit:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 13:38:06" --until "2026-06-21 13:38:25" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-bhc-signature-cheese-stale-stage.json
+```
+
+결과:
+
+```text
+stt_raw_line_count=21
+finalize_event_count=0
+finalize_delta_suppressed_stage_retained_count=126
+finalize_delta_suppressed_stage_retained_per_stt_raw=6.0
+finalize_delta_suppressed_stage_dropped_count=0
+stage_queue_promote_count=0
+representative_readiness.blockers=["transcript lines are missing", "finalize event lines are missing"]
+```
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_takeout_chicken_signature_cheese_20260621_001` 케이스를 추가했다.
+- 원인은 앞선 BHC takeout 케이스와 동일하다. `跟你们分享一下我点的一些吃的。` active stage가 broken delta `我 点 的 一 些 吃 的`만 만들며 반복 보류되고, 후속 후보들이 queue에서 소비되지 않는다.
+- 별도 로직을 추가하지 않고, 직전 `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS` 보정의 회귀 케이스로 관리한다.

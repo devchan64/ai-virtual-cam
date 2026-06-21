@@ -80,6 +80,11 @@ MAX_STAGED_SENTENCE_QUEUE = 20
 # 텍스트를 final 확정해서는 안 된다.
 NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS = 6
 
+# broken delta final을 보류할 때 active staged 후보를 잠시 유지해 후속 window
+# revision으로 회복할 기회를 준다. 다만 같은 staged 후보가 여러 chunk 동안
+# 같은 broken delta만 만들면 queue를 막아 누락을 만든다.
+DELTA_SUPPRESSED_STAGE_MAX_CHUNKS = 2
+
 
 # 문장 생명주기 final 확정
 #
@@ -263,6 +268,10 @@ def no_text_stale_stage_suppress_chunks() -> int:
     return _dictation_env_int("NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS", NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS)
 
 
+def delta_suppressed_stage_max_chunks() -> int:
+    return _dictation_env_int("DELTA_SUPPRESSED_STAGE_MAX_CHUNKS", DELTA_SUPPRESSED_STAGE_MAX_CHUNKS)
+
+
 def recent_final_extension_min_prefix_units() -> int:
     return _dictation_env_int("RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS", RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS)
 
@@ -320,6 +329,7 @@ def dictation_pipeline_policy() -> dict[str, object]:
         "cjk_char_ranges": CJK_CHAR_RANGES,
         "max_staged_sentence_queue": max_staged_sentence_queue(),
         "no_text_stale_stage_suppress_chunks": no_text_stale_stage_suppress_chunks(),
+        "delta_suppressed_stage_max_chunks": delta_suppressed_stage_max_chunks(),
         "sentence_confirm_chunks": sentence_confirm_chunks(),
         "forced_sentence_confirm_chunks": forced_sentence_confirm_chunks(),
         "sentence_confirm_max_age_chunks": sentence_confirm_max_age_chunks(),
@@ -370,6 +380,7 @@ def lifecycle_tuning_policy() -> dict[str, int]:
     return {
         "max_staged_sentence_queue": max_staged_sentence_queue(),
         "no_text_stale_stage_suppress_chunks": no_text_stale_stage_suppress_chunks(),
+        "delta_suppressed_stage_max_chunks": delta_suppressed_stage_max_chunks(),
         "sentence_confirm_chunks": sentence_confirm_chunks(),
         "forced_sentence_confirm_chunks": forced_sentence_confirm_chunks(),
         "sentence_confirm_max_age_chunks": sentence_confirm_max_age_chunks(),
@@ -470,6 +481,16 @@ def dictation_tuning_manifest() -> list[dict[str, int | float | str]]:
             max_value=30,
             scope="lifecycle",
             intent="suppress stale unconfirmed staged candidates after repeated no-text chunks without treating silence as final evidence",
+        ),
+        _tuning_manifest_entry(
+            "DELTA_SUPPRESSED_STAGE_MAX_CHUNKS",
+            default=DELTA_SUPPRESSED_STAGE_MAX_CHUNKS,
+            current=delta_suppressed_stage_max_chunks(),
+            value_type="int",
+            min_value=1,
+            max_value=10,
+            scope="lifecycle",
+            intent="drop a staged candidate after repeated broken-delta suppression so it cannot block later sentence candidates",
         ),
         _tuning_manifest_entry(
             "RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS",

@@ -48,6 +48,7 @@ class DictationAiSbdRepresentativeSourceAuditTest(unittest.TestCase):
                     "chunk=1 stage_queue_recent_final_suppressed=2 "
                     "stage_queue_recent_final_delta_trimmed=1 "
                     "finalize_delta_suppressed_stage_retained=1 "
+                    "finalize_delta_suppressed_stage_dropped=1 "
                     "lifecycle_metrics=stage_queue_recent_final_suppressed=99,"
                     "stage_queue_recent_final_delta_trimmed=88"
                 ),
@@ -82,9 +83,11 @@ class DictationAiSbdRepresentativeSourceAuditTest(unittest.TestCase):
         self.assertEqual(summary["marker_counts"]["stage_queue_recent_final_suppressed"], 2)
         self.assertEqual(summary["marker_counts"]["stage_queue_recent_final_delta_trimmed"], 1)
         self.assertEqual(summary["marker_counts"]["finalize_delta_suppressed_stage_retained"], 1)
+        self.assertEqual(summary["marker_counts"]["finalize_delta_suppressed_stage_dropped"], 1)
         self.assertEqual(summary["finalization_observation"]["stage_queue_recent_final_suppressed_count"], 2)
         self.assertEqual(summary["finalization_observation"]["stage_queue_recent_final_delta_trimmed_count"], 1)
         self.assertEqual(summary["finalization_observation"]["finalize_delta_suppressed_stage_retained_count"], 1)
+        self.assertEqual(summary["finalization_observation"]["finalize_delta_suppressed_stage_dropped_count"], 1)
         self.assertEqual(
             summary["segment_linkage"],
             {
