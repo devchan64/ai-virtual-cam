@@ -273,6 +273,16 @@ class DictationPipelineNodeTest(unittest.TestCase):
         self.assertEqual(candidate, "现在是一个网红居民楼嘛。")
         self.assertEqual(recent_source, "来之前的时候，我查了一下这个白象居，它。")
 
+    def test_recent_final_delta_recovers_short_cjk_object_extension(self) -> None:
+        candidate, recent_source = _recent_final_output_delta(
+            "这里进来，这里就是它的厕所。",
+            ("这里进来，这里就是。",),
+            "zh",
+        )
+
+        self.assertEqual(candidate, "它的厕所。")
+        self.assertEqual(recent_source, "这里进来，这里就是。")
+
     def test_recent_final_delta_keeps_short_suffix_corrections_suppressed(self) -> None:
         candidate, recent_source = _recent_final_output_delta(
             "所以还是有很多小摊贩在摆摊。",

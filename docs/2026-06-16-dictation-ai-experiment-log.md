@@ -14278,3 +14278,26 @@ finalize_delta_suppressed_stage_dropped_count=0
 - 벤치 lifecycle state에도 `staged_delta_suppressed_chunk_index`를 추가해 운영 루프와 동일하게 동작하도록 맞췄다.
 - stage age/revision용 `deferredAgeChunk`와 broken-delta 보류 카운터를 분리했다.
 - 회귀 테스트는 revision 직후 같은 chunk에서 broken delta가 발생해도 suppression 카운터가 증가하는지 확인한다.
+
+### 2026-06-21 recent final 짧은 CJK suffix 확장 회수
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 13:59:34..14:00:02
+chunk=453..456
+```
+
+관측:
+
+- chunk 453에서 `这里进来，这里就是。`가 먼저 final로 확정됐다.
+- chunk 454 이후 `这里进来，这里就是它的厕所。`가 반복 관측됐지만 최근 final echo로 중복 억제되어 `它的厕所。`가 final-only 번역 입력으로 회수되지 않았다.
+- 구간 audit은 `finalize_per_stt_raw=0.276`으로 final 자체는 있었지만, `stage_replace_deferred_per_stt_raw=0.517`, `stage_queue_recent_final_suppressed_per_stt_raw=0.207`로 최근 final 억제가 의미 suffix를 누락시키는 신호가 있었다.
+
+반영:
+
+- `RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS`를 6에서 4로 낮췄다.
+- CJK prefix extension은 여전히 prefix 8단위 이상을 요구하므로 짧은 echo 전체를 무제한 회수하지 않는다.
+- 기존 1글자 표기 보정(`摆` -> `摆摊`)은 계속 suppress되는지 단위 테스트로 확인한다.
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_room_tour_short_object_extension_20260621_001` 케이스를 추가했다.

@@ -65,10 +65,10 @@ RECENT_TRANSCRIPT_WINDOW = 8
 MAX_RECENT_SHORT_TEXT_REPEATS = 2
 
 # 이미 확정된 final이 후속 window에서 더 긴 문장 prefix로 다시 등장할 때
-# 긴 suffix만 새 후보로 회수하는 보수 조건이다. suffix가 짧으면 단순 표기
-# 보정이나 echo일 가능성이 커서 기존 중복 억제를 유지한다.
+# 긴 suffix만 새 후보로 회수하는 보수 조건이다. CJK는 짧은 목적어 확장도
+# 의미를 바꾸는 경우가 있어 4글자 이상부터 회수한다.
 RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS = 8
-RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS = 6
+RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS = 4
 
 # MAX_STAGED_SENTENCE_QUEUE는 현재 active staged 문장을 아직 소비할 수 없을
 # 때 생성순서 후보를 보존한다. 값을 키우면 SBD 출력이 몰릴 때 final 누락은
