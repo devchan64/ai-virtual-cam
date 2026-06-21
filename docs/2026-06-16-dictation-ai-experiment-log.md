@@ -14750,6 +14750,52 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-21 중국어 exhibition/iPhone photo 구간 delta/queue 지연 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 15:38:38..15:38:56
+chunk=3224..3242 중심
+```
+
+감사 결과:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 15:38:38" --until "2026-06-21 15:38:56" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-zh-153838-153856.json
+```
+
+```text
+stt_raw_line_count=19
+finalize_event_count=9
+finalize_per_stt_raw=0.474
+stage_replace_deferred_count=20
+stage_replace_deferred_per_stt_raw=1.053
+stage_queue_promote_count=6
+stage_queue_promote_per_stt_raw=0.316
+duplicate_suppressed_count=26
+duplicate_suppressed_per_stt_raw=1.368
+quality_block_count=8
+quality_block_per_stt_raw=0.421
+finalize_delta_suppressed_stage_retained_count=6
+finalize_delta_suppressed_stage_dropped_count=2
+stage_queue_recent_final_suppressed_count=4
+```
+
+관측:
+
+- `展区`, `放眼望去`, `几乎都是韩国人`, `人文气息`, `iPhone七Pro Max`, `拍出好看的一片` 조합은 기존 케이스와 겹치지 않는다.
+- `所以呢大家就是放眼望去...韩国人。` stage가 확정 직전 delta suppression에 걸리고, 이후 `TA/一起长大/人文气息` 후보가 queue head로 오래 유지됐다.
+- 후반 `iPhone七Pro Max` 사진 테스트 문장은 same-chunk replacement defer와 delta suppression retained가 반복되어 final 지연이 관측됐다.
+- STT는 `到底不会拍出好看的一片`처럼 부정 형태가 흔들리므로 raw 정답성을 보지 않고, 안정화된 의미 단위가 final로 소비되는지 보는 케이스로 둔다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-5-20260621.jsonl`에 `zh_log_delayed_exhibition_iphone_photo_delta_queue_20260621_001` 케이스를 추가했다.
+- 이 케이스는 delta suppression retained/dropped와 queue head 지연이 함께 나타나는 비교용이다.
+- `sat + cuda + float16` 벤치 결과 없이 로직 변경을 단정하지 않는다.
+
 ### 2026-06-21 중국어 Kobo/creator reading 구간 stage queue 지연 케이스 추가
 
 관측 구간:
