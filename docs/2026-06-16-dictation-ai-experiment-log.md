@@ -14606,3 +14606,42 @@ finalize_delta_suppressed_stage_dropped_count=14
 
 - `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-5-20260621.jsonl`에 `zh_log_missing_hongdae_women_street_recent_final_short_suffix_20260621_001` 케이스를 추가했다.
 - `RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS`를 즉시 2로 낮추지는 않았다. `哦。`, `吗。` 같은 짧은 echo가 fragment final로 늘어날 수 있으므로, 이 변경은 벤치 비교가 필요한 파라미터 후보로 둔다.
+
+### 2026-06-21 중국어 Coco Fresh/fashion 구간 짧은 stage queue 지연 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 14:59:20..14:59:50
+chunk=866..895
+```
+
+감사 결과:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 14:59:20" --until "2026-06-21 14:59:50" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-zh-145920-145950.json
+```
+
+```text
+stt_raw_line_count=31
+finalize_event_count=9
+finalize_per_stt_raw=0.290
+stage_replace_deferred_count=48
+stage_replace_deferred_per_stt_raw=1.548
+duplicate_suppressed_count=79
+duplicate_suppressed_per_stt_raw=2.548
+quality_block_count=19
+finalize_delta_suppressed_stage_dropped_count=0
+```
+
+관측:
+
+- `而且这一顶不到一千。`가 queue에서 먼저 승격된 뒤 `而且这一顶不到一千块。`로 회복되어 final됐다.
+- 이후 `新沙在Coco Fresh的旁边。`, `哦，那个也可爱。`, `因为今年好像也蛮流行那种就是有层次感或两件式的...` 후보가 순서대로 밀리며 stage replacement defer가 반복됐다.
+- 이 구간은 broken delta suppression 병목이 아니다. `finalize_delta_suppressed_stage_dropped=0`이며, 주 원인은 duplicate suppression과 `unconfirmed_cjk` stage 교체 보류다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-5-20260621.jsonl`에 `zh_log_delayed_coco_fresh_fashion_short_stage_queue_20260621_001` 케이스를 추가했다.
+- 현재 근거로는 `short_cjk` 또는 `unconfirmed_cjk`를 더 느슨하게 확정/폐기하는 일반 규칙을 추가하기 어렵다. 짧은 실제 문장 번역 요구와 충돌하므로, 로직 변경은 CUDA 벤치 비교 가능한 후보가 더 쌓일 때까지 보류한다.
