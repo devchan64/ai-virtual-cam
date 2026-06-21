@@ -14568,3 +14568,41 @@ chunk=372..420
 - `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-5-20260621.jsonl`에 `zh_log_delayed_glasses_outer_space_short_cjk_stage_head_20260621_001` 케이스를 추가했다.
 - STT 자체가 흔들린 구간은 기대 문장에 과도하게 넣지 않고, 반복적으로 안정된 핵심 문장만 `expected_final`로 지정했다.
 - 이번 변경은 케이스 보강이다. `short_cjk` 전체 차단은 짧은 실제 문장 번역 요구와 충돌하므로 로직 변경은 보류한다.
+
+### 2026-06-21 중국어 Hongdae/women street 구간 recent-final 짧은 suffix 누락 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 14:55:46..14:56:19
+chunk=652..685
+```
+
+감사 결과:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 14:52:20" --until "2026-06-21 14:56:15" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-zh-145220-145615.json
+```
+
+```text
+stt_raw_line_count=235
+finalize_event_count=46
+finalize_per_stt_raw=0.196
+stage_replace_deferred_count=174
+stage_replace_deferred_per_stt_raw=0.740
+quality_block_count=62
+finalize_delta_suppressed_stage_retained_count=44
+finalize_delta_suppressed_stage_dropped_count=14
+```
+
+관측:
+
+- `这条进去里面就全部都是女人街必买衣服。`가 먼저 final 확정됐다.
+- 후속 window에서 더 완전한 `这条进去里面就全部都是女人街必买衣服专区。`가 반복됐지만, 최근 final 유사 후보로 suppressed되며 `专区` suffix가 final에 반영되지 않았다.
+- current recent-final extension recovery는 `RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS=4`보다 짧은 suffix를 echo로 취급한다. 이번 suffix는 `专区` 2글자라 회수되지 않는다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-5-20260621.jsonl`에 `zh_log_missing_hongdae_women_street_recent_final_short_suffix_20260621_001` 케이스를 추가했다.
+- `RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS`를 즉시 2로 낮추지는 않았다. `哦。`, `吗。` 같은 짧은 echo가 fragment final로 늘어날 수 있으므로, 이 변경은 벤치 비교가 필요한 파라미터 후보로 둔다.
