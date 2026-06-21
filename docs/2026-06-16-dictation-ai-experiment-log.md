@@ -14837,6 +14837,48 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-21 중국어 climbing 구간 candidate buffer 소비 순서 원칙 보강
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 21:06:50..21:07:20
+chunk=747..764 중심
+```
+
+관측:
+
+- raw STT window는 `我现在推广攀岩...`, `对，推广赛艇，推广攀岩，也厉害。`, `老人怕什么呀？`, `怕摔跤啊。`, `攀岩要形成一种摔跤...` 순서로 안정화됐다.
+- 실행 로그에서는 `老人怕什么呀？`가 먼저 final로 나간 뒤, buffer에 남아 있던 `对推广赛艇推广攀岩也厉害。`가 뒤늦게 승격되어 소비 순서가 뒤집혔다.
+- 이 현상은 특정 문구 문제가 아니라 candidate buffer가 생성순서/관측 age 원칙을 충분히 강제하지 못한 문제로 본다.
+
+반영:
+
+- `zh_log_climbing_queue_order_fragment_20260621_001` 케이스를 추가했다.
+- active staged 후보가 final 직전일 때, candidate buffer head가 현재 chunk 기준으로 active보다 오래 관측된 다른 revision 계열이면 active final을 보류하고 buffer head를 먼저 재평가하도록 했다. stale 한계를 넘은 buffer 후보는 revision 흡수나 순서 보류 근거로 쓰지 않고 폐기한다.
+- 같은 revision 계열의 더 좋은 후보를 흡수하는 기존 경로와 분리했다.
+- 실시간 파이프라인 기준안에는 `stage_finalize_deferred_for_queue_order` 관측 지표를 추가했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_pipeline_nodes
+Ran 44 tests in 0.005s, OK
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases --max-drafts 0
+case_count=1223, expected_final_case_count=1219, en=429, ko=462, zh=332
+
+git diff --check
+OK
+```
+
+제한:
+
+- zh shard의 `sat + cuda + float16` 벤치는 sandbox 내부에서 초기화 fail-fast로 중단됐다.
+- 동일 명령의 sandbox 밖 실행 요청은 환경 정책에서 거부됐다.
+- CPU/mock fallback은 성능 근거가 아니므로 사용하지 않았다.
+
 ### 2026-06-21 중국어 coin/coffee 구간 recent final tail anchor 보강
 
 관측 구간:

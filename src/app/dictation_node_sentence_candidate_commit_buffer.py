@@ -30,18 +30,34 @@ class SentenceCandidateCommitBufferNode:
     def prefer_queued_revision_for_active(
         self,
         *,
+        chunk_index: int,
+        max_promotion_age_chunks: int,
         count_metric: MetricCounter,
         count_segment_state: MetricCounter,
     ) -> bool:
         active_sentence = self.active.sentence
         if not active_sentence:
             return False
-        for index, entry in enumerate(self._queue):
+        index = 0
+        while index < len(self._queue):
+            entry = self._queue[index]
+            queued_deferred_age_chunk = int(entry["deferred_age_chunk"])
+            queued_age = int(entry["age"])
+            if queued_deferred_age_chunk >= 0:
+                queued_age = max(queued_age, chunk_index - queued_deferred_age_chunk)
+            entry["age"] = queued_age
+            if queued_age > max_promotion_age_chunks:
+                del self._queue[index]
+                count_metric("stage_queue_stale_promote_suppressed", 1)
+                count_segment_state("suppressed", 1)
+                continue
             queued_sentence = str(entry["sentence"])
             if not _sentences_are_revisions(active_sentence, queued_sentence):
+                index += 1
                 continue
             preferred = _prefer_sentence_revision(active_sentence, queued_sentence)
             if preferred == active_sentence:
+                index += 1
                 continue
             entry["sentence"] = preferred
             self.active.apply_buffer_entry(entry)
@@ -51,6 +67,52 @@ class SentenceCandidateCommitBufferNode:
             count_segment_state("revised", 1)
             return True
         return False
+
+    def prefer_older_queued_candidate_before_active(
+        self,
+        *,
+        chunk_index: int,
+        max_promotion_age_chunks: int,
+        count_metric: MetricCounter,
+        count_segment_state: MetricCounter,
+    ) -> bool:
+        active_sentence = self.active.sentence
+        if not active_sentence or not self._queue:
+            return False
+        while self._queue:
+            queued_entry = self._queue[0]
+            queued_sentence = str(queued_entry["sentence"])
+            if _sentences_are_revisions(active_sentence, queued_sentence):
+                return False
+            queued_deferred_age_chunk = int(queued_entry["deferred_age_chunk"])
+            queued_age = int(queued_entry["age"])
+            if queued_deferred_age_chunk >= 0:
+                queued_age = max(queued_age, chunk_index - queued_deferred_age_chunk)
+            queued_entry["age"] = queued_age
+            if queued_age > max_promotion_age_chunks:
+                self._queue.popleft()
+                count_metric("stage_queue_stale_promote_suppressed", 1)
+                count_segment_state("suppressed", 1)
+                continue
+            if queued_age <= self.active.age:
+                return False
+            break
+        if not self._queue:
+            return False
+        queued_entry = self._queue[0]
+        queued_entry["age"] = queued_age
+        current_active_entry = {
+            "sentence": self.active.sentence,
+            "confirmations": self.active.confirmations,
+            "age": self.active.age,
+            "forced": self.active.forced,
+            "deferred_age_chunk": self.active.deferredAgeChunk,
+        }
+        queued_entry = self._queue.popleft()
+        self.active.apply_buffer_entry(queued_entry)
+        self._queue.appendleft(current_active_entry)
+        count_metric("stage_finalize_deferred_for_queue_order", 1)
+        return True
 
     def enqueue_or_revision(
         self,

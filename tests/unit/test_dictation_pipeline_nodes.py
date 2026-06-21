@@ -779,6 +779,8 @@ class DictationPipelineNodeTest(unittest.TestCase):
             ),
         ):
             deferred = node.prefer_queued_revision_for_active(
+                chunk_index=12,
+                max_promotion_age_chunks=8,
                 count_metric=count_metric,
                 count_segment_state=count_state,
             )
@@ -819,6 +821,8 @@ class DictationPipelineNodeTest(unittest.TestCase):
         )
 
         deferred = node.prefer_queued_revision_for_active(
+            chunk_index=737,
+            max_promotion_age_chunks=8,
             count_metric=count_metric,
             count_segment_state=count_state,
         )
@@ -829,6 +833,229 @@ class DictationPipelineNodeTest(unittest.TestCase):
         self.assertEqual(metrics["stage_finalize_deferred_for_queue_revision"], 1)
         self.assertEqual(metrics["stage_revision"], 1)
         self.assertEqual(states["revised"], 1)
+
+    def test_commit_buffer_drops_stale_queued_revision_before_active_final(self) -> None:
+        metrics: dict[str, int] = {}
+        states: dict[str, int] = {}
+
+        def count_metric(name: str, amount: int = 1) -> None:
+            metrics[name] = metrics.get(name, 0) + amount
+
+        def count_state(name: str, amount: int = 1) -> None:
+            states[name] = states.get(name, 0) + amount
+
+        node = SentenceCandidateCommitBufferNode(max_size=4)
+        node.active.start("short fragment.", forced=False, chunk_index=10)
+        node.active.confirmations = 3
+        node.active.age = 3
+        stable = SimpleNamespace(
+            stable_internal_ratio=0.0,
+            stable_internal_chars=0,
+            stable_overlap_source="none",
+        )
+        node.enqueue_or_revision(
+            candidate="short fragment with stable tail.",
+            forced=False,
+            chunk_index=1,
+            stable_analysis=stable,
+            count_metric=count_metric,
+            count_segment_state=count_state,
+        )
+
+        with (
+            patch("src.app.dictation_node_sentence_candidate_commit_buffer._sentences_are_revisions", return_value=True),
+            patch(
+                "src.app.dictation_node_sentence_candidate_commit_buffer._prefer_sentence_revision",
+                return_value="short fragment with stable tail.",
+            ),
+        ):
+            deferred = node.prefer_queued_revision_for_active(
+                chunk_index=12,
+                max_promotion_age_chunks=8,
+                count_metric=count_metric,
+                count_segment_state=count_state,
+            )
+
+        self.assertFalse(deferred)
+        self.assertEqual(node.active.sentence, "short fragment.")
+        self.assertEqual(len(node), 0)
+        self.assertEqual(metrics["stage_queue_stale_promote_suppressed"], 1)
+        self.assertNotIn("stage_finalize_deferred_for_queue_revision", metrics)
+        self.assertEqual(states["suppressed"], 1)
+
+    def test_commit_buffer_prefers_older_queued_candidate_before_active_final(self) -> None:
+        metrics: dict[str, int] = {}
+        states: dict[str, int] = {}
+
+        def count_metric(name: str, amount: int = 1) -> None:
+            metrics[name] = metrics.get(name, 0) + amount
+
+        def count_state(name: str, amount: int = 1) -> None:
+            states[name] = states.get(name, 0) + amount
+
+        node = SentenceCandidateCommitBufferNode(max_size=4)
+        node.active.start("老人怕什么呀？", forced=False, chunk_index=752)
+        node.active.confirmations = 3
+        node.active.age = 3
+        stable = SimpleNamespace(
+            stable_internal_ratio=0.0,
+            stable_internal_chars=0,
+            stable_overlap_source="none",
+        )
+        node.enqueue_or_revision(
+            candidate="对推广赛艇推广攀岩也厉害。",
+            forced=False,
+            chunk_index=746,
+            stable_analysis=stable,
+            count_metric=count_metric,
+            count_segment_state=count_state,
+        )
+        node._queue[0]["age"] = 6
+
+        deferred = node.prefer_older_queued_candidate_before_active(
+            chunk_index=752,
+            max_promotion_age_chunks=8,
+            count_metric=count_metric,
+            count_segment_state=count_state,
+        )
+
+        self.assertTrue(deferred)
+        self.assertEqual(node.active.sentence, "对推广赛艇推广攀岩也厉害。")
+        self.assertEqual(node.active.age, 6)
+        self.assertEqual(node.queued_sentences(), ("老人怕什么呀？",))
+        self.assertEqual(metrics["stage_finalize_deferred_for_queue_order"], 1)
+
+    def test_commit_buffer_does_not_prefer_newer_queued_candidate_before_active_final(self) -> None:
+        metrics: dict[str, int] = {}
+        states: dict[str, int] = {}
+
+        def count_metric(name: str, amount: int = 1) -> None:
+            metrics[name] = metrics.get(name, 0) + amount
+
+        def count_state(name: str, amount: int = 1) -> None:
+            states[name] = states.get(name, 0) + amount
+
+        node = SentenceCandidateCommitBufferNode(max_size=4)
+        node.active.start("老人怕什么呀？", forced=False, chunk_index=752)
+        node.active.confirmations = 3
+        node.active.age = 6
+        stable = SimpleNamespace(
+            stable_internal_ratio=0.0,
+            stable_internal_chars=0,
+            stable_overlap_source="none",
+        )
+        node.enqueue_or_revision(
+            candidate="怕摔跤啊。",
+            forced=False,
+            chunk_index=753,
+            stable_analysis=stable,
+            count_metric=count_metric,
+            count_segment_state=count_state,
+        )
+        node._queue[0]["age"] = 2
+
+        deferred = node.prefer_older_queued_candidate_before_active(
+            chunk_index=754,
+            max_promotion_age_chunks=8,
+            count_metric=count_metric,
+            count_segment_state=count_state,
+        )
+
+        self.assertFalse(deferred)
+        self.assertEqual(node.active.sentence, "老人怕什么呀？")
+        self.assertEqual(node.queued_sentences(), ("怕摔跤啊。",))
+        self.assertNotIn("stage_finalize_deferred_for_queue_order", metrics)
+
+    def test_commit_buffer_computes_older_queue_order_from_current_chunk(self) -> None:
+        metrics: dict[str, int] = {}
+        states: dict[str, int] = {}
+
+        def count_metric(name: str, amount: int = 1) -> None:
+            metrics[name] = metrics.get(name, 0) + amount
+
+        def count_state(name: str, amount: int = 1) -> None:
+            states[name] = states.get(name, 0) + amount
+
+        node = SentenceCandidateCommitBufferNode(max_size=4)
+        node.active.start("老人怕什么呀？", forced=False, chunk_index=752)
+        node.active.confirmations = 3
+        node.active.age = 3
+        stable = SimpleNamespace(
+            stable_internal_ratio=0.0,
+            stable_internal_chars=0,
+            stable_overlap_source="none",
+        )
+        node.enqueue_or_revision(
+            candidate="对推广赛艇推广攀岩也厉害。",
+            forced=False,
+            chunk_index=746,
+            stable_analysis=stable,
+            count_metric=count_metric,
+            count_segment_state=count_state,
+        )
+
+        deferred = node.prefer_older_queued_candidate_before_active(
+            chunk_index=752,
+            max_promotion_age_chunks=8,
+            count_metric=count_metric,
+            count_segment_state=count_state,
+        )
+
+        self.assertTrue(deferred)
+        self.assertEqual(node.active.sentence, "对推广赛艇推广攀岩也厉害。")
+        self.assertEqual(node.active.age, 6)
+        self.assertEqual(node.queued_sentences(), ("老人怕什么呀？",))
+        self.assertEqual(metrics["stage_finalize_deferred_for_queue_order"], 1)
+
+    def test_commit_buffer_drops_stale_queue_head_before_order_defer(self) -> None:
+        metrics: dict[str, int] = {}
+        states: dict[str, int] = {}
+
+        def count_metric(name: str, amount: int = 1) -> None:
+            metrics[name] = metrics.get(name, 0) + amount
+
+        def count_state(name: str, amount: int = 1) -> None:
+            states[name] = states.get(name, 0) + amount
+
+        node = SentenceCandidateCommitBufferNode(max_size=4)
+        node.active.start("老人怕什么呀？", forced=False, chunk_index=752)
+        node.active.confirmations = 3
+        node.active.age = 3
+        stable = SimpleNamespace(
+            stable_internal_ratio=0.0,
+            stable_internal_chars=0,
+            stable_overlap_source="none",
+        )
+        node.enqueue_or_revision(
+            candidate="过期的旧候选。",
+            forced=False,
+            chunk_index=730,
+            stable_analysis=stable,
+            count_metric=count_metric,
+            count_segment_state=count_state,
+        )
+        node.enqueue_or_revision(
+            candidate="对推广赛艇推广攀岩也厉害。",
+            forced=False,
+            chunk_index=746,
+            stable_analysis=stable,
+            count_metric=count_metric,
+            count_segment_state=count_state,
+        )
+
+        deferred = node.prefer_older_queued_candidate_before_active(
+            chunk_index=752,
+            max_promotion_age_chunks=8,
+            count_metric=count_metric,
+            count_segment_state=count_state,
+        )
+
+        self.assertTrue(deferred)
+        self.assertEqual(node.active.sentence, "对推广赛艇推广攀岩也厉害。")
+        self.assertEqual(node.queued_sentences(), ("老人怕什么呀？",))
+        self.assertEqual(metrics["stage_queue_stale_promote_suppressed"], 1)
+        self.assertEqual(metrics["stage_finalize_deferred_for_queue_order"], 1)
+        self.assertEqual(states["suppressed"], 1)
 
 
 if __name__ == "__main__":
