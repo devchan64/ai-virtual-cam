@@ -1243,6 +1243,9 @@ def _recent_final_sentence_delta(candidate: str, recent_sentence: str, language:
     tail_subset_delta = _recent_final_tail_subset_echo_delta(candidate_words, recent_words)
     if tail_subset_delta is not None:
         return tail_subset_delta
+    fuzzy_suffix_delta = _recent_final_fuzzy_suffix_echo_delta(candidate_words, recent_words)
+    if fuzzy_suffix_delta is not None:
+        return fuzzy_suffix_delta
     if min(len(candidate_words), len(recent_words)) < 8:
         suffix_delta = _recent_final_suffix_delta(candidate_words, recent_words)
         if suffix_delta is not None:
@@ -1375,6 +1378,25 @@ def _recent_final_tail_subset_echo_delta(candidate_words: list[str], recent_word
             best_ratio = ratio
             best_end_gap = end_gap
     if best_ratio >= 0.90 and best_end_gap <= 2:
+        return ""
+    return None
+
+
+def _recent_final_fuzzy_suffix_echo_delta(candidate_words: list[str], recent_words: list[str]) -> str | None:
+    if len(candidate_words) < 8 or len(candidate_words) >= len(recent_words):
+        return None
+    if not (_has_cjk_words(candidate_words) and _has_cjk_words(recent_words)):
+        return None
+    matcher = SequenceMatcher(None, recent_words, candidate_words, autojunk=False)
+    for block in sorted(matcher.get_matching_blocks(), key=lambda item: item.size, reverse=True):
+        if block.size < 6:
+            continue
+        recent_end_gap = len(recent_words) - (block.a + block.size)
+        candidate_end_gap = len(candidate_words) - (block.b + block.size)
+        if recent_end_gap > 1 or candidate_end_gap > 1:
+            continue
+        if block.size / max(len(candidate_words), 1) < 0.50:
+            continue
         return ""
     return None
 

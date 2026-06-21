@@ -14688,6 +14688,49 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 밖 실행 승인이 환경 정책에서 거절되어 실행하지 못했다.
 - CPU/mock fallback은 성능 근거가 아니므로 사용하지 않았다.
 
+### 2026-06-21 중국어 Blue Bottle 컵 구간 fuzzy suffix echo 보강
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 20:52:48..20:53:28
+chunk=323..363 중심
+```
+
+관측:
+
+- `然后大家也在物色他要的杯子，这个也不错。`가 final로 확정된 뒤, 후속 window에서 `和他一样的杯子，这个也不错啊。`가 다시 final로 확정됐다.
+- 두 문장은 앞부분 STT revision은 다르지만 `杯子，这个也不错` tail이 같은 구간에 정렬된다.
+- 기존 recent-final tail subset 억제는 후보 전체가 최근 final tail에 거의 그대로 들어갈 때만 동작하므로, 앞부분이 바뀌고 끝에 `啊`가 붙은 suffix duplicate를 억제하지 못했다.
+- 이 구간은 특정 브랜드/컵 문구 문제가 아니라 최근 final memory가 suffix common-run echo를 얼마나 좁게 억제하는지 보는 공통 lifecycle 케이스다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-6-20260621.jsonl`에 `zh_log_blue_bottle_cup_suffix_echo_20260621_001` 케이스를 추가했다.
+- CJK candidate가 최근 final보다 짧고, 양쪽 끝에 정렬된 common suffix block이 6 unit 이상이며 candidate coverage가 50% 이상일 때 recent-final echo로 suppress하는 `_recent_final_fuzzy_suffix_echo_delta()`를 추가했다.
+- 조건은 `recent_end_gap <= 1`, `candidate_end_gap <= 1`로 제한해, 새 문장 suffix 회수나 긴 확장 delta와 섞이지 않게 했다.
+- `和他一样的杯子，这个也不错啊。`는 echo로 억제하고, `没有玻璃杯，只有这种保温杯。` 같은 후속 독립 문장은 유지하는 회귀 테스트를 추가했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.unit.test_dictation_pipeline_nodes tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report
+Ran 64 tests in 0.016s, OK
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases --max-drafts 0
+case_count=1221, expected_final_case_count=1217, en=429, ko=462, zh=330
+
+git diff --check
+OK
+```
+
+제한:
+
+- shard 벤치 명령은 sandbox 내부에서 `sat + cuda + float16` 초기화 fail-fast로 중단됐다.
+- 동일 명령의 sandbox 밖 실행 요청은 환경 정책에서 거부됐다.
+- CPU/mock fallback은 성능 근거가 아니므로 사용하지 않았다.
+
 제한:
 
 - shard CUDA 벤치 명령 `./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py --cases tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-6-20260621.jsonl --output .tmp/eval/dictation-ai-sbd/zh-6-20260621-monitoring-update.json`은 sandbox 내부에서 `sat + cuda + float16` 초기화 fail-fast로 중단됐다.

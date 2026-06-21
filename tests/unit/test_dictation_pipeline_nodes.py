@@ -412,6 +412,26 @@ class DictationPipelineNodeTest(unittest.TestCase):
         self.assertEqual(candidate, "")
         self.assertEqual(recent_source, "这么好啊。")
 
+    def test_recent_final_delta_suppresses_fuzzy_cjk_suffix_echo(self) -> None:
+        candidate, recent_source = _recent_final_output_delta(
+            "和他一样的杯子，这个也不错啊。",
+            ("然后大家也在物色他要的杯子，这个也不错。",),
+            "zh",
+        )
+
+        self.assertEqual(candidate, "")
+        self.assertEqual(recent_source, "然后大家也在物色他要的杯子，这个也不错。")
+
+    def test_recent_final_delta_keeps_unrelated_cjk_after_suffix_echo(self) -> None:
+        candidate, recent_source = _recent_final_output_delta(
+            "没有玻璃杯，只有这种保温杯。",
+            ("然后大家也在物色他要的杯子，这个也不错。",),
+            "zh",
+        )
+
+        self.assertEqual(candidate, "没有玻璃杯，只有这种保温杯。")
+        self.assertIsNone(recent_source)
+
     def test_korean_revision_reset_uses_token_sentence_similarity(self) -> None:
         self.assertFalse(
             _should_reset_revision_age(
