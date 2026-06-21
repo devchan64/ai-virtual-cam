@@ -14412,3 +14412,24 @@ chunk=1909..1922
 
 - `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_winter_shopping_hat_queue_head_stall_20260621_001` 케이스를 추가했다.
 - 로직 추가 변경은 하지 않았다. 같은 계열의 queue head stall이 새 lifecycle 규칙에서 줄어드는지 벤치로 비교한다.
+
+### 2026-06-21 중국어 hand/broadcast 구간 queue false final 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 14:27:08..14:27:17
+chunk=2104..2115
+```
+
+관측:
+
+- queue 길이가 20까지 차고 `stage_queue_drop_oldest`, `stage_queue_promote`가 반복됐다.
+- chunk 2095 인근에서 `请你喝完它。`, `一点点，一点点。`, `一定你的肚子瘦一下啊...` 같은 짧거나 불안정한 후보가 false final로 나간 뒤, 실제 반복되는 `不要用手去看，用手播。`, `两只手一起播。`, `要滑动，快点。` 구간이 늦게 처리됐다.
+- 최신 로그에도 `stage_replace_deferred_same_chunk`가 없으므로 현재 실행 프로세스는 `b895de6` 적용 전 상태로 판단한다. 이 케이스는 새 lifecycle 규칙 재시작 후 비교 대상이다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_hand_broadcast_queue_false_final_20260621_001` 케이스를 추가했다.
+- 추가 로직 변경은 하지 않았다. 현재 코드 변경이 런타임에 적용된 뒤 같은 chunk 승격/교체 경로가 줄어드는지 벤치와 로그로 확인한다.
