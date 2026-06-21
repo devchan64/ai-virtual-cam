@@ -14750,6 +14750,34 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-21 중국어 BHC signature cheese 구간 재확인
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log.11
+2026-06-21 13:38:15..13:38:26
+chunk=102..113 중심
+```
+
+관측:
+
+- 사용자가 제시한 `B H C...招牌cheese` 구간은 이미 `zh_log_missing_takeout_chicken_signature_cheese_20260621_001`로 정식 케이스에 등록되어 있다.
+- 같은 계열의 선행 흐름도 `zh_log_missing_takeout_chicken_delta_suppressed_stale_stage_20260621_001`로 등록되어 있어 새 케이스를 중복 추가하지 않는다.
+- 로그상 직접 원인은 `跟你们分享一下我点的一些吃的。` stale stage가 유지된 상태에서 `BHC是其中一个...`, `哇，看起来就很好吃。`, `你看，我点的这个是他们家的招牌cheese。` 후보가 계속 replacement로 들어온 것이다.
+- 확정 시도는 있었지만 output delta가 `我 点 的 一 些 吃 的` 같은 CJK 내부 공백 fragment로 계산되어 `finalize_delta_suppressed_stage_retained`가 반복됐다.
+- 현재 코드에는 `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=2`와 관련 lifecycle 테스트가 이미 존재한다. 따라서 이번 재확인은 케이스 보강보다 현 코드 기준 CUDA 벤치 재검증 대상이다.
+
+검증 제한:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py --cases tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl --output .tmp/eval/dictation-ai-sbd/bhc-zh-f-current.json
+[dictation-ai-sbd-benchmark] error: sentence boundary backend 'sat' initialization failed: model=sat-3l-sm device=cuda compute=float16. Fail-Fast: fix the model/device/runtime instead of falling back to regex.
+```
+
+- sandbox 내부에서는 CUDA backend 초기화가 실패해 현재 코드 기준 벤치 수치를 만들지 못했다.
+- CPU/mock fallback은 성능 근거로 사용하지 않는다.
+
 ### 2026-06-21 중국어 Seongsu last-day popup/cafe 구간 지연 케이스 추가
 
 관측 구간:
