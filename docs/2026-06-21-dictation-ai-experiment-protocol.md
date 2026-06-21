@@ -30,7 +30,7 @@
 
 이 분리는 결과 해석을 위한 안전장치다. `tool_tests`가 통과했다는 것은 논문/벤치 도구의 입출력 계약이 깨지지 않았다는 뜻이지, SBD 로직의 성능이 좋아졌다는 뜻이 아니다. 성능 근거는 계속 실제 `tests/eval/dictation_ai/sbd_benchmark.py`를 `sat + cuda + float16`로 실행한 report만 사용한다.
 
-`tests/eval/dictation_ai/` 루트는 현재 실험일지와 논문 프로토콜에서 직접 실행 명령으로 참조하는 entrypoint를 유지한다. 파일 수가 늘어났기 때문에 도메인 해석은 [tests/eval/dictation_ai/README.md](../tests/eval/dictation_ai/README.md)의 분류를 따른다. 새 보조 모듈은 루트에 추가하지 않고 benchmark core, case corpus, parameter sweep/evidence, paper audit, representative workflow, structural workflow 중 하나의 하위 도메인으로 배치한다.
+`tests/eval/dictation_ai/` 루트는 `sbd_benchmark.py` 단일 entrypoint만 유지한다. 기본 replay는 기존 benchmark options로 실행하고, sweep/case/paper/representative/structural 보조 작업은 같은 파일의 subcommand로 실행한다. 실제 구현은 `benchmark/`, `cases/`, `sweeps/`, `paper/`, `representative/`, `structural/` 하위 도메인으로 나눈다. 도메인 해석은 [tests/eval/dictation_ai/README.md](../tests/eval/dictation_ai/README.md)의 분류를 따른다. 새 보조 모듈은 루트에 추가하지 않고 하위 도메인으로 배치한다.
 
 ## 재구성한 최소 실험 설계
 
@@ -165,7 +165,7 @@
 | final-only sink가 번역 안정성을 높였다. | 시스템 계약과 speech translation segmentation 배경만 있음 | 보류 | final event, translation request id, translation output replay |
 | raw STT 모델 정확도를 개선했다. | 없음. 현재 입력은 STT window hypothesis replay | 사용 금지 | 별도 참조 전사와 ASR CER/WER 평가 |
 
-최신 evidence inventory 기준으로 전체 report 재고에는 exploratory/incomplete 결과가 섞여 있다. `validate_sbd_evidence_report.py --complete-only --summary-only` 기준 전체 report는 135개이고, complete paper-evidence report는 23개다. complete subset은 `experiment_stage=challenge-replay`, `claim_scope_key=failure-lifecycle-tradeoff`로만 구성되며 `complete_mixed_experiment_stage=false`, `complete_mixed_claim_scope_key=false`다. 따라서 논문 본문에 직접 옮길 수 있는 수치는 이 23개 complete report와 그 summary로 제한한다. 나머지 exploratory/incomplete report는 실험 설계나 후속 후보를 설명할 때만 사용한다.
+최신 evidence inventory 기준으로 전체 report 재고에는 exploratory/incomplete 결과가 섞여 있다. `sbd_benchmark.py validate-evidence --complete-only --summary-only` 기준 전체 report는 135개이고, complete paper-evidence report는 23개다. complete subset은 `experiment_stage=challenge-replay`, `claim_scope_key=failure-lifecycle-tradeoff`로만 구성되며 `complete_mixed_experiment_stage=false`, `complete_mixed_claim_scope_key=false`다. 따라서 논문 본문에 직접 옮길 수 있는 수치는 이 23개 complete report와 그 summary로 제한한다. 나머지 exploratory/incomplete report는 실험 설계나 후속 후보를 설명할 때만 사용한다.
 
 논문 표 작성에 사용할 표준 evidence package 산출물은 다음 두 파일로 고정한다.
 
@@ -175,21 +175,21 @@
 이 파일은 다음 명령으로 재생성한다.
 
 ```text
-./.venv/bin/python tests/eval/dictation_ai/summarize_sbd_evidence_reports.py \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py summarize-evidence \
   .tmp/eval/dictation-ai-sbd/parameter-sweeps \
   --complete-only \
   --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
   --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.md
 ```
 
-같은 성격의 임시 summary가 `.tmp/eval/dictation-ai-sbd/` 바로 아래에 있더라도, 논문 본문과 실험일지는 위 표준 경로의 값을 기준으로 인용한다. 표준 summary를 갱신한 뒤에는 `validate_sbd_evidence_report.py --complete-only --summary-only` 결과의 `complete_report_count`, `complete_experiment_stage_counts`, `complete_claim_scope_key_counts`, `complete_mixed_*` 값을 함께 확인한다.
+같은 성격의 임시 summary가 `.tmp/eval/dictation-ai-sbd/` 바로 아래에 있더라도, 논문 본문과 실험일지는 위 표준 경로의 값을 기준으로 인용한다. 표준 summary를 갱신한 뒤에는 `sbd_benchmark.py validate-evidence --complete-only --summary-only` 결과의 `complete_report_count`, `complete_experiment_stage_counts`, `complete_claim_scope_key_counts`, `complete_mixed_*` 값을 함께 확인한다.
 
 표준 summary JSON과 Markdown은 `case_set_summary`, `baseline_metric_summary`, `paper_claim_matrix`, `lifecycle_replay_summary`도 포함한다. `case_set_summary`는 complete report들이 같은 case 집합과 언어 분포를 사용했는지 확인하고, `baseline_metric_summary`는 complete report들의 baseline metric이 같은 값인지 확인해 논문에 옮길 반올림 수치의 기준값을 제공한다. `paper_claim_matrix`는 complete evidence package가 각 논문 주장에 대해 `사용 가능`, `보류`, `사용 금지` 중 어떤 상태인지 자동으로 남긴다. `lifecycle_replay_summary`는 complete report 전체의 replay parity, 운영 loop 상태 소유자, benchmark replay 상태 소유자, replay에 없는 runtime signal을 집계한다. 논문 초안에 새 주장을 추가하거나 abstract 표현을 바꿀 때는 먼저 이 행렬의 상태와 `required_next_evidence`를 확인하고, 모든 complete report가 `state_machine_parity=partial`이면 운영 loop와 동일 검증을 했다고 쓰지 않는다. 이 금지는 `paper_claim_matrix.runtime_loop_equivalence` 행에도 별도 claim으로 남긴다.
 
 논문 초안을 수정한 뒤에는 다음 audit으로 금지/보류 claim의 방어 문장이 남아 있는지 확인한다. 이 도구는 문장 의미를 완전히 판정하지 않고, `paper_claim_matrix`에서 `사용 금지` 또는 `보류`인 주요 claim에 대응하는 안전 문구가 초안에 존재하는지만 확인한다.
 
 ```text
-./.venv/bin/python tests/eval/dictation_ai/audit_paper_claim_scope.py \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py paper-claim-scope \
   --summary .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
   --paper docs/paper/ko-revision-aware-realtime-stt.md
 ```
@@ -197,14 +197,14 @@
 비교군 문헌을 논문에 직접 넣을 때는 다음 audit으로 범위 방어 문장이 남아 있는지도 확인한다. 이 도구는 현재 `Optimizing Sentence Segmentation for Speech Translation`처럼 비교군으로만 허용한 문헌이 직접 구현 근거처럼 읽히지 않도록 guard phrase를 요구하고, 원문 확보 실패 또는 범위 밖으로 분류한 URL이 초안에 들어오면 실패한다.
 
 ```text
-./.venv/bin/python tests/eval/dictation_ai/audit_paper_reference_scope.py \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py paper-reference-scope \
   --paper docs/paper/ko-revision-aware-realtime-stt.md
 ```
 
 논문 초안의 기준선 metric 숫자, report 수, case 수, 언어별 case 수를 수정하거나 표준 summary를 재생성한 뒤에는 다음 audit으로 본문에 남은 수치가 `baseline_metric_summary`와 `case_set_summary`에 일치하는지도 확인한다.
 
 ```text
-./.venv/bin/python tests/eval/dictation_ai/audit_paper_evidence_numbers.py \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py paper-evidence-numbers \
   --summary .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
   --paper docs/paper/ko-revision-aware-realtime-stt.md
 ```
@@ -212,7 +212,7 @@
 논문 초안과 표준 evidence package를 함께 점검할 때는 다음 통합 audit을 사용한다. 이 audit은 complete report 재고, claim guard, evidence number, reference scope, follow-up readiness를 한 번에 확인한다.
 
 ```text
-./.venv/bin/python tests/eval/dictation_ai/audit_paper_readiness.py \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py paper-readiness \
   .tmp/eval/dictation-ai-sbd/parameter-sweeps \
   --summary .tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json \
   --paper docs/paper/ko-revision-aware-realtime-stt.md \
@@ -297,7 +297,7 @@ review packet은 manifest의 `source_started_at`과 `source_ended_at` 범위 안
 구조 실험 후보는 기존 CUDA benchmark report에서 다음 도구로 뽑는다.
 
 ```text
-./.venv/bin/python tests/eval/dictation_ai/select_sbd_structural_cases.py \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py select-structural-cases \
   .tmp/eval/dictation-ai-sbd/20260621-protocol-baseline.json \
   --limit 16 \
   --case-output .tmp/eval/dictation-ai-sbd/structural-lifecycle-cases.jsonl \
@@ -378,7 +378,7 @@ Representative case를 만들 때는 먼저 source log와 chunk/time 범위를 �
 이 점검은 먼저 source audit으로 수행한다.
 
 ```text
-./.venv/bin/python tests/eval/dictation_ai/audit_sbd_representative_sources.py \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources \
   .tmp/logs \
   --compact \
   --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit.json
@@ -391,7 +391,7 @@ source audit은 STT, SBD, 번역 backend/model marker를 분리 집계한다. �
 source audit 이후에는 사람 검수용 source manifest를 만들 수 있다.
 
 ```text
-./.venv/bin/python tests/eval/dictation_ai/select_sbd_representative_sources.py \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py select-representative-sources \
   .tmp/eval/dictation-ai-sbd/representative-source-audit.json \
   --per-language 2 \
   --output .tmp/eval/dictation-ai-sbd/representative-source-review-manifest.json \
@@ -403,7 +403,7 @@ source audit 이후에는 사람 검수용 source manifest를 만들 수 있다.
 source manifest 이후에는 사람이 검토할 orientation packet을 만들 수 있다.
 
 ```text
-./.venv/bin/python tests/eval/dictation_ai/extract_sbd_representative_review_packets.py \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py extract-review-packets \
   .tmp/eval/dictation-ai-sbd/representative-source-review-manifest.json \
   --output .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json \
   --markdown-output .tmp/eval/dictation-ai-sbd/representative-source-review-packets.md
@@ -414,7 +414,7 @@ review packet은 선택된 source 로그에서 raw STT window, final event, tran
 review packet을 만든 뒤에는 별도 validator로 중간 산출물 계약을 확인한다.
 
 ```text
-./.venv/bin/python tests/eval/dictation_ai/validate_sbd_representative_review_packets.py \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-review-packets \
   .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json \
   --summary-output .tmp/eval/dictation-ai-sbd/representative-source-review-packets.validation.json
 ```
@@ -424,7 +424,7 @@ validator는 packet version, manifest 선택 수와 언어별 선택 수, packet
 검토 편의를 위해 ready review packet에서 manual draft JSONL을 만들 수 있다.
 
 ```text
-./.venv/bin/python tests/eval/dictation_ai/extract_sbd_representative_case_drafts.py \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py extract-representative-drafts \
   .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json \
   --jsonl-output .tmp/eval/dictation-ai-sbd/representative-case-drafts.jsonl \
   --summary-output .tmp/eval/dictation-ai-sbd/representative-case-drafts.summary.json \
@@ -436,7 +436,7 @@ validator는 packet version, manifest 선택 수와 언어별 선택 수, packet
 수작업 템플릿 품질은 `.tmp` draft 상태에서도 명시적으로 검증할 수 있다.
 
 ```text
-./.venv/bin/python tests/eval/dictation_ai/validate_sbd_case_files.py \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases \
   .tmp/eval/dictation-ai-sbd/representative-case-drafts.jsonl \
   --corpus-role representative \
   --allow-drafts \
@@ -449,7 +449,7 @@ validator는 packet version, manifest 선택 수와 언어별 선택 수, packet
 사람이 `expected_final`과 `expected_final_reviewed_by`를 채우고 `draft_expected_final_required`를 제거한 뒤에는 다음 명령으로 정식 representative shard 승격을 검증한다.
 
 ```text
-./.venv/bin/python tests/eval/dictation_ai/promote_sbd_representative_cases.py \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py promote-representative-cases \
   .tmp/eval/dictation-ai-sbd/representative-case-drafts.jsonl \
   --review-packets .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json \
   --dry-run
@@ -460,7 +460,7 @@ validator는 packet version, manifest 선택 수와 언어별 선택 수, packet
 source audit과 review packet 검증 뒤에는 follow-up readiness audit으로 다음 병목을 명시한다.
 
 ```text
-./.venv/bin/python tests/eval/dictation_ai/audit_sbd_followup_readiness.py \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py followup-readiness \
   --source-audit .tmp/eval/dictation-ai-sbd/representative-source-audit.json \
   --review-packet-validation .tmp/eval/dictation-ai-sbd/representative-source-review-packets.validation.json \
   --representative-cases tests/eval/dictation_ai/sbd_representative_cases \
@@ -474,7 +474,7 @@ source audit과 review packet 검증 뒤에는 follow-up readiness audit으로 �
 사람이 `expected_final`을 확정해 representative JSONL case를 작성한 뒤에는 case validator에 review packet을 함께 넘겨 source 추적성을 확인한다.
 
 ```text
-./.venv/bin/python tests/eval/dictation_ai/validate_sbd_case_files.py \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases \
   tests/eval/dictation_ai/sbd_representative_cases \
   --max-drafts 0 \
   --review-packets .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json
@@ -557,13 +557,13 @@ Mock, smoke, CPU, float32 결과는 기능 검증으로는 사용할 수 있지�
 
 `missing_required_evidence_fields`는 `required_evidence_fields` 중 비어 있거나 없는 항목을 표시한다. dry-run에서는 실제 benchmark 결과가 없으므로 `evidence_summary.results`와 `evidence_summary.adoption_review_counts`가 누락으로 표시될 수 있다. 논문 근거로 인용할 실제 sweep summary는 이 값이 `none`이어야 한다.
 
-기존 benchmark/sweep report를 최신 논문 근거 기준으로 다시 확인할 때는 `tests/eval/dictation_ai/validate_sbd_evidence_report.py`를 사용한다. 이 도구는 report 안에 저장된 오래된 `required_evidence_fields`를 그대로 믿지 않고 현재 evidence protocol 기준으로 누락 필드를 다시 계산한다. 디렉터리를 입력하면 하위 `summary.json`과 `summary.refreshed.json`을 재귀적으로 검사하므로 sweep 재고 조사에 사용할 수 있다. `--summary-only`는 전체 재고 기준 `experiment_stage_counts`, `claim_scope_key_counts`, `mixed_experiment_stage`, `mixed_claim_scope_key`와 complete subset 기준 `complete_experiment_stage_counts`, `complete_claim_scope_key_counts`, `complete_mixed_experiment_stage`, `complete_mixed_claim_scope_key`, 누락 필드별 count를 함께 출력한다. 이 출력은 오래된 exploratory/incomplete 결과가 섞여 있는지 보는 재고 감사용이다. `--allow-missing`은 과거 report 재고 조사에만 사용하고, 논문 표에 옮길 결과는 missing field가 없어야 한다.
+기존 benchmark/sweep report를 최신 논문 근거 기준으로 다시 확인할 때는 `tests/eval/dictation_ai/sbd_benchmark.py validate-evidence`를 사용한다. 이 도구는 report 안에 저장된 오래된 `required_evidence_fields`를 그대로 믿지 않고 현재 evidence protocol 기준으로 누락 필드를 다시 계산한다. 디렉터리를 입력하면 하위 `summary.json`과 `summary.refreshed.json`을 재귀적으로 검사하므로 sweep 재고 조사에 사용할 수 있다. `--summary-only`는 전체 재고 기준 `experiment_stage_counts`, `claim_scope_key_counts`, `mixed_experiment_stage`, `mixed_claim_scope_key`와 complete subset 기준 `complete_experiment_stage_counts`, `complete_claim_scope_key_counts`, `complete_mixed_experiment_stage`, `complete_mixed_claim_scope_key`, 누락 필드별 count를 함께 출력한다. 이 출력은 오래된 exploratory/incomplete 결과가 섞여 있는지 보는 재고 감사용이다. `--allow-missing`은 과거 report 재고 조사에만 사용하고, 논문 표에 옮길 결과는 missing field가 없어야 한다.
 
 `--complete-only`는 현재 기준을 모두 만족한 report 목록만 출력한다. 이 모드는 같은 디렉터리에 incomplete report가 남아 있어도 complete 목록 추출 자체를 실패시키지 않는다. `--complete-only`의 `experiment_stage_counts`, `claim_scope_key_counts`, `mixed_experiment_stage`, `mixed_claim_scope_key`는 complete report subset 기준으로 해석한다. 따라서 논문 표에 옮길 report 집합은 `--complete-only` 출력에서 `mixed_experiment_stage=false`, `mixed_claim_scope_key=false`인지 확인한 뒤 사용한다.
 
 감사 출력의 각 report와 aggregate summary에는 `experiment_stage`와 `claim_scope_key`가 포함된다. 이 값은 complete report 재고가 모두 `challenge-replay`와 `failure-lifecycle-tradeoff`인지, representative 표본이나 exploratory 결과가 섞였는지 확인하기 위한 것이다. `summarize_sbd_evidence_reports.py`의 JSON summary는 `experiment_stage_counts`, `mixed_experiment_stage`, `claim_scope_key_counts`, `mixed_claim_scope_key`를 포함하고, Markdown 표도 `stage` 컬럼과 축별 대표 report를 포함한다. 여기서 축별 대표 report는 중복 parameter axis report 중 하나를 고른 `axis_representative_reports`이며, 운영 평균 표본을 뜻하는 `representative replay`와 다르다. 축별 후보 delta를 논문 초안에 옮기기 전에는 `mixed_experiment_stage=false`와 `mixed_claim_scope_key=false`인지 확인한다.
 
-과거 sweep summary가 최신 claim field만 빠뜨렸고 하위 job JSON이 남아 있다면 `tests/eval/dictation_ai/refresh_sbd_parameter_sweep_summary.py`로 summary와 Markdown을 현재 포맷으로 재생성할 수 있다. 디렉터리를 입력하면 하위 `summary.json`을 찾아 원본 옆 `summary.refreshed.json`을 만든다. 이 작업은 새 성능 수치를 만드는 것이 아니라, 이미 저장된 `sat + cuda + float16` job report를 현재 evidence protocol로 다시 묶는 것이다. 재생성한 결과도 반드시 `validate_sbd_evidence_report.py --complete-only`로 확인한 뒤 논문 표에 사용한다.
+과거 sweep summary가 최신 claim field만 빠뜨렸고 하위 job JSON이 남아 있다면 `tests/eval/dictation_ai/sbd_benchmark.py refresh-sweep`로 summary와 Markdown을 현재 포맷으로 재생성할 수 있다. 디렉터리를 입력하면 하위 `summary.json`을 찾아 원본 옆 `summary.refreshed.json`을 만든다. 이 작업은 새 성능 수치를 만드는 것이 아니라, 이미 저장된 `sat + cuda + float16` job report를 현재 evidence protocol로 다시 묶는 것이다. 재생성한 결과도 반드시 `sbd_benchmark.py validate-evidence --complete-only`로 확인한 뒤 논문 표에 사용한다.
 
 개별 `sbd_benchmark.py` report도 `evidence_protocol`을 포함한다. 단, benchmark 단독 실행은 `--paper-evidence` sweep gate를 통과한 것이 아니므로 `paper_evidence=false`일 수 있다. 이때 `paper_evidence_corpus_eligible=true`는 corpus 역할이 논문 근거 후보라는 뜻이고, 실제 논문 근거로 승격하려면 paper-evidence sweep 또는 같은 수준의 case threshold 검증을 함께 남긴다.
 

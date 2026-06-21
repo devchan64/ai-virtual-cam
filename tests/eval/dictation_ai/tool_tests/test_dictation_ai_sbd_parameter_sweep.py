@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 from io import StringIO
 
-from tests.eval.dictation_ai.run_sbd_parameter_sweep import (
+from tests.eval.dictation_ai.sweeps.run_sbd_parameter_sweep import (
     SweepJob,
     build_evidence_protocol,
     build_sweep_jobs,
@@ -16,23 +16,23 @@ from tests.eval.dictation_ai.run_sbd_parameter_sweep import (
     validate_sweep_execution_contract,
     validate_sweep_case_set,
 )
-from tests.eval.dictation_ai.sbd_parameter_sweep_report import (
+from tests.eval.dictation_ai.sweeps.sbd_parameter_sweep_report import (
     attach_baseline_deltas,
     build_evidence_summary,
     missing_required_evidence_fields,
     render_markdown_summary,
 )
-from tests.eval.dictation_ai.sbd_runtime_contract import lifecycle_replay_contract
-from tests.eval.dictation_ai.refresh_sbd_parameter_sweep_summary import (
+from tests.eval.dictation_ai.benchmark.sbd_runtime_contract import lifecycle_replay_contract
+from tests.eval.dictation_ai.sweeps.refresh_sbd_parameter_sweep_summary import (
     _default_refreshed_summary_path,
     expand_summary_paths as expand_refresh_summary_paths,
     main as refresh_summary_main,
     refresh_summary_payload,
 )
-from tests.eval.dictation_ai.summarize_sbd_evidence_reports import complete_report_paths
-from tests.eval.dictation_ai.summarize_sbd_evidence_reports import render_markdown as render_evidence_markdown
-from tests.eval.dictation_ai.summarize_sbd_evidence_reports import summarize_reports
-from tests.eval.dictation_ai.validate_sbd_evidence_report import expand_report_paths, validate_report, validate_reports
+from tests.eval.dictation_ai.sweeps.summarize_sbd_evidence_reports import complete_report_paths
+from tests.eval.dictation_ai.sweeps.summarize_sbd_evidence_reports import render_markdown as render_evidence_markdown
+from tests.eval.dictation_ai.sweeps.summarize_sbd_evidence_reports import summarize_reports
+from tests.eval.dictation_ai.sweeps.validate_sbd_evidence_report import expand_report_paths, validate_report, validate_reports
 
 
 class DictationAiSbdParameterSweepTest(unittest.TestCase):
@@ -147,7 +147,7 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
                 env_overrides={"AVC_DICTATION_SENTENCE_CONFIRM_CHUNKS": "1"},
             )
 
-            with patch("tests.eval.dictation_ai.run_sbd_parameter_sweep.subprocess.run") as run:
+            with patch("tests.eval.dictation_ai.sweeps.run_sbd_parameter_sweep.subprocess.run") as run:
                 run_job(job)
 
         env = run.call_args.kwargs["env"]
@@ -2264,7 +2264,7 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with patch("tests.eval.dictation_ai.sbd_case_paths.SBD_CHALLENGE_CASE_DIR", root):
+            with patch("tests.eval.dictation_ai.cases.sbd_case_paths.SBD_CHALLENGE_CASE_DIR", root):
                 with self.assertRaisesRegex(ValueError, "expected-final case count below target"):
                     validate_sweep_case_set((root,), paper_evidence=True, min_expected_final_cases=None)
 
@@ -2302,7 +2302,7 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
             )
             self._write_review_packets(review_packets)
 
-            with patch("tests.eval.dictation_ai.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
+            with patch("tests.eval.dictation_ai.cases.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
                 with self.assertRaisesRegex(ValueError, "requires explicit --min-expected-final-cases"):
                     validate_sweep_case_set((root,), paper_evidence=True, min_expected_final_cases=None)
 

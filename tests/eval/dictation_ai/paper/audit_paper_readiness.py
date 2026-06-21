@@ -12,11 +12,11 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tests.eval.dictation_ai.audit_paper_claim_scope import audit_paper_claim_scope
-from tests.eval.dictation_ai.audit_paper_evidence_numbers import audit_paper_evidence_numbers
-from tests.eval.dictation_ai.audit_paper_reference_scope import audit_paper_reference_scope
-from tests.eval.dictation_ai.audit_sbd_followup_readiness import audit_followup_readiness
-from tests.eval.dictation_ai.validate_sbd_evidence_report import expand_report_paths, validate_reports
+from tests.eval.dictation_ai.paper.audit_paper_claim_scope import audit_paper_claim_scope
+from tests.eval.dictation_ai.paper.audit_paper_evidence_numbers import audit_paper_evidence_numbers
+from tests.eval.dictation_ai.paper.audit_paper_reference_scope import audit_paper_reference_scope
+from tests.eval.dictation_ai.paper.audit_sbd_followup_readiness import audit_followup_readiness
+from tests.eval.dictation_ai.sweeps.validate_sbd_evidence_report import expand_report_paths, validate_reports
 
 
 STRUCTURAL_PREFLIGHT_DEFAULT_OUTPUT = Path(

@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tests.eval.dictation_ai.validate_sbd_case_files import enforce_case_thresholds, validate_case_files
+from tests.eval.dictation_ai.cases.validate_sbd_case_files import enforce_case_thresholds, validate_case_files
 
 
 class DictationAiSbdCaseValidatorTest(unittest.TestCase):
@@ -130,7 +130,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
                 },
             )
 
-            with patch("tests.eval.dictation_ai.sbd_case_paths.SBD_CHALLENGE_CASE_DIR", root):
+            with patch("tests.eval.dictation_ai.cases.sbd_case_paths.SBD_CHALLENGE_CASE_DIR", root):
                 summary = validate_case_files([root])
 
         self.assertEqual(summary["case_count"], 1)
@@ -170,7 +170,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
                 },
             )
 
-            with patch("tests.eval.dictation_ai.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
+            with patch("tests.eval.dictation_ai.cases.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
                 with self.assertRaisesRegex(ValueError, "missing metadata: sampling_rule"):
                     validate_case_files([root])
 
@@ -181,7 +181,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
             case_file = root / "cases.jsonl"
             self._write_payload(case_file, self._representative_payload())
 
-            with patch("tests.eval.dictation_ai.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
+            with patch("tests.eval.dictation_ai.cases.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
                 summary = validate_case_files([root])
 
         self.assertEqual(summary["case_count"], 1)
@@ -208,7 +208,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
             payload["sampling_unit"] = "failure-cluster"
             self._write_payload(root / "cases.jsonl", payload)
 
-            with patch("tests.eval.dictation_ai.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
+            with patch("tests.eval.dictation_ai.cases.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
                 with self.assertRaisesRegex(ValueError, "unsupported sampling_unit"):
                     validate_case_files([root])
 
@@ -220,7 +220,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
             payload["language"] = ""
             self._write_payload(root / "cases.jsonl", payload)
 
-            with patch("tests.eval.dictation_ai.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
+            with patch("tests.eval.dictation_ai.cases.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
                 with self.assertRaisesRegex(ValueError, "missing metadata: language"):
                     validate_case_files([root])
 
@@ -233,7 +233,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
             del payload["chunks"]
             self._write_payload(root / "cases.jsonl", payload)
 
-            with patch("tests.eval.dictation_ai.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
+            with patch("tests.eval.dictation_ai.cases.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
                 with self.assertRaisesRegex(ValueError, "missing metadata: chunks"):
                     validate_case_files([root])
 
@@ -245,7 +245,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
             del payload["stt_backend"]
             self._write_payload(root / "cases.jsonl", payload)
 
-            with patch("tests.eval.dictation_ai.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
+            with patch("tests.eval.dictation_ai.cases.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
                 with self.assertRaisesRegex(ValueError, "missing metadata: stt_backend"):
                     validate_case_files([root])
 
@@ -257,7 +257,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
             payload["expected_final"] = []
             self._write_payload(root / "cases.jsonl", payload)
 
-            with patch("tests.eval.dictation_ai.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
+            with patch("tests.eval.dictation_ai.cases.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
                 with self.assertRaisesRegex(ValueError, "missing metadata: expected_final"):
                     validate_case_files([root])
 
@@ -271,7 +271,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
             payload["draft_expected_final_required"] = True
             self._write_payload(root / "cases.jsonl", payload)
 
-            with patch("tests.eval.dictation_ai.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
+            with patch("tests.eval.dictation_ai.cases.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
                 with self.assertRaisesRegex(ValueError, "missing metadata: expected_final"):
                     validate_case_files([root])
                 summary = validate_case_files([root], allow_drafts=True)
@@ -311,7 +311,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
             del payload["review_packet_id"]
             self._write_payload(root / "cases.jsonl", payload)
 
-            with patch("tests.eval.dictation_ai.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
+            with patch("tests.eval.dictation_ai.cases.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
                 with self.assertRaisesRegex(ValueError, "missing metadata: review_packet_id"):
                     validate_case_files([root])
 
@@ -323,7 +323,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
             payload["expected_final_reviewed_by"] = ""
             self._write_payload(root / "cases.jsonl", payload)
 
-            with patch("tests.eval.dictation_ai.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
+            with patch("tests.eval.dictation_ai.cases.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
                 with self.assertRaisesRegex(ValueError, "missing metadata: expected_final_reviewed_by"):
                     validate_case_files([root])
 
@@ -334,7 +334,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
             case_file = root / "cases.jsonl"
             self._write_payload(case_file, self._representative_payload())
 
-            with patch("tests.eval.dictation_ai.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
+            with patch("tests.eval.dictation_ai.cases.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
                 summary = validate_case_files([case_file])
 
         self.assertEqual(summary["case_count"], 1)
@@ -350,7 +350,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
             self._write_payload(case_file, self._representative_payload())
             self._write_review_packets(review_packet_file)
 
-            with patch("tests.eval.dictation_ai.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
+            with patch("tests.eval.dictation_ai.cases.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
                 summary = validate_case_files([case_file], review_packets=review_packet_file)
 
         self.assertEqual(
@@ -380,7 +380,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
             self._write_payload(case_file, payload)
             self._write_review_packets(review_packet_file)
 
-            with patch("tests.eval.dictation_ai.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
+            with patch("tests.eval.dictation_ai.cases.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
                 with self.assertRaisesRegex(ValueError, "unknown review_packet_id"):
                     validate_case_files([case_file], review_packets=review_packet_file)
 
@@ -393,7 +393,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
             self._write_payload(case_file, self._representative_payload())
             self._write_review_packets(review_packet_file, source_log=".tmp/logs/other.log")
 
-            with patch("tests.eval.dictation_ai.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
+            with patch("tests.eval.dictation_ai.cases.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
                 with self.assertRaisesRegex(ValueError, "source_log mismatch"):
                     validate_case_files([case_file], review_packets=review_packet_file)
 
@@ -406,7 +406,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
             self._write_payload(case_file, self._representative_payload())
             self._write_review_packets(review_packet_file, language="en")
 
-            with patch("tests.eval.dictation_ai.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
+            with patch("tests.eval.dictation_ai.cases.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
                 with self.assertRaisesRegex(ValueError, "language mismatch"):
                     validate_case_files([case_file], review_packets=review_packet_file)
 
@@ -422,7 +422,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
             self._write_payload(case_file, payload)
             self._write_review_packets(review_packet_file)
 
-            with patch("tests.eval.dictation_ai.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
+            with patch("tests.eval.dictation_ai.cases.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
                 with self.assertRaisesRegex(ValueError, "source range outside review packet window"):
                     validate_case_files([case_file], review_packets=review_packet_file)
 

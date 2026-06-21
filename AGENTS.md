@@ -60,7 +60,7 @@
 - `scripts/bin/avc-device`, `scripts/bin/avc-docker`, `scripts/config/create-config-gui.py` 변경 시 `./bin/avc test` 실행 결과를 확인한다.
 - 테스트 없이 가상장치 생성/검증 로직의 분기, 기본값, 권한/릴레이 경로를 변경하지 않는다.
 - `tests/unit/`은 앱 코드의 품질관리 유닛테스트만 둔다. 받아쓰기 AI 논문/벤치/케이스 관리 도구의 계약 테스트는 `tests/eval/dictation_ai/tool_tests/`에 둔다.
-- `tests/eval/dictation_ai/` 루트에는 직접 실행하는 평가 entrypoint만 둔다. 새 보조 모듈은 `tests/eval/dictation_ai/README.md`의 도메인 경계를 먼저 확인하고 하위 도메인 배치를 우선한다.
+- `tests/eval/dictation_ai/` 루트에는 `sbd_benchmark.py` 단일 평가 entrypoint만 둔다. 새 구현/보조 모듈은 `tests/eval/dictation_ai/README.md`의 도메인 경계를 먼저 확인하고 하위 도메인에 배치한 뒤, 필요하면 `sbd_benchmark.py` subcommand로 연결한다.
 - 받아쓰기 AI 로그 기반 challenge replay 케이스는 `tests/eval/dictation_ai/sbd_cases/{en,ko,zh}/` 아래에 언어별, case id 해시 shard JSONL로 누적하고 `tests/eval/dictation_ai/sbd_benchmark.py`로 검증한다.
 - 일반 운영 평균을 보기 위한 representative corpus는 `tests/eval/dictation_ai/sbd_representative_cases/`에 별도로 두고, challenge replay 평균과 섞어 해석하지 않는다.
 - 받아쓰기 AI 논문/실험 해석은 `docs/2026-06-21-dictation-ai-experiment-protocol.md`의 corpus 역할, 지표, 파라미터 채택 기준을 따른다.

@@ -4,8 +4,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tests.eval.dictation_ai.sbd_case_loader import load_cases
-from tests.eval.dictation_ai.sbd_case_paths import case_corpus_role, default_case_inputs
+from tests.eval.dictation_ai.cases.sbd_case_loader import load_cases
+from tests.eval.dictation_ai.cases.sbd_case_paths import case_corpus_role, default_case_inputs
 
 
 class DictationAiSbdCaseLoaderTest(unittest.TestCase):
@@ -79,7 +79,7 @@ class DictationAiSbdCaseLoaderTest(unittest.TestCase):
             self._write_case(language_dir / "reviewed-context-en-a.jsonl", "reviewed-case")
 
             with patch(
-                "tests.eval.dictation_ai.sbd_case_paths.SBD_CHALLENGE_CASE_DIR",
+                "tests.eval.dictation_ai.cases.sbd_case_paths.SBD_CHALLENGE_CASE_DIR",
                 reviewed,
             ):
                 inputs = default_case_inputs()
@@ -98,7 +98,7 @@ class DictationAiSbdCaseLoaderTest(unittest.TestCase):
             self._write_case(group_dir / "reviewed-group.jsonl", "reviewed-case")
 
             with patch(
-                "tests.eval.dictation_ai.sbd_case_paths.SBD_CHALLENGE_CASE_DIR",
+                "tests.eval.dictation_ai.cases.sbd_case_paths.SBD_CHALLENGE_CASE_DIR",
                 reviewed,
             ):
                 inputs = default_case_inputs()
@@ -117,7 +117,7 @@ class DictationAiSbdCaseLoaderTest(unittest.TestCase):
             self._write_case(group_dir / "reviewed-group.jsonl", "ignored-case")
 
             with patch(
-                "tests.eval.dictation_ai.sbd_case_paths.SBD_CHALLENGE_CASE_DIR",
+                "tests.eval.dictation_ai.cases.sbd_case_paths.SBD_CHALLENGE_CASE_DIR",
                 reviewed,
             ):
                 cases, sources = load_cases([reviewed])
@@ -133,8 +133,8 @@ class DictationAiSbdCaseLoaderTest(unittest.TestCase):
             challenge_file = challenge / "en" / "case.jsonl"
             representative_file = representative / "case.jsonl"
 
-            with patch("tests.eval.dictation_ai.sbd_case_paths.SBD_CHALLENGE_CASE_DIR", challenge), patch(
-                "tests.eval.dictation_ai.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR",
+            with patch("tests.eval.dictation_ai.cases.sbd_case_paths.SBD_CHALLENGE_CASE_DIR", challenge), patch(
+                "tests.eval.dictation_ai.cases.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR",
                 representative,
             ):
                 self.assertEqual(case_corpus_role([challenge]), "challenge-replay")
@@ -148,7 +148,7 @@ class DictationAiSbdCaseLoaderTest(unittest.TestCase):
             reviewed = Path(tmpdir) / "sbd_cases"
             reviewed.mkdir()
 
-            with patch("tests.eval.dictation_ai.sbd_case_paths.SBD_CHALLENGE_CASE_DIR", reviewed):
+            with patch("tests.eval.dictation_ai.cases.sbd_case_paths.SBD_CHALLENGE_CASE_DIR", reviewed):
                 inputs = default_case_inputs()
 
         self.assertEqual(inputs, [])
@@ -196,7 +196,7 @@ class DictationAiSbdCaseLoaderTest(unittest.TestCase):
             path = root / "cases.jsonl"
             self._write_case(path, "representative-case")
 
-            with patch("tests.eval.dictation_ai.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
+            with patch("tests.eval.dictation_ai.cases.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
                 with self.assertRaisesRegex(ValueError, "missing metadata"):
                     load_cases([path])
 
@@ -229,7 +229,7 @@ class DictationAiSbdCaseLoaderTest(unittest.TestCase):
             }
             path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
 
-            with patch("tests.eval.dictation_ai.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
+            with patch("tests.eval.dictation_ai.cases.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
                 cases, sources = load_cases([path])
 
         self.assertEqual([case.id for case in cases], ["representative-case"])
@@ -272,7 +272,7 @@ class DictationAiSbdCaseLoaderTest(unittest.TestCase):
             }
             path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
 
-            with patch("tests.eval.dictation_ai.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
+            with patch("tests.eval.dictation_ai.cases.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", root):
                 with self.assertRaisesRegex(ValueError, "unsupported sampling_unit"):
                     load_cases([path])
 

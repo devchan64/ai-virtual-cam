@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.eval.dictation_ai.promote_sbd_representative_cases import promote_representative_cases
+from tests.eval.dictation_ai.representative.promote_sbd_representative_cases import promote_representative_cases
 
 
 class DictationAiSbdRepresentativeCasePromoterTest(unittest.TestCase):

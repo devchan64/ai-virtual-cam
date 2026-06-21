@@ -12805,3 +12805,74 @@ OK
 
 - 현재 복잡도 문제는 인정한다.
 - 다만 재현성 있는 실험 명령을 유지하는 것이 우선이므로, 우선 도메인 기준과 새 파일 배치 규칙을 고정해 추가 혼선을 막는다.
+
+### 2026-06-21 tests/eval 하위 도메인 패키지 분리
+
+문제:
+
+- 1차 정리에서는 도메인 기준만 세웠고, 구현 파일은 여전히 `tests/eval/dictation_ai/` 루트에 많이 남아 있었다.
+- 루트에 implementation과 CLI entrypoint가 섞이면 새 실험 도구를 추가할수록 다시 도메인이 흐려진다.
+
+정리:
+
+- 구현 파일을 다음 하위 도메인으로 이동했다.
+  - `benchmark/`: benchmark report와 runtime contract
+  - `cases/`: case loader, path, diagnostic tag, case validator
+  - `sweeps/`: parameter sweep, evidence summary, evidence validator
+  - `paper/`: paper claim/readiness/reference/number audit
+  - `representative/`: representative source, review packet, draft, promote workflow
+  - `structural/`: structural lifecycle case selector
+- 기존 `tests/eval/dictation_ai/*.py` 경로는 compatibility wrapper로 남겼다.
+- wrapper는 repo root를 `sys.path`에 추가한 뒤 하위 도메인 구현의 `main()` 또는 public symbol을 다시 export한다.
+- 새 코드 import는 wrapper가 아니라 하위 도메인 경로를 우선하도록 테스트 import도 갱신했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest discover -s tests/eval/dictation_ai/tool_tests -p 'test_*.py'
+./.venv/bin/python tests/eval/dictation_ai/audit_paper_readiness.py ...
+./.venv/bin/python tests/eval/dictation_ai/validate_sbd_case_files.py --help
+```
+
+결과:
+
+```text
+tool_tests: Ran 135 tests, OK
+audit_paper_readiness: ok=true
+validate_sbd_case_files wrapper: help 출력 성공
+```
+
+해석:
+
+- 구현 코드는 하위 도메인으로 분리됐고, 기존 루트 실행 경로는 wrapper로 유지된다.
+- 기존 실험일지 명령의 재현성을 유지하면서 새 코드의 배치 기준을 명확히 했다.
+
+### 2026-06-21 tests/eval 단일 엔트리 재정리
+
+문제:
+
+- 하위 도메인 패키지는 생겼지만 `tests/eval/dictation_ai/` 루트에 compatibility wrapper가 많이 남아 엔트리 스크립트가 계속 많은 상태가 되었다.
+- 사용 의도는 SBD 벤치 기능 하나를 중심으로 case, sweep, paper, representative, structural 하위 도메인이 함께 실행되는 구조였으므로 루트 wrapper 유지가 오히려 혼선을 만든다.
+
+정리:
+
+- `tests/eval/dictation_ai/sbd_benchmark.py`를 단일 실행 엔트리로 유지한다.
+- 기존 benchmark 실행은 `sbd_benchmark.py --cases ...` 형태로 유지한다.
+- 보조 작업은 `sbd_benchmark.py <subcommand> ...` 형태로 연결한다.
+- 루트의 compatibility wrapper 파일은 제거하고 구현은 하위 도메인에만 둔다.
+- `README.md`, `AGENTS.md`, 실험 프로토콜의 현재 명령 예시는 단일 엔트리/subcommand 기준으로 갱신했다.
+
+대표 명령:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py commands
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases --help
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py run-sweep --help
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py paper-readiness --help
+```
+
+해석:
+
+- `tests/eval/dictation_ai/` 루트는 이제 SBD 평가 기능의 단일 진입점만 가진다.
+- 하위 도메인은 실행 단위가 아니라 구현/책임 경계다.
+- 과거 실험일지의 루트 script 직접 실행 명령은 historical record로 남기되, 새 문서와 새 실행은 subcommand 기준을 따른다.

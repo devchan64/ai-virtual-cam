@@ -4,7 +4,7 @@ from io import StringIO
 from unittest.mock import patch
 
 from tests.eval.dictation_ai import sbd_benchmark
-from tests.eval.dictation_ai.sbd_benchmark_report import (
+from tests.eval.dictation_ai.benchmark.sbd_benchmark_report import (
     build_benchmark_report,
     summarize_case_exemplars,
     summarize_results_by_queue_residue_strata,
@@ -14,7 +14,7 @@ from tests.eval.dictation_ai.sbd_benchmark_report import (
     summarize_results_by_tag,
     summarize_staged_queue_residue,
 )
-from tests.eval.dictation_ai.sbd_case_loader import SbdCase
+from tests.eval.dictation_ai.cases.sbd_case_loader import SbdCase
 
 
 def _score(precision: float, recall: float, f1: float, *, exact: bool = False) -> dict[str, object]:

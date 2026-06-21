@@ -12,7 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tests.eval.dictation_ai.validate_sbd_evidence_report import expand_report_paths, validate_report
+from tests.eval.dictation_ai.sweeps.validate_sbd_evidence_report import expand_report_paths, validate_report
 
 
 AXIS_CONCLUSION_DESCRIPTIONS = {

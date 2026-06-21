@@ -22,16 +22,16 @@ from src.app.dictation_pipeline_settings import (
     dictation_tuning_manifest,
     dictation_tuning_protocol,
 )
-from tests.eval.dictation_ai.sbd_case_paths import build_evidence_protocol, corpus_interpretation
-from tests.eval.dictation_ai.sbd_parameter_sweep_report import (
+from tests.eval.dictation_ai.cases.sbd_case_paths import build_evidence_protocol, corpus_interpretation
+from tests.eval.dictation_ai.sweeps.sbd_parameter_sweep_report import (
     METRIC_KEYS,
     attach_baseline_deltas,
     build_evidence_summary,
     missing_required_evidence_fields,
     render_markdown_summary,
 )
-from tests.eval.dictation_ai.sbd_runtime_contract import OFFLINE_MODEL_ENV, lifecycle_replay_contract, runtime_contract
-from tests.eval.dictation_ai.validate_sbd_case_files import enforce_case_thresholds, validate_case_files
+from tests.eval.dictation_ai.benchmark.sbd_runtime_contract import OFFLINE_MODEL_ENV, lifecycle_replay_contract, runtime_contract
+from tests.eval.dictation_ai.cases.validate_sbd_case_files import enforce_case_thresholds, validate_case_files
 
 
 DEFAULT_CASES = (

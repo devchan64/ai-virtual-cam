@@ -12,7 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tests.eval.dictation_ai.sbd_case_paths import build_evidence_protocol, missing_required_evidence_fields
+from tests.eval.dictation_ai.cases.sbd_case_paths import build_evidence_protocol, missing_required_evidence_fields
 
 
 def _report_corpus_roles(payload: dict[str, Any]) -> list[str]:

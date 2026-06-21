@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tests.eval.dictation_ai.audit_sbd_followup_readiness import (
+from tests.eval.dictation_ai.paper.audit_sbd_followup_readiness import (
     audit_followup_readiness,
 )
 
@@ -186,7 +186,7 @@ class DictationAiSbdFollowupReadinessAuditTest(unittest.TestCase):
             self._write_review_packets(review_packets)
             self._write_representative_case(cases / "rep.jsonl")
 
-            with patch("tests.eval.dictation_ai.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", cases):
+            with patch("tests.eval.dictation_ai.cases.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", cases):
                 result = audit_followup_readiness(
                     source_audit_path=source_audit,
                     review_packet_validation_path=packet_validation,

@@ -12,7 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tests.eval.dictation_ai.sbd_benchmark_report import (  # noqa: E402
+from tests.eval.dictation_ai.benchmark.sbd_benchmark_report import (  # noqa: E402
     summarize_case_exemplars,
     summarize_staged_queue_residue,
 )

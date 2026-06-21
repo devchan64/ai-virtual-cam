@@ -1,6 +1,6 @@
 import unittest
 
-from tests.eval.dictation_ai.validate_sbd_representative_review_packets import (
+from tests.eval.dictation_ai.representative.validate_sbd_representative_review_packets import (
     validate_review_packets,
 )
 

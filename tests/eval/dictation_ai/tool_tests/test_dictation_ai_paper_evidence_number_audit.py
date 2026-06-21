@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.eval.dictation_ai.audit_paper_evidence_numbers import (
+from tests.eval.dictation_ai.paper.audit_paper_evidence_numbers import (
     audit_paper_evidence_numbers,
 )
 

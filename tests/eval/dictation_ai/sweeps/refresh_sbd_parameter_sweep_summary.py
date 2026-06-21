@@ -12,8 +12,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tests.eval.dictation_ai.run_sbd_parameter_sweep import SweepJob, build_summary_payload
-from tests.eval.dictation_ai.sbd_parameter_sweep_report import render_markdown_summary
+from tests.eval.dictation_ai.sweeps.run_sbd_parameter_sweep import SweepJob, build_summary_payload
+from tests.eval.dictation_ai.sweeps.sbd_parameter_sweep_report import render_markdown_summary
 
 
 def _load_summary(path: Path) -> dict[str, Any]:

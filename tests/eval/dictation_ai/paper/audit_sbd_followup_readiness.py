@@ -12,8 +12,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tests.eval.dictation_ai.sbd_case_paths import iter_case_paths
-from tests.eval.dictation_ai.validate_sbd_case_files import validate_case_files
+from tests.eval.dictation_ai.cases.sbd_case_paths import iter_case_paths
+from tests.eval.dictation_ai.cases.validate_sbd_case_files import validate_case_files
 
 
 TRANSLATION_REPLAY_REQUIRED_SIGNALS = (

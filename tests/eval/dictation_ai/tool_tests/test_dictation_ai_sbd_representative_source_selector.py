@@ -1,6 +1,6 @@
 import unittest
 
-from tests.eval.dictation_ai.select_sbd_representative_sources import (
+from tests.eval.dictation_ai.representative.select_sbd_representative_sources import (
     eligible_file_summaries,
     select_representative_sources,
 )

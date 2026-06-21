@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
-from tests.eval.dictation_ai.sbd_case_paths import (
+from tests.eval.dictation_ai.cases.sbd_case_paths import (
     corpus_interpretation,
     missing_required_evidence_fields,
 )

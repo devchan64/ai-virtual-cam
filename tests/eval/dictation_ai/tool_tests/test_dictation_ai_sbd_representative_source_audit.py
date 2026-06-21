@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.eval.dictation_ai.audit_sbd_representative_sources import (
+from tests.eval.dictation_ai.representative.audit_sbd_representative_sources import (
     audit_sources,
     compact_summary,
     iter_log_paths,

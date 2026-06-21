@@ -11,15 +11,15 @@ from src.app.dictation_pipeline_settings import (
     lifecycle_tuning_policy,
 )
 from src.app.dictation_transcript_logic import _revision_similarity_policy
-from tests.eval.dictation_ai.sbd_case_loader import SbdCase
-from tests.eval.dictation_ai.sbd_case_paths import (
+from tests.eval.dictation_ai.cases.sbd_case_loader import SbdCase
+from tests.eval.dictation_ai.cases.sbd_case_paths import (
     build_evidence_protocol,
     corpus_interpretation,
     missing_required_evidence_fields,
     summarize_representative_metadata,
 )
-from tests.eval.dictation_ai.sbd_diagnostic_tags import is_diagnostic_tag
-from tests.eval.dictation_ai.sbd_runtime_contract import lifecycle_replay_contract, runtime_contract
+from tests.eval.dictation_ai.cases.sbd_diagnostic_tags import is_diagnostic_tag
+from tests.eval.dictation_ai.benchmark.sbd_runtime_contract import lifecycle_replay_contract, runtime_contract
 
 LIFECYCLE_BOTTLENECK_METRICS = (
     "stage_start",

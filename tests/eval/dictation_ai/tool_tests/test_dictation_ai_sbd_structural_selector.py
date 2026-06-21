@@ -3,12 +3,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.eval.dictation_ai.select_sbd_structural_cases import (
+from tests.eval.dictation_ai.structural.select_sbd_structural_cases import (
     render_markdown,
     select_structural_cases,
     write_case_jsonl,
 )
-from tests.eval.dictation_ai.sbd_case_loader import load_cases
+from tests.eval.dictation_ai.cases.sbd_case_loader import load_cases
 
 
 def _case(case_id: str, *, queue_len: int, boundary_f1: float, queue_revision: int, replace_deferred: int) -> dict:

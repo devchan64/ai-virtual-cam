@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from src.app.sentence_boundary import normalized_text
-from tests.eval.dictation_ai.sbd_case_paths import (
+from tests.eval.dictation_ai.cases.sbd_case_paths import (
     case_corpus_role,
     iter_case_paths,
     representative_metadata_record,

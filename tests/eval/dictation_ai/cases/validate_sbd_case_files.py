@@ -14,14 +14,14 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tests.eval.dictation_ai.sbd_case_paths import (
+from tests.eval.dictation_ai.cases.sbd_case_paths import (
     case_corpus_role,
     iter_case_paths,
     representative_metadata_record,
     summarize_representative_metadata,
     validate_representative_payload,
 )
-from tests.eval.dictation_ai.validate_sbd_representative_review_packets import validate_review_packets
+from tests.eval.dictation_ai.representative.validate_sbd_representative_review_packets import validate_review_packets
 
 
 TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")

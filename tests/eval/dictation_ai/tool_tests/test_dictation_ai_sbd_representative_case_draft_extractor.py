@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from tests.eval.dictation_ai.extract_sbd_representative_case_drafts import (
+from tests.eval.dictation_ai.representative.extract_sbd_representative_case_drafts import (
     build_case_drafts,
     render_jsonl,
     render_markdown,

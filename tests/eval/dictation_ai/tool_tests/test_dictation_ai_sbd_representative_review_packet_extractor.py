@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.eval.dictation_ai.extract_sbd_representative_review_packets import (
+from tests.eval.dictation_ai.representative.extract_sbd_representative_review_packets import (
     build_review_packets,
     write_markdown_packets,
 )

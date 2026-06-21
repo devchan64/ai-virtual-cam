@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tests.eval.dictation_ai.audit_paper_readiness import audit_paper_readiness
+from tests.eval.dictation_ai.paper.audit_paper_readiness import audit_paper_readiness
 
 
 class DictationAiPaperReadinessAuditTest(unittest.TestCase):
@@ -315,7 +315,7 @@ class DictationAiPaperReadinessAuditTest(unittest.TestCase):
                 encoding="utf-8",
             )
         self._write_report(report, corpus_role=report_corpus_role)
-        with patch("tests.eval.dictation_ai.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", cases):
+        with patch("tests.eval.dictation_ai.cases.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", cases):
             return audit_paper_readiness(
                 reports=[report],
                 summary_path=summary,

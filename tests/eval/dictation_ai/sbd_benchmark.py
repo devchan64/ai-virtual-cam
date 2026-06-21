@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import sys
 import time
@@ -54,14 +55,62 @@ from src.app.dictation_transcript_logic import (
 )
 from src.app.transcript_revision import append_context as _append_committed_text
 from src.app.transcript_revision import consume_committed_prefix as _consume_committed_prefix
-from tests.eval.dictation_ai.sbd_case_paths import (
+from tests.eval.dictation_ai.cases.sbd_case_paths import (
     case_corpus_role as _case_corpus_role,
     default_case_inputs as _default_case_inputs,
 )
-from tests.eval.dictation_ai.sbd_case_loader import SbdCase, load_cases as _load_cases
-from tests.eval.dictation_ai.sbd_benchmark_report import build_benchmark_report
-from tests.eval.dictation_ai.sbd_runtime_contract import force_offline_model_cache_env
-from tests.eval.dictation_ai.validate_sbd_case_files import validate_case_files
+from tests.eval.dictation_ai.cases.sbd_case_loader import SbdCase, load_cases as _load_cases
+from tests.eval.dictation_ai.benchmark.sbd_benchmark_report import build_benchmark_report
+from tests.eval.dictation_ai.benchmark.sbd_runtime_contract import force_offline_model_cache_env
+from tests.eval.dictation_ai.cases.validate_sbd_case_files import validate_case_files
+
+_SUBCOMMANDS: dict[str, str] = {
+    "validate-cases": "tests.eval.dictation_ai.cases.validate_sbd_case_files:main",
+    "run-sweep": "tests.eval.dictation_ai.sweeps.run_sbd_parameter_sweep:main",
+    "refresh-sweep": "tests.eval.dictation_ai.sweeps.refresh_sbd_parameter_sweep_summary:main",
+    "summarize-evidence": "tests.eval.dictation_ai.sweeps.summarize_sbd_evidence_reports:main",
+    "validate-evidence": "tests.eval.dictation_ai.sweeps.validate_sbd_evidence_report:main",
+    "paper-claim-scope": "tests.eval.dictation_ai.paper.audit_paper_claim_scope:main",
+    "paper-evidence-numbers": "tests.eval.dictation_ai.paper.audit_paper_evidence_numbers:main",
+    "paper-readiness": "tests.eval.dictation_ai.paper.audit_paper_readiness:main",
+    "paper-reference-scope": "tests.eval.dictation_ai.paper.audit_paper_reference_scope:main",
+    "followup-readiness": "tests.eval.dictation_ai.paper.audit_sbd_followup_readiness:main",
+    "representative-sources": "tests.eval.dictation_ai.representative.audit_sbd_representative_sources:main",
+    "select-representative-sources": "tests.eval.dictation_ai.representative.select_sbd_representative_sources:main",
+    "extract-review-packets": "tests.eval.dictation_ai.representative.extract_sbd_representative_review_packets:main",
+    "validate-review-packets": "tests.eval.dictation_ai.representative.validate_sbd_representative_review_packets:main",
+    "extract-representative-drafts": "tests.eval.dictation_ai.representative.extract_sbd_representative_case_drafts:main",
+    "promote-representative-cases": "tests.eval.dictation_ai.representative.promote_sbd_representative_cases:main",
+    "select-structural-cases": "tests.eval.dictation_ai.structural.select_sbd_structural_cases:main",
+}
+
+
+def _print_subcommands() -> None:
+    print("usage: sbd_benchmark.py [benchmark options] | <subcommand> [options]\n")
+    print("subcommands:")
+    for name in sorted(_SUBCOMMANDS):
+        print(f"  {name}")
+
+
+def _dispatch_subcommand() -> int | None:
+    if len(sys.argv) < 2:
+        return None
+    subcommand = sys.argv[1]
+    if subcommand in {"commands", "subcommands"}:
+        _print_subcommands()
+        return 0
+    target = _SUBCOMMANDS.get(subcommand)
+    if target is None:
+        return None
+
+    module_name, function_name = target.split(":", 1)
+    original_argv = sys.argv[:]
+    try:
+        sys.argv = [f"{Path(original_argv[0]).name} {subcommand}", *original_argv[2:]]
+        module = importlib.import_module(module_name)
+        return int(getattr(module, function_name)())
+    finally:
+        sys.argv = original_argv
 
 
 @dataclass
@@ -812,6 +861,9 @@ def main() -> int:
 
 
 def cli_main() -> int:
+    subcommand_result = _dispatch_subcommand()
+    if subcommand_result is not None:
+        return subcommand_result
     try:
         return main()
     except (ValueError, RuntimeError) as exc:
