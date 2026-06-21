@@ -14750,6 +14750,52 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-21 중국어 Kobo/creator reading 구간 stage queue 지연 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log.1
+2026-06-21 15:34:09..15:34:58
+chunk=2955..3004 중심
+```
+
+감사 결과:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 15:34:09" --until "2026-06-21 15:34:58" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-zh-153409-153458.json
+```
+
+```text
+stt_raw_line_count=50
+finalize_event_count=13
+finalize_per_stt_raw=0.260
+stage_replace_deferred_count=50
+stage_replace_deferred_per_stt_raw=1.000
+stage_queue_promote_count=12
+stage_queue_promote_per_stt_raw=0.240
+duplicate_suppressed_count=72
+duplicate_suppressed_per_stt_raw=1.440
+quality_block_count=15
+quality_block_per_stt_raw=0.300
+finalize_delta_suppressed_stage_retained_count=4
+finalize_delta_suppressed_stage_dropped_count=4
+stage_queue_recent_final_suppressed_count=2
+```
+
+관측:
+
+- `Kobo/电子书`, `生活变得很丰富`, `创作者`, `六十秒`, `看书` 계열은 기존 케이스에서 검색되지 않았다.
+- 긴 창작자 추천 문장이 sliding window를 따라 천천히 뒤로 밀리며 `stage_replace_deferred=50`, `duplicate_suppressed=72`가 누적됐다.
+- 후반에는 `发问一题。` 같은 짧은 stage head와 `用手机看比较容易...` 후보가 같은 chunk replacement defer에 걸리는 패턴이 반복된다.
+- STT 원문은 `Kobo/淘宝/酷摩`, `短视频/R.I.P./Rios/法律有死`처럼 크게 흔들리므로 raw STT 정답성은 평가하지 않는다. 기대 문장은 반복 window에서 의미가 안정화된 문장 흐름만 지정했다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-5-20260621.jsonl`에 `zh_log_delayed_kobo_creator_reading_stage_queue_20260621_001` 케이스를 추가했다.
+- 이 케이스는 짧은 stage head와 긴 문장 sliding-window 지연이 동시에 나타나는 후속 CUDA 벤치 비교용이다.
+- `sat + cuda + float16` 벤치 결과 없이 로직 변경을 단정하지 않는다.
+
 ### 2026-06-21 중국어 Jongno cafe/bagel 구간 짧은 stage head 지연 케이스 추가
 
 관측 구간:
