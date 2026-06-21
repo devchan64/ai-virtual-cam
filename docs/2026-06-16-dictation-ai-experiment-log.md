@@ -14837,6 +14837,196 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-22 queue 파라미터 재검증과 structural clean preflight 정리
+
+목적:
+
+- 전체 challenge replay에서 queue residue가 길수록 `final_f1_avg`와 `final_boundary_f1_avg`가 낮아지는지 확인했다.
+- queue 관련 기본값을 바꾸기 전에 `expected_final` 정의 품질 review 후보를 앱 lifecycle 병목 후보에서 분리했다.
+- STT 정확도나 case 정의 문제를 앱 로직 개선 근거로 오해하지 않도록 structural selector의 기본 입력을 clean expected case로 제한했다.
+
+기준선:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-goal-continue-baseline.json
+```
+
+```text
+cases=1223
+finalized=5228
+stage_start=8964
+finalized_per_stage_start=0.583222
+final_precision_avg=0.582216
+final_recall_avg=0.467552
+final_f1_avg=0.496566
+final_boundary_f1_avg=0.115502
+
+without_expected_quality_review:
+cases=412
+final_precision_avg=0.688096
+final_recall_avg=0.525445
+final_f1_avg=0.567969
+final_boundary_f1_avg=0.196097
+```
+
+queue strata:
+
+```text
+no_queue: cases=707 final_f1_avg=0.498580 final_boundary_f1_avg=0.123150
+queue_len_1: cases=330 final_f1_avg=0.503411 final_boundary_f1_avg=0.112731
+queue_len_2_to_4: cases=176 final_f1_avg=0.481113 final_boundary_f1_avg=0.093720
+queue_len_ge_5: cases=10 final_f1_avg=0.400256 final_boundary_f1_avg=0.049524
+```
+
+queue 파라미터 sweep:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sweeps/run_sbd_parameter_sweep.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/goal-continue-queue-20260622 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/goal-continue-queue-20260622/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/goal-continue-queue-20260622/summary.md \
+  --include-baseline \
+  --param STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=3 \
+  --param STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=10 \
+  --param MAX_STAGED_SENTENCE_QUEUE=12 \
+  --param MAX_STAGED_SENTENCE_QUEUE=30
+```
+
+결과:
+
+| 후보 | 전체 F1 delta | clean F1 delta | clean recall delta | clean boundary delta | 판단 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=3` | -0.001715 | -0.001233 | -0.001416 | +0.000405 | recall과 전체 F1 하락으로 기각 |
+| `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=10` | +0.000144 | +0.000578 | +0.000809 | -0.000116 | 개선 폭이 너무 작고 boundary가 하락해 보류 |
+| `MAX_STAGED_SENTENCE_QUEUE=12` | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 영향 없음 |
+| `MAX_STAGED_SENTENCE_QUEUE=30` | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 영향 없음 |
+
+판단:
+
+- queue 길이는 분명한 관측 병목이지만, 단순 queue 보존 폭 또는 promotion age 조정으로는 의미 있는 개선이 나오지 않았다.
+- `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=10`은 clean F1을 소폭 올렸지만 `+0.001` 미만이고 boundary가 하락했다. 운영 기본값으로 승격하지 않는다.
+- `MAX_STAGED_SENTENCE_QUEUE`는 현재 case set에서 12와 30 모두 완전히 동일한 결과라 튜닝 축으로 우선순위가 낮다.
+
+structural selector 정리:
+
+- structural preflight는 앱 lifecycle 병목을 보기 위한 도구이므로 expected 품질 review 후보를 기본적으로 제외하도록 변경했다.
+- `--expected-quality include`는 기존처럼 전체 후보를 보고, `--expected-quality only`는 case 정의 품질 review 후보만 분리해 본다.
+- replay 입력 근거가 약한 후보도 기본적으로 제외하도록 `--input-evidence require`를 추가했다. `--input-evidence include`는 전체 후보를 보고, `--input-evidence weak-only`는 expected 문장이 replay input에 거의 나타나지 않는 후보만 분리한다.
+- 선택 결과 row에는 `expected_quality_flags`와 `input_evidence`를 표시해 후보의 해석 범위를 명시한다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/structural/select_sbd_structural_cases.py \
+  .tmp/eval/dictation-ai-sbd/current-20260622-goal-continue-baseline.json \
+  --limit 20 \
+  --case-output .tmp/eval/dictation-ai-sbd/goal-continue-structural-evidence-cases.jsonl \
+  --markdown-output .tmp/eval/dictation-ai-sbd/goal-continue-structural-evidence-cases.md
+
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases .tmp/eval/dictation-ai-sbd/goal-continue-structural-evidence-cases.jsonl \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/goal-continue-structural-evidence-report.json
+```
+
+structural clean preflight:
+
+```text
+cases=20
+finalized=87
+stage_start=193
+finalized_per_stage_start=0.450777
+final_precision_avg=0.426310
+final_recall_avg=0.365833
+final_f1_avg=0.331811
+final_boundary_f1_avg=0.077857
+
+stage_replace=311
+stage_queue_enqueue=220
+stage_replace_deferred=200
+stage_queue_revision=128
+stage_candidate_quality_blocked=90
+candidate_recent_final_delta_trimmed=80
+candidate_duplicate_suppressed=104
+```
+
+해석:
+
+- expected 품질 후보를 제외해도 structural subset에는 STT 내용 불일치가 강한 케이스가 일부 남는다.
+- 입력 evidence 필터 적용 후에도 top 20 후보는 모두 최소 1개 이상의 expected 문장이 replay input에 관측됐다. 별도로 `--input-evidence weak-only`를 실행하면 `coverage=0.0` 후보가 분리되므로, 이 후보들은 앱 lifecycle 성능 근거가 아니라 case/input 검토 대상으로 본다.
+- 따라서 structural evidence subset은 앱 로직 변경을 바로 정당화하는 근거가 아니라, 후속 사람이 확인할 구조 병목 후보 목록으로만 사용한다.
+- 다음 개선 후보는 새 임계값 추가가 아니라 evidence subset에서 공통 상태 전이 병목이 반복되는지 확인한 뒤 전체 challenge replay에서 재검증해야 한다.
+
+short CJK confirmation 탐색:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sweeps/run_sbd_parameter_sweep.py \
+  --cases .tmp/eval/dictation-ai-sbd/goal-continue-structural-evidence-cases.jsonl \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/goal-continue-structural-evidence-20260622 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/goal-continue-structural-evidence-20260622/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/goal-continue-structural-evidence-20260622/summary.md \
+  --include-baseline \
+  --param SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=1 \
+  --param SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=2 \
+  --param SHORT_CJK_CONFIRM_EXTRA_CHUNKS=0 \
+  --param SHORT_CJK_CONFIRM_EXTRA_CHUNKS=2
+```
+
+structural evidence subset에서는 `SHORT_CJK_CONFIRM_EXTRA_CHUNKS=2`가 `final_f1_avg=0.331811 -> 0.360`으로 올랐지만, 이는 exploratory subset 결과이므로 전체 challenge replay로 재검증했다.
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+AVC_DICTATION_SHORT_CJK_CONFIRM_EXTRA_CHUNKS=2 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-short-cjk-confirm-extra-2.json
+```
+
+전체 challenge replay delta:
+
+```text
+summary.final_precision_avg=+0.003989
+summary.final_recall_avg=-0.005806
+summary.final_f1_avg=-0.001209
+summary.final_boundary_f1_avg=-0.004296
+summary.finalized_per_stage_start=-0.015452
+
+without_expected_quality.final_precision_avg=+0.005601
+without_expected_quality.final_recall_avg=-0.005744
+without_expected_quality.final_f1_avg=-0.001066
+without_expected_quality.final_boundary_f1_avg=-0.005577
+without_expected_quality.staged_residue_count=+7
+
+zh.final_precision_avg=+0.014696
+zh.final_recall_avg=-0.021389
+zh.final_f1_avg=-0.004452
+zh.final_boundary_f1_avg=-0.015827
+zh.staged_residue_count=+8
+```
+
+판단:
+
+- `SHORT_CJK_CONFIRM_EXTRA_CHUNKS=2`는 structural subset에서는 좋아 보였지만 전체 challenge replay에서는 recall, F1, boundary를 모두 낮췄다.
+- precision 상승은 final 지연 강화의 부작용으로 보이며, 받아쓰기 final 누락 문제 개선으로 해석할 수 없다.
+- 운영 기본값으로 승격하지 않는다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_structural_selector
+Ran 4 tests in 0.001s, OK
+```
+
 ### 2026-06-22 core lifecycle 파라미터 민감도 sweep
 
 목적:

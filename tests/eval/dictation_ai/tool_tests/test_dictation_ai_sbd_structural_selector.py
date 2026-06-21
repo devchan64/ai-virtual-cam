@@ -53,10 +53,54 @@ class DictationAiSbdStructuralSelectorTest(unittest.TestCase):
 
         self.assertEqual([case["id"] for case in selected], ["high-queue", "high-revision"])
         self.assertIn("lifecycle-focus-top", selected[0]["selection_reasons"])
+        self.assertEqual(selected[0]["expected_quality_flags"], [])
+        self.assertEqual(selected[0]["input_evidence"]["covered_count"], 3)
+        self.assertIn("- expected_quality_mode: exclude", markdown)
+        self.assertIn("- input_evidence_mode: require", markdown)
         self.assertIn("- corpus_role: exploratory", markdown)
         self.assertIn("- paper_evidence: false", markdown)
         self.assertIn("structural lifecycle preflight only", markdown)
         self.assertIn("| 1 | high-queue | en |", markdown)
+
+    def test_excludes_expected_quality_review_candidates_by_default(self) -> None:
+        quality_case = _case("quality-review", queue_len=8, boundary_f1=0.0, queue_revision=80, replace_deferred=80)
+        quality_case["expected_final"] = ["and then unfinished"]
+        clean_case = _case("clean-structural", queue_len=1, boundary_f1=0.0, queue_revision=1, replace_deferred=1)
+        report = {"cases": [quality_case, clean_case]}
+
+        selected = select_structural_cases(report, limit=2)
+        included = select_structural_cases(
+            report,
+            limit=2,
+            expected_quality_mode="include",
+            input_evidence_mode="include",
+        )
+        quality_only = select_structural_cases(
+            report,
+            limit=2,
+            expected_quality_mode="only",
+            input_evidence_mode="include",
+        )
+
+        self.assertEqual([case["id"] for case in selected], ["clean-structural"])
+        self.assertEqual([case["id"] for case in included], ["quality-review", "clean-structural"])
+        self.assertEqual([case["id"] for case in quality_only], ["quality-review"])
+        self.assertIn("no_terminal_expected", quality_only[0]["expected_quality_flags"])
+
+    def test_requires_input_evidence_by_default(self) -> None:
+        weak_case = _case("weak-input", queue_len=8, boundary_f1=0.0, queue_revision=80, replace_deferred=80)
+        weak_case["expected_final"] = ["A sentence that never appears in any replay input."]
+        clean_case = _case("clean-input", queue_len=1, boundary_f1=0.0, queue_revision=1, replace_deferred=1)
+        report = {"cases": [weak_case, clean_case]}
+
+        selected = select_structural_cases(report, limit=2)
+        included = select_structural_cases(report, limit=2, input_evidence_mode="include")
+        weak_only = select_structural_cases(report, limit=2, input_evidence_mode="weak-only")
+
+        self.assertEqual([case["id"] for case in selected], ["clean-input"])
+        self.assertEqual([case["id"] for case in included], ["weak-input", "clean-input"])
+        self.assertEqual([case["id"] for case in weak_only], ["weak-input"])
+        self.assertFalse(weak_only[0]["input_evidence"]["has_evidence"])
 
     def test_writes_benchmark_compatible_case_jsonl(self) -> None:
         selected = [_case("high-queue", queue_len=6, boundary_f1=0.0, queue_revision=20, replace_deferred=15)]

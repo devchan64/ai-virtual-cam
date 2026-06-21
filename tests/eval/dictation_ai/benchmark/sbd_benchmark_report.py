@@ -20,6 +20,7 @@ from tests.eval.dictation_ai.cases.sbd_case_paths import (
 )
 from tests.eval.dictation_ai.cases.sbd_diagnostic_tags import is_diagnostic_tag
 from tests.eval.dictation_ai.cases.sbd_expected_quality import expected_quality_flags
+from tests.eval.dictation_ai.cases.sbd_input_evidence import case_input_evidence
 from tests.eval.dictation_ai.benchmark.sbd_runtime_contract import lifecycle_replay_contract, runtime_contract
 
 LIFECYCLE_BOTTLENECK_METRICS = (
@@ -264,6 +265,21 @@ def summarize_results_by_expected_quality_strata(results: list[dict[str, Any]]) 
     return {
         "expected_quality_review": _summarize_result_group(expected_quality),
         "without_expected_quality_review": _summarize_result_group(without_expected_quality),
+    }
+
+
+def summarize_results_by_input_evidence_strata(results: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Separate cases whose expected final text is weakly represented in replay inputs."""
+    with_input_evidence: list[dict[str, Any]] = []
+    weak_input_evidence: list[dict[str, Any]] = []
+    for result in results:
+        if case_input_evidence(result)["has_evidence"]:
+            with_input_evidence.append(result)
+        else:
+            weak_input_evidence.append(result)
+    return {
+        "with_input_evidence": _summarize_result_group(with_input_evidence),
+        "weak_input_evidence_review": _summarize_result_group(weak_input_evidence),
     }
 
 
@@ -514,6 +530,7 @@ def build_benchmark_report(
     tag_summary = summarize_results_by_tag(results)
     evidence_strata_summary = summarize_results_by_evidence_strata(results)
     expected_quality_strata_summary = summarize_results_by_expected_quality_strata(results)
+    input_evidence_strata_summary = summarize_results_by_input_evidence_strata(results)
     queue_residue_strata_summary = summarize_results_by_queue_residue_strata(results)
     case_exemplar_summary = summarize_case_exemplars(results)
     lifecycle_bottleneck_summary = summarize_lifecycle_bottlenecks(results, metric_totals)
@@ -587,6 +604,7 @@ def build_benchmark_report(
         "queue_residue_strata_summary": queue_residue_strata_summary,
         "evidence_strata_summary": evidence_strata_summary,
         "expected_quality_strata_summary": expected_quality_strata_summary,
+        "input_evidence_strata_summary": input_evidence_strata_summary,
         "case_exemplar_summary": case_exemplar_summary,
         "language_summary": language_summary,
         "tag_summary": tag_summary,

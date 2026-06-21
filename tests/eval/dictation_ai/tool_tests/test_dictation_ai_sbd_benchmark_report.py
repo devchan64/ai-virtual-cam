@@ -7,6 +7,7 @@ from tests.eval.dictation_ai import sbd_benchmark
 from tests.eval.dictation_ai.benchmark.sbd_benchmark_report import (
     build_benchmark_report,
     summarize_case_exemplars,
+    summarize_results_by_input_evidence_strata,
     summarize_results_by_expected_quality_strata,
     summarize_results_by_queue_residue_strata,
     summarize_results_by_evidence_strata,
@@ -69,6 +70,7 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
                 "language": "ko",
                 "tags": ["missing-final"],
                 "expected_final": ["안녕하세요."],
+                "chunks": [{"input": "안녕하세요."}],
                 "actual_final": ["안녕하세요."],
                 "actual_pending": "",
                 "actual_staged": "",
@@ -172,6 +174,14 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(
             report["expected_quality_strata_summary"]["without_expected_quality_review"]["case_count"],
             1,
+        )
+        self.assertEqual(
+            report["input_evidence_strata_summary"]["with_input_evidence"]["case_count"],
+            1,
+        )
+        self.assertEqual(
+            report["input_evidence_strata_summary"]["weak_input_evidence_review"]["case_count"],
+            0,
         )
         self.assertEqual(report["case_exemplar_summary"]["lifecycle_focus_top"][0]["id"], "case-a")
         self.assertEqual(report["staged_queue_residue_summary"]["queue_residue_case_count"], 0)
@@ -311,6 +321,49 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(summary["expected_quality_review"]["case_count"], 1)
         self.assertEqual(summary["without_expected_quality_review"]["case_count"], 1)
         self.assertEqual(summary["expected_quality_review"]["final_f1_avg"], 1.0)
+
+    def test_input_evidence_strata_separates_weak_input_cases(self) -> None:
+        results = [
+            {
+                "id": "case-a",
+                "expected_final": ["The expected sentence is present."],
+                "chunks": [{"input": "The expected sentence is present. Next text."}],
+                "actual_final": ["The expected sentence is present."],
+                "actual_pending": "",
+                "actual_staged": "",
+                "actual_staged_queue": [],
+                "final_score": _score(1.0, 1.0, 1.0),
+                "final_boundary_score": _score(1.0, 1.0, 1.0),
+                "completed_last_score": _score(1.0, 1.0, 1.0),
+                "pending_exact": True,
+                "staged_exact": True,
+                "case_exact_match": True,
+                "metrics": {"finalized": 1, "stage_start": 1},
+            },
+            {
+                "id": "case-b",
+                "expected_final": ["This target never appears in the replay input."],
+                "chunks": [{"input": "Completely unrelated source text."}],
+                "actual_final": [],
+                "actual_pending": "",
+                "actual_staged": "",
+                "actual_staged_queue": [],
+                "final_score": _score(0.0, 0.0, 0.0),
+                "final_boundary_score": _score(0.0, 0.0, 0.0),
+                "completed_last_score": _score(0.0, 0.0, 0.0),
+                "pending_exact": True,
+                "staged_exact": True,
+                "case_exact_match": False,
+                "metrics": {"finalized": 0, "stage_start": 1},
+            },
+        ]
+
+        summary = summarize_results_by_input_evidence_strata(results)
+
+        self.assertEqual(summary["with_input_evidence"]["case_count"], 1)
+        self.assertEqual(summary["weak_input_evidence_review"]["case_count"], 1)
+        self.assertEqual(summary["with_input_evidence"]["final_f1_avg"], 1.0)
+        self.assertEqual(summary["weak_input_evidence_review"]["final_f1_avg"], 0.0)
 
     def test_summarizes_evidence_strata_without_changing_scores(self) -> None:
         results = [

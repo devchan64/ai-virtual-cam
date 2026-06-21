@@ -16,9 +16,16 @@ from tests.eval.dictation_ai.benchmark.sbd_benchmark_report import (  # noqa: E4
     summarize_case_exemplars,
     summarize_staged_queue_residue,
 )
+from tests.eval.dictation_ai.cases.sbd_expected_quality import expected_quality_flags  # noqa: E402
+from tests.eval.dictation_ai.cases.sbd_input_evidence import (  # noqa: E402
+    MIN_INPUT_EVIDENCE_COVERAGE,
+    case_input_evidence,
+)
 
 
 DEFAULT_LIMIT = 16
+EXPECTED_QUALITY_MODES = ("exclude", "include", "only")
+INPUT_EVIDENCE_MODES = ("require", "include", "weak-only")
 
 
 def _load_report(path: Path) -> dict[str, Any]:
@@ -65,6 +72,45 @@ def _case_id(item: dict[str, Any]) -> str:
     return str(item.get("id") or "").strip()
 
 
+def _case_expected_quality_flags(case: dict[str, Any]) -> list[str]:
+    expected_final = [
+        str(sentence).strip()
+        for sentence in case.get("expected_final", []) or []
+        if str(sentence).strip()
+    ]
+    return expected_quality_flags(expected_final)
+
+
+def _filter_expected_quality_cases(cases: list[dict[str, Any]], *, mode: str) -> list[dict[str, Any]]:
+    if mode not in EXPECTED_QUALITY_MODES:
+        raise ValueError(f"unsupported expected quality mode: {mode!r}")
+    if mode == "include":
+        return cases
+    filtered: list[dict[str, Any]] = []
+    for case in cases:
+        has_flags = bool(_case_expected_quality_flags(case))
+        if mode == "exclude" and not has_flags:
+            filtered.append(case)
+        elif mode == "only" and has_flags:
+            filtered.append(case)
+    return filtered
+
+
+def _filter_input_evidence_cases(cases: list[dict[str, Any]], *, mode: str) -> list[dict[str, Any]]:
+    if mode not in INPUT_EVIDENCE_MODES:
+        raise ValueError(f"unsupported input evidence mode: {mode!r}")
+    if mode == "include":
+        return cases
+    filtered: list[dict[str, Any]] = []
+    for case in cases:
+        has_evidence = bool(case_input_evidence(case)["has_evidence"])
+        if mode == "require" and has_evidence:
+            filtered.append(case)
+        elif mode == "weak-only" and not has_evidence:
+            filtered.append(case)
+    return filtered
+
+
 def _append_unique(
     selected: list[dict[str, Any]],
     seen: set[str],
@@ -82,12 +128,22 @@ def _append_unique(
     reasons.append(reason)
     item["selection_reasons"] = reasons
     item["structural_selection_score"] = round(_case_score(candidate), 3)
+    item["expected_quality_flags"] = _case_expected_quality_flags(candidate)
+    item["input_evidence"] = case_input_evidence(candidate)
     selected.append(item)
     seen.add(case_id)
 
 
-def select_structural_cases(report: dict[str, Any], *, limit: int = DEFAULT_LIMIT) -> list[dict[str, Any]]:
+def select_structural_cases(
+    report: dict[str, Any],
+    *,
+    limit: int = DEFAULT_LIMIT,
+    expected_quality_mode: str = "exclude",
+    input_evidence_mode: str = "require",
+) -> list[dict[str, Any]]:
     cases = _report_cases(report, path=Path("<memory>"))
+    cases = _filter_expected_quality_cases(cases, mode=expected_quality_mode)
+    cases = _filter_input_evidence_cases(cases, mode=input_evidence_mode)
     by_id = {_case_id(case): case for case in cases if _case_id(case)}
     selected: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -167,23 +223,39 @@ def write_case_jsonl(cases: list[dict[str, Any]], path: Path) -> None:
             handle.write("\n")
 
 
-def render_markdown(cases: list[dict[str, Any]], *, source_report: str) -> str:
+def render_markdown(
+    cases: list[dict[str, Any]],
+    *,
+    source_report: str,
+    expected_quality_mode: str = "exclude",
+    input_evidence_mode: str = "require",
+) -> str:
     lines = [
         "# Dictation AI Structural Case Selection",
         "",
         f"- source_report: {source_report}",
         f"- selected_case_count: {len(cases)}",
+        f"- expected_quality_mode: {expected_quality_mode}",
+        f"- input_evidence_mode: {input_evidence_mode}",
+        f"- min_input_evidence_coverage: {MIN_INPUT_EVIDENCE_COVERAGE:.2f}",
         "- corpus_role: exploratory",
         "- paper_evidence: false",
-        "- interpretation: structural lifecycle preflight only; rerun the full challenge replay with sat + cuda + float16 before using any metric as paper evidence.",
+        "- interpretation: structural lifecycle preflight only; expected-quality review candidates and weak input-evidence candidates are excluded by default; rerun the full challenge replay with sat + cuda + float16 before using any metric as paper evidence.",
         "",
-        "| rank | id | language | score | reasons | final_f1 | boundary_f1 | queue_len | stage_queue_revision | stage_replace_deferred |",
-        "| ---: | --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |",
+        "| rank | id | language | score | reasons | expected_quality_flags | input_evidence | final_f1 | boundary_f1 | queue_len | stage_queue_revision | stage_replace_deferred |",
+        "| ---: | --- | --- | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for rank, case in enumerate(cases, start=1):
         metrics = dict(case.get("metrics", {}))
         final_score = dict(case.get("final_score", {}))
         boundary_score = dict(case.get("final_boundary_score", {}))
+        quality_flags = ", ".join(str(flag) for flag in case.get("expected_quality_flags", []))
+        input_evidence = dict(case.get("input_evidence", {}))
+        input_evidence_label = (
+            f"{int(input_evidence.get('covered_count', 0))}/"
+            f"{int(input_evidence.get('expected_count', 0))} "
+            f"{float(input_evidence.get('coverage_avg', 0.0)):.2f}"
+        )
         lines.append(
             "| "
             + " | ".join(
@@ -193,6 +265,8 @@ def render_markdown(cases: list[dict[str, Any]], *, source_report: str) -> str:
                     str(case.get("language", "")),
                     f"{float(case.get('structural_selection_score', 0.0)):.3f}",
                     ", ".join(str(reason) for reason in case.get("selection_reasons", [])),
+                    quality_flags,
+                    input_evidence_label,
                     f"{float(final_score.get('f1', 0.0)):.3f}",
                     f"{float(boundary_score.get('f1', 0.0)):.3f}",
                     str(len(case.get("actual_staged_queue", []) or [])),
@@ -210,6 +284,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Select structural lifecycle SBD benchmark cases from a report.")
     parser.add_argument("report", type=Path)
     parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
+    parser.add_argument(
+        "--expected-quality",
+        choices=EXPECTED_QUALITY_MODES,
+        default="exclude",
+        help="How to handle expected_final definition review candidates. Default excludes them from structural app-logic preflight.",
+    )
+    parser.add_argument(
+        "--input-evidence",
+        choices=INPUT_EVIDENCE_MODES,
+        default="require",
+        help="How to handle cases where expected_final has weak evidence in replay input chunks.",
+    )
     parser.add_argument("--case-output", type=Path, default=None)
     parser.add_argument("--markdown-output", type=Path, default=None)
     args = parser.parse_args()
@@ -218,13 +304,23 @@ def main() -> int:
         if args.limit <= 0:
             raise ValueError("--limit must be positive")
         report = _load_report(args.report)
-        cases = select_structural_cases(report, limit=args.limit)
+        cases = select_structural_cases(
+            report,
+            limit=args.limit,
+            expected_quality_mode=args.expected_quality,
+            input_evidence_mode=args.input_evidence,
+        )
         if args.case_output is not None:
             write_case_jsonl(cases, args.case_output)
         if args.markdown_output is not None:
             args.markdown_output.parent.mkdir(parents=True, exist_ok=True)
             args.markdown_output.write_text(
-                render_markdown(cases, source_report=str(args.report)),
+                render_markdown(
+                    cases,
+                    source_report=str(args.report),
+                    expected_quality_mode=args.expected_quality,
+                    input_evidence_mode=args.input_evidence,
+                ),
                 encoding="utf-8",
             )
     except (OSError, json.JSONDecodeError, ValueError) as exc:
