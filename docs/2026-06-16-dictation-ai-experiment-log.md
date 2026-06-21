@@ -14750,6 +14750,60 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-21 중국어 Huaihai/Chenghuangmiao 구간 fragment final 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 18:22:14..18:22:33
+chunk=3572..3591 중심
+```
+
+감사 결과:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 18:22:14" --until "2026-06-21 18:22:33" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-zh-huaihai-chenghuangmiao-182214-182233.json
+```
+
+```text
+stt_raw_line_count=20
+finalize_event_count=5
+finalize_per_stt_raw=0.25
+stage_replace_deferred_count=10
+stage_replace_deferred_per_stt_raw=0.5
+stage_queue_promote_count=5
+stage_queue_promote_per_stt_raw=0.25
+duplicate_suppressed_count=47
+duplicate_suppressed_per_stt_raw=2.35
+quality_block_count=16
+```
+
+관측:
+
+- `淮海中路那里呢，它其实跟那个新天地那里就差不多一样，都是shopping的地方。` 후보는 앞부분이 잘린 `呢它其实...` stage로 유지되다가 뒤늦게 확정됐다.
+- `我觉得今天比较特别的一点呢，就是今天。`이 너무 이른 조각 문장으로 확정되고, 뒤이어 `晚上去的那个城隍庙。`이 분리 확정됐다. 기대 동작은 `我觉得今天比较特别的一点呢，就是今天晚上去的那个城隍庙。`처럼 동일 의미 단위로 확정되는 것이다.
+- 이후 `我真的觉得城隍庙真的是太过美了。`, `我那时候第一次来的时候，我就没有去到城隍庙。`는 확정되지만, `如果你们来上海呢，你一定要去城隍庙。`와 `这一次去城隍庙的时候，其实大家都有一点累了。`는 지연/누락 위험이 보인다.
+- 최신 로그에는 `stage_queue_stale_promote_suppressed`가 보이지 않는다. 따라서 실행 중인 앱이 이전 stale queue 억제 패치를 반영했는지 불명확하므로, 이번 항목은 새 로직을 추가하지 않고 후속 비교용 케이스로만 남긴다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-6-20260621.jsonl`에 `zh_log_huaihai_chenghuangmiao_fragment_final_20260621_001` 케이스를 추가했다.
+- 이 케이스는 raw STT의 `淮海/洱海`, `shop/shopping` 변동을 평가하지 않고, 안정화된 sentence candidate가 조각 확정과 누락 없이 final-only 경로로 소비되는지 확인하는 용도다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases --max-drafts 0
+case_count=1194, expected_final_case_count=1190, zh=303
+
+./.venv/bin/python -m unittest tests.unit.test_dictation_pipeline_nodes tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle
+Ran 35 tests in 0.007s, OK
+
+git diff --check
+OK
+```
+
 ### 2026-06-21 중국어 photo booth/cover selection 구간 stale queue 지연 케이스 추가
 
 관측 구간:
