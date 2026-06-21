@@ -14749,3 +14749,65 @@ OK
 
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
+
+### 2026-06-21 중국어 Hongdae cushion/tax refund 구간 delta/queue 지연 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 15:10:20..15:10:55
+chunk=1529..1556 중심
+```
+
+감사 결과:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 15:10:20" --until "2026-06-21 15:10:55" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-zh-151020-151055.json
+```
+
+```text
+stt_raw_line_count=36
+finalize_event_count=17
+finalize_per_stt_raw=0.472
+stage_replace_deferred_count=61
+stage_replace_deferred_per_stt_raw=1.694
+stage_queue_promote_count=20
+stage_queue_promote_per_stt_raw=0.556
+duplicate_suppressed_count=64
+duplicate_suppressed_per_stt_raw=1.778
+quality_block_count=15
+finalize_delta_suppressed_stage_retained_count=22
+finalize_delta_suppressed_stage_dropped_count=6
+stage_queue_recent_final_suppressed_count=6
+```
+
+관측:
+
+- `而且有浅色跟深色的，虽然我不知道这是什么牌子，但是它好可爱哦。` stage가 확정 시도마다 `虽然我不知道这是什么牌子但是它好可爱哦` 형태의 delta로 계산되어 보류됐다.
+- 뒤의 `而且它是雾面的...`, `打开里面是这样...`, `三C的这个我也有买...`, `大家这个呢可以自助退税...` 후보가 stage queue와 duplicate suppression 사이에서 지연됐다.
+- 후반부는 `自助配睡`에서 `自助退税`로 안정화되므로 raw STT 정확도 평가가 아니라 안정화 후 final 소비 여부를 보는 케이스로 다룬다.
+- 현재 실행 중인 앱은 최근 `delta suppression counter` 보존 수정 이후 재시작된 실행인지 보장되지 않는다. 따라서 이 케이스는 새 로직의 직접 효과를 주장하기보다 후속 CUDA 벤치 비교용 케이스로 남긴다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-5-20260621.jsonl`에 `zh_log_delayed_hongdae_cushion_tax_refund_delta_queue_20260621_001` 케이스를 추가했다.
+- 기대 문장은 반복 window에서 안정화된 문장만 지정했다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases --max-drafts 0
+case_count=1152, expected_final_case_count=1148, zh=261
+
+./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle
+Ran 10 tests in 0.002s, OK
+
+git diff --check
+OK
+```
+
+제한:
+
+- `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
+- CPU/mock fallback은 성능 근거로 사용하지 않는다.
