@@ -116,10 +116,6 @@ def _word_units(text: str) -> list[str]:
     return [match.group(0).replace(",", "") for match in _WORD_UNIT_RE.finditer(_normalized_text(text).lower())]
 
 
-def _phrase_key(units: list[str]) -> list[str]:
-    return _word_units(" ".join(units))
-
-
 def _is_subsequence_at(words: list[str], candidate: list[str], start: int) -> bool:
     return words[start : start + len(candidate)] == candidate
 
@@ -134,10 +130,7 @@ def _dedupe_adjacent_words(words: list[str]) -> list[str]:
 
 
 def _duplicate_key_words(words: list[str]) -> list[str]:
-    key_words = _dedupe_adjacent_words(words)
-    while len(key_words) >= 3 and key_words[:2] in (["not", "just"], ["no", "not"]):
-        key_words = key_words[2:]
-    return key_words
+    return _dedupe_adjacent_words(words)
 
 
 def _contains_word_sequence(words: list[str], candidate: list[str]) -> bool:
@@ -170,9 +163,7 @@ def _longest_suffix_run_in_words(words: list[str], candidate: list[str]) -> int:
 
 
 def _prefix_words_match(left: str, right: str) -> bool:
-    if left == right:
-        return True
-    return {left, right} <= {"a", "an", "the"}
+    return left == right
 
 
 def _longest_prefix_revision_run(left_words: list[str], right_words: list[str]) -> int:
@@ -182,29 +173,6 @@ def _longest_prefix_revision_run(left_words: list[str], right_words: list[str]) 
             break
         length += 1
     return length
-
-
-def _short_revision_signature(words: list[str]) -> tuple[str, ...]:
-    if not words or len(words) > 18:
-        return ()
-    for start in range(0, len(words) - 1):
-        if words[start : start + 2] == ["take", "care"]:
-            return ("take", "care")
-    for start in range(0, len(words) - 2):
-        if words[start : start + 3] == ["one", "that", "suits"]:
-            return ("one", "that", "suits")
-        if start + 3 < len(words) and words[start : start + 4] == ["one", "that", "it", "suits"]:
-            return ("one", "that", "suits")
-    return ()
-
-
-def _trim_leading_boundary_noise(text: str) -> str:
-    words = _word_units(text)
-    if len(words) >= 4 and words[:4] == ["if", "you", "when", "you"]:
-        return " ".join(words[2:]).strip()
-    if len(words) >= 3 and words[:3] == ["you", "when", "you"]:
-        return " ".join(words[1:]).strip()
-    return text.strip()
 
 
 _NUMERIC_FRAGMENT_PREFIXES = {"are", "is", "it", "its", "there"}
@@ -349,7 +317,7 @@ def _korean_revision_delta(committed_words: list[str], sentence_words: list[str]
 
 
 def _cjk_delta_from_words(words: list[str]) -> str:
-    return _trim_leading_boundary_noise("".join(words).strip())
+    return "".join(words).strip()
 
 
 def _cjk_revision_delta(committed_words: list[str], sentence_words: list[str]) -> str | None:
@@ -417,7 +385,7 @@ def _is_numeric_fragment_echo(candidate_words: list[str], committed_words: list[
     return True
 
 def _sentence_delta_from_words(words: list[str]) -> str:
-    return _trim_leading_boundary_noise(" ".join(words).strip())
+    return " ".join(words).strip()
 
 
 def _sentence_output_delta(committed_text: str, sentence: str) -> str:
@@ -430,14 +398,12 @@ def _sentence_output_delta(committed_text: str, sentence: str) -> str:
         and normalized.startswith(committed_normalized)
         and (_is_cjk_text(committed_normalized) or _is_cjk_text(normalized))
     ):
-        return _trim_leading_boundary_noise(normalized[len(committed_normalized) :].lstrip(" ，,"))
+        return normalized[len(committed_normalized) :].lstrip(" ，,").strip()
     committed_words = _word_units(committed_text)
     sentence_words = _word_units(normalized)
     if not committed_words or not sentence_words:
         return normalized
     if _is_numeric_fragment_echo(sentence_words, committed_words):
-        return ""
-    if sentence_words == ["hi"] and committed_words[-1:] == ["high"]:
         return ""
     korean_delta = _korean_revision_delta(committed_words, sentence_words)
     if korean_delta is not None:
@@ -596,10 +562,6 @@ def _should_preserve_revision_confirmation_by_token_sentence(previous: str, pref
     )
 
 
-def _should_preserve_cjk_confirmation_by_similarity(previous: str, preferred: str) -> bool:
-    return _should_preserve_revision_confirmation_by_token_sentence(previous, preferred)
-
-
 def _sentences_are_revisions(left: str, right: str) -> bool:
     left_words = _word_units(left)
     right_words = _word_units(right)
@@ -610,10 +572,6 @@ def _sentences_are_revisions(left: str, right: str) -> bool:
     if 1 <= len(left_words) <= 4 and len(right_words) > len(left_words):
         if all(_prefix_words_match(left_word, right_word) for left_word, right_word in zip(left_words, right_words)):
             return True
-    left_signature = _short_revision_signature(left_words)
-    right_signature = _short_revision_signature(right_words)
-    if left_signature and left_signature == right_signature:
-        return True
     if _share_stable_numeric_sequence(left_words, right_words):
         return True
     if _short_hangul_containment_revision(left_words, right_words):
@@ -1073,17 +1031,6 @@ def _should_stage_boundary_candidate(sentence: str, language: str) -> bool:
             "trailing_ellipsis",
         }
     )
-
-
-def _should_finalize_boundary_candidate(
-    sentence: str,
-    language: str,
-    staged_confirmations: int | None = None,
-    staged_forced: bool = False,
-) -> bool:
-    if staged_confirmations is not None and staged_confirmations < _staged_sentence_required_confirmations(sentence, staged_forced):
-        return False
-    return _should_stage_boundary_candidate(sentence, language)
 
 
 def _should_finalize_before_replacement(
@@ -1741,13 +1688,6 @@ def _prefer_sentence_revision(left: str, right: str) -> str:
             and _boundary_sentence_end_count(right) > 0
         ):
             return _normalized_text(right)
-    left_signature = _short_revision_signature(left_words)
-    right_signature = _short_revision_signature(right_words)
-    if left_signature and left_signature == right_signature:
-        if left_signature == ("take", "care"):
-            if _sentence_end_count(right) >= _sentence_end_count(left):
-                return _normalized_text(right)
-        return _normalized_text(right)
     if _share_stable_numeric_sequence(left_words, right_words):
         if _sentence_end_count(right) > _sentence_end_count(left):
             return _normalized_text(right)

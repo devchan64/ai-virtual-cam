@@ -14837,6 +14837,227 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-22 ad-hoc revision/delta 예외 제거 검증
+
+목적:
+
+- 받아쓰기 확정 로직은 언어별/문구별 ad-hoc 규칙보다 token sentence similarity, numeric stability, 생성순서 lifecycle 같은 공통 원칙으로 유지한다.
+- `dictation_transcript_logic.py`에 남아 있던 특정 영어 문구/관사 보정은 현재 challenge replay에서 성능 기여가 확인되지 않아 제거 후보로 검토했다.
+
+제거한 예외:
+
+- `_short_revision_signature()`의 `take care`, `one that suits`, `one that it suits` signature 기반 revision 묶기.
+- `_trim_leading_boundary_noise()`의 `if you when you`, `you when you` 선행 문구 제거.
+- `_sentence_output_delta()`의 `hi`/`high` 단일 단어 echo 예외.
+- `_duplicate_key_words()`의 `not just`, `no not` 선행 표현 제거.
+- `_prefix_words_match()`의 `a`, `an`, `the` 관사 동등성 보정.
+- 미사용 private helper `_phrase_key()`, `_should_preserve_cjk_confirmation_by_similarity()`, `_should_finalize_boundary_candidate()`.
+
+검증:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-ad-hoc-dead-helper-removed.json
+
+cases=1223 finalized=4863 stage_start=8572 finalized_per_stage_start=0.567
+final_precision_avg=0.592 final_recall_avg=0.441 final_f1_avg=0.480
+final_similarity_coverage_avg=0.390 final_boundary_f1_avg=0.111
+case_exact_match=21 pending_exact_match=712 staged_exact_match=336
+```
+
+baseline `.tmp/eval/dictation-ai-sbd/current-20260622-post-push.json`와 비교한 delta:
+
+```text
+finalized_delta=0
+stage_start_delta=0
+finalized_per_stage_start_delta=0.000000
+final_precision_avg_delta=0.000000
+final_recall_avg_delta=0.000000
+final_f1_avg_delta=0.000000
+final_boundary_f1_avg_delta=0.000000
+case_exact_match_delta=0
+pending_exact_match_delta=0
+staged_exact_match_delta=0
+lifecycle_metric_changed_count=0
+```
+
+판단:
+
+- 현재 reviewed challenge replay에서는 해당 예외들이 실제 성능 지표, 언어별 지표, lifecycle metric에 영향을 주지 않았다.
+- 성능 기여가 없는 문구/관사별 예외는 보편성을 낮추므로 제거한다.
+- 숫자 fragment echo처럼 값의 안정성에 근거한 구조적 규칙은 이번 제거 대상에서 제외한다.
+- 문구 예외 제거 뒤 `_trim_leading_boundary_noise()`는 `strip()`만 감싸는 helper가 되었으므로 호출부를 직접 정리하고 helper도 제거한다.
+- repo 전체 참조 기준으로 미사용 private helper가 더 이상 남지 않는지 AST/`rg` 기반으로 확인했다.
+
+### 2026-06-22 CJK revision similarity 계열 CUDA 스윕
+
+목적:
+
+- 확정 누락과 중복 확정의 핵심 원인 중 하나는 sliding window 사이에서 같은 문장을 revision으로 볼지, 새 문장으로 볼지의 판정이다.
+- 문구별 예외를 제거한 뒤, 공통 token sentence similarity 계열 상수만으로 개선 여지가 있는지 확인했다.
+
+실행 1: confirmation 보존 임계값
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sweeps/run_sbd_parameter_sweep.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/cjk-confirm-preserve-ratio-20260622-current \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/cjk-confirm-preserve-ratio-20260622-current/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/cjk-confirm-preserve-ratio-20260622-current/summary.md \
+  --include-baseline \
+  --param CJK_CONFIRM_PRESERVE_RATIO_MIN=0.65 \
+  --param CJK_CONFIRM_PRESERVE_RATIO_MIN=0.80
+```
+
+결과:
+
+```text
+baseline:
+final_precision_avg=0.591738
+final_recall_avg=0.441211
+final_f1_avg=0.480155
+final_boundary_f1_avg=0.111346
+
+CJK_CONFIRM_PRESERVE_RATIO_MIN=0.65:
+final_precision_avg=0.592305  delta=+0.000566
+final_recall_avg=0.442627     delta=+0.001416
+final_f1_avg=0.481333         delta=+0.001177
+final_boundary_f1_avg=0.111775 delta=+0.000429
+zh_final_f1_avg_delta=+0.004337
+queue_len_2_to_4_final_f1_delta=-0.007603
+
+CJK_CONFIRM_PRESERVE_RATIO_MIN=0.80:
+final_precision_avg=0.591898  delta=+0.000160
+final_recall_avg=0.441152     delta=-0.000059
+final_f1_avg=0.480200         delta=+0.000045
+final_boundary_f1_avg=0.111914 delta=+0.000568
+queue_len_ge_5_final_f1_delta=-0.018485
+```
+
+실행 2: CJK revision 분류 임계값
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sweeps/run_sbd_parameter_sweep.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/cjk-revision-ratio-20260622-current \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/cjk-revision-ratio-20260622-current/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/cjk-revision-ratio-20260622-current/summary.md \
+  --include-baseline \
+  --param CJK_REVISION_RATIO_MIN=0.70 \
+  --param CJK_REVISION_RATIO_MIN=0.85
+```
+
+결과:
+
+```text
+CJK_REVISION_RATIO_MIN=0.70:
+final_f1_avg_delta=-0.000257
+final_boundary_f1_avg_delta=+0.000089
+zh_final_f1_avg_delta=-0.000948
+queue_len_ge_5_final_f1_delta=+0.005475
+
+CJK_REVISION_RATIO_MIN=0.85:
+final_f1_avg_delta=+0.000095
+final_boundary_f1_avg_delta=-0.000060
+zh_final_f1_avg_delta=+0.000349
+queue_len_2_to_4_final_f1_delta=+0.000473
+queue_len_ge_5_final_f1_delta=+0.001127
+```
+
+조합 확인:
+
+```text
+AVC_DICTATION_CJK_CONFIRM_PRESERVE_RATIO_MIN=0.65 \
+AVC_DICTATION_CJK_REVISION_RATIO_MIN=0.85 \
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-cjk-confirm-065-revision-085.json
+
+final_precision_avg=0.592614 delta=+0.000876
+final_recall_avg=0.442764 delta=+0.001553
+final_f1_avg=0.481588 delta=+0.001433
+final_boundary_f1_avg=0.111801 delta=+0.000455
+zh_final_f1_avg_delta=+0.005279
+queue_len_2_to_4_final_f1_delta=-0.007160
+queue_len_ge_5_final_f1_delta=+0.001127
+```
+
+판단:
+
+- `CJK_CONFIRM_PRESERVE_RATIO_MIN=0.65` 계열은 전체와 중국어 F1을 올리지만, `queue_len_2_to_4` 계층을 크게 낮춘다.
+- `CJK_REVISION_RATIO_MIN=0.85`는 queue 계층 손상이 작지만 전체 개선 폭이 매우 작고 boundary F1이 소폭 낮아진다.
+- 두 값을 조합하면 전체 F1은 가장 높아지지만, 중간 queue 계층 손상이 여전히 남는다.
+- 따라서 현재 기본값은 유지한다. revision similarity 계열은 가능성이 있지만, 채택하려면 queue 중간 계층 손상을 설명하거나 완화하는 구조 개선이 먼저 필요하다.
+
+### 2026-06-22 중복 revision reset 유닛 테스트 폐기
+
+목적:
+
+- 받아쓰기 AI 품질 관리는 단일 private helper 유닛 테스트보다 reviewed case replay와 CUDA/SaT 벤치 결과를 우선한다.
+- `tests/unit/test_dictation_ai_revision_reset_policy.py`는 `you want to go up there...` 단일 문장부호 flapping 케이스만 검증해, 현재 벤치 중심 품질 판단에는 기여가 작다.
+
+판단:
+
+- 같은 정책은 `tests/unit/test_dictation_pipeline_nodes.py`의 한국어/영어 token-sentence revision reset 테스트와 `tests/eval/dictation_ai/benchmark/sbd_lifecycle_replay.py` 경로에서 이미 다룬다.
+- 실제 실패/개선 판단은 `tests/eval/dictation_ai/sbd_cases/{en,ko,zh}/` reviewed case set과 `sbd_benchmark.py` 결과를 기준으로 삼는다.
+- 따라서 중복 private helper unit test인 `tests/unit/test_dictation_ai_revision_reset_policy.py`를 폐기한다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest discover tests/unit
+Ran 169 tests in 0.245s, OK
+
+./.venv/bin/python -m unittest discover tests/eval/dictation_ai/tool_tests
+Ran 164 tests in 0.108s, OK
+```
+
+### 2026-06-22 short mixed-latin zh stage 차단 ablation 기각
+
+목적:
+
+- `short_mixed_latin_zh`는 이름상 특정 언어 조건이어서 보편성 측면에서 의심되는 품질 게이트다.
+- 다만 과거 `body king的。` 같은 짧은 mixed Latin/CJK 조각이 stage head를 점유한 근거로 추가된 규칙이므로, 제거 전 CUDA replay로 확인했다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-short-mixed-latin-stageable-ablation.json
+```
+
+ablation 내용:
+
+- `short_mixed_latin_zh` flag 생성은 유지.
+- `_should_stage_boundary_candidate()`에서 `short_mixed_latin_zh` stage 차단만 제거.
+
+결과:
+
+```text
+final_precision_avg_delta=+0.000140
+final_recall_avg_delta=+0.000636
+final_f1_avg_delta=+0.000364
+final_boundary_f1_avg_delta=-0.000082
+finalized_per_stage_start_delta=-0.000870
+staged_exact_match_delta=-3
+zh_final_f1_avg_delta=+0.001341
+zh_final_boundary_f1_avg_delta=-0.000301
+queue_len_1_final_f1_delta=-0.004599
+stage_replace_deferred_delta=+33
+```
+
+판단:
+
+- 전체 final F1은 소폭 증가하지만 boundary F1, staged exact, finalized/stage 효율이 하락한다.
+- `stage_replace_deferred`가 증가해 queue/revision 병목을 완화하지 못했다.
+- 따라서 `short_mixed_latin_zh` stage 차단은 유지한다.
+- 이 규칙은 장기적으로 더 일반적인 “짧은 mixed-script fragment” 게이트로 이름과 조건을 바꿀 후보지만, 현재 근거만으로 제거하지 않는다.
+
 ### 2026-06-22 short no-end fragment 품질 게이트 CUDA 스윕
 
 목적:
