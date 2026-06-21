@@ -14347,3 +14347,26 @@ chunk=453..456
 - CJK 후보가 짧고 문장 종료 신호가 없으면 기존 `short_no_end_fragment` 품질 플래그로 stage 진입을 막는다.
 - `哇，看起来就很好吃。`처럼 짧지만 완결된 문장은 계속 stage/final 후보로 유지한다.
 - 단위 테스트로 무종결 조각 차단과 완결 짧은 문장 허용을 함께 고정했다.
+
+### 2026-06-21 stage queue same-chunk replacement final 지연
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+chunk=1371..1392
+```
+
+관측:
+
+- `这个章鱼真的很新鲜。`, `五色，味道很不一样哎。`, `看到我自己吗？`, `不要了，它有脚垫...` 구간에서 장시간 final이 느리거나 일부 문장이 누락되는 현상을 확인했다.
+- 해당 구간의 lifecycle 로그에서는 `stage_queue_len=14~16`까지 누적된 뒤, chunk 1389에서 `stage_queue_promote=4`, `finalized=3`이 동시에 발생했다.
+- 같은 chunk 안에서 오래된 queue 후보가 active stage로 승격되고, 바로 다음 후보의 replacement에 의해 `replaced_confirmed` final로 소비되는 경로가 있었다.
+- 이 경로는 생성순서 queue를 쓰는 목적과 충돌한다. 승격된 후보가 새 window에서 재확인되기 전에 같은 window의 후속 후보 때문에 final로 소비되면 stale fragment가 false final이 되고, 뒤의 의미 후보도 계속 밀린다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_food_queue_burst_same_chunk_replace_20260621_001` 케이스를 추가했다.
+- active staged 후보가 현재 chunk에서 candidate buffer로부터 승격된 경우, 같은 chunk의 replacement는 final 확정으로 처리하지 않고 새 후보를 queue에 보류하도록 변경했다.
+- 벤치 lifecycle에도 같은 규칙과 `stage_replace_deferred_same_chunk` 지표를 추가했다.
+- 이는 중국어 문구별 예외가 아니라, staged 후보가 최소 한 번의 후속 STT window를 거쳐 소비되도록 하는 일반 생명주기 규칙이다.

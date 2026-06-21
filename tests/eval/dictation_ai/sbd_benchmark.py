@@ -586,6 +586,10 @@ def _stage_completed_sentence(
             state.staged_delta_suppressed_chunk_index = -1
             _promote_next_staged_sentence(state, chunk_index)
         return []
+    if state.staged_deferred_age_chunk == chunk_index:
+        _queue_staged_sentence(state, candidate, forced, chunk_index)
+        state.count("stage_replace_deferred_same_chunk")
+        return []
     if _should_finalize_replaced_sentence(
         state.staged_sentence,
         candidate,

@@ -588,6 +588,19 @@ def run_transcribe_loop(
                 active_stage.clear()
                 promote_next_staged_sentence(detected)
             return []
+        if active_stage.deferredAgeChunk == chunks:
+            queue_staged_sentence(candidate, forced)
+            count_metric("stage_replace_deferred_same_chunk")
+            worker._emit(
+                "status",
+                "받아쓰기 AI stage 교체 보류: "
+                f"chunk={chunks} decision={replacement_reason} same_chunk=True "
+                f"staged_confirmations={active_stage.confirmations} staged_age={active_stage.age} "
+                f"staged_tail={_diagnostic_tail(active_stage.sentence)} "
+                f"candidate_tail={_diagnostic_tail(candidate)}",
+                display=False,
+            )
+            return []
         worker._emit(
             "status",
             "받아쓰기 AI stage 교체: "
@@ -1048,6 +1061,10 @@ def run_transcribe_loop(
                 "stage_queue_recent_final_delta_trimmed",
                 0,
             )
+            stage_replace_deferred_same_chunk_count = chunk_lifecycle_metrics.get(
+                "stage_replace_deferred_same_chunk",
+                0,
+            )
             stage_finalize_before_replace_count = chunk_lifecycle_metrics.get("stage_finalize_before_replace", 0)
             stage_age_finalize_count = chunk_lifecycle_metrics.get("stage_age_finalize", 0)
             stage_age_quality_blocked_count = chunk_lifecycle_metrics.get("stage_age_quality_blocked", 0)
@@ -1123,6 +1140,7 @@ def run_transcribe_loop(
                 f"stage_queue_drop_oldest={stage_queue_drop_oldest_count} "
                 f"stage_queue_recent_final_suppressed={stage_queue_recent_final_suppressed_count} "
                 f"stage_queue_recent_final_delta_trimmed={stage_queue_recent_final_delta_trimmed_count} "
+                f"stage_replace_deferred_same_chunk={stage_replace_deferred_same_chunk_count} "
                 f"stage_queue_len={len(commit_buffer_node)} "
                 f"finalize_before_replace={stage_finalize_before_replace_count} "
                 f"age_finalize={stage_age_finalize_count} "
