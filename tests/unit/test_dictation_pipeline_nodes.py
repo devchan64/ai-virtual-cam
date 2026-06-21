@@ -482,10 +482,10 @@ class DictationPipelineNodeTest(unittest.TestCase):
             )
         )
 
-    def test_short_cjk_quality_block_uses_replacement_hold_limit(self) -> None:
+    def test_short_cjk_quality_block_uses_default_replacement_hold_limit(self) -> None:
         self.assertEqual(
             _stage_quality_block_age_limit("给你解腻的，是炸鸡。", "zh", False, 3),
-            5,
+            3,
         )
         self.assertEqual(
             _stage_quality_block_age_limit("它对面的这一家", "zh", False, 3),

@@ -635,7 +635,7 @@ Representative corpus를 단독 `sbd_benchmark.py`로 실행할 때도 report의
 - `MAX_STAGED_SENTENCE_QUEUE=20`은 성능 개선축이라기보다 긴 window 후보 조기 폐기를 막는 보수적 하한이다.
 - `MAX_STAGED_SENTENCE_QUEUE=12/30` 재분석에서도 clean lifecycle stratum 결론은 동일하다. 12는 drop oldest와 queue revision을 늘리고, 30은 20과 동일해 기본값 변경 근거가 없다.
 - `REVISION_FALLBACK_COVERAGE_MIN=0.55`는 주변값 0.50/0.60/0.70보다 전체/언어/태그 delta가 안정적이어서 현재 기본값 근거가 있다.
-- `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=0/1/3`은 현재 challenge replay에서 전체/언어/태그 delta가 모두 0이므로 성능 튜닝축으로 보지 않는다.
+- `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=0/1/3`은 1113건 기준에서는 delta 0이었지만, 1223건 기준에서는 queue-head-stall CJK 사례가 추가되며 실효 축으로 다시 열렸다.
 - `NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS=3/9`는 한국어 staged residue를 각각 -1/+1 움직이지만 final 품질 지표는 바꾸지 않아 기본값 변경 근거가 없다.
 - `FORCED_SENTENCE_CONFIRM_CHUNKS=2/4`는 현재 challenge replay에서 전체/언어/태그 delta가 모두 0이므로 닫힌 튜닝축으로 본다.
 - `FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS=3/5`도 전체/언어/태그 delta가 모두 0이므로 forced 계열은 현재 corpus에서 추가 미세조정하지 않는다.
@@ -643,13 +643,13 @@ Representative corpus를 단독 `sbd_benchmark.py`로 실행할 때도 report의
 - `CJK_REVISION_RATIO_MIN=0.70`은 중국어 staged residue를 2건 줄이지만 final 품질 지표를 바꾸지 않고, `0.85`는 중국어 precision/F1과 핵심 태그 precision을 낮춰 기본값 변경 근거가 없다.
 - 2026-06-22 1223건 기준에서는 한국어 suffix 예외 제거 이후 `CJK_CONFIRM_PRESERVE_RATIO_MIN=0.55`가 final F1, recall, boundary F1을 함께 올렸다. 이 축은 더 이상 보류가 아니라 token-sentence revision confirmation reset을 덜 공격적으로 하는 채택 축으로 본다.
 
-당시 12개 manifest 축의 종합 판단은 다음처럼 분류했다. 이후 delta 0으로 닫힌 `SENTENCE_CONFIRM_MAX_AGE_CHUNKS`, `FORCED_SENTENCE_CONFIRM_CHUNKS`, `FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS`, `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS`는 운영 상수로만 유지하고 현재 `dictation_tuning_manifest()` sweep 후보에서는 제외한다.
+당시 12개 manifest 축의 종합 판단은 다음처럼 분류했다. 이후 delta 0으로 닫힌 `SENTENCE_CONFIRM_MAX_AGE_CHUNKS`, `FORCED_SENTENCE_CONFIRM_CHUNKS`, `FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS`는 운영 상수로만 유지하고 현재 `dictation_tuning_manifest()` sweep 후보에서는 제외한다. `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS`는 1223건 기준 재검증에서 다시 열린 축으로 분리한다.
 
 | 분류 | 축 | 해석 |
 | --- | --- | --- |
 | 유지 근거 있음 | `REVISION_FALLBACK_COVERAGE_MIN=0.55` | 주변값 0.50/0.60/0.70보다 전체 final F1, precision, recall이 안정적이다. |
 | trade-off 축 | `SENTENCE_CONFIRM_CHUNKS`, `SHORT_NO_END_FRAGMENT_UNITS`, `SHORT_CJK_FINAL_UNITS`, `MAX_STAGED_SENTENCE_QUEUE`, `CJK_REVISION_RATIO_MIN` | 일부 지표나 잔류를 줄여도 precision, recall, boundary, 언어별 품질 중 하나가 악화된다. |
-| 닫힌 축 | `SENTENCE_CONFIRM_MAX_AGE_CHUNKS`, `FORCED_SENTENCE_CONFIRM_CHUNKS`, `FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS`, `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS` | 현재 1113건 challenge replay에서 전체/언어/핵심 태그 지표를 움직이지 않는다. |
+| 닫힌 축 | `SENTENCE_CONFIRM_MAX_AGE_CHUNKS`, `FORCED_SENTENCE_CONFIRM_CHUNKS`, `FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS` | 현재 1113건 challenge replay에서 전체/언어/핵심 태그 지표를 움직이지 않는다. |
 | 보류 축 | `NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS` | final 품질 변화가 없거나 개선 폭이 너무 작아 기본값 변경 근거가 부족하다. |
 
 따라서 후속 실험에서 단일 threshold를 더 세밀하게 흔드는 것은 우선순위가 낮다. 새 기본값 후보를 찾기보다, active staged 후보와 candidate queue가 같은 발화 구간의 revision을 어떻게 소비하는지 설명하는 구조 실험을 먼저 설계한다.
@@ -681,6 +681,16 @@ reason breakdown은 다음 실험 축을 좁히는 데 사용한다.
 2026-06-22의 1223건 replay에서는 한국어 어미 suffix 기반 `open_korean_clause`를 폐기했다. 해당 규칙은 언어별 어미를 직접 예외로 둔 과거 흔적이었고, 제거 후 `open_korean_clause=301 -> 0`, `confirmed=4674 -> 4845`, `final_f1_avg=0.480155 -> 0.482404`, `final_boundary_f1_avg=0.111346 -> 0.112973`로 확인됐다. 따라서 이후 reason breakdown에서 한국어 열린 절은 별도 문법 예외가 아니라 일반 confirmation/revision lifecycle 결과로 해석한다.
 
 같은 1223건 replay에서 `CJK_CONFIRM_PRESERVE_RATIO_MIN=0.55`와 queued revision preemption 확인 조건을 반영한 최신 기준선은 `final_f1_avg=0.488275`, `final_precision_avg=0.579891`, `final_recall_avg=0.455824`, `final_boundary_f1_avg=0.112375`다. 이 변경은 final content 지표와 empty final을 개선하지만 boundary F1을 소폭 낮추므로, boundary 개선 근거가 아니라 queue/revision missing-final 완화 근거로 해석한다.
+
+같은 기준선에서 `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=4/8` 재검증은 기본값 변경 근거를 만들지 못했다. `4`는 queue/staged residue를 줄이지만 recall과 final F1을 낮췄고, `8`은 final F1을 +0.0003 올리는 대신 boundary F1을 낮추고 review-risk로 분류됐다. 또한 `open_latin_clause` defer를 제거하는 임시 ablation은 `stage_replace_deferred=4713 -> 2845`로 queue churn을 줄였지만, `stage_start=8559 -> 9035`, `finalized_per_stage_start=0.596214 -> 0.570116`, `final_f1_avg=0.488275 -> 0.486790`으로 악화됐다. 따라서 남은 병목은 단순 queue age 조정이나 no-end 라틴 defer 제거가 아니라, active/queued revision을 생성순서 안에서 언제 소비할지의 구조 문제로 본다.
+
+반면 `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=0`은 같은 1223건 기준에서 `final_f1_avg=0.488275 -> 0.496566`, `final_precision_avg=0.579891 -> 0.582216`, `final_recall_avg=0.455824 -> 0.467552`, `final_boundary_f1_avg=0.112375 -> 0.115502`로 함께 개선됐다. 영향은 중국어에 집중되고 영어/한국어 delta는 0이다. `stage_replace_deferred=-936`, `stage_queue_revision=-834`, `stage_queue_revision_token_sentence_deferred=-391`로 queue-head-stall 계열 churn도 감소했다. 따라서 이 축은 “짧은 CJK를 더 빨리 final로 보낸다”가 아니라 “짧은 CJK active head가 확정 불가능할 때 추가 hold 없이 suppress/promote를 허용해 생성순서 queue 소비를 회복한다”는 구조 정책으로 채택한다.
+
+같은 상태에서 `SHORT_CJK_CONFIRM_EXTRA_CHUNKS=0/2`를 재검증하면 기본값 `1`을 유지해야 한다. `0`은 finalized/stage와 recall을 올리지만 `final_precision_avg=-0.0329`, `final_f1_avg=-0.0128`, `final_boundary_f1_avg=-0.0047`로 악화되고 중국어 precision은 `-0.1214` 하락한다. `2`는 precision만 소폭 올리고 recall, final F1, boundary를 낮춘다. 따라서 hold=0은 “확정 불가능한 짧은 head가 queue를 막지 않게 하는 정책”이고, confirm extra=1은 “짧은 CJK final 자체는 한 번 더 관측하는 정책”으로 분리해 유지한다.
+
+`MAX_STAGED_SENTENCE_QUEUE=10/30` 재검증은 queue residue가 용량 부족 때문이 아님을 보여준다. baseline과 `30`은 동일하고, baseline에서도 `stage_queue_drop_oldest=0`이다. `10`은 queue residue total을 2건 줄일 뿐 boundary F1을 낮추고 review-risk가 붙었다. 따라서 queue 관련 후속 실험은 큐 크기 확장이 아니라 active staged 후보가 확정, 억제, 또는 promote를 허용하는 소비 순서 정책으로 제한한다.
+
+`SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=0` 이후 `CJK_CONFIRM_PRESERVE_RATIO_MIN=0.50/0.60`을 다시 검증했지만 기본값 변경 근거는 없었다. `0.50`은 queue residue를 11건 줄이는 대신 언어별 precision/F1 regression risk가 남고, `0.60`은 recall, boundary F1, finalized/stage를 낮췄다. 따라서 token-sentence revision confirmation reset 보수성은 현재 기본값 `0.55`를 유지한다.
 
 `SHORT_NO_END_FRAGMENT_UNITS=3/5` 최신 lifecycle reason delta 재검증은 이 축을 기본값 개선 후보가 아니라 trade-off 설명 축으로 분류하게 한다. `3`은 `quality_blocked=-492`, `no_end_marker=-490`, `short_no_end_fragment=-489`로 차단을 줄이지만 `stage_replace_deferred=+404`, `stage_queue_revision=+198`이 늘고 final precision/F1이 하락했다. `5`는 `stage_replace_deferred=-416`, `stage_queue_revision=-235`로 churn을 줄이지만 `quality_blocked=+456`, `no_end_marker=+450`, `short_no_end_fragment=+449`가 늘고 recall/F1/boundary가 하락했다. 따라서 no-end fragment threshold는 현 기준에서 더 세밀하게 최적화할 축이 아니라, 보수성 수준을 설명하는 폐쇄된 축으로 본다.
 

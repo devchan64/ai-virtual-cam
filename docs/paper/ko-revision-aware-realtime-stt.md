@@ -6,7 +6,7 @@
 
 ## 초록
 
-실시간 음성 전사(automatic speech recognition, ASR) 모델은 스트리밍 또는 준스트리밍 환경에서 매 입력 윈도우마다 부분 가설(partial hypothesis)을 재작성한다. 본 연구의 관심사는 raw STT 정확도 자체를 개선하는 것이 아니라, 부정확하고 흔들리는 STT 가설을 사람이 속기하듯 잠깐 보류하고 반복 관측된 문장 단위만 순서대로 확정해 final-only 번역 입력으로 안정화하는 것이다. 이를 위해 원시 ASR 가설(raw ASR hypothesis), 문장 경계 검출(sentence boundary detection), 리비전 생명주기(revision lifecycle), final-only 번역 입력 제어를 분리해 계측하는 후처리 구조를 제안한다. 특히 한국어, 영어, 중국어 환경에서 문맥 윈도우(context window) 길이와 확정 단위(commit unit)의 상호작용을 분석하고, 긴 문맥이 원시 STT 가설을 더 안정적으로 만들 수 있는 동시에 사용자 화면의 최종 전사(final transcript) 갱신을 늦출 수 있음을 운영 로그와 텍스트 벤치마크 기반으로 관찰한다. 1223개 로그 기반 failure-enriched replay 케이스를 실제 `sat + cuda + float16` 경로로 평가한 최신 challenge 기준선은 `final_f1_avg=0.488`, `final_precision_avg=0.580`, `final_recall_avg=0.456`, `final_boundary_f1_avg=0.112`이다.
+실시간 음성 전사(automatic speech recognition, ASR) 모델은 스트리밍 또는 준스트리밍 환경에서 매 입력 윈도우마다 부분 가설(partial hypothesis)을 재작성한다. 본 연구의 관심사는 raw STT 정확도 자체를 개선하는 것이 아니라, 부정확하고 흔들리는 STT 가설을 사람이 속기하듯 잠깐 보류하고 반복 관측된 문장 단위만 순서대로 확정해 final-only 번역 입력으로 안정화하는 것이다. 이를 위해 원시 ASR 가설(raw ASR hypothesis), 문장 경계 검출(sentence boundary detection), 리비전 생명주기(revision lifecycle), final-only 번역 입력 제어를 분리해 계측하는 후처리 구조를 제안한다. 특히 한국어, 영어, 중국어 환경에서 문맥 윈도우(context window) 길이와 확정 단위(commit unit)의 상호작용을 분석하고, 긴 문맥이 원시 STT 가설을 더 안정적으로 만들 수 있는 동시에 사용자 화면의 최종 전사(final transcript) 갱신을 늦출 수 있음을 운영 로그와 텍스트 벤치마크 기반으로 관찰한다. 1223개 로그 기반 failure-enriched replay 케이스를 실제 `sat + cuda + float16` 경로로 평가한 최신 challenge 기준선은 `final_f1_avg=0.497`, `final_precision_avg=0.582`, `final_recall_avg=0.468`, `final_boundary_f1_avg=0.116`이다.
 
 본 논문의 기여는 세 가지다. 첫째, 실시간 ASR 출력의 불안정성을 단순 UI 문제가 아니라 리비전 인지 확정 문제로 모델링한다. 둘째, 중복 증폭(duplicate amplification), 확정 누락(missing final), 확정 지연의 대리 신호(candidate age, staged residue), pending overrun, replacement churn을 분리한 평가 지표를 제시한다. 셋째, 다국어 실시간 전사 시스템에서 STT 모델, 문장 경계 모델, 확정 정책, 번역 sink를 독립 축으로 검증해야 한다는 운영 근거를 제시한다. 이 결과는 완성된 범용 해법이나 운영 평균 성능 개선 주장이 아니라, 운영 로그 기반 실패 사례를 벤치마크로 누적하며 파이프라인의 병목을 보수적으로 분석하는 사례 연구로 해석해야 한다.
 
@@ -147,7 +147,7 @@ Whisper 계열 모델은 강력한 오프라인 전사 성능을 보이지만, �
 - 파라미터 변경은 같은 reviewed 샘플 집합에서 한 번에 한 축만 비교하고, 변경 전후의 lifecycle metric을 함께 기록한다. 논문 근거로 채택하려면 변경값, 영향을 받는 실패 유형, 개선 지표, 악화 지표를 함께 남긴다.
 - 모델/STT 품질, SBD 후보 품질, final lifecycle 품질, 번역 sink 계약을 서로 다른 실패 축으로 본다.
 
-파라미터 sweep은 `AVC_DICTATION_*` 환경변수로 수행한다. 실험 가능한 값은 `dictation_tuning_manifest()`에 등록된 실효 축으로 제한한다. 현재 manifest는 `MAX_STAGED_SENTENCE_QUEUE`, `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS`, `SENTENCE_CONFIRM_CHUNKS`, `SHORT_CJK_FINAL_UNITS`, `SHORT_NO_END_FRAGMENT_UNITS`, revision similarity 계열처럼 final lifecycle에 직접 영향을 주고 replay에서 delta가 관측되는 축을 중심으로 유지한다. `SENTENCE_CONFIRM_MAX_AGE_CHUNKS`, forced confirmation 계열, `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS`처럼 현재 challenge replay에서 delta가 없거나 config 계약에 가려지는 축은 운영 상수로만 유지하고 sweep 후보에서 제외한다. STT 모델을 바꾸거나 언어별 문구 규칙을 추가하는 것은 이 논문의 lifecycle 튜닝 실험으로 보지 않는다. 운영 기본값은 단일 벤치 수치가 아니라 다수 로그 케이스에서 같은 방향의 개선이 반복될 때만 checked-in 상수로 반영한다. 외부 문헌은 partial hypothesis/final 분리, incremental ASR 안정성 평가, SBD 후보 생성의 근거로 쓰고, 개별 임계값 자체는 앱 로그 replay 실험으로만 정당화한다. 벤치 리포트에는 `dictation_tuning_protocol`과 `dictation_tuning_manifest`를 함께 저장해 실험 규칙, 각 파라미터의 env 이름, 기본값, 현재값, scope, 의도, 근거 분류를 결과와 함께 추적한다.
+파라미터 sweep은 `AVC_DICTATION_*` 환경변수로 수행한다. 실험 가능한 값은 `dictation_tuning_manifest()`에 등록된 실효 축으로 제한한다. 현재 manifest는 `MAX_STAGED_SENTENCE_QUEUE`, `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS`, `SENTENCE_CONFIRM_CHUNKS`, `SHORT_CJK_FINAL_UNITS`, `SHORT_NO_END_FRAGMENT_UNITS`, `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS`, revision similarity 계열처럼 final lifecycle에 직접 영향을 주고 replay에서 delta가 관측되는 축을 중심으로 유지한다. `SENTENCE_CONFIRM_MAX_AGE_CHUNKS`와 forced confirmation 계열처럼 현재 challenge replay에서 delta가 없거나 config 계약에 가려지는 축은 운영 상수로만 유지하고 sweep 후보에서 제외한다. STT 모델을 바꾸거나 언어별 문구 규칙을 추가하는 것은 이 논문의 lifecycle 튜닝 실험으로 보지 않는다. 운영 기본값은 단일 벤치 수치가 아니라 다수 로그 케이스에서 같은 방향의 개선이 반복될 때만 checked-in 상수로 반영한다. 외부 문헌은 partial hypothesis/final 분리, incremental ASR 안정성 평가, SBD 후보 생성의 근거로 쓰고, 개별 임계값 자체는 앱 로그 replay 실험으로만 정당화한다. 벤치 리포트에는 `dictation_tuning_protocol`과 `dictation_tuning_manifest`를 함께 저장해 실험 규칙, 각 파라미터의 env 이름, 기본값, 현재값, scope, 의도, 근거 분류를 결과와 함께 추적한다.
 
 따라서 케이스 수집과 파라미터 채택은 별도 단계다. 앱 로그에서 관측한 실패 구간은 `expected_final`을 확인한 뒤 reviewed benchmark case로만 보관한다. 그 뒤 같은 reviewed case 집합에서 `AVC_DICTATION_*` override를 사용해 값을 바꿔 실행하고, `final_f1_avg`, `final_precision_avg`, `final_recall_avg`, `final_boundary_f1_avg`, `finalized_per_stage_start`와 주요 lifecycle counter를 함께 비교한다. draft 상태의 케이스는 논문 성능 수치에 포함하지 않는다.
 
@@ -249,7 +249,7 @@ Challenge replay 벤치마크는 품질 게이트가 아니라 실패 재현 기
 
 | 조건 | cases | finalized | stage_start | finalized/stage | final precision | final recall | final F1 | boundary F1 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1223건 challenge replay baseline | 1223 | 5103 | 8559 | 0.596 | 0.580 | 0.456 | 0.488 | 0.112 |
+| 1223건 challenge replay baseline | 1223 | 5228 | 8964 | 0.583 | 0.582 | 0.468 | 0.497 | 0.116 |
 | 1113건 challenge replay baseline | 1113 | 4012 | 5638 | 0.712 | 0.602 | 0.440 | 0.483 | 0.108 |
 | 1113건 이전 fallback coverage 기준선 | 1113 | 3986 | 5658 | 0.704 | 0.597 | 0.435 | 0.478 | 0.109 |
 | 혼합 age 샘플 | 164 | 809 | 1183 | 0.684 | 0.775 | 0.688 | 0.705 | 0.280 |
@@ -291,7 +291,7 @@ Challenge replay 벤치마크는 품질 게이트가 아니라 실패 재현 기
 
 셋째, 생성순서대로 소비 가능한 staged 후보를 폐기하지 않는 정책은 확정 누락을 줄이는 데 효과가 있었다. `stage_unconfirmed_replacement_suppressed=102`였던 기준선에서 해당 경로를 `stage_age_finalize`로 전환하자 final 수는 791에서 840으로 늘었고 recall과 boundary F1이 함께 개선됐다. 하지만 precision이 하락했으므로, 이 정책은 최근 final memory와 no-end fragment 품질 게이트를 함께 관찰해야 한다.
 
-넷째, boundary 품질은 내용 회수율과 독립적으로 관리해야 한다. 최신 1223건 기준선의 `final_f1_avg=0.488`에 비해 `final_boundary_f1_avg=0.112`는 더 낮다. 여러 케이스에서 기대 문장 내용은 일부 회수되지만 문장 경계가 합쳐지거나 잘리고, 일부 후속 문장은 staged queue에 잔류한다. 실시간 번역 시스템에서는 문장 경계 오류가 번역 단위 오류로 전파되므로 boundary F1과 staged residue를 별도 지표로 유지해야 한다.
+넷째, boundary 품질은 내용 회수율과 독립적으로 관리해야 한다. 최신 1223건 기준선의 `final_f1_avg=0.497`에 비해 `final_boundary_f1_avg=0.116`는 더 낮다. 여러 케이스에서 기대 문장 내용은 일부 회수되지만 문장 경계가 합쳐지거나 잘리고, 일부 후속 문장은 staged queue에 잔류한다. 실시간 번역 시스템에서는 문장 경계 오류가 번역 단위 오류로 전파되므로 boundary F1과 staged residue를 별도 지표로 유지해야 한다.
 
 다섯째, 성능 개선 시도는 “수치가 오른다”보다 “어떤 실패를 줄이고 어떤 실패를 늘릴 수 있는가”로 해석해야 한다. 예를 들어 queue 한도를 늘리면 일부 긴 영어 케이스의 recall은 개선되지만, 오래된 후보가 더 오래 남아 stale staged 위험이 증가할 수 있다. 반대로 no-end fragment를 강하게 차단하면 문장 파괴는 줄 수 있지만, 짧고 실제로 완결된 응답의 recall을 잃을 수 있다. 따라서 본 연구의 파라미터 튜닝은 공격적 최적화가 아니라 실패 유형 간 trade-off를 기록하는 보수적 절차다.
 
@@ -339,7 +339,7 @@ Rao et al.의 speech translation segmentation 연구는 번역 단위가 downstr
 
 본 연구는 다국어 실시간 전사 및 번역 시스템에서 리비전 인지 확정 계층의 필요성을 제시했다. STT 모델의 원시 가설, 문장 경계 검출, 확정 생명주기, final-only sink 계약은 서로 다른 실패 원인을 갖기 때문에 분리 평가되어야 한다. 특히 긴 문맥은 STT 안정성을 높일 수 있지만 final transcript 지연과 긴 문장 확정 문제를 유발한다. 따라서 실시간 전사 시스템은 문맥 윈도우와 확정 단위를 분리하고, 중복 억제와 리비전 생명주기를 명시적으로 계측해야 한다.
 
-현재 구현은 완성된 답이라기보다 실패 중심 입력에서 재현 가능한 기준선이다. 최신 1223건 challenge replay 기준에서 내용 회수 F1은 0.488이고 boundary F1은 0.112이다. 이 격차는 실시간 전사 품질을 STT 정확도 하나로 설명할 수 없음을 보여준다. 잔여 실패는 특히 영어 long-context 케이스의 boundary F1과 staged residue에 집중되어 있으며, lifecycle counter는 단순 큐 한도보다 staged replacement/deferred와 boundary 후보 품질이 더 직접적인 병목임을 가리킨다. 다만 현재 replay case는 STT 단계의 boundary confidence를 보존하지 않고, SaT/SBD의 boundary count와 right-context count만 보존한다. 또한 complete evidence package의 replay parity는 `partial`이므로, 현재 결론은 운영 loop 전체 검증이 아니라 공유 decision helper를 사용하는 text replay 기반 failure lifecycle 분석이다. 이 count들은 좋은 케이스와 나쁜 케이스 모두에서 크게 나타나므로 단순 threshold 정책의 근거로 쓰기 어렵다. 향후 개선은 언어별 ad-hoc 규칙보다 active staged 소비, candidate queue 정리, no-end fragment 처리, recent final memory의 일반 정책을 보수적으로 검증하고, representative/translation replay로 runtime-only 신호를 보강하는 방향으로 진행해야 한다.
+현재 구현은 완성된 답이라기보다 실패 중심 입력에서 재현 가능한 기준선이다. 최신 1223건 challenge replay 기준에서 내용 회수 F1은 0.497이고 boundary F1은 0.116이다. 이 격차는 실시간 전사 품질을 STT 정확도 하나로 설명할 수 없음을 보여준다. 잔여 실패는 특히 영어 long-context 케이스의 boundary F1과 staged residue에 집중되어 있으며, lifecycle counter는 단순 큐 한도보다 staged replacement/deferred와 boundary 후보 품질이 더 직접적인 병목임을 가리킨다. 다만 현재 replay case는 STT 단계의 boundary confidence를 보존하지 않고, SaT/SBD의 boundary count와 right-context count만 보존한다. 또한 complete evidence package의 replay parity는 `partial`이므로, 현재 결론은 운영 loop 전체 검증이 아니라 공유 decision helper를 사용하는 text replay 기반 failure lifecycle 분석이다. 이 count들은 좋은 케이스와 나쁜 케이스 모두에서 크게 나타나므로 단순 threshold 정책의 근거로 쓰기 어렵다. 향후 개선은 언어별 ad-hoc 규칙보다 active staged 소비, candidate queue 정리, no-end fragment 처리, recent final memory의 일반 정책을 보수적으로 검증하고, representative/translation replay로 runtime-only 신호를 보강하는 방향으로 진행해야 한다.
 
 ## 참고 문헌
 

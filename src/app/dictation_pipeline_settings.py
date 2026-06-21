@@ -126,7 +126,7 @@ SLOW_PENDING_MAX_CHARS_PER_CHUNK = 18.0
 # 구조적 기준으로만 유지하고, 관측된 단어나 문구를 여기에 넣지 않는다.
 SHORT_CJK_FINAL_UNITS = 10
 SHORT_NO_END_FRAGMENT_UNITS = 5
-SHORT_CJK_REPLACEMENT_HOLD_CHUNKS = 2
+SHORT_CJK_REPLACEMENT_HOLD_CHUNKS = 0
 
 # 짧은 CJK 후보는 문장부호가 있어도 다음 window에서 긴 문장으로 확장되는
 # 경우가 많다. final을 막지는 않고 기본 confirmation보다 1회 더 관측해
@@ -600,6 +600,16 @@ def dictation_tuning_manifest() -> list[dict[str, int | float | str]]:
             max_value=4,
             scope="lifecycle",
             intent="require one more observation for punctuated short CJK candidates before finalizing",
+        ),
+        _tuning_manifest_entry(
+            "SHORT_CJK_REPLACEMENT_HOLD_CHUNKS",
+            default=SHORT_CJK_REPLACEMENT_HOLD_CHUNKS,
+            current=short_cjk_replacement_hold_chunks(),
+            value_type="int",
+            min_value=0,
+            max_value=6,
+            scope="lifecycle",
+            intent="delay suppression of punctuated short CJK staged heads when later replacement candidates arrive",
         ),
         _tuning_manifest_entry(
             "CJK_REVISION_RATIO_MIN",

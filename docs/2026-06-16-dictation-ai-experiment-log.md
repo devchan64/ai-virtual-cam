@@ -15336,6 +15336,272 @@ stage_queue_revision_preempt_deferred_terminal_tail_revision_split=2
 - broad 조건의 추가 4건은 `aged`와 `terminal_tail_revision_split`이며, 전체 final F1과 recall/precision을 가장 크게 올린다.
 - 따라서 reason을 특정 final 경로로 좁히는 것은 일반 append-only 원칙을 흐리면서 성능 이득도 줄인다. 현재는 final reason과 무관하게 “ready active boundary slot은 낮은 confirmation same-boundary queued revision에 밀리지 않는다”는 조건을 유지한다.
 
+### 2026-06-22 staged queue promotion age 재검증
+
+목적:
+
+- 최신 1223건 기준선에서 queue residue와 `stage_queue_revision`이 여전히 크다.
+- `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS`를 줄이면 stale queue residue를 줄일 수 있고, 늘리면 생성순서 후보 보존을 더 허용할 수 있다.
+- 언어별 예외나 문구 규칙이 아닌 queue lifecycle 기본 정책 축으로 재검증했다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py run-sweep \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-1223-queue-promotion-age-20260622 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-1223-queue-promotion-age-20260622/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-1223-queue-promotion-age-20260622/summary.md \
+  --include-baseline \
+  --param STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=4 \
+  --param STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=8
+```
+
+결과:
+
+| value | final F1 delta | precision delta | recall delta | boundary F1 delta | staged residue delta | queue residue total delta | 판단 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `4` | -0.0009 | +0.0002 | -0.0014 | +0.0000 | -7 | -12 | residue는 줄지만 recall/F1과 한국어/중국어 지표가 하락한다. |
+| `8` | +0.0003 | +0.0002 | +0.0003 | -0.0001 | +1 | +0 | 개선 폭이 작고 boundary 하락과 key-tag boundary regression이 있다. |
+
+판단:
+
+- `4`는 stale 후보를 더 빨리 버리지만 실제 final 누락을 늘린다.
+- `8`은 중국어 final F1을 +0.0009 올리지만 전체 boundary F1을 낮추고 queue_len_ge_5 residue를 늘린다.
+- 따라서 현재 1223건 기준에서 queue promotion age는 기본값 변경 축이 아니다. queue 문제는 단순 age 상한보다 active/queued revision 소비 정책으로 해석한다.
+
+### 2026-06-22 open latin clause defer 폐기 ablation
+
+목적:
+
+- 영어 병목에서 `open_latin_clause=1868`이 크게 관측된다.
+- no-end 라틴 후보를 replacement 시점에 보류하지 않으면 영어 누락이 줄어드는지 확인했다.
+- 이는 문구 예외가 아니라 `open_latin_clause` lifecycle defer 정책 자체의 필요성을 검증한 ablation이다.
+
+임시 변경:
+
+```text
+_should_defer_unconfirmed_replacement()에서 "open_latin_clause"를 제외
+```
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-open-latin-defer-disabled.json
+```
+
+결과:
+
+| metric | baseline | open latin defer disabled | delta |
+| --- | ---: | ---: | ---: |
+| `finalized` | 5103 | 5151 | +48 |
+| `stage_start` | 8559 | 9035 | +476 |
+| `finalized_per_stage_start` | 0.596214 | 0.570116 | -0.026098 |
+| `final_precision_avg` | 0.579891 | 0.576412 | -0.003479 |
+| `final_recall_avg` | 0.455824 | 0.455260 | -0.000564 |
+| `final_f1_avg` | 0.488275 | 0.486790 | -0.001485 |
+| `final_boundary_f1_avg` | 0.112375 | 0.112218 | -0.000156 |
+| `staged_exact_match` | 347 | 342 | -5 |
+
+언어별 영향:
+
+```text
+en: precision_delta=-0.009917, recall_delta=-0.001609, final_f1_delta=-0.004234, boundary_delta=-0.000446, staged_residue_delta=+5, empty_final_delta=+1
+ko/zh: delta 없음
+```
+
+주요 counter:
+
+```text
+stage_replace_deferred=4713 -> 2845
+stage_queue_revision=4558 -> 3956
+stage_finalize_deferred_for_queue_revision=782 -> 768
+candidate_duplicate_suppressed=14082 -> 14340
+```
+
+판단:
+
+- `open_latin_clause` defer를 제거하면 replacement defer와 queue revision은 크게 줄지만, stage_start가 과도하게 늘고 finalized/stage, precision, recall, final F1, boundary F1이 모두 하락한다.
+- 영어 precision과 final F1 하락이 직접 확인되므로 채택하지 않는다.
+- no-end 라틴 후보를 replacement에서 보류하는 현재 정책은 유지한다. 영어 개선은 이 defer를 제거하는 방식이 아니라, no-end 후보가 실제 boundary evidence를 얻는 경로를 별도로 보강해야 한다.
+
+### 2026-06-22 short CJK replacement hold 재개 및 기본값 0 채택
+
+목적:
+
+- 최신 구조 병목 사례에서 짧은 CJK completed head가 active stage를 점유하고, 뒤의 긴 completed sentence들이 queue에 쌓인 채 final로 소비되지 않는 패턴이 확인됐다.
+- 대표 사례 `zh_log_marinated_crab_no_end_fragment_queue_20260621_001`은 `很甘甜。`이 active staged로 남고 `我比较喜欢那个这个绿色的蟹黄...` 이후 문장들이 queue에 쌓였지만, 5개 chunk 동안 final이 0건이었다.
+- 이전 1113건 기준에서는 `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS`가 delta 0으로 닫힌 축이었지만, 1223건으로 queue-head-stall 케이스가 추가된 뒤 실제 병목 축으로 다시 열렸다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 AVC_DICTATION_SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=0 \
+  ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-short-cjk-hold-0.json
+
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 AVC_DICTATION_SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=1 \
+  ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-short-cjk-hold-1.json
+
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 AVC_DICTATION_SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=3 \
+  ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-short-cjk-hold-3.json
+```
+
+결과:
+
+| value | final F1 delta | precision delta | recall delta | boundary F1 delta | finalized delta | staged exact delta | zh final F1 delta | zh boundary delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `0` | +0.008290 | +0.002325 | +0.011728 | +0.003127 | +125 | +20 | +0.030540 | +0.011519 |
+| `1` | +0.005667 | +0.002260 | +0.007761 | +0.001254 | +82 | +15 | +0.020874 | +0.004619 |
+| `3` | -0.006728 | -0.002421 | -0.008103 | -0.002951 | -65 | -2 | -0.024785 | -0.010871 |
+
+주요 counter delta:
+
+| value | stage_replace_deferred | stage_queue_revision | stage_queue_revision_token_sentence_deferred | stage_candidate_quality_blocked | candidate_duplicate_suppressed |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `0` | -936 | -834 | -391 | +20 | +509 |
+| `1` | -483 | -427 | -209 | +0 | +259 |
+| `3` | +474 | +448 | +215 | -46 | -281 |
+
+checked-in 기본값 반영 검증:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-short-cjk-hold-0-default.json
+```
+
+```text
+cases=1223 finalized=5228 stage_start=8964 finalized_per_stage_start=0.583222
+final_precision_avg=0.582216
+final_recall_avg=0.467552
+final_f1_avg=0.496566
+final_similarity_coverage_avg=0.408517
+final_boundary_f1_avg=0.115502
+case_exact_match=23 pending_exact_match=712 staged_exact_match=367
+```
+
+판단:
+
+- `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=0`은 영어/한국어에는 영향을 주지 않고 중국어에서 precision, recall, final F1, boundary F1, staged residue를 같은 방향으로 개선했다.
+- hold를 늘릴수록 짧은 CJK active head가 queue를 더 오래 막고 `stage_replace_deferred`, `stage_queue_revision`, token-sentence defer가 증가한다.
+- 이 변경은 짧은 CJK 문장을 더 공격적으로 final 확정하는 규칙이 아니다. 짧은 head가 확정 불가능하면 추가 hold 없이 suppress/promote 경로로 넘어가게 해 생성순서 queue 소비를 회복하는 lifecycle 정책이다.
+- 기본값을 `2 -> 0`으로 변경하고 `dictation_tuning_manifest()`에 다시 등록한다.
+
+### 2026-06-22 short CJK confirmation extra 유지
+
+목적:
+
+- `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=0`은 짧은 CJK head가 queue를 막지 않게 하는 구조 개선이었다.
+- 다음 질문은 punctuated short CJK 후보 자체의 confirmation을 더 빨리 하거나 더 늦추는 것이 추가 개선을 만드는지다.
+- 이 축은 짧은 CJK를 실제 final로 확정하는 보수성 값이므로 precision/boundary 손실 여부를 우선 확인한다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py run-sweep \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-1223-short-cjk-confirm-extra-hold0-20260622 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-1223-short-cjk-confirm-extra-hold0-20260622/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-1223-short-cjk-confirm-extra-hold0-20260622/summary.md \
+  --include-baseline \
+  --param SHORT_CJK_CONFIRM_EXTRA_CHUNKS=0 \
+  --param SHORT_CJK_CONFIRM_EXTRA_CHUNKS=2
+```
+
+결과:
+
+| value | final F1 delta | precision delta | recall delta | boundary F1 delta | finalized/stage delta | zh final F1 delta | zh precision delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `0` | -0.0128 | -0.0329 | +0.0049 | -0.0047 | +0.0458 | -0.0471 | -0.1214 |
+| `2` | -0.0012 | +0.0040 | -0.0058 | -0.0043 | -0.0155 | -0.0045 | +0.0147 |
+
+판단:
+
+- `0`은 확정량과 recall을 늘리지만 precision과 boundary를 크게 낮춘다. 특히 중국어 precision 하락이 `-0.1214`로 과도하다.
+- `2`는 precision만 소폭 올리고 recall, final F1, boundary, staged residue가 나빠진다.
+- 따라서 `SHORT_CJK_CONFIRM_EXTRA_CHUNKS=1`을 유지한다.
+- hold=0은 확정 불가능한 짧은 head가 queue 소비를 막지 않게 하는 suppress/promote 정책이고, confirm extra=1은 짧은 CJK를 실제 final로 보내기 전 한 번 더 확인하는 보수 정책이다. 두 축은 구분해서 유지한다.
+
+### 2026-06-22 max staged sentence queue 용량 재검증
+
+목적:
+
+- `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=0` 이후에도 queue residue가 남아 있다.
+- 이 residue가 단순 queue 용량 부족인지, active/queued 후보 소비 정책 문제인지 분리하기 위해 queue size를 다시 확인했다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py run-sweep \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-1223-max-queue-hold0-20260622 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-1223-max-queue-hold0-20260622/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-1223-max-queue-hold0-20260622/summary.md \
+  --include-baseline \
+  --param MAX_STAGED_SENTENCE_QUEUE=10 \
+  --param MAX_STAGED_SENTENCE_QUEUE=30
+```
+
+결과:
+
+| value | final F1 delta | precision delta | recall delta | boundary F1 delta | queue residue total delta | queue max delta | stage_queue_drop_oldest |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `10` | +0.0001 | +0.0000 | +0.0001 | -0.0002 | -2 | -1 | 0 |
+| `30` | +0.0000 | +0.0000 | +0.0000 | +0.0000 | +0 | +0 | 0 |
+
+판단:
+
+- baseline에서도 `stage_queue_drop_oldest=0`이므로 현재 1223건 기준의 queue residue는 queue 용량 부족이 아니다.
+- `10`은 미세하게 residue를 줄이지만 boundary F1을 낮추고 review-risk로 분류된다.
+- `30`은 완전한 no-op이다.
+- 따라서 `MAX_STAGED_SENTENCE_QUEUE` 기본값은 유지한다. 남은 queue 문제는 용량이 아니라 active staged 후보가 언제 final/suppress/promote 되는지의 소비 순서 문제로 본다.
+
+### 2026-06-22 CJK confirmation preserve ratio hold=0 기준 재검증
+
+목적:
+
+- `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=0` 채택 후 CJK confirmation preserve ratio의 최적점이 바뀌었는지 확인했다.
+- 이 축은 token-sentence revision confirmation reset을 얼마나 보수적으로 할지 결정하므로, final F1뿐 아니라 언어별 precision/recall, queue residue, review-risk를 함께 본다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py run-sweep \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-1223-cjk-confirm-preserve-hold0-20260622 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-1223-cjk-confirm-preserve-hold0-20260622/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-1223-cjk-confirm-preserve-hold0-20260622/summary.md \
+  --include-baseline \
+  --param CJK_CONFIRM_PRESERVE_RATIO_MIN=0.50 \
+  --param CJK_CONFIRM_PRESERVE_RATIO_MIN=0.60
+```
+
+결과:
+
+| value | final F1 delta | precision delta | recall delta | boundary F1 delta | finalized/stage delta | queue residue total delta | review |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `0.50` | +0.0000 | +0.0000 | +0.0000 | +0.0001 | +0.0007 | -11 | language/key-tag regression |
+| `0.60` | +0.0000 | +0.0001 | -0.0002 | -0.0001 | -0.0013 | +2 | language/key-tag regression |
+
+언어별 관찰:
+
+- `0.50`은 queue residue를 11건 줄이지만 영어 final F1/precision을 소폭 낮추고, 중국어는 precision +0.0007 대신 recall -0.0006 trade-off가 생긴다.
+- `0.60`은 precision을 아주 소폭 올리지만 recall, boundary F1, finalized/stage가 낮아지고 queue len >= 5 residue가 1건 늘어난다.
+
+판단:
+
+- `0.50`과 `0.60` 모두 개선 폭이 측정 오차 수준이고 review-risk가 남는다.
+- hold=0 이후에도 `CJK_CONFIRM_PRESERVE_RATIO_MIN=0.55`가 가장 균형 잡힌 기준선이다.
+- 따라서 기본값은 변경하지 않는다.
+
 ### 2026-06-22 short no-end fragment 품질 게이트 CUDA 스윕
 
 목적:
