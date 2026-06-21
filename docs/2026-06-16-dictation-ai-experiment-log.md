@@ -14433,3 +14433,24 @@ chunk=2104..2115
 
 - `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_hand_broadcast_queue_false_final_20260621_001` 케이스를 추가했다.
 - 추가 로직 변경은 하지 않았다. 현재 코드 변경이 런타임에 적용된 뒤 같은 chunk 승격/교체 경로가 줄어드는지 벤치와 로그로 확인한다.
+
+### 2026-06-21 중국어 fried chicken/whole chicken 구간 확정 지연 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 14:29:47..14:30:07
+chunk=2265..2285
+```
+
+관측:
+
+- 사용자가 제시한 `BHC...招牌cheese` 구간은 이미 `zh_log_missing_takeout_chicken_signature_cheese_20260621_001`로 등록되어 있었다.
+- 이어지는 `整只鸡`, `鸡颈`, `很脆`, `鸡胸/鸡腿/鸡翅`, `甜辣的` 구간은 최종적으로 chunk 2267, 2284, 2285에서 확정됐지만, 중간에 `所以蒸汁鸡呢，它是。`, `你嗦。` 같은 짧은 false staged 후보가 노출되고 확정이 지연됐다.
+- 로그에는 `stage_replace_deferred_same_chunk` 안정성 지표가 없으므로, 동일 chunk stage 교체 지연 패치가 반영된 실행인지 아직 확정할 수 없다. 해당 케이스는 적용 후 지연 시간이 줄어드는지 비교할 대상으로 둔다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-2-20260621.jsonl`에 `zh_log_delayed_fried_chicken_whole_chicken_queue_stage_20260621_001` 케이스를 추가했다.
+- 이 케이스는 완전 누락이 아니라 확정 지연과 false staged 노출 사례로 분류했다. 추가 로직 변경은 실제 `sat + cuda + float16` 벤치에서 동일 패턴이 남는지 확인한 뒤 판단한다.
