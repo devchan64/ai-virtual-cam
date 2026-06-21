@@ -118,10 +118,7 @@ def run_transcribe_loop(
             if not promoted:
                 return
             promoted_quality_flags = set(_final_sentence_diagnostic_flags(active_stage.sentence, detected))
-            if (
-                not _should_stage_boundary_candidate(active_stage.sentence, detected)
-                or ("no_end_marker" in promoted_quality_flags and len(commit_buffer_node) > 0)
-            ):
+            if not _should_stage_boundary_candidate(active_stage.sentence, detected):
                 count_metric("stage_queue_quality_suppressed", 1)
                 count_segment_state("suppressed", 1)
                 for flag in promoted_quality_flags:

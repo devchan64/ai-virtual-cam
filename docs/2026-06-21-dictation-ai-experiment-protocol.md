@@ -643,7 +643,7 @@ Representative corpus를 단독 `sbd_benchmark.py`로 실행할 때도 report의
 - `CJK_REVISION_RATIO_MIN=0.70`은 중국어 staged residue를 2건 줄이지만 final 품질 지표를 바꾸지 않고, `0.85`는 중국어 precision/F1과 핵심 태그 precision을 낮춰 기본값 변경 근거가 없다.
 - `CJK_CONFIRM_PRESERVE_RATIO_MIN=0.65`는 중국어 staged residue를 1건 줄이고 final F1을 +0.0002 올리지만 boundary/precision 변화가 없어 기본값 변경 근거가 약하다.
 
-12개 manifest 축의 종합 판단은 다음처럼 분류한다.
+당시 12개 manifest 축의 종합 판단은 다음처럼 분류했다. 이후 delta 0으로 닫힌 `SENTENCE_CONFIRM_MAX_AGE_CHUNKS`, `FORCED_SENTENCE_CONFIRM_CHUNKS`, `FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS`, `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS`는 운영 상수로만 유지하고 현재 `dictation_tuning_manifest()` sweep 후보에서는 제외한다.
 
 | 분류 | 축 | 해석 |
 | --- | --- | --- |

@@ -1453,13 +1453,13 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
                 },
                 "lifecycle_replay_contract": lifecycle_replay_contract(),
                 "case_summary": {"corpus_role": "challenge-replay", "expected_final_case_count": 1109},
-                "parameter_axes": ["FORCED_SENTENCE_CONFIRM_CHUNKS"],
+                "parameter_axes": ["NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS"],
                 "evidence_summary": {
                     "adoption_review_counts": {"no-risk-flag": 1},
                     "results": [
                         {"label": "baseline"},
                         {
-                            "label": "forced_sentence_confirm_chunks-2",
+                            "label": "no_text_stale_stage_suppress_chunks-3",
                             "adoption_review": "no-risk-flag",
                             "metric_deltas": {
                                 "final_f1_avg": 0.0,

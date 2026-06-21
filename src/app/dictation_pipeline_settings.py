@@ -100,7 +100,8 @@ SENTENCE_CONFIRM_CHUNKS = 1
 FORCED_SENTENCE_CONFIRM_CHUNKS = 3
 
 # age는 정확한 confirmation을 계속 받지 못하는 staged 후보의 보조 확정
-# 장치다. GUI의 sentenceFinalizeAge 계약과 가깝게 유지해야 한다.
+# 장치다. 운영 경로에서는 config의 sentenceFinalizeAge가 실제 age 계약이며,
+# 아래 값은 base age가 전달되지 않는 내부 fallback으로만 유지한다.
 SENTENCE_CONFIRM_MAX_AGE_CHUNKS = 3
 FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS = 4
 
@@ -571,36 +572,6 @@ def dictation_tuning_manifest() -> list[dict[str, int | float | str]]:
             intent="balance finalization latency against duplicate and premature final risk for ordinary candidates",
         ),
         _tuning_manifest_entry(
-            "FORCED_SENTENCE_CONFIRM_CHUNKS",
-            default=FORCED_SENTENCE_CONFIRM_CHUNKS,
-            current=forced_sentence_confirm_chunks(),
-            value_type="int",
-            min_value=1,
-            max_value=8,
-            scope="lifecycle",
-            intent="require stronger observation for forced boundary candidates",
-        ),
-        _tuning_manifest_entry(
-            "SENTENCE_CONFIRM_MAX_AGE_CHUNKS",
-            default=SENTENCE_CONFIRM_MAX_AGE_CHUNKS,
-            current=sentence_confirm_max_age_chunks(),
-            value_type="int",
-            min_value=1,
-            max_value=10,
-            scope="lifecycle",
-            intent="allow aged staged candidates to finalize when repeated exact confirmations are not preserved",
-        ),
-        _tuning_manifest_entry(
-            "FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS",
-            default=FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS,
-            current=forced_sentence_confirm_max_age_chunks(),
-            value_type="int",
-            min_value=1,
-            max_value=12,
-            scope="lifecycle",
-            intent="age cap for forced boundary candidates",
-        ),
-        _tuning_manifest_entry(
             "SHORT_CJK_FINAL_UNITS",
             default=SHORT_CJK_FINAL_UNITS,
             current=short_cjk_final_units(),
@@ -619,16 +590,6 @@ def dictation_tuning_manifest() -> list[dict[str, int | float | str]]:
             max_value=20,
             scope="quality-gate",
             intent="flag short candidates without sentence-end markers before final-only translation",
-        ),
-        _tuning_manifest_entry(
-            "SHORT_CJK_REPLACEMENT_HOLD_CHUNKS",
-            default=SHORT_CJK_REPLACEMENT_HOLD_CHUNKS,
-            current=short_cjk_replacement_hold_chunks(),
-            value_type="int",
-            min_value=0,
-            max_value=10,
-            scope="quality-gate",
-            intent="hold short CJK replacement candidates briefly before replacing existing staged content",
         ),
         _tuning_manifest_entry(
             "SHORT_CJK_CONFIRM_EXTRA_CHUNKS",

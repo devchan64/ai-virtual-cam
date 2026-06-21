@@ -2629,7 +2629,7 @@ staged_exact_match=52
 
 - 논문 근거를 보강하려면 raw STT 정확도보다, 불안정한 STT 가설을 final-only 번역 입력으로 안정화하는 lifecycle 파라미터의 효과를 반복 검증해야 한다.
 - 파라미터 변경은 앱 로그에서 수집한 다수 실패 케이스를 benchmark에 누적한 뒤, 같은 샘플 집합에서 변경 전후를 비교한다.
-- 실험 가능한 파라미터는 lifecycle에 직접 영향을 주는 값으로 제한한다. 예: `MAX_STAGED_SENTENCE_QUEUE`, `SENTENCE_CONFIRM_CHUNKS`, `FORCED_SENTENCE_CONFIRM_CHUNKS`, `SENTENCE_CONFIRM_MAX_AGE_CHUNKS`, `FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS`, `SHORT_CJK_FINAL_UNITS`, `SHORT_NO_END_FRAGMENT_UNITS`, revision similarity 계열.
+- 실험 가능한 파라미터는 lifecycle에 직접 영향을 주고 현재 replay에서 실효 delta가 관측되는 값으로 제한한다. 예: `MAX_STAGED_SENTENCE_QUEUE`, `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS`, `SENTENCE_CONFIRM_CHUNKS`, `SHORT_CJK_FINAL_UNITS`, `SHORT_NO_END_FRAGMENT_UNITS`, revision similarity 계열.
 - STT 모델, CUDA 장치, backend, 언어별 문구 규칙, 케이스별 문자열 보정은 이 논문의 lifecycle 파라미터 실험으로 취급하지 않는다.
 - `AVC_DICTATION_*` 환경변수 override는 로컬 sweep용이다. 운영 기본값은 벤치 결과와 실험일지 판단을 거쳐 `dictation_pipeline_settings.py` checked-in 상수로 반영한다.
 - 문헌 근거 검토 결과, Whisper-Streaming과 incremental ASR 평가는 partial hypothesis와 final transcript 분리, latency/revoke/안정성 지표 분리의 근거로 쓸 수 있다. 다만 `SENTENCE_CONFIRM_CHUNKS` 같은 개별 상수값을 외부 논문에서 직접 정당화하지는 않는다. 상수 채택은 앱 로그 replay와 CUDA/AI 벤치 결과로만 판단한다.
@@ -15311,6 +15311,205 @@ stage_queue_drop_oldest=31
 - capacity를 줄이면 오래된 queue tail은 줄지만, 실제 문장 후보 보존도 함께 손상된다.
 - 따라서 queue residue 문제는 단순 capacity 축보다 queue 후보 품질/소비 정책에서 다뤄야 하며, `MAX_STAGED_SENTENCE_QUEUE=20` 기본값을 유지한다.
 
+### 2026-06-22 short CJK confirmation 추가 요구 CUDA 스윕 기각
+
+목적:
+
+- queue-order 선점 보류 제거 후 기준선에서 짧은 CJK 후보가 recall/precision 균형에 어떤 영향을 주는지 확인했다.
+- 이 축은 단어별 예외가 아니라, 공백이 없는 CJK 짧은 후보가 문장부호를 포함할 때도 추가 window 확인을 요구할지 정하는 구조적 생명주기 정책이다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sweeps/run_sbd_parameter_sweep.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/short-cjk-confirm-extra-20260622 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/short-cjk-confirm-extra-20260622/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/short-cjk-confirm-extra-20260622/summary.md \
+  --include-baseline \
+  --param SHORT_CJK_CONFIRM_EXTRA_CHUNKS=0 \
+  --param SHORT_CJK_CONFIRM_EXTRA_CHUNKS=2
+```
+
+결과:
+
+```text
+baseline:
+finalized=4837
+stage_start=8785
+finalized_per_stage_start=0.5506
+final_precision_avg=0.5919
+final_recall_avg=0.4401
+final_f1_avg=0.4795
+final_boundary_f1_avg=0.1106
+staged_exact_match=335
+
+SHORT_CJK_CONFIRM_EXTRA_CHUNKS=0:
+finalized=5497
+stage_start=9204
+finalized_per_stage_start=0.5972
+final_precision_avg=0.5634
+final_recall_avg=0.4557
+final_f1_avg=0.4751
+final_boundary_f1_avg=0.1073
+staged_exact_match=346
+
+SHORT_CJK_CONFIRM_EXTRA_CHUNKS=2:
+finalized=4706
+stage_start=8702
+finalized_per_stage_start=0.5408
+final_precision_avg=0.5946
+final_recall_avg=0.4349
+final_f1_avg=0.4776
+final_boundary_f1_avg=0.1058
+staged_exact_match=335
+```
+
+해석:
+
+- `0`은 finalized 수와 recall을 올리지만 precision `-0.0285`, final F1 `-0.0043`, boundary F1 `-0.0033`으로 하락한다. 짧은 CJK 후보를 너무 쉽게 확정해 중복/오염 final 위험을 키우는 방향이다.
+- `2`는 precision을 소폭 올리지만 recall, final F1, boundary F1을 모두 낮춘다. 추가 확인을 더 강하게 요구하면 확정 누락이 커진다.
+- 두 후보 모두 adoption review가 `review-risk`이며, language/tag delta에서도 CJK final F1 또는 key-tag boundary가 악화된다.
+- 따라서 `SHORT_CJK_CONFIRM_EXTRA_CHUNKS=1` 기본값을 유지한다.
+
+### 2026-06-22 sentence max age env 스윕 무효 축 정리
+
+목적:
+
+- 확정 지연과 누락이 계속 관측되므로 `SENTENCE_CONFIRM_MAX_AGE_CHUNKS`를 2/4로 바꿔 age 보조 확정 기준이 유효한 튜닝축인지 다시 확인했다.
+- 이 축은 “오래 관측된 staged 후보를 언제 소비할지”라는 핵심 lifecycle 규칙처럼 보이지만, 현재 운영 경로에서 실제로 값이 적용되는지 확인이 필요했다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sweeps/run_sbd_parameter_sweep.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/sentence-confirm-max-age-20260622 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/sentence-confirm-max-age-20260622/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/sentence-confirm-max-age-20260622/summary.md \
+  --include-baseline \
+  --param SENTENCE_CONFIRM_MAX_AGE_CHUNKS=2 \
+  --param SENTENCE_CONFIRM_MAX_AGE_CHUNKS=4
+```
+
+결과:
+
+```text
+baseline:
+final_precision_avg=0.5919
+final_recall_avg=0.4401
+final_f1_avg=0.4795
+final_boundary_f1_avg=0.1106
+finalized_per_stage_start=0.5506
+queue_residue_total=1068
+
+SENTENCE_CONFIRM_MAX_AGE_CHUNKS=2:
+final_precision_avg=0.5919
+final_recall_avg=0.4401
+final_f1_avg=0.4795
+final_boundary_f1_avg=0.1106
+finalized_per_stage_start=0.5506
+queue_residue_total=1068
+
+SENTENCE_CONFIRM_MAX_AGE_CHUNKS=4:
+final_precision_avg=0.5919
+final_recall_avg=0.4401
+final_f1_avg=0.4795
+final_boundary_f1_avg=0.1106
+finalized_per_stage_start=0.5506
+queue_residue_total=1068
+```
+
+해석:
+
+- 전체/언어/태그/queue 계층 delta가 모두 0이다.
+- 원인은 `_sentence_max_age_chunks(..., base_age=sentence_finalize_age)` 경로다. 운영과 replay 모두 config의 `sentenceFinalizeAge`를 base age로 전달하므로, `SENTENCE_CONFIRM_MAX_AGE_CHUNKS` env override는 현재 경로에서 effective parameter가 아니다.
+- 따라서 이 축은 “성능 영향이 없는 기본값”이 아니라 “현재 sweep 도구로 검증 가능한 실효 튜닝축이 아님”으로 분류한다.
+- `SENTENCE_CONFIRM_MAX_AGE_CHUNKS`와 `FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS`는 내부 fallback 상수로만 유지하고, `dictation_tuning_manifest()`에서는 제거한다. age tuning은 향후 필요하면 config 계약인 `sentenceFinalizeAge` 계열을 별도 실험축으로 다뤄야 한다.
+- 기존 paper-evidence sweep에서 전체/언어/핵심 태그 delta가 0으로 확인된 `FORCED_SENTENCE_CONFIRM_CHUNKS`와 `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS`도 운영 상수는 유지하되 `dictation_tuning_manifest()`에서는 제거한다. 향후 파라미터 sweep은 실효 delta가 관측되는 축 위주로 좁힌다.
+
+### 2026-06-22 queue no-end backlog 보조 억제 규칙 제거
+
+목적:
+
+- queue_len_ge_5 계층의 final F1이 `0.3699`로 전체 평균보다 크게 낮았다.
+- 기존 promoted queue 품질 검사에는 `_should_stage_boundary_candidate()` 외에 “뒤에 queue 후보가 남아 있으면 no-end marker 후보를 폐기”하는 보조 규칙이 있었다.
+- 이 규칙은 생성순서 queue가 밀릴 때 head 후보가 active stage를 점유하지 못하게 하는 의도였지만, no-end 품질 판단을 queue backlog와 결합해 누락을 키울 수 있다.
+
+실행:
+
+아래 실행은 임시 ablation 축 `STAGED_QUEUE_SUPPRESS_NO_END_BACKLOG=0`을 둔 상태에서 수행했다. 최종 반영은 새 운영 설정을 추가하지 않고 보조 규칙 제거로 정리했다.
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sweeps/run_sbd_parameter_sweep.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/stage-queue-no-end-backlog-20260622 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/stage-queue-no-end-backlog-20260622/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/stage-queue-no-end-backlog-20260622/summary.md \
+  --include-baseline \
+  --param STAGED_QUEUE_SUPPRESS_NO_END_BACKLOG=0
+```
+
+결과:
+
+```text
+baseline:
+final_precision_avg=0.5919
+final_recall_avg=0.4401
+final_f1_avg=0.4795
+final_boundary_f1_avg=0.1106
+finalized_per_stage_start=0.5506
+stage_start=8785
+finalized=4837
+queue_len_ge_5_final_f1=0.3699
+
+STAGED_QUEUE_SUPPRESS_NO_END_BACKLOG=0:
+final_precision_avg=0.5917
+final_recall_avg=0.4412
+final_f1_avg=0.4802
+final_boundary_f1_avg=0.1113
+finalized_per_stage_start=0.5673
+stage_start=8572
+finalized=4863
+queue_len_ge_5_final_f1=0.3884
+```
+
+해석:
+
+- no-end backlog 보조 억제를 끄면 precision은 `-0.0002`로 미세 하락하지만 recall `+0.0012`, final F1 `+0.0007`, boundary F1 `+0.0008`, finalized/stage 효율 `+0.0167`이 개선됐다.
+- queue_len_ge_5 계층은 final F1 `0.3699 -> 0.3884`로 개선됐고, replace_deferred는 `548 -> 525`로 줄었다.
+- `no-end-marker` tag 자체는 F1이 `-0.0023` 하락하므로 review-risk가 남는다. 다만 이 보조 규칙은 이미 존재하는 `_should_stage_boundary_candidate()` 위에 queue backlog 조건을 다시 얹은 중복 품질 게이트다.
+- 핵심 원칙 관점에서는 promoted queue 후보도 일반 stage 후보와 같은 품질 게이트를 통과하면 active stage로 올리고, backlog 존재만으로 no-end 후보를 폐기하지 않는 편이 더 단순하고 일반화 가능하다.
+
+반영:
+
+- `src/app/dictation_pipeline_loop.py`와 `tests/eval/dictation_ai/benchmark/sbd_lifecycle_replay.py`에서 backlog no-end 보조 폐기 조건을 제거했다.
+- 별도 운영 설정값은 추가하지 않았다. 새 파라미터를 늘리는 대신 과도한 보조 규칙을 제거해 queue promotion 품질 기준을 `_should_stage_boundary_candidate()`로 수렴시켰다.
+
+재확인:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-no-end-backlog-rule-removed-default.json
+
+cases=1223
+finalized=4863
+stage_start=8572
+finalized_per_stage_start=0.567
+final_precision_avg=0.592
+final_recall_avg=0.441
+final_f1_avg=0.480
+final_boundary_f1_avg=0.111
+staged_exact_match=336
+```
+
 ### 2026-06-21 CUDA SBD 벤치 재실행 및 confirmation 기본값 조정
 
 목적:
@@ -16296,6 +16495,7 @@ chunk=2421..2435 중심
 - queue 후보 승격 직후 stage 품질 게이트를 다시 적용하도록 앱과 벤치 replay를 맞췄다.
 - 특히 승격 후보가 `no_end_marker`이고 뒤에 queue 후보가 남아 있으면, 그 후보는 final 가능한 앞 문장으로 소비하지 않고 `stage_queue_quality_suppressed`로 폐기한다.
 - 이 변경은 특정 중국어 문구나 음식명 보정이 아니라, candidateBuffer 소비 단계의 공통 품질 재검사다.
+- 후속 `2026-06-22 queue no-end backlog 보조 억제 규칙 제거` CUDA ablation에서 이 보조 조건은 과도한 품질 게이트로 확인되어 제거했다. 현재 유지되는 기준은 promoted queue 후보도 일반 stage 후보와 같은 `_should_stage_boundary_candidate()`만 통과하면 active stage로 승격하는 것이다.
 
 검증:
 

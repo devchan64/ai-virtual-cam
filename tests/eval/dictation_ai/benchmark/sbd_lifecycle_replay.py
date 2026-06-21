@@ -87,10 +87,7 @@ def _promote_next_staged_sentence(state: LifecycleState, chunk_index: int) -> No
         state.count("stage_start")
         state.count("segment_state_staged")
         promoted_quality_flags = set(_final_sentence_diagnostic_flags(state.staged_sentence, state.language))
-        if (
-            not _should_stage_boundary_candidate(state.staged_sentence, state.language)
-            or ("no_end_marker" in promoted_quality_flags and len(state.staged_queue) > 0)
-        ):
+        if not _should_stage_boundary_candidate(state.staged_sentence, state.language):
             state.count("stage_queue_quality_suppressed")
             state.count("segment_state_suppressed")
             for flag in promoted_quality_flags:
