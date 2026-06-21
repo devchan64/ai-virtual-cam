@@ -759,9 +759,6 @@ def run_transcribe_loop(
     def age_staged_sentence(detected: str, pending_text: str = "") -> list[str]:
         if not active_stage.sentence:
             return []
-        if active_stage.deferredAgeChunk == chunks:
-            count_metric("stage_age_same_chunk_skipped")
-            return []
         if not _should_age_staged_sentence(active_stage.sentence, pending_text):
             count_metric("stage_age_hold")
             worker._emit(

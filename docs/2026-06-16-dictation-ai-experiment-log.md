@@ -17357,6 +17357,168 @@ final_boundary_f1_avg=0.111
 staged_exact_match=336
 ```
 
+### 2026-06-22 full-input 기준 queue/confirmation 재검증
+
+목적:
+
+- `input_evidence`를 `full / partial / weak`로 분리한 뒤, 앱 로직 성능 판단 대상을 `full_input_evidence`와 expected-quality clean strata로 좁혔다.
+- 단순 queue 보존 파라미터와 confirmation 파라미터가 실제 누락/중복 개선으로 이어지는지 재검증했다.
+- 세부 규칙을 늘리기보다, 기존 핵심 lifecycle 축이 유효한 튜닝축인지 확인하는 데 목적을 둔다.
+
+queue lifecycle sweep:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sweeps/run_sbd_parameter_sweep.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/queue-lifecycle-20260622 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/queue-lifecycle-20260622/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/queue-lifecycle-20260622/summary.md \
+  --include-baseline \
+  --param STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=3 \
+  --param STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=10 \
+  --param MAX_STAGED_SENTENCE_QUEUE=10 \
+  --param MAX_STAGED_SENTENCE_QUEUE=30
+```
+
+| candidate | full_input_f1_delta | clean_f1_delta | full_boundary_delta | clean_boundary_delta | 판단 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=3` | -0.002138 | -0.001233 | -0.001952 | +0.000405 | F1 하락 |
+| `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=10` | +0.000332 | +0.000578 | -0.000111 | -0.000116 | 개선 폭 부족, boundary 하락 |
+| `MAX_STAGED_SENTENCE_QUEUE=10` | +0.000236 | +0.000243 | -0.000655 | -0.000405 | boundary 하락 |
+| `MAX_STAGED_SENTENCE_QUEUE=30` | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 영향 없음 |
+
+confirmation sweep:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sweeps/run_sbd_parameter_sweep.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/confirmation-core-20260622 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/confirmation-core-20260622/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/confirmation-core-20260622/summary.md \
+  --include-baseline \
+  --param SENTENCE_CONFIRM_CHUNKS=2 \
+  --param SENTENCE_CONFIRM_CHUNKS=3 \
+  --param SHORT_CJK_CONFIRM_EXTRA_CHUNKS=0 \
+  --param SHORT_CJK_CONFIRM_EXTRA_CHUNKS=2
+```
+
+| candidate | full_input_f1_delta | clean_f1_delta | full_precision_delta | full_recall_delta | full_boundary_delta | 판단 |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `SENTENCE_CONFIRM_CHUNKS=2` | -0.026087 | -0.018762 | -0.005360 | -0.041894 | -0.017809 | 확정 지연/누락 증가 |
+| `SENTENCE_CONFIRM_CHUNKS=3` | -0.052662 | -0.017608 | -0.009984 | -0.080082 | -0.035612 | 확정 지연/누락 증가 |
+| `SHORT_CJK_CONFIRM_EXTRA_CHUNKS=0` | -0.017535 | -0.024212 | -0.037331 | +0.010676 | -0.009215 | premature fragment 위험 증가 |
+| `SHORT_CJK_CONFIRM_EXTRA_CHUNKS=2` | -0.003961 | -0.001066 | +0.005702 | -0.014137 | -0.007767 | recall/boundary 하락 |
+
+로직 ablation:
+
+- `_should_defer_token_sentence_revision()`에서 “다음 confirmation에서 확정 가능해지는 revision을 큐로 미루는 조건”을 제거하는 후보를 임시로 검토했다.
+- 관련 보호 테스트 `test_reset_revision_is_deferred_until_token_sentence_repeats`가 즉시 실패했다. 관측 케이스 `刚好明天要拍夜拍...`에서 한 번 나타난 신규 token-sentence가 바로 final로 확정되는 문제를 재현하므로 폐기했다.
+
+판단:
+
+- queue age/size와 confirmation count를 단순 조정하는 방식은 full-input/clean strata에서 채택할 개선을 만들지 못했다.
+- 특히 confirmation을 강화하면 precision 일부가 좋아지는 경우가 있지만 recall, F1, boundary가 함께 하락한다. 이는 “확정이 너무 쉽다”는 일부 현상을 전체 기본값 상향으로 해결하면 안 된다는 근거다.
+- short CJK extra 기본값 `1`은 현재 case set에서 절충점이다. `0`은 precision을 크게 낮추고, `2`는 recall과 boundary를 낮춘다.
+- 다음 최적화 후보는 숫자 상수 조정보다 case-level로 `stage_replace_deferred`, `stage_queue_revision_token_sentence_deferred`, `stage_queue_recent_final_suppressed`가 실제 생성순서를 막는 구간을 좁혀야 한다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report
+Ran 32 tests in 0.010s, OK
+```
+
+### 2026-06-22 same-chunk staged age 반영 채택
+
+목적:
+
+- clean/full-input 케이스에서 active staged residue가 가장 큰 병목으로 남았다.
+- 기존 구현은 staged 후보가 현재 chunk에서 생성/갱신되면 chunk 끝의 aging을 `stage_age_same_chunk_skipped`로 건너뛰었다.
+- 실제 호출 구조상 `age_staged_sentence()`는 chunk 처리 끝에서 한 번만 호출된다. 따라서 이 skip은 “같은 chunk에서 여러 번 age 증가”를 막는 장치라기보다, completed 후보가 처음 관측된 chunk를 age 근거에서 제외하는 지연 규칙이었다.
+
+변경:
+
+- `src/app/dictation_pipeline_loop.py`와 `tests/eval/dictation_ai/benchmark/sbd_lifecycle_replay.py`에서 same-chunk age skip을 제거했다.
+- candidateAge는 후속 chunk만 세는 타이머가 아니라, SBD가 completed 후보로 내보낸 관측 횟수/순서의 보조 근거로 해석한다.
+- STT text가 없는 chunk는 여전히 age 근거로 쓰지 않는다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-same-chunk-age-ablation.json
+```
+
+전체 결과:
+
+| metric | baseline | same-chunk age | delta |
+| --- | ---: | ---: | ---: |
+| `final_f1_avg` | 0.496566 | 0.502247 | +0.005681 |
+| `final_precision_avg` | 0.582216 | 0.576080 | -0.006135 |
+| `final_recall_avg` | 0.467552 | 0.481212 | +0.013661 |
+| `final_boundary_f1_avg` | 0.115502 | 0.117970 | +0.002468 |
+| `finalized_per_stage_start` | 0.583222 | 0.547052 | -0.036169 |
+| `finalized` | 5228 | 5447 | +219 |
+| `stage_start` | 8964 | 9957 | +993 |
+| `staged_exact_match` | 367 | 427 | +60 |
+
+strata 결과:
+
+| strata | final_f1_delta | precision_delta | recall_delta | boundary_delta | staged_residue_delta | empty_final_delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `full_input_evidence` | +0.008162 | -0.004407 | +0.020717 | +0.001263 | -22 | -1 |
+| `without_expected_quality_review` | +0.015154 | +0.000281 | +0.024919 | +0.007882 | -21 | -1 |
+| `partial_input_evidence_review` | +0.004665 | -0.007610 | +0.010582 | +0.003358 | -37 | 0 |
+| `expected_quality_review` | +0.000868 | -0.009395 | +0.007942 | -0.000282 | -38 | 0 |
+
+언어별 결과:
+
+| language | final_f1_delta | precision_delta | recall_delta | boundary_delta |
+| --- | ---: | ---: | ---: | ---: |
+| `en` | -0.002633 | -0.012849 | +0.005559 | -0.000199 |
+| `ko` | +0.014011 | +0.002591 | +0.020619 | +0.003716 |
+| `zh` | +0.004832 | -0.009603 | +0.014447 | +0.004177 |
+
+해석:
+
+- clean/full-input strata에서 recall, F1, boundary, staged residue가 함께 개선됐다.
+- 전체 precision과 `finalized_per_stage_start`는 하락했다. 이는 더 많은 staged 후보가 age 기준으로 소비되며 false positive 위험도 같이 늘어난다는 의미다.
+- 하지만 clean strata에서는 precision도 `+0.000281`로 보존되었고, 주요 개선이 case/input 품질 문제 bucket이 아니라 앱 lifecycle 평가 대상에서 발생했다.
+- 영어는 F1 `-0.002633`으로 소폭 하락했다. 단일 언어 예외를 추가하지 않고, 후속 로그/representative set에서 영어 퇴행이 반복되는지 추적한다.
+- queue_len_ge_5 strata는 final F1 `+0.152868`로 크게 개선되어, queue backlog에서 현재 chunk 관측을 age에서 제외하던 정책이 누락을 키웠다는 근거가 있다.
+
+보완 ablation:
+
+- same-chunk 후보 중 종결 경계가 없는 후보만 기존처럼 age 반영을 보류하는 `terminal-only` 보완안을 검토했다.
+- 전체 precision 하락은 `-0.006135 -> -0.003280`으로 줄었지만, clean F1 개선은 `+0.015154 -> +0.008365`, full-input F1 개선은 `+0.008162 -> +0.004399`로 크게 줄었다.
+- clean boundary 개선도 `+0.007882 -> +0.006526`으로 낮아졌고, staged residue 개선도 `-21 -> -10`으로 줄었다.
+- 종결 경계 여부를 same-chunk age 정의에 다시 얹는 것은 핵심 원칙을 단순화하기보다 예외 조건을 추가하는 방향이므로 채택하지 않는다.
+
+판단:
+
+- same-chunk completed 후보를 candidateAge 첫 관측으로 인정하는 규칙은 언어별 예외가 아니라 lifecycle 정의의 정정이다.
+- 세부 규칙을 추가하지 않고 기존 age 정의를 단순화하므로 채택한다.
+- 후속 검토는 precision 하락이 실제 중복확정으로 이어지는지 representative 로그에서 확인하는 방향으로 둔다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest discover -s tests/eval/dictation_ai/tool_tests
+Ran 175 tests in 0.056s, OK
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases --max-drafts 0
+case_count=1223, expected_final_case_count=1219, draft_count=0
+
+./.venv/bin/python -m unittest tests.unit.test_dictation_pipeline_loop tests.unit.test_dictation_pipeline_nodes tests.unit.test_dictation_ai_contract
+Ran 52 tests in 0.005s, OK
+```
+
 ### 2026-06-21 CUDA SBD 벤치 재실행 및 confirmation 기본값 조정
 
 목적:

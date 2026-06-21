@@ -82,6 +82,7 @@
 - 종결부호/문장부호가 window마다 흔들려도 token-sentence가 같은 revision이면 confirmation과 age를 reset하지 않는다. 문장부호 손실은 token-sentence 유사도와 internal stability로 같은 revision이 아니라고 판단된 뒤에만 reset 근거로 사용한다.
 - candidate buffer에 active staged 후보의 더 긴 token-sentence revision이 남아 있으면, active staged 후보가 age 기준에 도달해도 fragment final로 먼저 소비하지 않는다. 단, stale 한계를 넘은 revision 후보는 흡수하지 않고 suppressed 후보로 폐기한다.
 - candidate buffer head가 active staged 후보보다 오래 관측된 다른 revision 계열이면, active staged 후보가 확정 조건을 만족해도 먼저 final로 소비하지 않고 buffer head를 먼저 재평가한다. 단, stale 한계를 넘은 buffer head는 final 순서 보류 근거가 아니라 suppressed 후보로 폐기한다.
+- 같은 STT chunk에서 생성된 completed 후보도 staged 후보의 첫 관측 근거로 본다. candidateAge는 후속 chunk만 세는 지연 타이머가 아니라, SBD가 completed 후보로 내보낸 관측 횟수/순서의 보조 근거다.
 - candidate buffer에서 승격된 이전 후보가 짧은 과거 prefix를 끌고 온 상태이고, 같은 chunk의 새 후보가 해당 prefix 뒤 본문과 높은 token-sentence coverage로 정렬되면 새 후보를 같은 revision의 preferred candidate로 본다.
 - active staged 후보가 과거 prefix 뒤에 새 문장의 앞부분만 붙은 형태이고, candidate buffer 후보가 그 앞부분에서 시작해 충분한 suffix를 이어가면 같은 token-sentence revision으로 보고 queue 후보를 preferred candidate로 본다.
 - STT text가 없는 chunk는 candidateAge 증가 근거로 사용하지 않는다.

@@ -755,9 +755,6 @@ def _stage_completed_sentence(
 def _age_staged_sentence(state: LifecycleState, language: str, sentence_finalize_age: int, chunk_index: int) -> list[str]:
     if not state.staged_sentence:
         return []
-    if state.staged_deferred_age_chunk == chunk_index:
-        state.count("stage_age_same_chunk_skipped")
-        return []
     if not _should_age_staged_sentence(state.staged_sentence, state.pending_text):
         state.count("stage_age_hold")
         return []
