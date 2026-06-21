@@ -284,9 +284,10 @@ class WhisperTranscriptWorker:
         display: bool = True,
         log_text: str | None = None,
         final: bool = True,
+        segment_id: int | None = None,
     ) -> None:
         _log_line(f"[avc] Dictation AI {kind}: {log_text if log_text is not None else text}")
-        self._events.put(TranscriptEvent(kind, text, display, log_text, final))
+        self._events.put(TranscriptEvent(kind, text, display, log_text, final, segment_id))
 
     def _sync_sentence_boundary_detector(self, detected_language: str) -> None:
         normalized = str(detected_language or "en").strip().lower()
@@ -537,9 +538,14 @@ class WhisperTranscriptWorker:
         self._emit("status", "받아쓰기 AI mock 출력 시작")
         index = 1
         while not self._stop.is_set():
-            self._emit("transcript", f"[mock] sample transcript {index}")
+            self._emit("transcript", f"[mock] sample transcript {index}", segment_id=index)
             if self._cfg.translationEnabled:
-                self._emit("translation", f"translated mock sample {index}", log_text=f"[mock->{self._cfg.translationTargetLanguage}] translated mock sample {index}")
+                self._emit(
+                    "translation",
+                    f"translated mock sample {index}",
+                    log_text=f"[mock->{self._cfg.translationTargetLanguage}#{index}] translated mock sample {index}",
+                    segment_id=index,
+                )
             index += 1
             self._stop.wait(2.0)
 
@@ -568,6 +574,7 @@ class WhisperTranscriptWindow:
         self._stt_status_root = None
         self._stt_status_text = None
         self._line_number_widgets = {}
+        self._line_number_labels = {}
         self._context_text = None
         self._transcript_partial_active = False
         self._translation_partial_active = False
@@ -699,6 +706,7 @@ class WhisperTranscriptWindow:
         text_widget.bind("<Configure>", lambda _event: self._update_line_numbers(text_widget))
         self._configure_line_number_text(line_numbers)
         self._line_number_widgets[text_widget] = line_numbers
+        self._line_number_labels[text_widget] = {}
         return text_widget
 
     def _configure_line_number_text(self, line_numbers) -> None:
@@ -711,11 +719,23 @@ class WhisperTranscriptWindow:
     def _line_number_x(self, max_line: int) -> int:
         return self._line_number_width(max_line) - 6
 
+    def _line_number_display_width(self, text_widget, fallback_max_line: int) -> int:
+        labels = getattr(self, "_line_number_labels", {}).get(text_widget, {})
+        max_digits = max(
+            [len(str(fallback_max_line))]
+            + [len(str(label)) for label in labels.values() if str(label)]
+        )
+        return max(42, (max_digits * 9) + 16)
+
+    def _line_number_display_x(self, width: int) -> int:
+        return width - 6
+
     def _update_line_numbers(self, text_widget) -> None:
         line_numbers = getattr(self, "_line_number_widgets", {}).get(text_widget)
         if line_numbers is None:
             return
         line_numbers.delete("all")
+        labels = getattr(self, "_line_number_labels", {}).get(text_widget, {})
         try:
             index = text_widget.index("@0,0")
             visible_lines: list[tuple[str, int]] = []
@@ -730,17 +750,24 @@ class WhisperTranscriptWindow:
                     break
                 index = next_index
             max_line = max((int(line) for line, _y in visible_lines), default=1)
-            line_numbers.configure(width=self._line_number_width(max_line))
-            x = self._line_number_x(max_line)
+            width = self._line_number_display_width(text_widget, max_line)
+            line_numbers.configure(width=width)
+            x = self._line_number_display_x(width)
+            seen_lines: set[int] = set()
             for line, y in visible_lines:
-                line_numbers.create_text(x, y, anchor="ne", text=line, fill="#777777")
+                line_number = int(line)
+                label = "" if line_number in seen_lines else str(labels.get(line_number, line))
+                seen_lines.add(line_number)
+                line_numbers.create_text(x, y, anchor="ne", text=label, fill="#777777")
         except Exception:
             content = text_widget.get("1.0", "end-1c")
             line_count = 0 if not content else content.count("\n") + 1
-            line_numbers.configure(width=self._line_number_width(line_count))
-            x = self._line_number_x(line_count)
+            width = self._line_number_display_width(text_widget, line_count)
+            line_numbers.configure(width=width)
+            x = self._line_number_display_x(width)
             for line in range(1, line_count + 1):
-                line_numbers.create_text(x, (line - 1) * 17, anchor="ne", text=str(line), fill="#777777")
+                label = str(labels.get(line, line))
+                line_numbers.create_text(x, (line - 1) * 17, anchor="ne", text=label, fill="#777777")
 
     def run(self) -> int:
         self._thread.start()
@@ -766,7 +793,15 @@ class WhisperTranscriptWindow:
             return
         self._append(line, self._stt_status_text, final=True)
 
-    def _append(self, line: str, text_widget=None, *, final: bool = True, tag: str | None = None) -> None:
+    def _append(
+        self,
+        line: str,
+        text_widget=None,
+        *,
+        final: bool = True,
+        tag: str | None = None,
+        line_label: str | None = None,
+    ) -> None:
         target = text_widget if text_widget is not None else self._text
         partial_attr = None
         if target is self._text:
@@ -777,8 +812,11 @@ class WhisperTranscriptWindow:
             partial_attr = None
         if partial_attr is not None and getattr(self, partial_attr):
             target.delete("end-1c linestart", "end-1c")
+        insert_line = int(target.index("end-1c linestart").split(".", 1)[0])
         if final:
             target.insert("end", f"{line}\n", tag or FINAL_TEXT_TAG)
+            if line_label is not None:
+                self._line_number_labels.setdefault(target, {})[insert_line] = str(line_label)
             if partial_attr is not None:
                 setattr(self, partial_attr, False)
         else:
@@ -808,13 +846,15 @@ class WhisperTranscriptWindow:
             if not _is_modal_output_event(event):
                 continue
             if event.kind == "translation" and self._translation_text is not None:
-                self._append(event.text, self._translation_text, final=event.final)
+                line_label = str(event.segment_id) if event.segment_id is not None and event.final else None
+                self._append(event.text, self._translation_text, final=event.final, line_label=line_label)
             elif event.kind == "error":
                 self._append(self._format_error_for_modal(event.text), self._text, final=True, tag=ERROR_TEXT_TAG)
                 if self._translation_text is not None:
                     self._append(self._format_error_for_modal(event.text), self._translation_text, final=True, tag=ERROR_TEXT_TAG)
             elif event.kind == "transcript":
-                self._append(event.text, self._text, final=event.final)
+                line_label = str(event.segment_id) if event.segment_id is not None and event.final else None
+                self._append(event.text, self._text, final=event.final, line_label=line_label)
         self._root.after(100, self._poll_events)
 
     def _on_configure(self, event) -> None:
@@ -915,6 +955,7 @@ class WhisperTranscriptWindow:
     def _clear(self, text_widget=None) -> None:
         target = text_widget if text_widget is not None else (self._context_text or self._text)
         target.delete("1.0", "end")
+        self._line_number_labels[target] = {}
         self._update_line_numbers(target)
         if target is self._text:
             self._transcript_partial_active = False

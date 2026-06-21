@@ -72,6 +72,7 @@ def run_transcribe_loop(
     audio_window = SlidingAudioWindow(window_samples=window_samples, step_samples=step_samples)
     language = worker._cfg.language
     chunks = 0
+    next_final_segment_id = 1
     translation_failed = False
     committed_text = ""
     committed_translation_text = ""
@@ -140,8 +141,8 @@ def run_transcribe_loop(
         f"without_timestamps=True translation_beam_size={worker._cfg.translationBeamSize} "
         f"translation_max_new_tokens={worker._cfg.translationMaxNewTokens}",
     )
-    def finalize_staged_sentence(detected: str, reason: str) -> list[str]:
-        nonlocal committed_text
+    def finalize_staged_sentence(detected: str, reason: str) -> list[tuple[int, str]]:
+        nonlocal committed_text, next_final_segment_id
         if not active_stage.sentence:
             return []
         count_metric("finalize_attempt")
@@ -212,6 +213,8 @@ def run_transcribe_loop(
             return []
         count_metric("finalized")
         count_segment_state("final")
+        segment_id = next_final_segment_id
+        next_final_segment_id += 1
         final_quality_flags = _final_sentence_diagnostic_flags(output_sentence, detected)
         for flag in final_quality_flags:
             count_metric(f"final_quality_{flag}")
@@ -220,15 +223,21 @@ def run_transcribe_loop(
         worker._emit(
             "status",
             "받아쓰기 AI 문장 확정: "
-            f"chunk={chunks} reason={reason} committed_before_chars={committed_before_chars} "
+            f"chunk={chunks} segment_id={segment_id} reason={reason} committed_before_chars={committed_before_chars} "
             f"output_chars={len(_normalized_text(output_sentence))} "
             f"quality_flags={','.join(final_quality_flags) or 'none'} "
             f"staged_tail={_diagnostic_tail(staged_before)} text={output_sentence!r}",
             display=False,
         )
-        worker._emit("transcript", output_sentence, log_text=f"[{detected}] {output_sentence}", final=True)
+        worker._emit(
+            "transcript",
+            output_sentence,
+            log_text=f"[{detected}#{segment_id}] {output_sentence}",
+            final=True,
+            segment_id=segment_id,
+        )
         promote_next_staged_sentence(detected)
-        return [output_sentence]
+        return [(segment_id, output_sentence)]
     def stage_completed_sentence(
         sentence: str,
         detected: str,
@@ -731,7 +740,7 @@ def run_transcribe_loop(
                     display=False,
                 )
             completed_sentences: list[str] = []
-            final_sentences: list[str] = []
+            final_segments: list[tuple[int, str]] = []
             boundary_complete = 0
             boundary_soft = 0
             boundary_end_marks = 0
@@ -770,19 +779,19 @@ def run_transcribe_loop(
                 elif pending_transcript_text:
                     pending_chunks += 1
                 for sentence_index, sentence in enumerate(completed_sentences):
-                    produced_sentences = stage_completed_sentence(
+                    produced_segments = stage_completed_sentence(
                         sentence,
                         detected,
                         later_completed_sentences=completed_sentences[sentence_index + 1 :],
                         prior_pending_text=prior_pending_transcript_text,
                     )
-                    final_sentences.extend(produced_sentences)
-                    for produced_sentence in produced_sentences:
+                    final_segments.extend(produced_segments)
+                    for _segment_id, produced_sentence in produced_segments:
                         pending_transcript_text = _consume_committed_prefix(pending_transcript_text, produced_sentence)
                         if not pending_transcript_text:
                             pending_chunks = 0
                 if completed_sentences:
-                    final_sentences.extend(age_staged_sentence(detected, pending_transcript_text))
+                    final_segments.extend(age_staged_sentence(detected, pending_transcript_text))
                 if pending_transcript_text:
                     count_segment_state("pending")
                     worker._emit(
@@ -792,7 +801,7 @@ def run_transcribe_loop(
                         display=False,
                     )
                 elif not completed_sentences:
-                    final_sentences.extend(age_staged_sentence(detected, pending_transcript_text))
+                    final_segments.extend(age_staged_sentence(detected, pending_transcript_text))
             else:
                 preview_chars = max(0, len(_normalized_text(window_text)) - len(_normalized_text(stable_text)))
                 worker._emit(
@@ -819,7 +828,7 @@ def run_transcribe_loop(
             worker._emit(
                 "status",
                 "받아쓰기 AI 문장 진단: "
-                f"chunk={chunks} completed={len(completed_sentences)} final={len(final_sentences)} "
+                f"chunk={chunks} completed={len(completed_sentences)} final={len(final_segments)} "
                 f"pending_overrun={pending_overrun_reason or 'none'} "
                 f"pending_quality={','.join(pending_quality_flags) or 'none'} "
                 f"boundary_backend={worker._sentence_boundary_detector.backend} "
@@ -848,16 +857,17 @@ def run_transcribe_loop(
                 f"staged_tail={_diagnostic_tail(active_stage.sentence)}",
                 display=False,
             )
-            translation_jobs: list[str] = []
-            for sentence in final_sentences:
+            translation_jobs: list[tuple[int, str]] = []
+            for segment_id, sentence in final_segments:
                 if _should_translate_final_sentence(sentence, detected):
-                    translation_jobs.append(sentence)
+                    translation_jobs.append((segment_id, sentence))
                 else:
                     count_metric("translation_skip_final_quality")
                     worker._emit(
                         "status",
                         "받아쓰기 AI 번역 생략: "
-                        f"chunk={chunks} reason=final_quality flags={','.join(_final_sentence_diagnostic_flags(sentence, detected))} "
+                        f"chunk={chunks} segment_id={segment_id} reason=final_quality "
+                        f"flags={','.join(_final_sentence_diagnostic_flags(sentence, detected))} "
                         f"text={sentence!r}",
                         display=False,
                     )
@@ -867,9 +877,13 @@ def run_transcribe_loop(
                     request_label = "Whisper 백엔드 내장 번역 요청" if text_translator is None else "외부 텍스트 번역 요청"
                     target_language = worker._cfg.translationTargetLanguage
                     source_language = detected if detected in {"ko", "en", "zh"} else worker._cfg.language
-                    for sentence in translation_jobs:
+                    for segment_id, sentence in translation_jobs:
                         translation_started_at = time.perf_counter()
-                        worker._emit("status", f"{request_label}: chunk={chunks} final=True", display=False)
+                        worker._emit(
+                            "status",
+                            f"{request_label}: chunk={chunks} segment_id={segment_id} final=True",
+                            display=False,
+                        )
                         translated_text = ""
                         if text_translator is None:
                             translated_segments, _translated_info = model.transcribe(
@@ -905,7 +919,7 @@ def run_transcribe_loop(
                             worker._emit(
                                 "status",
                                 "받아쓰기 AI 번역 진단: "
-                                f"chunk={chunks} final=True "
+                                f"chunk={chunks} segment_id={segment_id} final=True "
                                 f"source_lang={source_language} target_lang={target_language} "
                                 f"source_chars={len(_normalized_text(sentence))} "
                                 f"target_chars={len(_normalized_text(translated_text))} "
@@ -916,8 +930,9 @@ def run_transcribe_loop(
                             worker._emit(
                                 "translation",
                                 translated_text,
-                                log_text=f"[{detected}->{target_language}] {translated_text}",
+                                log_text=f"[{detected}->{target_language}#{segment_id}] {translated_text}",
                                 final=True,
+                                segment_id=segment_id,
                             )
                         else:
                             worker._emit("status", f"받아쓰기 AI 번역 결과 없음: chunk={chunks}", display=False)
@@ -1022,7 +1037,7 @@ def run_transcribe_loop(
             )
             input_queue_size_peak = chunk_lifecycle_metrics.get("input_queue_size_peak", 0)
             input_queue_backlog_count = chunk_lifecycle_metrics.get("input_queue_backlog_chunk", 0)
-            raw_without_final_count = 1 if raw_window_text and not final_sentences else 0
+            raw_without_final_count = 1 if raw_window_text and not final_segments else 0
             if raw_without_final_count:
                 count_metric("raw_without_final")
             translation_skip_count = chunk_lifecycle_metrics.get("translation_skip_final_quality", 0)

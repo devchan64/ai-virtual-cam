@@ -10,6 +10,7 @@ class TranscriptEvent:
     display: bool = True
     log_text: str | None = None
     final: bool = True
+    segment_id: int | None = None
 
 
 def is_modal_output_event(event: TranscriptEvent) -> bool:

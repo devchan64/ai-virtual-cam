@@ -36,16 +36,16 @@ class DictationAiSbdRepresentativeSourceAuditTest(unittest.TestCase):
                 "[2026-06-20 21:22:40] [avc] Dictation AI stt_raw: [en raw] Hello world.",
                 (
                     "[2026-06-20 21:22:40] [avc] Dictation AI status: 받아쓰기 AI 문장 확정: "
-                    "chunk=1 reason=confirmed text='Hello world.'"
+                    "chunk=1 segment_id=1 reason=confirmed text='Hello world.'"
                 ),
-                "[2026-06-20 21:22:40] [avc] Dictation AI transcript: [en] Hello world.",
+                "[2026-06-20 21:22:40] [avc] Dictation AI transcript: [en#1] Hello world.",
                 (
                     "[2026-06-20 21:22:40] [avc] Dictation AI status: 받아쓰기 AI 문장 진단: "
                     "chunk=1 language=en boundary_backend=sat window=20.00s step=1.00s"
                 ),
                 (
                     "[2026-06-20 21:22:40] [avc] Dictation AI status: 받아쓰기 AI 번역 진단: "
-                    "chunk=1 final=True source_lang=en target_lang=ko backend=nllb-transformers "
+                    "chunk=1 segment_id=1 final=True source_lang=en target_lang=ko backend=nllb-transformers "
                     "model=facebook/nllb-200-distilled-600M"
                 ),
             ]
