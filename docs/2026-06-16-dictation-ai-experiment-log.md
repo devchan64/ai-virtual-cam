@@ -14805,6 +14805,66 @@ stage_replace_deferred_per_stt_raw=1.154
 - 이 로그는 `deferred_age_chunk` 기반 큐 후보 age 보정 패치가 실행 중인 앱 프로세스에 반영됐는지 보장되지 않는다.
 - 따라서 새 로직 실패의 직접 근거로 보지 않고, 앱 재시작 후 같은 유형이 반복되는지 확인하기 위한 회귀/성능 케이스로 누적한다.
 
+### 2026-06-21 중국어 burger/鹅肝 구간 fragment final/order loss 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log.1
+2026-06-21 17:43:35..17:44:13
+chunk=1253..1291 중심
+```
+
+대표 raw 흐름:
+
+```text
+诶，给你们看，我们买了薯条，然后买了套餐，买了几个burger。
+招牌是那个食品，然后那个牛二蛋也是比较多人点的。
+然后那个店员还讲了有一个是那个鹅肝的那个，鹅肝的在这里。
+这个是它的招牌，这个是食品，食品啊，它里面是有那个他们自己做的那个云南酱。
+还有这个呢是比较贵一点的，这个是还有也是它的招牌，就是鹅肝。
+就是花五百块坐在马路上吃。当流浪汉吃汉堡。
+```
+
+감사 결과:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 17:43:07" --until "2026-06-21 17:43:58" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-zh-burger-foie-gras-174307-174358.json
+```
+
+```text
+stt_raw_line_count=52
+finalize_event_count=19
+finalize_per_stt_raw=0.365
+duplicate_suppressed_count=56
+duplicate_suppressed_per_stt_raw=1.077
+quality_block_count=17
+quality_block_per_stt_raw=0.327
+stage_queue_promote_count=24
+stage_queue_promote_per_stt_raw=0.462
+stage_replace_deferred_count=75
+stage_replace_deferred_per_stt_raw=1.442
+finalize_delta_suppressed_stage_dropped_count=2
+finalize_delta_suppressed_stage_retained_count=2
+```
+
+관측:
+
+- `诶，给你们看...burger` 구간은 완성되기 전에 `照`를 포함한 조각 final로 먼저 소비됐다.
+- `然后那个店员还讲了...鹅肝的在这里` 구간은 delta 보류 후 `在这里，鹅肝呢是这个。`, `品食品啊它里面是有那个...` 같은 fragment stage/final로 분해됐다.
+- 후반부의 `就是花五百块坐在马路上吃。`, `当流浪汉吃汉堡。`는 중복 억제 이벤트로 반복 관측되지만, 앞선 fragment 소비 때문에 전체 순서가 매끄럽지 않다.
+- 한국어 잔류로 보이는 이전 final이 같은 zh 흐름 앞쪽에 남아 있었으나, 이번 케이스는 그 오염 자체보다 이후 zh 문장 확정 단위가 조각나는 현상에 초점을 둔다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-6-20260621.jsonl`에 `zh_log_burger_foie_gras_fragment_final_order_loss_20260621_001` 케이스를 추가했다.
+- 기대 문장은 STT 의미 정답이 아니라 반복 window에서 안정화된 final 소비 단위 기준으로 지정했다.
+
+후속 판단:
+
+- 이 패턴은 단순 파라미터 튜닝보다 delta suppression 이후 stage 재시작 후보가 앞 문맥을 과도하게 잃는지 확인할 필요가 있다.
+- 다만 즉시 로직을 넓히면 과잉 보정 위험이 있으므로, 우선 벤치 케이스로 누적하고 CUDA 벤치에서 같은 유형의 F1/fragment 변화를 확인한다.
+
 ### 2026-06-21 중국어 자유행/跟团 구간 queue head stall 케이스 추가
 
 관측 구간:
