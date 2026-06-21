@@ -14750,6 +14750,50 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-21 중국어 room tour table/bed/fridge 구간 delta/queue 지연 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 15:22:38..15:22:58
+chunk=2264..2284 중심
+```
+
+감사 결과:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 15:22:38" --until "2026-06-21 15:22:58" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-zh-152238-152258.json
+```
+
+```text
+stt_raw_line_count=21
+finalize_event_count=6
+finalize_per_stt_raw=0.286
+stage_replace_deferred_count=32
+stage_replace_deferred_per_stt_raw=1.524
+stage_queue_promote_count=4
+stage_queue_promote_per_stt_raw=0.190
+duplicate_suppressed_count=20
+duplicate_suppressed_per_stt_raw=0.952
+quality_block_count=2
+finalize_delta_suppressed_stage_retained_count=24
+finalize_delta_suppressed_stage_dropped_count=2
+stage_queue_recent_final_suppressed_count=2
+```
+
+관측:
+
+- `给大家看一下来稍微吐味一下。` stage가 확정 시도마다 `一 下 来 稍 微 吐 味 一 下` 형태의 CJK 내부 공백 delta를 만들며 보류됐다.
+- 뒤의 `这个是门口进来一个小小的玄关。`, `这边就是有一张桌子...`, `桌子后面就是第一张双人床啦。`, `老板有帮我们准备了三罐矿泉水。` 후보가 stage queue와 duplicate suppression 사이에서 지연됐다.
+- 이 구간은 final이 완전히 0은 아니지만, `stage_replace_deferred_per_stt_raw=1.524`와 `finalize_delta_suppressed_stage_retained_count=24`로 stage head 정체가 뚜렷하다.
+- 현재 코드에는 delta suppression stage 폐기와 카운터 보존 보정이 이미 반영되어 있으므로, 같은 계열 로직을 추가로 완화하지 않고 후속 CUDA 벤치 비교용 케이스로 누적한다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-5-20260621.jsonl`에 `zh_log_delayed_room_tour_table_bed_fridge_delta_queue_20260621_001` 케이스를 추가했다.
+- 기대 문장은 raw STT 정확도 평가가 아니라 반복 window에서 안정화된 문장 확정 흐름을 검증하는 용도로 지정했다.
+
 ### 2026-06-21 중국어 Hongdae route/roadworks 구간 stage queue 지연 케이스 추가
 
 관측 구간:
