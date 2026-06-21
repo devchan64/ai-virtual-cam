@@ -14837,6 +14837,197 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-21 CUDA SBD 벤치 재실행 및 confirmation 기본값 조정
+
+목적:
+
+- STT 정확도나 번역 품질이 아니라, 불안정한 raw STT window 입력에서 받아쓰기 final 확정 성능을 개선한다.
+- 케이스별/언어별 규칙을 추가하지 않고 문장 생명주기의 핵심 상수만 비교한다.
+
+실행 조건:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16
+```
+
+baseline:
+
+```text
+cases=1223
+finalized=4461
+stage_start=8187
+finalized_per_stage_start=0.545
+final_precision_avg=0.591
+final_recall_avg=0.415
+final_f1_avg=0.462
+final_boundary_f1_avg=0.099
+pending_exact_match=710
+staged_exact_match=314
+```
+
+관측:
+
+- 언어별 병목은 동일하지 않았다. 한국어는 expected 대비 actual final 부족이 크고, 중국어는 staged queue 잔류가 크게 나타났다.
+- 전체 병목은 `stage_replace_deferred`, `stage_queue_revision`, `stage_candidate_quality_blocked`에 집중되어 있었다.
+- queue 후보 중 active와 같은 revision인데 active가 더 선호되는 후보를 제거하는 규칙을 검토했으나, 이번 벤치에서는 해당 metric이 발화하지 않아 채택 근거로 삼지 않았다.
+
+parameter sweep:
+
+```text
+AVC_DICTATION_SENTENCE_CONFIRM_CHUNKS=1
+cases=1223
+finalized=5208
+stage_start=8149
+finalized_per_stage_start=0.639
+final_precision_avg=0.588
+final_recall_avg=0.467
+final_f1_avg=0.494
+final_boundary_f1_avg=0.103
+pending_exact_match=712
+staged_exact_match=409
+```
+
+```text
+AVC_DICTATION_SENTENCE_CONFIRM_CHUNKS=1
+AVC_DICTATION_SHORT_CJK_CONFIRM_EXTRA_CHUNKS=0
+cases=1223
+finalized=6032
+stage_start=8700
+finalized_per_stage_start=0.693
+final_precision_avg=0.547
+final_recall_avg=0.484
+final_f1_avg=0.483
+final_boundary_f1_avg=0.098
+pending_exact_match=712
+staged_exact_match=430
+```
+
+채택:
+
+- `SENTENCE_CONFIRM_CHUNKS=1`을 기본값으로 채택한다.
+- 단, 문장이 바뀐 revision은 similarity로 confirmation이 보존되더라도 최소 2회 근거를 요구한다. 이는 새 revision이 한 번 관측되자마자 final되는 문제를 막기 위한 생명주기 규칙이다.
+- 최종 checked-in 기본값 재실행 결과는 `final_f1_avg=0.473`, `final_recall_avg=0.430`, `final_precision_avg=0.594`였다.
+- `confirm=1` 단독 sweep의 `final_f1_avg=0.494`보다 낮지만, reset/revision 보수성 원칙을 유지하면서 baseline `0.462` 대비 개선됐다.
+
+기각:
+
+- `SHORT_CJK_CONFIRM_EXTRA_CHUNKS=0`은 recall을 더 올리지만 precision 손실이 커서 `confirm=1` 단독보다 F1이 낮아졌다.
+- 최종 revision 보수 규칙과 함께 실행한 `SHORT_CJK_CONFIRM_EXTRA_CHUNKS=0`도 `final_f1_avg=0.469`로 checked-in 기본값보다 낮았다.
+- 짧은 중국어 문장 확정은 별도 단어/표현 규칙을 추가하지 않고, 기존 추가확인 기본값을 유지한다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest discover tests/eval/dictation_ai/tool_tests
+Ran 165 tests, OK
+
+./.venv/bin/python -m unittest discover tests/unit
+Ran 174 tests, OK
+
+git diff --check
+OK
+```
+
+### 2026-06-21 paper audit evidence contract stale summary 차단
+
+문제:
+
+- `validate-evidence`는 최신 report에서 `lifecycle_replay_contract.replayed_runtime_signals`를 필수로 요구한다.
+- 그러나 `paper-claim-scope`, `paper-evidence-numbers` audit는 aggregate summary의 최신 replay contract 여부를 확인하지 않았다.
+- 그 결과 기존 `.tmp/eval/dictation-ai-sbd/parameter-sweeps/complete-paper-evidence-summary.json`처럼 `stable_analysis.*`를 여전히 `missing_runtime_signal_counts`로 집계한 오래된 summary도 guard 문구와 숫자만 맞으면 통과할 수 있었다.
+
+반영:
+
+- `tests/eval/dictation_ai/paper/audit_evidence_contract.py`를 추가해 aggregate summary가 현재 계약의 `replayed_runtime_signal_counts`를 포함하는지 확인한다.
+- `stable_analysis.stable_internal_ratio`, `stable_analysis.stable_internal_chars`, `stable_analysis.stable_overlap_source`가 replayed signal로 집계되지 않거나 missing signal로 남아 있으면 stale evidence로 판정한다.
+- `paper-claim-scope`, `paper-evidence-numbers` audit는 이제 이 contract audit가 실패하면 숫자/guard 문구가 맞아도 실패한다.
+
+확인:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py paper-claim-scope
+ok=false
+stale_evidence_reasons:
+- missing replayed runtime signal count: stable_analysis.stable_internal_ratio
+- stable analysis signal is still marked missing: stable_analysis.stable_internal_ratio
+- missing replayed runtime signal count: stable_analysis.stable_internal_chars
+- stable analysis signal is still marked missing: stable_analysis.stable_internal_chars
+- missing replayed runtime signal count: stable_analysis.stable_overlap_source
+- stable analysis signal is still marked missing: stable_analysis.stable_overlap_source
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py paper-evidence-numbers
+ok=false
+same stale evidence contract reasons
+```
+
+해석:
+
+- 기존 paper evidence summary의 수치(`final_f1_avg=0.483` 등)는 과거 CUDA 실행 산출물이지만, 현재 evidence contract 기준으로는 최신 논문 근거가 아니다.
+- 다음 성능 해석은 최신 코드로 `sat + cuda + float16` complete report를 재생성한 뒤 진행해야 한다.
+- 이 변경은 받아쓰기 확정 로직 성능 개선이 아니라, 성능 개선 판단에 쓰는 근거가 오래된 계약을 통과하지 못하도록 하는 품질 관리 패치다.
+
+### 2026-06-21 token-sentence prefix extension confirmation 보존 가설
+
+문제:
+
+- 최근 로그/케이스에서 확정 누락은 active staged 후보가 후속 window에서 같은 발화의 더 긴 token-sentence로 확장될 때 자주 관측된다.
+- 기존 `_should_preserve_revision_confirmation_by_token_sentence()`는 공통 run/coverage가 높아도 길이 차이가 `CJK_REVISION_MAX_LENGTH_DELTA`보다 크면 confirmation을 보존하지 않았다.
+- 이 조건은 단어/언어별 예외는 아니지만, “같은 token-sentence가 prefix에서 확장되는지”보다 절대 길이 차이를 우선해 stage age reset과 queue 지연을 만들 수 있다.
+
+반영:
+
+- `src/app/dictation_transcript_logic.py`에 `_is_token_sentence_prefix_extension()`을 추가했다.
+- 이전 staged 문장과 preferred revision이 앞쪽에서 높은 coverage로 겹치고, preferred가 더 길지만 문장 경계 수가 늘지 않는 경우 confirmation을 보존한다.
+- 문장 경계 수가 늘어난 경우는 새 문장을 붙인 후보일 수 있으므로 confirmation을 보존하지 않는다.
+- `src/app/dictation_pipeline_loop.py`와 eval replay에서 revision age가 reset된 후보는 같은 chunk에서 final하지 않고 다음 관측을 기다리도록 맞췄다.
+
+의도:
+
+- 새 단어/언어별 예외를 추가하지 않고 token-sentence coverage 원칙을 확정 리비전 판단에 더 일관되게 적용한다.
+- 확정 누락을 줄이는 후보 개선이지만, false final 또는 boundary F1 저하 가능성은 최신 `sat + cuda + float16` complete replay로 확인해야 한다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle
+Ran 19 tests, OK
+
+./.venv/bin/python -m py_compile src/app/dictation_transcript_logic.py tests/eval/dictation_ai/paper/audit_paper_readiness.py
+OK
+
+./.venv/bin/python -m unittest discover tests/eval/dictation_ai/tool_tests
+Ran 165 tests, OK
+
+./.venv/bin/python -m unittest discover tests/unit
+Ran 174 tests, OK
+```
+
+CUDA 벤치:
+
+```text
+nvidia-smi
+NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver.
+
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-contract-challenge-replay.json
+
+[dictation-ai-sbd-benchmark] error: sentence boundary backend 'sat' initialization failed: model=sat-3l-sm device=cuda compute=float16.
+Fail-Fast: fix the model/device/runtime instead of falling back to regex.
+```
+
+해석:
+
+- 현재 sandbox에서는 CUDA 성능 벤치가 실행되지 않았다.
+- CPU/mock/smoke 결과는 성능 근거로 쓰지 않는다.
+- 성능 개선 여부는 sandbox 밖 실제 CUDA 환경에서 current-contract challenge replay를 실행한 뒤 `final_f1_avg`, `final_precision_avg`, `final_recall_avg`, `final_boundary_f1_avg`, lifecycle bottleneck delta를 비교해야 한다.
+
 ### 2026-06-21 lifecycle replay contract stable signal 정정
 
 문제:

@@ -11,6 +11,18 @@ class DictationAiPaperClaimScopeAuditTest(unittest.TestCase):
         path.write_text(
             json.dumps(
                 {
+                    "report_count": 23,
+                    "lifecycle_replay_summary": {
+                        "replayed_runtime_signal_counts": {
+                            "stable_analysis.stable_internal_ratio": 23,
+                            "stable_analysis.stable_internal_chars": 23,
+                            "stable_analysis.stable_overlap_source": 23,
+                        },
+                        "missing_runtime_signal_counts": {
+                            "audio timestamp latency": 23,
+                            "translation request/output linkage": 23,
+                        },
+                    },
                     "paper_claim_matrix": [
                         {"claim_id": "operating_average_quality", "status": "사용 금지"},
                         {"claim_id": "translation_stability", "status": "보류"},
@@ -100,6 +112,41 @@ class DictationAiPaperClaimScopeAuditTest(unittest.TestCase):
         self.assertIn(
             "raw_stt_accuracy",
             {item["claim_id"] for item in result["missing_guard_claims"]},
+        )
+
+    def test_audit_rejects_stale_evidence_contract_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            summary = root / "summary.json"
+            paper = root / "paper.md"
+            self._write_summary(summary)
+            payload = json.loads(summary.read_text(encoding="utf-8"))
+            payload["lifecycle_replay_summary"] = {
+                "missing_runtime_signal_counts": {
+                    "stable_analysis.stable_internal_ratio": 23,
+                    "stable_analysis.stable_internal_chars": 23,
+                    "stable_analysis.stable_overlap_source": 23,
+                }
+            }
+            summary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            paper.write_text(
+                "\n".join(
+                    [
+                        "운영 평균 품질 주장은 여전히 보류한다.",
+                        "translation replay 전에는 성능 주장으로 쓰지 않는다.",
+                        "raw STT 정확도 개선은 주장하지 않는다.",
+                        "end-to-end runtime 검증으로 표현하지 않는다.",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result = audit_paper_claim_scope(summary, paper)
+
+        self.assertFalse(result["ok"])
+        self.assertIn(
+            "stable analysis signal is still marked missing: stable_analysis.stable_internal_ratio",
+            result["evidence_contract"]["stale_evidence_reasons"],
         )
 
 

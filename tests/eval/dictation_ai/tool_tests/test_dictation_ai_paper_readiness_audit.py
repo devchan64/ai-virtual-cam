@@ -14,6 +14,17 @@ class DictationAiPaperReadinessAuditTest(unittest.TestCase):
                 {
                     "report_count": 1,
                     "unique_axis_count": 1,
+                    "lifecycle_replay_summary": {
+                        "replayed_runtime_signal_counts": {
+                            "stable_analysis.stable_internal_ratio": 1,
+                            "stable_analysis.stable_internal_chars": 1,
+                            "stable_analysis.stable_overlap_source": 1,
+                        },
+                        "missing_runtime_signal_counts": {
+                            "audio timestamp latency": 1,
+                            "translation request/output linkage": 1,
+                        },
+                    },
                     "case_set_summary": {
                         "case_count": {"consistent": True, "value": 3, "unique_values": [3]},
                         "expected_final_case_count": {
@@ -220,7 +231,13 @@ class DictationAiPaperReadinessAuditTest(unittest.TestCase):
             encoding="utf-8",
         )
 
-    def _write_report(self, path: Path, *, corpus_role: str = "challenge-replay") -> None:
+    def _write_report(
+        self,
+        path: Path,
+        *,
+        corpus_role: str = "challenge-replay",
+        stale_contract: bool = False,
+    ) -> None:
         if corpus_role == "representative":
             experiment_stage = "representative-replay"
             claim_scope_key = "operating-average-finalization"
@@ -258,9 +275,7 @@ class DictationAiPaperReadinessAuditTest(unittest.TestCase):
             unsupported_claims = ["operating-average quality"]
             deferred_claims = ["translation-side churn reduction"]
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(
-                {
+        payload = {
                     "corpus_roles": [corpus_role],
                     "case_summary": case_summary,
                     "evidence_protocol": {
@@ -294,11 +309,10 @@ class DictationAiPaperReadinessAuditTest(unittest.TestCase):
                         ],
                         "missing_runtime_signals": ["translation request/output linkage"],
                     },
-                },
-                ensure_ascii=False,
-            ),
-            encoding="utf-8",
-        )
+                }
+        if stale_contract:
+            payload["lifecycle_replay_contract"].pop("replayed_runtime_signals", None)
+        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
     def _run_audit(
         self,
@@ -308,6 +322,8 @@ class DictationAiPaperReadinessAuditTest(unittest.TestCase):
         report_corpus_role: str = "challenge-replay",
         write_structural_result: bool = False,
         translation_linked: bool = False,
+        stale_evidence_contract: bool = False,
+        stale_report_contract: bool = False,
     ) -> dict[str, object]:
         summary = root / "summary.json"
         paper = root / "paper.md"
@@ -321,6 +337,16 @@ class DictationAiPaperReadinessAuditTest(unittest.TestCase):
         report = root / "reports" / "summary.json"
         cases.mkdir()
         self._write_summary(summary)
+        if stale_evidence_contract:
+            payload = json.loads(summary.read_text(encoding="utf-8"))
+            payload["lifecycle_replay_summary"] = {
+                "missing_runtime_signal_counts": {
+                    "stable_analysis.stable_internal_ratio": 1,
+                    "stable_analysis.stable_internal_chars": 1,
+                    "stable_analysis.stable_overlap_source": 1,
+                }
+            }
+            summary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         self._write_paper(paper, missing_guard=missing_guard)
         self._write_source_audit(source, translation_linked=translation_linked)
         self._write_packet_validation(packet_validation)
@@ -332,7 +358,7 @@ class DictationAiPaperReadinessAuditTest(unittest.TestCase):
                 json.dumps({"summary": {"case_count": 2}}, ensure_ascii=False),
                 encoding="utf-8",
             )
-        self._write_report(report, corpus_role=report_corpus_role)
+        self._write_report(report, corpus_role=report_corpus_role, stale_contract=stale_report_contract)
         with patch("tests.eval.dictation_ai.cases.sbd_case_paths.SBD_REPRESENTATIVE_CASE_DIR", cases):
             return audit_paper_readiness(
                 reports=[report],
@@ -357,6 +383,8 @@ class DictationAiPaperReadinessAuditTest(unittest.TestCase):
         self.assertTrue(result["followup_readiness"]["representative_draft_traceable"])
         self.assertTrue(result["checks"]["evidence_inventory"])
         self.assertTrue(result["checks"]["methodology"])
+        self.assertTrue(result["claim_scope_audit"]["evidence_contract"]["ok"])
+        self.assertTrue(result["evidence_number_audit"]["evidence_contract"]["ok"])
         self.assertEqual(
             result["followup_readiness"]["representative_status"],
             "blocked_on_human_expected_final",
@@ -447,6 +475,38 @@ class DictationAiPaperReadinessAuditTest(unittest.TestCase):
 
         self.assertFalse(result["ok"])
         self.assertFalse(result["checks"]["claim_scope"])
+
+    def test_readiness_audit_exposes_stale_evidence_contract_reasons(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = self._run_audit(Path(tmpdir), stale_evidence_contract=True)
+
+        self.assertFalse(result["ok"])
+        self.assertFalse(result["checks"]["claim_scope"])
+        self.assertFalse(result["checks"]["evidence_numbers"])
+        self.assertIn(
+            "missing replayed runtime signal count: stable_analysis.stable_internal_ratio",
+            result["claim_scope_audit"]["evidence_contract"]["stale_evidence_reasons"],
+        )
+        self.assertIn(
+            "stable analysis signal is still marked missing: stable_analysis.stable_internal_ratio",
+            result["evidence_number_audit"]["evidence_contract"]["stale_evidence_reasons"],
+        )
+
+    def test_readiness_audit_prioritizes_current_contract_cuda_rerun(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = self._run_audit(Path(tmpdir), stale_report_contract=True)
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["evidence_inventory"]["paper_evidence_complete_report_count"], 0)
+        self.assertEqual(result["evidence_inventory"]["paper_evidence_rerun_candidate_count"], 1)
+        self.assertEqual(
+            result["methodology_decision"]["recommended_next_experiment"],
+            "rerun current-contract cuda challenge replay",
+        )
+        first_experiment = result["methodology_decision"]["available_next_experiments"][0]
+        self.assertEqual(first_experiment["role"], "current-contract performance baseline")
+        self.assertIn("--device cuda", first_experiment["command"])
+        self.assertIn("--compute-type float16", first_experiment["command"])
 
     def test_readiness_audit_fails_when_challenge_only_methodology_has_other_report_scope(
         self,

@@ -15,6 +15,17 @@ class DictationAiPaperEvidenceNumberAuditTest(unittest.TestCase):
                 {
                     "report_count": 23,
                     "unique_axis_count": 12,
+                    "lifecycle_replay_summary": {
+                        "replayed_runtime_signal_counts": {
+                            "stable_analysis.stable_internal_ratio": 23,
+                            "stable_analysis.stable_internal_chars": 23,
+                            "stable_analysis.stable_overlap_source": 23,
+                        },
+                        "missing_runtime_signal_counts": {
+                            "audio timestamp latency": 23,
+                            "translation request/output linkage": 23,
+                        },
+                    },
                     "baseline_metric_summary": {
                         "final_precision_avg": {
                             "consistent": True,
@@ -189,6 +200,39 @@ class DictationAiPaperEvidenceNumberAuditTest(unittest.TestCase):
         self.assertEqual(
             {(item["kind"], item["name"]) for item in result["missing_counts"]},
             {("case_set", "case_count")},
+        )
+
+    def test_audit_rejects_stale_evidence_contract_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            summary = root / "summary.json"
+            paper = root / "paper.md"
+            self._write_summary(summary)
+            payload = json.loads(summary.read_text(encoding="utf-8"))
+            payload["lifecycle_replay_summary"] = {
+                "missing_runtime_signal_counts": {
+                    "stable_analysis.stable_internal_ratio": 23,
+                    "stable_analysis.stable_internal_chars": 23,
+                    "stable_analysis.stable_overlap_source": 23,
+                }
+            }
+            summary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            paper.write_text(
+                "final_precision_avg=0.602 final_recall_avg=0.440 "
+                "final_f1_avg=0.483 final_boundary_f1_avg=0.108 "
+                "finalized_per_stage_start=0.712 "
+                "complete report 23 unique axis 12 "
+                "case_count 1113 expected_final_case_count 1109 "
+                "en 429 ko 462 zh 222",
+                encoding="utf-8",
+            )
+
+            result = audit_paper_evidence_numbers(summary, paper)
+
+        self.assertFalse(result["ok"])
+        self.assertIn(
+            "missing replayed runtime signal count: stable_analysis.stable_internal_ratio",
+            result["evidence_contract"]["stale_evidence_reasons"],
         )
 
 

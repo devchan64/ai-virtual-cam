@@ -559,13 +559,14 @@ def run_transcribe_loop(
                 stable_analysis.stable_internal_chars,
                 stable_analysis.stable_overlap_source,
             )
-            if _should_reset_revision_age(
+            revision_age_reset = _should_reset_revision_age(
                 staged_before,
                 preferred,
                 stable_analysis.stable_internal_ratio,
                 stable_analysis.stable_internal_chars,
                 stable_analysis.stable_overlap_source,
-            ):
+            )
+            if revision_age_reset:
                 active_stage.age = 0
                 count_metric("stage_revision_age_reset")
             else:
@@ -584,6 +585,8 @@ def run_transcribe_loop(
                 f"preferred={_diagnostic_tail(preferred)}",
                 display=False,
             )
+            if revision_age_reset:
+                return []
             defer_for_later_extension = _has_later_completed_extension(active_stage.sentence, later_completed_sentences)
             if defer_for_later_extension:
                 count_metric("stage_confirm_deferred_later_extension")

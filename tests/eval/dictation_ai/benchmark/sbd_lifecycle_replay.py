@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from difflib import SequenceMatcher
 from typing import Any
 
 from src.app.sentence_boundary import normalized_text
 from src.app.dictation_pipeline_settings import (
+    FINAL_SENTENCE_MATCH_MIN_SIMILARITY,
     delta_suppressed_stage_max_chunks,
     max_staged_sentence_queue,
     no_text_stale_stage_suppress_chunks,
@@ -40,6 +42,7 @@ from src.app.dictation_transcript_logic import (
     _should_stage_boundary_candidate,
     _should_suppress_delta_final,
     _strip_prior_pending_prefix_revision,
+    _word_units,
 )
 from src.app.stable_token_detection import analyze_stable_window
 from src.app.transcript_revision import append_context as _append_committed_text
@@ -625,13 +628,14 @@ def _stage_completed_sentence(
             _stable_internal_chars(state),
             _stable_overlap_source(state),
         )
-        if _should_reset_revision_age(
+        revision_age_reset = _should_reset_revision_age(
             previous,
             preferred,
             _stable_internal_ratio(state),
             _stable_internal_chars(state),
             _stable_overlap_source(state),
-        ):
+        )
+        if revision_age_reset:
             state.staged_age = 0
             state.count("stage_revision_age_reset")
         else:
@@ -639,6 +643,8 @@ def _stage_completed_sentence(
         state.staged_deferred_age_chunk = chunk_index
         state.count("stage_age_tick")
         state.staged_forced = state.staged_forced or forced
+        if revision_age_reset:
+            return []
         defer_for_later_extension = _has_later_completed_extension(state.staged_sentence, later_completed_sentences)
         if defer_for_later_extension:
             state.count("stage_confirm_deferred_later_extension")

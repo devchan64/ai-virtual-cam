@@ -528,9 +528,9 @@ class DictationPipelineNodeTest(unittest.TestCase):
         sentence = "这一家餐厅呢，他。"
         required = _staged_sentence_required_confirmations(sentence, False)
 
-        self.assertEqual(required, 3)
-        self.assertFalse(_should_confirm_staged_sentence(sentence, 2, False))
-        self.assertTrue(_should_confirm_staged_sentence(sentence, 3, False))
+        self.assertEqual(required, 2)
+        self.assertFalse(_should_confirm_staged_sentence(sentence, 1, False))
+        self.assertTrue(_should_confirm_staged_sentence(sentence, 2, False))
         self.assertTrue(_should_stage_boundary_candidate(sentence, "zh"))
 
     def test_hypothesis_candidate_node_preserves_boundary_contract(self) -> None:

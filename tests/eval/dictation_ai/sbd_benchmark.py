@@ -33,6 +33,8 @@ from tests.eval.dictation_ai.benchmark.sbd_lifecycle_replay import (
     LifecycleState,
     _finalize_staged_sentence,
     _run_lifecycle_case,
+    _score_boundary_offsets,
+    _score_sequence,
     _stage_completed_sentence,
 )
 from tests.eval.dictation_ai.benchmark.sbd_runtime_contract import force_offline_model_cache_env

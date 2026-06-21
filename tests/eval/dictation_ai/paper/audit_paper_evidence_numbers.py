@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from tests.eval.dictation_ai.paper.audit_evidence_contract import audit_current_evidence_contract
+
 
 PAPER_BASELINE_METRIC_DECIMALS = {
     "final_precision_avg": 3,
@@ -86,6 +88,7 @@ def _audit_expected_text(
 def audit_paper_evidence_numbers(summary_path: Path, paper_path: Path) -> dict[str, Any]:
     summary = _load_json_object(summary_path)
     paper = paper_path.read_text(encoding="utf-8")
+    evidence_contract = audit_current_evidence_contract(summary)
     baseline_metrics = _baseline_metric_summary(summary)
     case_set_summary = _case_set_summary(summary)
     checked_metrics: list[dict[str, Any]] = []
@@ -206,11 +209,13 @@ def audit_paper_evidence_numbers(summary_path: Path, paper_path: Path) -> dict[s
         "missing_counts": missing_counts,
         "inconsistent_metrics": inconsistent_metrics,
         "inconsistent_counts": inconsistent_counts,
+        "evidence_contract": evidence_contract,
         "ok": (
             not missing_metrics
             and not missing_counts
             and not inconsistent_metrics
             and not inconsistent_counts
+            and evidence_contract["ok"]
         ),
     }
 

@@ -236,11 +236,12 @@ class DictationAiSbdLifecycleTest(unittest.TestCase):
             chunk_index=9,
         )
 
-        self.assertEqual(finalized, [])
-        self.assertEqual(state.staged_sentence, "对，真的不知不觉一直吃。")
+        self.assertEqual(finalized, ["对，真的不知不觉一直吃。"])
+        self.assertEqual(state.staged_sentence, "两只鸡其实没有很多，因为它小小。")
         self.assertEqual(state.metrics["stage_queue_promote"], 2)
         self.assertEqual(state.metrics["stage_queue_quality_suppressed"], 1)
         self.assertEqual(state.metrics["stage_queue_quality_no_end_marker"], 1)
+        self.assertEqual(state.metrics["finalized"], 1)
         self.assertEqual(state.metrics["segment_state_suppressed"], 1)
 
     def test_recent_final_suffix_recovery_runs_even_when_committed_delta_is_empty(self) -> None:
@@ -409,7 +410,8 @@ class DictationAiSbdLifecycleTest(unittest.TestCase):
 
         self.assertEqual(finalized, [])
         self.assertEqual(state.staged_sentence, "像是松板的部分口感上那真的就是一个脆嫩带。")
-        self.assertEqual(state.metrics["stage_age_quality_blocked"], 1)
+        self.assertEqual(state.metrics["stage_finalize_deferred_for_queue_revision"], 1)
+        self.assertEqual(state.metrics["stage_queue_enqueue"], 1)
         self.assertNotIn("finalized", state.metrics)
 
     def test_longer_mixed_latin_zh_sentence_remains_stageable(self) -> None:

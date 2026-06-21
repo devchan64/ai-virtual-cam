@@ -1842,6 +1842,7 @@ def _should_defer_token_sentence_revision(
     ):
         return True
     required_confirmations = _staged_sentence_required_confirmations(normalized_preferred, staged_forced)
+    revision_required_confirmations = max(required_confirmations, 2)
     next_confirmations = _next_revision_confirmation_count(
         normalized_previous,
         normalized_preferred,
@@ -1850,7 +1851,7 @@ def _should_defer_token_sentence_revision(
         stable_internal_chars,
         stable_overlap_source,
     )
-    return current_confirmations < required_confirmations <= next_confirmations
+    return current_confirmations < revision_required_confirmations <= next_confirmations
 
 
 def _should_reset_revision_age(

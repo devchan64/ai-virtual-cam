@@ -140,7 +140,13 @@ def _methodology_decision(
         for claim_id, status in statuses.items()
         if status in {"사용 금지", "보류"}
     ]
-    if representative_status == "blocked_on_human_expected_final":
+    current_contract_rerun_needed = (
+        int(inventory.get("paper_evidence_complete_report_count", 0)) <= 0
+        and int(inventory.get("paper_evidence_rerun_candidate_count", 0)) > 0
+    )
+    if current_contract_rerun_needed:
+        recommended_next_experiment = "rerun current-contract cuda challenge replay"
+    elif representative_status == "blocked_on_human_expected_final":
         recommended_next_experiment = "human-review representative expected_final labels"
     elif representative_status == "ready_for_pilot_representative_replay":
         recommended_next_experiment = "run pilot representative replay"
@@ -158,16 +164,34 @@ def _methodology_decision(
         translation_next_experiment = "run translation replay"
         translation_role = "translation replay linkage is ready; run translation replay before stability claims"
         translation_method_note = "run translation replay before final-only translation stability claims"
-    available_next_experiments = [
-        {
-            "name": recommended_next_experiment,
-            "role": "paper-evidence expansion",
-            "paper_evidence": False,
-            "blocked_by": "human expected_final labels"
-            if representative_status == "blocked_on_human_expected_final"
-            else "",
-        },
-        {
+    available_next_experiments = []
+    if current_contract_rerun_needed:
+        available_next_experiments.append(
+            {
+                "name": recommended_next_experiment,
+                "role": "current-contract performance baseline",
+                "paper_evidence": True,
+                "blocked_by": "",
+                "rerun_candidate_count": int(inventory.get("paper_evidence_rerun_candidate_count", 0)),
+                "command": (
+                    "HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 "
+                    "./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py "
+                    "--cases tests/eval/dictation_ai/sbd_cases --device cuda --compute-type float16 "
+                    "--output .tmp/eval/dictation-ai-sbd/current-contract-challenge-replay.json"
+                ),
+            }
+        )
+    available_next_experiments.extend(
+        [
+            {
+                "name": "human-review representative expected_final labels",
+                "role": "paper-evidence expansion",
+                "paper_evidence": False,
+                "blocked_by": "human expected_final labels"
+                if representative_status == "blocked_on_human_expected_final"
+                else "",
+            },
+            {
             "name": translation_next_experiment,
             "role": "translation claim expansion",
             "paper_evidence": False,
@@ -179,8 +203,9 @@ def _methodology_decision(
                 "blocked_on_translation_output_linkage",
             }
             else "",
-        },
-    ]
+            },
+        ]
+    )
     if bool(structural_preflight.get("ready", False)):
         structural_case_path = str(structural_preflight.get("case_path", "")).strip()
         structural_result_path = str(
@@ -237,6 +262,9 @@ def _methodology_decision(
         "method_reconstruction": [
             "keep challenge replay for observed failure lifecycle trade-off",
             "do not interpret challenge replay averages as operating average quality",
+            "rerun current-contract challenge replay before optimizing from stale evidence"
+            if current_contract_rerun_needed
+            else "current challenge replay evidence contract is available",
             "promote traceable human-reviewed representative cases before operating-average claims",
             translation_method_note,
         ],
@@ -299,6 +327,7 @@ def audit_paper_readiness(
             "ok": claim_scope["ok"],
             "claim_statuses": claim_scope.get("claim_statuses", {}),
             "missing_guard_claims": claim_scope.get("missing_guard_claims", []),
+            "evidence_contract": claim_scope.get("evidence_contract", {}),
         },
         "evidence_number_audit": {
             "ok": evidence_numbers["ok"],
@@ -306,6 +335,7 @@ def audit_paper_readiness(
             "missing_counts": evidence_numbers.get("missing_counts", []),
             "inconsistent_metrics": evidence_numbers.get("inconsistent_metrics", []),
             "inconsistent_counts": evidence_numbers.get("inconsistent_counts", []),
+            "evidence_contract": evidence_numbers.get("evidence_contract", {}),
         },
         "reference_scope_audit": {
             "ok": reference_scope["ok"],

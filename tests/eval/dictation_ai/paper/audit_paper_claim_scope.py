@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from tests.eval.dictation_ai.paper.audit_evidence_contract import audit_current_evidence_contract
+
 
 RESTRICTED_CLAIM_GUARDS = {
     "operating_average_quality": [
@@ -57,6 +59,7 @@ def audit_paper_claim_scope(summary_path: Path, paper_path: Path) -> dict[str, A
     summary = _load_json_object(summary_path)
     paper = paper_path.read_text(encoding="utf-8")
     statuses = _claim_statuses(summary)
+    evidence_contract = audit_current_evidence_contract(summary)
     restricted_claims: list[dict[str, Any]] = []
     missing_guard_claims: list[dict[str, Any]] = []
     for claim_id, guard_phrases in RESTRICTED_CLAIM_GUARDS.items():
@@ -79,7 +82,8 @@ def audit_paper_claim_scope(summary_path: Path, paper_path: Path) -> dict[str, A
         "claim_statuses": statuses,
         "restricted_claims": restricted_claims,
         "missing_guard_claims": missing_guard_claims,
-        "ok": not missing_guard_claims,
+        "evidence_contract": evidence_contract,
+        "ok": not missing_guard_claims and evidence_contract["ok"],
     }
 
 
