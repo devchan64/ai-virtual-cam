@@ -14301,3 +14301,22 @@ chunk=453..456
 - CJK prefix extension은 여전히 prefix 8단위 이상을 요구하므로 짧은 echo 전체를 무제한 회수하지 않는다.
 - 기존 1글자 표기 보정(`摆` -> `摆摊`)은 계속 suppress되는지 단위 테스트로 확인한다.
 - `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_room_tour_short_object_extension_20260621_001` 케이스를 추가했다.
+
+### 2026-06-21 짧은 무종결 CJK stage 병목 완화
+
+관측:
+
+- 사용자가 제시한 `BHC...招牌cheese` 구간은 이미 `zh_log_missing_takeout_chicken_signature_cheese_20260621_001`로 등록되어 있었다.
+- 최신 로그의 `餐厅/fusion food/米其林推荐` 구간에서도 같은 구조가 확인됐다.
+- `它对面的这一家`처럼 짧고 종결 신호가 없는 CJK 조각이 active stage가 된 뒤, 뒤의 완성 문장들은 recent-final/duplicate 억제로 사라지고 active stage는 `stage_age_quality_blocked`까지 queue를 막았다.
+
+해석:
+
+- 병목은 특정 문구나 중국어 예외가 아니라, 완성되지 않은 짧은 후보가 생성순서 버퍼의 head가 되면서 후속 후보 소비를 지연시키는 lifecycle 문제다.
+- 종결부호가 있는 짧은 문장은 사용자가 요구한 대로 final-only 번역 대상이 되어야 하므로 전역 `short_cjk` 차단은 적용하지 않는다.
+
+반영:
+
+- CJK 후보가 짧고 문장 종료 신호가 없으면 기존 `short_no_end_fragment` 품질 플래그로 stage 진입을 막는다.
+- `哇，看起来就很好吃。`처럼 짧지만 완결된 문장은 계속 stage/final 후보로 유지한다.
+- 단위 테스트로 무종결 조각 차단과 완결 짧은 문장 허용을 함께 고정했다.

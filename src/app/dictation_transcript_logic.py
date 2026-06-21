@@ -749,10 +749,10 @@ def _final_sentence_diagnostic_flags(sentence: str, language: str) -> tuple[str,
     normalized_language = str(language or "").strip().lower()
     has_cjk = _has_cjk_words(words)
     has_latin = _has_latin_words(words)
+    cjk_units = [word for word in words if _has_cjk_words([word])]
     if _has_repeated_word_ngram(words):
         flags.append("repeated_word_ngram")
     if normalized_language == "zh" or has_cjk:
-        cjk_units = [word for word in words if _has_cjk_words([word])]
         if 0 < len(cjk_units) <= _short_cjk_final_units():
             flags.append("short_cjk")
         if 0 < len(cjk_units) <= 3 and _boundary_sentence_end_count(normalized) == 0:
@@ -772,7 +772,9 @@ def _final_sentence_diagnostic_flags(sentence: str, language: str) -> tuple[str,
         flags.append("mixed_latin_zh")
     if _boundary_sentence_end_count(normalized) == 0:
         flags.append("no_end_marker")
-        if len(words) <= _short_no_end_fragment_units():
+        if len(words) <= _short_no_end_fragment_units() or (
+            has_cjk and 0 < len(cjk_units) <= _short_cjk_final_units()
+        ):
             flags.append("short_no_end_fragment")
     return tuple(flags)
 

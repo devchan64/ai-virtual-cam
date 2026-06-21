@@ -33,6 +33,7 @@ from src.app.dictation_pipeline_settings import (
     dictation_tuning_protocol,
 )
 from src.app.dictation_transcript_logic import (
+    _final_sentence_diagnostic_flags,
     _normalized_text,
     _recent_final_output_delta,
     _should_stage_boundary_candidate,
@@ -292,6 +293,20 @@ class DictationPipelineNodeTest(unittest.TestCase):
 
         self.assertEqual(candidate, "")
         self.assertEqual(recent_source, "所以还是有很多小摊贩在摆。")
+
+    def test_short_cjk_without_end_marker_is_not_stageable(self) -> None:
+        self.assertIn(
+            "short_no_end_fragment",
+            _final_sentence_diagnostic_flags("它对面的这一家", "zh"),
+        )
+        self.assertFalse(_should_stage_boundary_candidate("它对面的这一家", "zh"))
+
+    def test_short_cjk_with_end_marker_remains_stageable(self) -> None:
+        self.assertNotIn(
+            "short_no_end_fragment",
+            _final_sentence_diagnostic_flags("哇，看起来就很好吃。", "zh"),
+        )
+        self.assertTrue(_should_stage_boundary_candidate("哇，看起来就很好吃。", "zh"))
 
     def test_hypothesis_candidate_node_preserves_boundary_contract(self) -> None:
         detector = FakeBoundaryDetector()
