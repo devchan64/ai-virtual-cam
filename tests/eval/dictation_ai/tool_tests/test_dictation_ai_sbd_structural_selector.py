@@ -90,16 +90,20 @@ class DictationAiSbdStructuralSelectorTest(unittest.TestCase):
     def test_requires_input_evidence_by_default(self) -> None:
         weak_case = _case("weak-input", queue_len=8, boundary_f1=0.0, queue_revision=80, replace_deferred=80)
         weak_case["expected_final"] = ["A sentence that never appears in any replay input."]
+        partial_case = _case("partial-input", queue_len=7, boundary_f1=0.0, queue_revision=70, replace_deferred=70)
+        partial_case["expected_final"] = ["First sentence.", "A sentence that never appears in any replay input."]
         clean_case = _case("clean-input", queue_len=1, boundary_f1=0.0, queue_revision=1, replace_deferred=1)
-        report = {"cases": [weak_case, clean_case]}
+        report = {"cases": [weak_case, partial_case, clean_case]}
 
         selected = select_structural_cases(report, limit=2)
-        included = select_structural_cases(report, limit=2, input_evidence_mode="include")
+        included = select_structural_cases(report, limit=3, input_evidence_mode="include")
         weak_only = select_structural_cases(report, limit=2, input_evidence_mode="weak-only")
 
         self.assertEqual([case["id"] for case in selected], ["clean-input"])
-        self.assertEqual([case["id"] for case in included], ["weak-input", "clean-input"])
+        self.assertEqual([case["id"] for case in included], ["weak-input", "partial-input", "clean-input"])
         self.assertEqual([case["id"] for case in weak_only], ["weak-input"])
+        self.assertTrue(included[1]["input_evidence"]["has_evidence"])
+        self.assertFalse(included[1]["input_evidence"]["fully_supported"])
         self.assertFalse(weak_only[0]["input_evidence"]["has_evidence"])
 
     def test_writes_benchmark_compatible_case_jsonl(self) -> None:

@@ -14837,6 +14837,199 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-22 core manifest exploratory sweep와 기본값 유지 판단
+
+목적:
+
+- `stage_replace_deferred`, `stage_queue_revision`, `no_end_marker` 병목이 많은 상태에서 기존 tuning manifest 축 중 실제 개선 신호가 있는지 확인했다.
+- 새 세부 규칙을 추가하지 않고, 이미 정의된 핵심 축만 독립 변경해 CUDA challenge replay에서 비교했다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sweeps/run_sbd_parameter_sweep.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/core-manifest-exploration-20260622 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/core-manifest-exploration-20260622/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/core-manifest-exploration-20260622/summary.md \
+  --include-baseline \
+  --param CJK_CONFIRM_PRESERVE_RATIO_MIN=0.50 \
+  --param CJK_CONFIRM_PRESERVE_RATIO_MIN=0.65 \
+  --param CJK_REVISION_RATIO_MIN=0.70 \
+  --param CJK_REVISION_RATIO_MIN=0.86 \
+  --param REVISION_FALLBACK_COVERAGE_MIN=0.45 \
+  --param REVISION_FALLBACK_COVERAGE_MIN=0.70 \
+  --param DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=1 \
+  --param DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=4 \
+  --param SHORT_NO_END_FRAGMENT_UNITS=3 \
+  --param SHORT_NO_END_FRAGMENT_UNITS=8
+```
+
+기준선:
+
+```text
+cases=1223
+final_precision_avg=0.582216
+final_recall_avg=0.467552
+final_f1_avg=0.496566
+final_boundary_f1_avg=0.115502
+finalized_per_stage_start=0.583222
+```
+
+결과 요약:
+
+| candidate | final_f1_delta | precision_delta | recall_delta | boundary_delta | 판단 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `CJK_CONFIRM_PRESERVE_RATIO_MIN=0.50` | -0.000023 | -0.000014 | +0.000019 | +0.000070 | 개선 없음 |
+| `CJK_CONFIRM_PRESERVE_RATIO_MIN=0.65` | -0.000389 | +0.000138 | -0.000704 | -0.000210 | recall/F1 하락 |
+| `CJK_REVISION_RATIO_MIN=0.70` | -0.000027 | -0.000090 | 0.000000 | -0.000172 | 개선 없음 |
+| `CJK_REVISION_RATIO_MIN=0.86` | +0.000017 | +0.000117 | -0.000082 | -0.000128 | 개선 폭 없음, boundary 하락 |
+| `REVISION_FALLBACK_COVERAGE_MIN=0.45` | -0.001811 | +0.001872 | -0.002910 | +0.000589 | precision/boundary와 recall trade-off, F1 하락 |
+| `REVISION_FALLBACK_COVERAGE_MIN=0.70` | -0.001341 | -0.005397 | +0.001025 | -0.003220 | precision/boundary/F1 하락 |
+| `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=1` | +0.000335 | +0.000925 | +0.000165 | -0.000245 | 개선 폭이 너무 작고 clean strata F1 하락 |
+| `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=4` | -0.000574 | -0.000926 | -0.000352 | +0.000067 | F1 하락 |
+| `SHORT_NO_END_FRAGMENT_UNITS=3` | -0.006554 | -0.016949 | -0.001134 | -0.001485 | 명확히 악화 |
+| `SHORT_NO_END_FRAGMENT_UNITS=8` | -0.012651 | -0.000703 | -0.017422 | -0.000092 | 명확히 악화 |
+
+clean/input strata 확인:
+
+- `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=1`은 전체 F1을 `+0.000335` 올렸지만 `without_expected_quality_review.final_f1_avg=-0.000728`, `final_boundary_f1_avg=-0.000728`로 clean strata가 하락했다.
+- `SHORT_NO_END_FRAGMENT_UNITS`는 완화(`3`)와 강화(`8`) 모두 전체 F1을 크게 낮췄다. 짧은 미종결 fragment를 임계값만으로 더 허용하거나 더 차단하는 방식은 파이프라인 개선 원칙으로 부적합하다.
+- revision similarity 계열은 변경 영향이 작거나 precision/recall trade-off만 만들었다. 현재 병목은 단순 similarity threshold가 아니라 active/queue lifecycle 소비 순서와 case/input 품질 분리에 더 가깝다.
+
+판단:
+
+- 이번 sweep에서 운영 기본값으로 승격할 후보는 없다.
+- `src/app` 변경을 만들기보다 rejected sweep 근거를 남기고, 다음 탐색은 case-level delta에서 `stage_replace_deferred`와 `stage_queue_revision`이 실제 생성 순서를 어긋나게 만드는 구간으로 좁힌다.
+- 과도한 helper/test 추가 없이 평가 report에 이미 추가한 `expected_quality_strata_summary`, `input_evidence_strata_summary`를 사용해 앱 로직 평가 대상과 case/input review 대상을 분리한다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest discover -s tests/eval/dictation_ai/tool_tests
+Ran 175 tests in 0.050s, OK
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases --max-drafts 0
+case_count=1223, expected_final_case_count=1219, draft_count=0
+
+git diff --check
+OK
+```
+
+### 2026-06-22 input evidence strata 재측정과 revision confirmation 길이 완화 기각
+
+목적:
+
+- STT raw 정확도나 case 정의 문제를 받아쓰기 finalization 로직 문제로 오해하지 않기 위해 `expected_final`이 replay input에 실제로 나타나는지 층화했다.
+- 문맥 window가 앞뒤로 크게 변해도 같은 token-sentence가 반복 관측되면 confirmation을 보존할 수 있는지 검토했다.
+- 단, 세부 규칙을 늘리기보다 일반 원칙으로 설명 가능한 경우에만 앱 기본값 반영 후보로 본다.
+
+전체 challenge replay:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-input-evidence-strata.json
+```
+
+```text
+cases=1223
+finalized=5228
+stage_start=8964
+finalized_per_stage_start=0.583222
+final_precision_avg=0.582216
+final_recall_avg=0.467552
+final_f1_avg=0.496566
+final_boundary_f1_avg=0.115502
+```
+
+input evidence strata:
+
+| strata | cases | final_f1_avg | precision | recall | boundary_f1 | staged_residue | empty_final |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `full_input_evidence` | 430 | 0.646637 | 0.681940 | 0.652740 | 0.224841 | 333 | 4 |
+| `partial_input_evidence_review` | 737 | 0.435612 | 0.552668 | 0.385193 | 0.052614 | 513 | 16 |
+| `weak_input_evidence_review` | 56 | 0.146429 | 0.205357 | 0.129464 | 0.103571 | 14 | 30 |
+
+expected quality strata:
+
+| strata | cases | final_f1_avg | precision | recall | boundary_f1 | staged_residue | empty_final |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `without_expected_quality_review` | 412 | 0.567969 | 0.688096 | 0.525445 | 0.196097 | 243 | 28 |
+| `expected_quality_review` | 811 | 0.460292 | 0.528427 | 0.438141 | 0.074558 | 617 | 22 |
+
+해석:
+
+- 기존 `with_input_evidence`는 `expected_final` 중 일부만 replay input에 있어도 통과시켜 앱 lifecycle 성능 판단에 너무 넓었다.
+- `full_input_evidence`는 모든 `expected_final` 문장이 replay input에서 coverage 기준을 만족하는 bucket이다. 앱 로직 개선 판단은 최소한 `full_input_evidence`와 `without_expected_quality_review` strata를 함께 본다.
+- `partial_input_evidence_review` 737건은 일부 기대 문장만 입력 근거가 있으므로 case/input 검토 대상으로 분리한다.
+- 약한 input evidence bucket은 56건이고 `final_f1_avg=0.146429`로 매우 낮다. 이 bucket도 앱 lifecycle 성능 근거가 아니라 case/input 검토 대상으로 분리한다.
+- structural preflight 기본값은 `has_evidence`가 아니라 `fully_supported`를 요구하도록 정리했다.
+- sweep summary JSON에 `expected_quality_strata_summary`, `input_evidence_strata_summary`와 각 delta를 보존하도록 평가 도구를 보강했다.
+
+revision confirmation 길이 완화 후보:
+
+- 가설: 같은 token-sentence가 반복 관측되는데 sliding window가 앞뒤 문맥을 크게 바꾸는 경우, 길이 차이만으로 confirmation을 reset하면 final 누락이 늘 수 있다.
+- 단순 완화: confirmation 보존의 length delta 허용치를 12/24/40으로 늘렸다.
+- 보수형 완화: length delta가 큰 경우 긴 공통 token run과 높은 coverage가 있을 때만 confirmation을 보존하도록 제한했다.
+
+단순 완화 sweep:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sweeps/run_sbd_parameter_sweep.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/revision-confirm-length-20260622 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/revision-confirm-length-20260622/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/revision-confirm-length-20260622/summary.md \
+  --include-baseline \
+  --param REVISION_CONFIRM_PRESERVE_MAX_LENGTH_DELTA=12 \
+  --param REVISION_CONFIRM_PRESERVE_MAX_LENGTH_DELTA=24 \
+  --param REVISION_CONFIRM_PRESERVE_MAX_LENGTH_DELTA=40
+```
+
+| candidate | final_f1_delta | precision_delta | recall_delta | boundary_delta | finalized/stage delta | 판단 |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `12` | +0.001042 | -0.003801 | +0.004605 | -0.002511 | +0.025729 | precision/boundary 하락으로 기각 |
+| `24` | +0.000885 | -0.004436 | +0.004648 | -0.002830 | +0.028978 | precision/boundary 하락으로 기각 |
+| `40` | +0.001720 | -0.003676 | +0.005561 | -0.002858 | +0.030289 | 개선 폭이 작고 precision/boundary 하락으로 기각 |
+
+보수형 완화 sweep:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sweeps/run_sbd_parameter_sweep.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/revision-confirm-length-strict-20260622 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/revision-confirm-length-strict-20260622/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/revision-confirm-length-strict-20260622/summary.md \
+  --include-baseline \
+  --param REVISION_CONFIRM_PRESERVE_MAX_LENGTH_DELTA=12 \
+  --param REVISION_CONFIRM_PRESERVE_MAX_LENGTH_DELTA=24 \
+  --param REVISION_CONFIRM_PRESERVE_MAX_LENGTH_DELTA=40
+```
+
+| candidate | final_f1_delta | precision_delta | recall_delta | boundary_delta | finalized/stage delta | 판단 |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `12` | -0.001122 | -0.005176 | +0.001614 | -0.001473 | +0.015893 | F1 하락으로 기각 |
+| `24` | -0.002066 | -0.006134 | +0.000739 | -0.001589 | +0.016915 | F1 하락으로 기각 |
+| `40` | -0.001292 | -0.005401 | +0.001623 | -0.001611 | +0.018076 | F1 하락으로 기각 |
+
+판단:
+
+- confirmation 길이 허용은 staged residue와 final/stage ratio를 개선하지만, precision과 boundary를 손상한다.
+- 단순 완화는 recall 중심 trade-off일 뿐이고, 보수형 완화도 F1을 낮춘다.
+- 앱 기본 로직에는 반영하지 않는다. rejected tuning 축도 checked-in 설정으로 남기지 않는다.
+- 다음 탐색은 길이 허용이 아니라, `stage_replace_deferred`와 `stage_queue_revision`이 누적될 때 active/queue 소비 순서가 실제 생성 순서와 어긋나는지 case-level delta로 좁혀야 한다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_parameter_sweep tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report
+Ran 51 tests in 0.010s, OK
+```
+
 ### 2026-06-22 queue 파라미터 재검증과 structural clean preflight 정리
 
 목적:

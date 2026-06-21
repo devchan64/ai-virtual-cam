@@ -22,7 +22,7 @@
 - `tool_tests/`는 평가 도구의 계약 테스트만 둔다. 앱 코드 품질관리 유닛테스트는 `tests/unit/`에 둔다.
 - benchmark 성능 근거는 `tool_tests` 통과가 아니라 `sbd_benchmark.py`를 실제 `sat + cuda + float16`로 실행한 report만 사용한다.
 - challenge replay, representative replay, structural preflight 결과를 같은 표로 합치지 않는다. corpus role과 evidence protocol이 다르면 별도 해석한다.
-- structural preflight는 앱 lifecycle 병목을 보기 위한 도구이므로 `expected_final` 정의 품질 review 후보와 replay 입력 근거가 약한 후보를 기본적으로 제외한다. case 정의 문제를 일부러 보려면 `--expected-quality include` 또는 `only`, 입력 근거 문제를 보려면 `--input-evidence include` 또는 `weak-only`를 명시한다.
+- structural preflight는 앱 lifecycle 병목을 보기 위한 도구이므로 `expected_final` 정의 품질 review 후보와 replay 입력 근거가 일부만 있거나 약한 후보를 기본적으로 제외한다. case 정의 문제를 일부러 보려면 `--expected-quality include` 또는 `only`, 입력 근거 문제를 보려면 `--input-evidence include` 또는 `weak-only`를 명시한다.
 
 ## 단일 엔트리
 

@@ -270,15 +270,20 @@ def summarize_results_by_expected_quality_strata(results: list[dict[str, Any]]) 
 
 def summarize_results_by_input_evidence_strata(results: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Separate cases whose expected final text is weakly represented in replay inputs."""
-    with_input_evidence: list[dict[str, Any]] = []
+    full_input_evidence: list[dict[str, Any]] = []
+    partial_input_evidence_review: list[dict[str, Any]] = []
     weak_input_evidence: list[dict[str, Any]] = []
     for result in results:
-        if case_input_evidence(result)["has_evidence"]:
-            with_input_evidence.append(result)
+        evidence = case_input_evidence(result)
+        if evidence["fully_supported"]:
+            full_input_evidence.append(result)
+        elif evidence["has_evidence"]:
+            partial_input_evidence_review.append(result)
         else:
             weak_input_evidence.append(result)
     return {
-        "with_input_evidence": _summarize_result_group(with_input_evidence),
+        "full_input_evidence": _summarize_result_group(full_input_evidence),
+        "partial_input_evidence_review": _summarize_result_group(partial_input_evidence_review),
         "weak_input_evidence_review": _summarize_result_group(weak_input_evidence),
     }
 
@@ -305,6 +310,21 @@ def summarize_results_by_queue_residue_strata(results: list[dict[str, Any]]) -> 
         "queue_len_2_to_4": _summarize_result_group(queue_len_2_to_4),
         "queue_len_ge_5": _summarize_result_group(queue_len_ge_5),
     }
+
+
+def _with_case_evidence_metadata(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    enriched: list[dict[str, Any]] = []
+    for result in results:
+        item = dict(result)
+        expected_final = [
+            str(sentence).strip()
+            for sentence in item.get("expected_final", []) or []
+            if str(sentence).strip()
+        ]
+        item["expected_quality_flags"] = expected_quality_flags(expected_final)
+        item["input_evidence"] = case_input_evidence(item)
+        enriched.append(item)
+    return enriched
 
 
 def _text_preview(value: Any, *, limit: int = CASE_EXEMPLAR_PREVIEW_CHARS) -> str:
@@ -518,6 +538,7 @@ def build_benchmark_report(
     elapsed_ms: float,
     representative_review_packet_validation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    results = _with_case_evidence_metadata(results)
     exact_match_count = sum(1 for result in results if result["case_exact_match"])
     pending_exact_count = sum(1 for result in results if result["pending_exact"])
     staged_exact_count = sum(1 for result in results if result["staged_exact"])

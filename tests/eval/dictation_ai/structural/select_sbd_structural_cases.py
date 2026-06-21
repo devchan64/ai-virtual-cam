@@ -103,10 +103,10 @@ def _filter_input_evidence_cases(cases: list[dict[str, Any]], *, mode: str) -> l
         return cases
     filtered: list[dict[str, Any]] = []
     for case in cases:
-        has_evidence = bool(case_input_evidence(case)["has_evidence"])
-        if mode == "require" and has_evidence:
+        evidence = case_input_evidence(case)
+        if mode == "require" and bool(evidence["fully_supported"]):
             filtered.append(case)
-        elif mode == "weak-only" and not has_evidence:
+        elif mode == "weak-only" and not bool(evidence["has_evidence"]):
             filtered.append(case)
     return filtered
 
@@ -240,7 +240,7 @@ def render_markdown(
         f"- min_input_evidence_coverage: {MIN_INPUT_EVIDENCE_COVERAGE:.2f}",
         "- corpus_role: exploratory",
         "- paper_evidence: false",
-        "- interpretation: structural lifecycle preflight only; expected-quality review candidates and weak input-evidence candidates are excluded by default; rerun the full challenge replay with sat + cuda + float16 before using any metric as paper evidence.",
+        "- interpretation: structural lifecycle preflight only; expected-quality review candidates and partial/weak input-evidence candidates are excluded by default; rerun the full challenge replay with sat + cuda + float16 before using any metric as paper evidence.",
         "",
         "| rank | id | language | score | reasons | expected_quality_flags | input_evidence | final_f1 | boundary_f1 | queue_len | stage_queue_revision | stage_replace_deferred |",
         "| ---: | --- | --- | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
@@ -294,7 +294,7 @@ def main() -> int:
         "--input-evidence",
         choices=INPUT_EVIDENCE_MODES,
         default="require",
-        help="How to handle cases where expected_final has weak evidence in replay input chunks.",
+        help="How to handle cases where expected_final has partial or weak evidence in replay input chunks.",
     )
     parser.add_argument("--case-output", type=Path, default=None)
     parser.add_argument("--markdown-output", type=Path, default=None)

@@ -75,5 +75,6 @@ def case_input_evidence(case: dict[str, Any]) -> dict[str, Any]:
         "coverage_avg": sum(coverages) / max(len(coverages), 1),
         "coverage_min": min(coverages, default=0.0),
         "coverage_max": max(coverages, default=0.0),
+        "fully_supported": bool(expected_final) and covered_count == len(expected_final),
         "has_evidence": bool(expected_final) and covered_count > 0,
     }

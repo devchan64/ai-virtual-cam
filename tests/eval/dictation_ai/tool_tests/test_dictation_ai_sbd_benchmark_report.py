@@ -176,13 +176,21 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
             1,
         )
         self.assertEqual(
-            report["input_evidence_strata_summary"]["with_input_evidence"]["case_count"],
+            report["input_evidence_strata_summary"]["full_input_evidence"]["case_count"],
             1,
+        )
+        self.assertEqual(
+            report["input_evidence_strata_summary"]["partial_input_evidence_review"]["case_count"],
+            0,
         )
         self.assertEqual(
             report["input_evidence_strata_summary"]["weak_input_evidence_review"]["case_count"],
             0,
         )
+        self.assertEqual(report["cases"][0]["expected_quality_flags"], [])
+        self.assertTrue(report["cases"][0]["input_evidence"]["has_evidence"])
+        self.assertTrue(report["cases"][0]["input_evidence"]["fully_supported"])
+        self.assertEqual(report["cases"][0]["input_evidence"]["covered_count"], 1)
         self.assertEqual(report["case_exemplar_summary"]["lifecycle_focus_top"][0]["id"], "case-a")
         self.assertEqual(report["staged_queue_residue_summary"]["queue_residue_case_count"], 0)
         self.assertEqual(report["staged_queue_residue_summary"]["active_staged_residue_case_count"], 0)
@@ -342,6 +350,25 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
             },
             {
                 "id": "case-b",
+                "expected_final": [
+                    "The expected sentence is present.",
+                    "This target never appears in the replay input.",
+                ],
+                "chunks": [{"input": "The expected sentence is present. Next text."}],
+                "actual_final": ["The expected sentence is present."],
+                "actual_pending": "",
+                "actual_staged": "",
+                "actual_staged_queue": [],
+                "final_score": _score(0.5, 0.5, 0.5),
+                "final_boundary_score": _score(0.5, 0.5, 0.5),
+                "completed_last_score": _score(0.5, 0.5, 0.5),
+                "pending_exact": True,
+                "staged_exact": True,
+                "case_exact_match": False,
+                "metrics": {"finalized": 1, "stage_start": 1},
+            },
+            {
+                "id": "case-c",
                 "expected_final": ["This target never appears in the replay input."],
                 "chunks": [{"input": "Completely unrelated source text."}],
                 "actual_final": [],
@@ -360,9 +387,11 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
 
         summary = summarize_results_by_input_evidence_strata(results)
 
-        self.assertEqual(summary["with_input_evidence"]["case_count"], 1)
+        self.assertEqual(summary["full_input_evidence"]["case_count"], 1)
+        self.assertEqual(summary["partial_input_evidence_review"]["case_count"], 1)
         self.assertEqual(summary["weak_input_evidence_review"]["case_count"], 1)
-        self.assertEqual(summary["with_input_evidence"]["final_f1_avg"], 1.0)
+        self.assertEqual(summary["full_input_evidence"]["final_f1_avg"], 1.0)
+        self.assertEqual(summary["partial_input_evidence_review"]["final_f1_avg"], 0.5)
         self.assertEqual(summary["weak_input_evidence_review"]["final_f1_avg"], 0.0)
 
     def test_summarizes_evidence_strata_without_changing_scores(self) -> None:

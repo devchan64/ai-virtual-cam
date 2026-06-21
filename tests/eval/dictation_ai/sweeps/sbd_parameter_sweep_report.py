@@ -206,6 +206,8 @@ def attach_baseline_deltas(results: list[dict[str, Any]]) -> list[dict[str, Any]
     baseline_queue_residue = dict(baseline.get("staged_queue_residue_summary", {}))
     baseline_queue_strata = dict(baseline.get("queue_residue_strata_summary", {}))
     baseline_strata = dict(baseline.get("evidence_strata_summary", {}))
+    baseline_expected_quality_strata = dict(baseline.get("expected_quality_strata_summary", {}))
+    baseline_input_evidence_strata = dict(baseline.get("input_evidence_strata_summary", {}))
     baseline_case_scores = list(baseline.get("case_score_summary", []))
     updated: list[dict[str, Any]] = []
     for result in results:
@@ -248,6 +250,20 @@ def attach_baseline_deltas(results: list[dict[str, Any]]) -> list[dict[str, Any]
                 continue
             strata_deltas[stratum] = _numeric_deltas(stratum_summary, baseline_summary)
         item["evidence_strata_deltas"] = strata_deltas
+        expected_quality_strata_deltas: dict[str, dict[str, float]] = {}
+        for stratum, stratum_summary in dict(result.get("expected_quality_strata_summary", {})).items():
+            baseline_summary = baseline_expected_quality_strata.get(stratum, {})
+            if not isinstance(stratum_summary, dict) or not isinstance(baseline_summary, dict):
+                continue
+            expected_quality_strata_deltas[stratum] = _numeric_deltas(stratum_summary, baseline_summary)
+        item["expected_quality_strata_deltas"] = expected_quality_strata_deltas
+        input_evidence_strata_deltas: dict[str, dict[str, float]] = {}
+        for stratum, stratum_summary in dict(result.get("input_evidence_strata_summary", {})).items():
+            baseline_summary = baseline_input_evidence_strata.get(stratum, {})
+            if not isinstance(stratum_summary, dict) or not isinstance(baseline_summary, dict):
+                continue
+            input_evidence_strata_deltas[stratum] = _numeric_deltas(stratum_summary, baseline_summary)
+        item["input_evidence_strata_deltas"] = input_evidence_strata_deltas
         item["case_delta_summary"] = summarize_case_score_deltas(
             list(result.get("case_score_summary", [])),
             baseline_case_scores,
@@ -376,6 +392,10 @@ def build_evidence_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
                 "queue_residue_strata_deltas": result.get("queue_residue_strata_deltas", {}),
                 "evidence_strata_summary": result.get("evidence_strata_summary", {}),
                 "evidence_strata_deltas": result.get("evidence_strata_deltas", {}),
+                "expected_quality_strata_summary": result.get("expected_quality_strata_summary", {}),
+                "expected_quality_strata_deltas": result.get("expected_quality_strata_deltas", {}),
+                "input_evidence_strata_summary": result.get("input_evidence_strata_summary", {}),
+                "input_evidence_strata_deltas": result.get("input_evidence_strata_deltas", {}),
                 "case_exemplar_summary": result.get("case_exemplar_summary", {}),
                 "case_delta_summary": case_delta_summary,
                 "interpretation_flags": interpretation_flags,
