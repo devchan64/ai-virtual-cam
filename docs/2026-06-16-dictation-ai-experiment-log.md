@@ -14391,3 +14391,24 @@ chunk=1744..1775
 
 - `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_beef_order_queue_head_stall_20260621_001` 케이스를 추가했다.
 - 로직 추가 변경은 하지 않았다. 같은 chunk stage 교체 지연 규칙 적용 후, 이 케이스에서 queue head stall과 false fragment final이 줄어드는지 실제 `sat + cuda + float16` 벤치로 비교해야 한다.
+
+### 2026-06-21 중국어 winter shopping/hat 구간 stage queue head stall 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 14:23:51..14:24:04
+chunk=1909..1922
+```
+
+관측:
+
+- `可以，我再。`, `一下前期。` 같은 짧은 stale staged 후보가 active head에 남아 `羽绒服`, `帽子`, `时间真的是过得真快` 구간의 final 확정이 늦어졌다.
+- queue 길이는 10에서 1까지 줄었지만, 중간에 `stage_queue_promote`와 `finalize_delta_suppressed_stage_dropped`가 발생하며 일부 짧은 조각이 transcript로 노출됐다.
+- 이 로그도 `stage_replace_deferred_same_chunk` 지표가 없는 실행 프로세스에서 나온 것이므로, `b895de6` 적용 후 재실행 비교 대상으로 둔다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-f.jsonl`에 `zh_log_missing_winter_shopping_hat_queue_head_stall_20260621_001` 케이스를 추가했다.
+- 로직 추가 변경은 하지 않았다. 같은 계열의 queue head stall이 새 lifecycle 규칙에서 줄어드는지 벤치로 비교한다.
