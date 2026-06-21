@@ -14498,3 +14498,25 @@ chunk=33..47
 - `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-4-20260621.jsonl`에 `zh_log_missing_stamina_shopping_recent_final_internal_delta_20260621_001` 케이스를 추가했다.
 - `_compact_recent_final_delta`에서 `recent_key in candidate_key` 즉시 폐기를 제거했다. 완전 동일하거나 후보가 최근 final 내부에 포함되는 echo 억제는 유지하고, 최근 final이 후보 내부에 포함된 경우는 상세 prefix/suffix 회수 로직이 판단하게 했다.
 - 문구별 예외가 아니라 append-only final 이후 sliding window가 같은 구간을 더 긴 후보로 다시 제시할 때, 새 suffix가 있는지를 구조적으로 판단하기 위한 변경이다.
+
+### 2026-06-21 중국어 Martin King hat 구간 짧은 mixed-latin stage head 차단
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 14:42:15..14:42:28
+chunk=342..355
+```
+
+관측:
+
+- `body king的。`가 `mixed_latin_zh`, `short_cjk` 성격의 짧은 조각인데도 stage head로 승격됐다.
+- 이후 `马丁·凯恩的帽子戴起来，脸看起来超小的啦。`, `怎么会这样？`, `你会这样，因为它这边比较窄...` 후보가 순서대로 반복됐지만, 짧은 active stage가 먼저 소비되면서 실제 문장 확정이 지연됐다.
+- 사용자가 제시한 BHC `招牌cheese` 구간은 이미 `zh_log_missing_takeout_chicken_signature_cheese_20260621_001`로 등록되어 있었다. 이번 구간은 같은 mixed-latin 관측군이지만, 긴 mixed-latin 문장을 막는 문제가 아니라 아주 짧은 라틴+CJK 조각이 stage head를 점유하는 문제로 분리한다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-5-20260621.jsonl`에 `zh_log_delayed_martin_king_hat_short_stage_head_20260621_001` 케이스를 추가했다.
+- `short_mixed_latin_zh` 품질 플래그를 추가했다. 중국어 후보에서 라틴 토큰과 1~2개 CJK 단위만 결합된 매우 짧은 조각만 stage 진입 전에 차단한다.
+- `mixed_latin_zh` 전체를 stage 차단하지는 않는다. `你看，我点的这个是他们家的招牌cheese。`처럼 긴 문장형 mixed-latin 후보는 계속 stage 가능해야 한다.

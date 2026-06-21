@@ -35,6 +35,8 @@ from src.app.dictation_pipeline_settings import (
     sentence_confirm_max_age_chunks as _sentence_confirm_max_age_chunks,
     short_cjk_final_units as _short_cjk_final_units,
     short_cjk_replacement_hold_chunks as _short_cjk_replacement_hold_chunks,
+    short_mixed_latin_zh_cjk_units as _short_mixed_latin_zh_cjk_units,
+    short_mixed_latin_zh_total_units as _short_mixed_latin_zh_total_units,
     short_no_end_fragment_units as _short_no_end_fragment_units,
 )
 from src.app.sentence_boundary import (
@@ -770,6 +772,11 @@ def _final_sentence_diagnostic_flags(sentence: str, language: str) -> tuple[str,
         flags.append("latin_only_for_zh")
     elif normalized_language == "zh" and has_latin and has_cjk and _has_unstable_mixed_latin_for_zh(words):
         flags.append("mixed_latin_zh")
+        if (
+            0 < len(cjk_units) <= _short_mixed_latin_zh_cjk_units()
+            and len(words) <= _short_mixed_latin_zh_total_units()
+        ):
+            flags.append("short_mixed_latin_zh")
     if _boundary_sentence_end_count(normalized) == 0:
         flags.append("no_end_marker")
         if len(words) <= _short_no_end_fragment_units() or (
@@ -1025,6 +1032,7 @@ def _should_stage_boundary_candidate(sentence: str, language: str) -> bool:
             "cjk_repeated_ngram",
             "repeated_word_ngram",
             "latin_only_for_zh",
+            "short_mixed_latin_zh",
             "low_value_cjk_fragment",
             "short_no_end_fragment",
             "trailing_ellipsis",

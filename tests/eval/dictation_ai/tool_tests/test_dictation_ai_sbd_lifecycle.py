@@ -1,6 +1,11 @@
 import unittest
 
-from src.app.dictation_transcript_logic import _prefer_sentence_revision, _recent_final_output_delta
+from src.app.dictation_transcript_logic import (
+    _final_sentence_diagnostic_flags,
+    _prefer_sentence_revision,
+    _recent_final_output_delta,
+    _should_stage_boundary_candidate,
+)
 from tests.eval.dictation_ai.sbd_benchmark import LifecycleState, _finalize_staged_sentence, _stage_completed_sentence
 
 
@@ -137,6 +142,21 @@ class DictationAiSbdLifecycleTest(unittest.TestCase):
         )
 
         self.assertEqual(preferred, "被吓到了想要炸鸡可能吃不下去了。")
+
+    def test_short_mixed_latin_zh_fragment_is_not_stageable(self) -> None:
+        flags = _final_sentence_diagnostic_flags("body king的。", "zh")
+
+        self.assertIn("mixed_latin_zh", flags)
+        self.assertIn("short_mixed_latin_zh", flags)
+        self.assertFalse(_should_stage_boundary_candidate("body king的。", "zh"))
+
+    def test_longer_mixed_latin_zh_sentence_remains_stageable(self) -> None:
+        sentence = "你看，我点的这个是他们家的招牌cheese。"
+        flags = _final_sentence_diagnostic_flags(sentence, "zh")
+
+        self.assertIn("mixed_latin_zh", flags)
+        self.assertNotIn("short_mixed_latin_zh", flags)
+        self.assertTrue(_should_stage_boundary_candidate(sentence, "zh"))
 
 
 if __name__ == "__main__":
