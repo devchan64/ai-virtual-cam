@@ -15004,6 +15004,7 @@ OK
 - `tests/eval/dictation_ai/sbd_benchmark.py audit-initial-final-context` subcommand를 추가했다.
 - 감사 기준은 `initial_final`이 비어 있고, 첫 `expected_final` 문장이 chunk 내부에서 일정 prefix 이후에 나타나는 케이스다.
 - 이 감사는 후보만 찾는다. prefix가 이미 확정됐다는 증거는 아니므로 케이스 파일을 자동 수정하지 않는다.
+- expected 품질 판정은 공용 `sbd_expected_quality.expected_quality_flags()`로 분리했다. 감사 도구와 기본 CUDA benchmark report가 같은 기준을 쓴다.
 
 실행:
 
@@ -15154,6 +15155,221 @@ final_boundary_f1_avg=0.000
 - 하지만 4건 중 1건만 F1이 개선됐고 boundary F1은 여전히 0이다.
 - 일부 케이스는 `expected_final` 자체가 실제 final lifecycle보다 fragment 중심으로 정의되어 있어, 단순 상태 보정보다 케이스 기대값 재검토가 먼저 필요하다.
 - 따라서 227건 후보를 일괄 보정하지 않는다. 우선순위 후보는 로그에서 실제 final 이벤트와 expected_final 의미 단위를 함께 확인한 뒤 정식 케이스를 수정해야 한다.
+
+### 2026-06-22 post-audit CUDA baseline과 expected 품질 strata
+
+목적:
+
+- `initial_final` 후보와 case 정의 품질 문제가 앱 로직 튜닝 지표를 얼마나 왜곡하는지 현재 체크아웃 기준으로 재확인한다.
+- STT 정확도 개선이 아니라 받아쓰기 final lifecycle 개선 대상만 분리한다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-post-audit-baseline.json
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py audit-initial-final-context \
+  tests/eval/dictation_ai/sbd_cases \
+  --benchmark-report .tmp/eval/dictation-ai-sbd/current-20260622-post-audit-baseline.json \
+  --summary-output .tmp/eval/dictation-ai-sbd/initial-final-context-audit-20260622-post-baseline-v2.json \
+  --limit 0 \
+  --worst-limit 5 \
+  --worst-group-limit 5
+```
+
+추가 보정:
+
+- 짧은 완결 문장도 받아쓰기 final 및 번역 대상이 되어야 하므로 `买好了。`, `안녕하세요.`처럼 종결부호가 있는 짧은 문장은 expected 품질 review로 분류하지 않는다.
+- 아래 expected 품질 strata와 candidate 품질 strata는 이 terminal-aware 기준으로 다시 산출한 값이다.
+
+CUDA baseline:
+
+```text
+cases=1223
+finalized=5228
+stage_start=8964
+finalized_per_stage_start=0.583222
+final_precision_avg=0.582216
+final_recall_avg=0.467552
+final_f1_avg=0.496566
+final_similarity_coverage_avg=0.408517
+final_boundary_f1_avg=0.115502
+case_exact_match=23
+pending_exact_match=712
+staged_exact_match=367
+```
+
+`initial_final` 후보 strata:
+
+```text
+candidate:
+cases=227
+final_precision_avg=0.425839
+final_recall_avg=0.453872
+final_f1_avg=0.427711
+final_boundary_f1_avg=0.036089
+
+non_candidate:
+cases=996
+final_precision_avg=0.617856
+final_recall_avg=0.470669
+final_f1_avg=0.512259
+final_boundary_f1_avg=0.133601
+```
+
+expected 품질 strata:
+
+```text
+report_field=expected_quality_strata_summary
+
+expected_quality:
+cases=811
+final_precision_avg=0.528427
+final_recall_avg=0.438141
+final_f1_avg=0.460292
+final_boundary_f1_avg=0.074558
+
+without_expected_quality:
+cases=412
+final_precision_avg=0.688096
+final_recall_avg=0.525445
+final_f1_avg=0.567969
+final_boundary_f1_avg=0.196097
+
+candidate_expected_quality:
+cases=189
+final_precision_avg=0.375404
+final_recall_avg=0.443877
+final_f1_avg=0.398365
+final_boundary_f1_avg=0.030052
+
+candidate_without_expected_quality:
+cases=38
+final_precision_avg=0.676647
+final_recall_avg=0.616228
+final_f1_avg=0.573666
+final_boundary_f1_avg=0.066106
+```
+
+추가 관측:
+
+```text
+stage_queue_revision_token_sentence_deferred=1241
+stage_revision_confirmation_reset=74
+stage_candidate_quality_blocked=4929
+candidate_recent_final_delta_trimmed=5357
+candidate_duplicate_suppressed=14591
+```
+
+판단:
+
+- 현재 체크아웃 기준선은 이전 최고권 report와 같은 수준이다. 파라미터 조정만으로 의미 있는 개선이 반복 확인되지는 않았다.
+- `initial_final` 후보 227건 중 189건이 expected 품질 플래그를 가진다. 즉 중간 스트림 초기 상태 문제는 주로 fragment 기대값, 종결부호 부재, 접속어/소문자 시작 기대값과 함께 나타난다.
+- 품질 플래그가 없는 전체 케이스는 `final_f1_avg=0.567969`으로 전체보다 높다. 품질 플래그가 없는 `initial_final` 후보도 38건으로 늘었지만, 이 집합의 `final_f1_avg=0.573666`은 clean 전체와 유사하므로 이 축만으로 앱 로직을 바꾸기에는 근거가 약하다.
+- reset 관련 지표는 존재하지만 전체 하락을 지배하지 않는다. 더 큰 병목은 case 정의 품질, recent-final delta trim, stage 품질 차단, duplicate suppression 쪽이다.
+- 다음 로직 변경은 특정 문구/언어 예외가 아니라, 로그 근거로 정리된 clean challenge case에서 반복되는 구조적 병목이 확인될 때만 진행한다.
+
+### 2026-06-22 clean expected strata 기준 파라미터 후보 재검증
+
+목적:
+
+- 전체 challenge replay 점수 개선이 case 정의 품질 strata에도 동일하게 나타나는지 확인한다.
+- 전체 점수만 개선되고 clean expected strata에는 개선이 없으면 운영 기본값으로 승격하지 않는다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+AVC_DICTATION_RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS=5 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-clean-strata-prefix5.json
+
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+AVC_DICTATION_DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=3 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-clean-strata-delta3.json
+```
+
+baseline 대비 delta:
+
+```text
+prefix5:
+summary.final_f1_avg=+0.000299
+summary.final_boundary_f1_avg=+0.000477
+expected_quality_review.final_f1_avg=+0.000339
+expected_quality_review.final_boundary_f1_avg=+0.000542
+without_expected_quality_review.final_f1_avg=+0.000000
+without_expected_quality_review.final_boundary_f1_avg=+0.000000
+
+delta3:
+summary.final_f1_avg=+0.000141
+summary.final_boundary_f1_avg=+0.000063
+expected_quality_review.final_f1_avg=+0.000223
+expected_quality_review.final_boundary_f1_avg=+0.000071
+without_expected_quality_review.final_f1_avg=-0.000457
+without_expected_quality_review.final_boundary_f1_avg=+0.000000
+```
+
+판단:
+
+- 두 후보 모두 전체 점수 개선 폭이 0.001 미만이다.
+- `RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS=5`는 clean expected strata에서 변화가 없다. 개선은 expected 품질 review 대상 케이스에만 나타난다.
+- `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=3`은 clean expected strata에서 `final_f1_avg`가 소폭 하락한다.
+- 따라서 두 값 모두 운영 기본값으로 승격하지 않는다. 현재 기준에서는 전체 challenge score보다 `without_expected_quality_review` strata가 앱 로직 튜닝 판단에 더 적합하다.
+
+### 2026-06-22 no-end staged quality hold 후보 기각
+
+목적:
+
+- clean expected strata의 한국어 긴 문장 누락에서 `stage_candidate_quality_no_end_marker`와 `stage_age_quality_blocked`가 관측됐다.
+- 종결부호 없는 staged 후보를 바로 final하지 않고, quality block 시점만 1 chunk 늦추면 punctuation이 늦게 붙는 후보가 회복되는지 검증했다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+AVC_DICTATION_NO_END_STAGE_QUALITY_HOLD_EXTRA_CHUNKS=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-no-end-quality-hold-1.json
+```
+
+baseline 대비 delta:
+
+```text
+summary.final_f1_avg=-0.006688
+summary.final_recall_avg=-0.009423
+summary.final_boundary_f1_avg=-0.001973
+
+expected_quality_review.final_f1_avg=-0.006582
+expected_quality_review.staged_residue_count=+26
+expected_quality_review.empty_final_count=+4
+
+without_expected_quality_review.final_f1_avg=-0.007469
+without_expected_quality_review.final_recall_avg=-0.010845
+without_expected_quality_review.final_boundary_f1_avg=-0.004142
+without_expected_quality_review.staged_residue_count=+5
+without_expected_quality_review.empty_final_count=+2
+```
+
+판단:
+
+- no-end 후보의 quality block 지연은 회복보다 staged residue와 empty final을 늘렸다.
+- clean expected strata에서도 명확히 악화됐으므로 운영 기본값으로 승격하지 않는다.
+- 이 후보를 위한 앱 설정/로직은 남기지 않고 폐기했다.
 
 검증:
 

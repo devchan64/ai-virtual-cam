@@ -19,6 +19,7 @@ from tests.eval.dictation_ai.cases.sbd_case_paths import (
     summarize_representative_metadata,
 )
 from tests.eval.dictation_ai.cases.sbd_diagnostic_tags import is_diagnostic_tag
+from tests.eval.dictation_ai.cases.sbd_expected_quality import expected_quality_flags
 from tests.eval.dictation_ai.benchmark.sbd_runtime_contract import lifecycle_replay_contract, runtime_contract
 
 LIFECYCLE_BOTTLENECK_METRICS = (
@@ -243,6 +244,26 @@ def summarize_results_by_evidence_strata(results: list[dict[str, Any]]) -> dict[
         "lifecycle_focus": _summarize_result_group(lifecycle_focus),
         "lifecycle_without_input_review": _summarize_result_group(lifecycle_without_input_review),
         "input_contamination_review": _summarize_result_group(input_review),
+    }
+
+
+def summarize_results_by_expected_quality_strata(results: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Separate case-definition review candidates from cleaner lifecycle cases."""
+    expected_quality: list[dict[str, Any]] = []
+    without_expected_quality: list[dict[str, Any]] = []
+    for result in results:
+        expected_final = [
+            str(item).strip()
+            for item in result.get("expected_final", [])
+            if str(item).strip()
+        ]
+        if expected_quality_flags(expected_final):
+            expected_quality.append(result)
+        else:
+            without_expected_quality.append(result)
+    return {
+        "expected_quality_review": _summarize_result_group(expected_quality),
+        "without_expected_quality_review": _summarize_result_group(without_expected_quality),
     }
 
 
@@ -492,6 +513,7 @@ def build_benchmark_report(
     language_summary = summarize_results_by_language(results)
     tag_summary = summarize_results_by_tag(results)
     evidence_strata_summary = summarize_results_by_evidence_strata(results)
+    expected_quality_strata_summary = summarize_results_by_expected_quality_strata(results)
     queue_residue_strata_summary = summarize_results_by_queue_residue_strata(results)
     case_exemplar_summary = summarize_case_exemplars(results)
     lifecycle_bottleneck_summary = summarize_lifecycle_bottlenecks(results, metric_totals)
@@ -564,6 +586,7 @@ def build_benchmark_report(
         "staged_queue_residue_summary": staged_queue_residue_summary,
         "queue_residue_strata_summary": queue_residue_strata_summary,
         "evidence_strata_summary": evidence_strata_summary,
+        "expected_quality_strata_summary": expected_quality_strata_summary,
         "case_exemplar_summary": case_exemplar_summary,
         "language_summary": language_summary,
         "tag_summary": tag_summary,

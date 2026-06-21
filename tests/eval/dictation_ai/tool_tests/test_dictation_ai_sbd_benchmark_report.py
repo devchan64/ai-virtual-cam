@@ -7,6 +7,7 @@ from tests.eval.dictation_ai import sbd_benchmark
 from tests.eval.dictation_ai.benchmark.sbd_benchmark_report import (
     build_benchmark_report,
     summarize_case_exemplars,
+    summarize_results_by_expected_quality_strata,
     summarize_results_by_queue_residue_strata,
     summarize_results_by_evidence_strata,
     summarize_lifecycle_bottlenecks,
@@ -164,6 +165,14 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(report["evidence_strata_summary"]["all_cases"]["case_count"], 1)
         self.assertEqual(report["evidence_strata_summary"]["lifecycle_focus"]["case_count"], 1)
         self.assertEqual(report["evidence_strata_summary"]["input_contamination_review"]["case_count"], 0)
+        self.assertEqual(
+            report["expected_quality_strata_summary"]["expected_quality_review"]["case_count"],
+            0,
+        )
+        self.assertEqual(
+            report["expected_quality_strata_summary"]["without_expected_quality_review"]["case_count"],
+            1,
+        )
         self.assertEqual(report["case_exemplar_summary"]["lifecycle_focus_top"][0]["id"], "case-a")
         self.assertEqual(report["staged_queue_residue_summary"]["queue_residue_case_count"], 0)
         self.assertEqual(report["staged_queue_residue_summary"]["active_staged_residue_case_count"], 0)
@@ -262,6 +271,46 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertNotIn("case_summary.representative_review_packet_validation.packet_count", missing)
         self.assertNotIn("case_summary.representative_review_packet_validation.ready_packet_count", missing)
         self.assertNotIn("case_summary.representative_review_packet_validation.matched_case_count", missing)
+
+    def test_expected_quality_strata_separates_review_candidates(self) -> None:
+        results = [
+            {
+                "id": "case-a",
+                "expected_final": ["and then unfinished"],
+                "actual_final": ["and then unfinished"],
+                "actual_pending": "",
+                "actual_staged": "",
+                "actual_staged_queue": [],
+                "final_score": _score(1.0, 1.0, 1.0),
+                "final_boundary_score": _score(0.0, 0.0, 0.0),
+                "completed_last_score": _score(0.0, 0.0, 0.0),
+                "pending_exact": True,
+                "staged_exact": True,
+                "case_exact_match": False,
+                "metrics": {"finalized": 1, "stage_start": 1},
+            },
+            {
+                "id": "case-b",
+                "expected_final": ["This sentence is complete enough."],
+                "actual_final": ["This sentence is complete enough."],
+                "actual_pending": "",
+                "actual_staged": "",
+                "actual_staged_queue": [],
+                "final_score": _score(1.0, 1.0, 1.0),
+                "final_boundary_score": _score(1.0, 1.0, 1.0),
+                "completed_last_score": _score(1.0, 1.0, 1.0),
+                "pending_exact": True,
+                "staged_exact": True,
+                "case_exact_match": True,
+                "metrics": {"finalized": 1, "stage_start": 1},
+            },
+        ]
+
+        summary = summarize_results_by_expected_quality_strata(results)
+
+        self.assertEqual(summary["expected_quality_review"]["case_count"], 1)
+        self.assertEqual(summary["without_expected_quality_review"]["case_count"], 1)
+        self.assertEqual(summary["expected_quality_review"]["final_f1_avg"], 1.0)
 
     def test_summarizes_evidence_strata_without_changing_scores(self) -> None:
         results = [

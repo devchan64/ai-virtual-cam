@@ -14,6 +14,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.app.sentence_boundary import normalized_text
+from tests.eval.dictation_ai.cases.sbd_expected_quality import expected_quality_flags
 from tests.eval.dictation_ai.cases.sbd_case_paths import iter_case_paths
 
 
@@ -21,22 +22,6 @@ DEFAULT_MIN_PREFIX_UNITS = 12
 DEFAULT_PREVIEW_UNITS = 80
 DEFAULT_WORST_CASE_LIMIT = 20
 DEFAULT_WORST_GROUP_LIMIT = 12
-TERMINAL_MARKS = (".", "?", "!", "。", "？", "！")
-LOWERCASE_FRAGMENT_STARTERS = {
-    "and",
-    "but",
-    "or",
-    "so",
-    "that",
-    "then",
-    "to",
-    "with",
-    "when",
-    "where",
-    "which",
-    "who",
-    "you",
-}
 
 
 def _as_float(value: object) -> float:
@@ -51,33 +36,6 @@ def _normalized_list(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     return [normalized_text(item) for item in value if normalized_text(item)]
-
-
-def _expected_quality_flags(expected_final: list[str]) -> list[str]:
-    flags: list[str] = []
-    if len(expected_final) >= 6:
-        flags.append("many_expected_sentences")
-    short_count = 0
-    no_terminal_count = 0
-    lowercase_fragment_count = 0
-    for sentence in expected_final:
-        units = sentence.split()
-        if len(sentence) < 24 or (units and len(units) <= 4):
-            short_count += 1
-        if sentence and not sentence.endswith(TERMINAL_MARKS):
-            no_terminal_count += 1
-        first = units[0].strip(".,?!:;\"'()[]{}").lower() if units else ""
-        if first in LOWERCASE_FRAGMENT_STARTERS or (sentence[:1].islower() and units):
-            lowercase_fragment_count += 1
-    if short_count:
-        flags.append("short_expected_fragment")
-    if no_terminal_count:
-        flags.append("no_terminal_expected")
-    if lowercase_fragment_count:
-        flags.append("lowercase_or_connector_start")
-    if expected_final and no_terminal_count == len(expected_final):
-        flags.append("all_expected_no_terminal")
-    return flags
 
 
 def _prefix_preview(text: str, *, preview_units: int) -> str:
@@ -335,12 +293,30 @@ def _load_candidate_score_summary(
     payload = json.loads(benchmark_report.read_text(encoding="utf-8"))
     cases = [case for case in payload.get("cases", []) if isinstance(case, dict)]
     candidates_by_id = {str(candidate["id"]): candidate for candidate in candidates}
+    quality_flags_by_id = {
+        str(case.get("id", "")).strip(): list(case.get("expected_quality_flags", []))
+        for case in all_cases
+        if str(case.get("id", "")).strip()
+    }
     candidate_cases: list[dict[str, Any]] = []
     non_candidate_cases: list[dict[str, Any]] = []
+    expected_quality_cases: list[dict[str, Any]] = []
+    without_expected_quality_cases: list[dict[str, Any]] = []
+    candidate_expected_quality_cases: list[dict[str, Any]] = []
+    candidate_without_expected_quality_cases: list[dict[str, Any]] = []
     for case in cases:
         case_id = str(case.get("id", "")).strip()
+        has_expected_quality_flags = bool(quality_flags_by_id.get(case_id))
+        if has_expected_quality_flags:
+            expected_quality_cases.append(case)
+        else:
+            without_expected_quality_cases.append(case)
         if case_id in candidates_by_id:
             candidate_cases.append(case)
+            if has_expected_quality_flags:
+                candidate_expected_quality_cases.append(case)
+            else:
+                candidate_without_expected_quality_cases.append(case)
         else:
             non_candidate_cases.append(case)
     candidate_records = [
@@ -353,6 +329,10 @@ def _load_candidate_score_summary(
         "benchmark_report": str(benchmark_report),
         "candidate": _score_group_summary(candidate_cases),
         "non_candidate": _score_group_summary(non_candidate_cases),
+        "expected_quality": _score_group_summary(expected_quality_cases),
+        "without_expected_quality": _score_group_summary(without_expected_quality_cases),
+        "candidate_expected_quality": _score_group_summary(candidate_expected_quality_cases),
+        "candidate_without_expected_quality": _score_group_summary(candidate_without_expected_quality_cases),
         "worst_candidates": _worst_candidate_scores(cases, candidates_by_id, limit=worst_limit),
         "worst_groups": _attach_group_metadata(worst_groups, _candidate_group_metadata(all_cases)),
     }
@@ -389,11 +369,12 @@ def audit_initial_final_context(
                     initial_final_case_count += 1
                 all_case_metadata.append(
                     {
+                        "id": str(payload.get("id") or f"{path.name}:{line_no}").strip(),
                         "language": str(payload.get("language", "")).strip().lower() or "en",
                         "source_log": str(payload.get("source_log", "")).strip(),
                         "source_chunk": payload.get("source_chunk"),
                         "review_group_id": str(payload.get("review_group_id", "")).strip(),
-                        "expected_quality_flags": _expected_quality_flags(expected_final),
+                        "expected_quality_flags": expected_quality_flags(expected_final),
                     }
                 )
                 candidate = _audit_payload(
