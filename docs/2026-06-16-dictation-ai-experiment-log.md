@@ -14750,6 +14750,48 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-21 중국어 BHC signature cheese 구간 재관측
+
+사용자 재관측:
+
+```text
+自己揪一下...B H C是其中一个，就在韩国最好吃的炸鸡...
+你看，我点的这个是他们家的招牌cheese。
+```
+
+기존 반영:
+
+- 동일 입력 구간은 이미 `zh_log_missing_takeout_chicken_signature_cheese_20260621_001`로 등록되어 있다.
+- 관련 원인은 `跟你们分享一下我点的一些吃的。` stage가 broken delta suppression 상태로 오래 유지되어 뒤의 BHC/cheese 후보를 막는 것으로 정리되어 있다.
+- 이후 동일 preferred sentence revision에서는 delta suppression 카운터를 보존하도록 운영 경로와 lifecycle 벤치를 수정했다.
+
+재확인 audit:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 15:39:40" --until "2026-06-21 15:40:10" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-zh-bhc-153940-154010.json
+```
+
+```text
+stt_raw_line_count=31
+finalize_event_count=9
+finalize_per_stt_raw=0.290
+stage_replace_deferred_count=21
+stage_replace_deferred_per_stt_raw=0.677
+duplicate_suppressed_count=78
+duplicate_suppressed_per_stt_raw=2.516
+quality_block_count=36
+finalize_delta_suppressed_stage_retained_count=2
+finalize_delta_suppressed_stage_dropped_count=0
+stage_queue_recent_final_suppressed_count=4
+```
+
+판단:
+
+- 패치 전 BHC signature cheese audit은 `finalize_event_count=0`이었고, 이번 재관측은 final이 계속 발생한다.
+- 따라서 현재 관측은 "장시간 완전 정지"라기보다 duplicate suppression과 `unconfirmed_cjk` stage 교체 보류가 섞인 지연/부분 누락 케이스로 본다.
+- 동일 BHC 입력을 새 케이스로 중복 등록하지 않는다. 이미 등록된 케이스와 delta suppression 카운터 보존 회귀 테스트로 관리한다.
+- 현재 수치만으로 추가 로직을 넣지는 않는다. 새 일반 규칙은 CUDA 벤치에서 기존 케이스군의 final F1/중복 지표가 함께 개선될 때만 반영한다.
+
 ### 2026-06-21 중국어 book scent/manga 구간 짧은 stage head 지연 케이스 추가
 
 관측 구간:
