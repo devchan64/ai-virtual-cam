@@ -14750,6 +14750,66 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-21 중국어 자유행/跟团 구간 queue head stall 케이스 추가
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 17:29:58..17:30:08
+chunk=436..446 중심
+```
+
+감사 결과:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 17:29:56" --until "2026-06-21 17:30:08" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-zh-free-travel-172956-173008.json
+```
+
+```text
+stt_raw_line_count=13
+finalize_event_count=3
+finalize_per_stt_raw=0.231
+stage_replace_deferred_count=67
+stage_replace_deferred_per_stt_raw=5.154
+stage_queue_promote_count=7
+stage_queue_promote_per_stt_raw=0.538
+quality_block_count=6
+duplicate_suppressed_count=2
+```
+
+관측:
+
+- `地铁怎么样的感觉？`, `用那个R C就可以搭地铁。`, `徐家汇叫啥？`, `没去过。` 같은 오래된 짧은 queued stage가 차례로 승격됐다.
+- 승격된 후보는 confirmation이 낮고 short CJK 품질 차단 대상이라 final로 소비되지 못했다.
+- 그동안 현재 raw window의 `但是第三天，你觉得自由行怎么样？`, `很放松咯，没有压力咯。`, `想吃什么就吃什么...`, `那你还想要跟团吗？` 후보들이 `unconfirmed_cjk` replacement로 계속 queue에 밀렸다.
+- 이는 특정 문구 문제가 아니라 queued 후보가 active로 승격될 때 큐 내부에서 기다린 chunk age가 반영되지 않아 head-of-line blocking이 반복되는 lifecycle 문제로 판단했다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-6-20260621.jsonl`에 `zh_log_free_travel_queue_head_stall_20260621_001` 케이스를 추가했다.
+- `SentenceCandidateCommitBufferNode`와 `sbd_benchmark.py`의 queue entry가 생성 chunk를 보존하고, 승격 시 `chunk_index - deferred_age_chunk`를 active age에 반영하도록 수정했다.
+- 의도는 오래된 미확정 queued 후보가 active가 된 뒤 다시 age 0부터 현재 문장을 막지 않게 하는 것이다. 언어별 문구 규칙이나 정규식 분기는 추가하지 않았다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases --max-drafts 0
+case_count=1184, expected_final_case_count=1180, zh=293
+
+./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle tests.unit.test_dictation_pipeline_nodes
+Ran 32 tests in 0.005s, OK
+
+git diff --check
+OK
+```
+
+제한:
+
+- `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
+- sandbox 밖 실행 요청도 현재 환경 정책으로 거절됐다.
+- CPU/mock fallback은 성능 근거로 사용하지 않는다.
+
 ### 2026-06-21 중국어 足浴/中式按摩 구간 connector tail suppress 케이스 추가
 
 관측 구간:

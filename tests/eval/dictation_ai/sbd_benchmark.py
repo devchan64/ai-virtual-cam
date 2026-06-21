@@ -157,6 +157,8 @@ def _promote_next_staged_sentence(state: LifecycleState, chunk_index: int) -> No
         state.staged_forced = bool(entry["forced"])
         deferred_age_chunk = int(entry["deferred_age_chunk"])
         state.staged_deferred_age_chunk = chunk_index if deferred_age_chunk < 0 else deferred_age_chunk
+        if deferred_age_chunk >= 0:
+            state.staged_age = max(state.staged_age, chunk_index - deferred_age_chunk)
         state.staged_delta_suppressed_chunks = 0
         state.staged_delta_suppressed_chunk_index = -1
         state.count("stage_queue_promote")
@@ -217,7 +219,7 @@ def _queue_staged_sentence(state: LifecycleState, candidate: str, forced: bool, 
             "confirmations": 1,
             "age": 0,
             "forced": forced,
-            "deferred_age_chunk": -1,
+            "deferred_age_chunk": chunk_index,
         }
     )
     state.count("stage_queue_enqueue")

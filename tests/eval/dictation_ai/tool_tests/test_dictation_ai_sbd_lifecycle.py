@@ -154,6 +154,35 @@ class DictationAiSbdLifecycleTest(unittest.TestCase):
         self.assertEqual(state.metrics["stage_queue_promote"], 1)
         self.assertNotIn("stage_replace_deferred_same_chunk", state.metrics)
 
+    def test_stale_unconfirmed_queue_candidate_does_not_block_current_sentence(self) -> None:
+        state = LifecycleState(language="zh")
+        assert state.staged_queue is not None
+        state.staged_queue.append(
+            {
+                "sentence": "地铁怎么样的感觉？",
+                "confirmations": 1,
+                "age": 0,
+                "forced": False,
+                "deferred_age_chunk": 20,
+            }
+        )
+
+        finalized = _stage_completed_sentence(
+            state,
+            "但是第三天，你觉得自由行怎么样？",
+            "zh",
+            forced=False,
+            sentence_finalize_age=3,
+            chunk_index=25,
+        )
+
+        self.assertEqual(finalized, [])
+        self.assertEqual(state.staged_sentence, "但是第三天，你觉得自由行怎么样？")
+        self.assertEqual(state.staged_age, 0)
+        self.assertEqual(state.metrics["stage_queue_promote"], 1)
+        self.assertEqual(state.metrics["stage_replaced_unconfirmed"], 1)
+        self.assertEqual(state.metrics["segment_state_suppressed"], 1)
+
     def test_recent_final_suffix_recovery_runs_even_when_committed_delta_is_empty(self) -> None:
         state = LifecycleState(
             language="zh",

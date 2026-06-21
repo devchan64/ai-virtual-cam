@@ -374,8 +374,48 @@ class DictationPipelineNodeTest(unittest.TestCase):
 
         self.assertTrue(promoted)
         self.assertEqual(node.active.sentence, "first sentence.")
+        self.assertEqual(node.active.age, 2)
+        self.assertEqual(node.active.deferredAgeChunk, 1)
         self.assertEqual(len(node), 1)
         self.assertEqual(metrics["stage_queue_enqueue"], 2)
+        self.assertEqual(metrics["stage_queue_promote"], 1)
+
+    def test_commit_buffer_promoted_queue_candidate_ages_from_enqueue_chunk(self) -> None:
+        metrics: dict[str, int] = {}
+        states: dict[str, int] = {}
+
+        def count_metric(name: str, amount: int = 1) -> None:
+            metrics[name] = metrics.get(name, 0) + amount
+
+        def count_state(name: str, amount: int = 1) -> None:
+            states[name] = states.get(name, 0) + amount
+
+        node = SentenceCandidateCommitBufferNode(max_size=2)
+        stable = SimpleNamespace(
+            stable_internal_ratio=1.0,
+            stable_internal_chars=10,
+            stable_overlap_source="prefix",
+        )
+
+        node.enqueue_or_revision(
+            candidate="地铁怎么样的感觉？",
+            forced=False,
+            chunk_index=20,
+            stable_analysis=stable,
+            count_metric=count_metric,
+            count_segment_state=count_state,
+        )
+
+        promoted = node.promote_if_idle(
+            chunk_index=25,
+            count_metric=count_metric,
+            count_segment_state=count_state,
+        )
+
+        self.assertTrue(promoted)
+        self.assertEqual(node.active.sentence, "地铁怎么样的感觉？")
+        self.assertEqual(node.active.age, 5)
+        self.assertEqual(node.active.deferredAgeChunk, 20)
         self.assertEqual(metrics["stage_queue_promote"], 1)
 
     def test_commit_buffer_preserves_revised_queue_chunk_on_promotion(self) -> None:

@@ -73,7 +73,7 @@ class SentenceCandidateCommitBufferNode:
                 "confirmations": 1,
                 "age": 0,
                 "forced": forced,
-                "deferred_age_chunk": -1,
+                "deferred_age_chunk": chunk_index,
             }
         )
         count_metric("stage_queue_enqueue", 1)
@@ -89,8 +89,11 @@ class SentenceCandidateCommitBufferNode:
         if self.active.sentence or not self._queue:
             return False
         entry = self._queue.popleft()
-        if int(entry["deferred_age_chunk"]) < 0:
+        deferred_age_chunk = int(entry["deferred_age_chunk"])
+        if deferred_age_chunk < 0:
             entry["deferred_age_chunk"] = chunk_index
+        else:
+            entry["age"] = max(int(entry["age"]), chunk_index - deferred_age_chunk)
         self.active.apply_buffer_entry(entry)
         count_metric("stage_queue_promote", 1)
         count_metric("stage_start", 1)
