@@ -484,11 +484,13 @@ def _stage_completed_sentence(
         state.count("segment_state_revised")
         previous = state.staged_sentence
         preferred = _prefer_sentence_revision(previous, candidate)
-        if preferred != previous:
+        preferred_changed = preferred != previous
+        if preferred_changed:
             state.count("stage_revision_changed")
         state.staged_sentence = preferred
-        state.staged_delta_suppressed_chunks = 0
-        state.staged_delta_suppressed_chunk_index = -1
+        if preferred_changed:
+            state.staged_delta_suppressed_chunks = 0
+            state.staged_delta_suppressed_chunk_index = -1
         state.staged_confirmations = _next_revision_confirmation_count(previous, preferred, state.staged_confirmations)
         if _should_reset_revision_age(previous, preferred):
             state.staged_age = 0

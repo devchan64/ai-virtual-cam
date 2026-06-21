@@ -14645,3 +14645,46 @@ finalize_delta_suppressed_stage_dropped_count=0
 
 - `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-5-20260621.jsonl`에 `zh_log_delayed_coco_fresh_fashion_short_stage_queue_20260621_001` 케이스를 추가했다.
 - 현재 근거로는 `short_cjk` 또는 `unconfirmed_cjk`를 더 느슨하게 확정/폐기하는 일반 규칙을 추가하기 어렵다. 짧은 실제 문장 번역 요구와 충돌하므로, 로직 변경은 CUDA 벤치 비교 가능한 후보가 더 쌓일 때까지 보류한다.
+
+### 2026-06-21 중국어 BHC signature cheese 구간 delta suppression 카운터 보존
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log.7
+2026-06-21 13:37:39..13:38:25
+chunk=65..112
+```
+
+관측:
+
+- 사용자가 다시 제시한 `B H C...招牌cheese` 구간은 이미 `zh_log_missing_takeout_chicken_signature_cheese_20260621_001`로 등록되어 있다.
+- 직접 원인은 `跟你们分享一下我点的一些吃的。` stage가 확정 시도마다 broken delta `我 点 的 一 些 吃 的`로 계산되어 final로 내보낼 수 없는데도 오래 유지된 것이다.
+- 기존 로직에는 `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=2` 이후 stale stage를 폐기하는 장치가 있었지만, 실제 문장이 바뀌지 않는 stage revision에서도 delta suppression 카운터가 매번 초기화되어 `suppress_chunks=0` 상태가 반복됐다.
+- 결과적으로 뒤의 `BHC是其中一个...`, `哇，看起来就很好吃。`, `你看，我点的这个是他们家的招牌cheese。` 후보가 stage 교체 시도와 delta suppression 사이에서 장시간 확정되지 않았다.
+
+반영:
+
+- 실제 preferred sentence가 바뀌는 revision에서는 기존처럼 delta suppression 카운터를 초기화한다.
+- preferred sentence가 바뀌지 않는 반복 revision은 같은 stale stage의 지속으로 보고 delta suppression 카운터를 보존한다.
+- 운영 경로와 벤치 lifecycle 구현을 동일하게 수정했다.
+- `tests/eval/dictation_ai/tool_tests/test_dictation_ai_sbd_lifecycle.py`에 unchanged revision이 delta suppression 카운터를 보존해 다음 chunk에서 stale stage를 폐기하는 케이스를 추가했다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases --max-drafts 0
+case_count=1150, expected_final_case_count=1146, zh=259
+
+./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle
+Ran 10 tests in 0.002s, OK
+
+git diff --check
+OK
+```
+
+제한:
+
+- `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
+- sandbox 밖 실행도 현재 실행 정책에서 거절되어 실제 CUDA 벤치 수치는 이번 변경에서 확보하지 못했다.
+- CPU/mock fallback은 성능 근거로 사용하지 않는다.

@@ -444,9 +444,11 @@ def run_transcribe_loop(
                     and "repeated_word_ngram" not in staged_flags
                 ):
                     count_metric("stage_revision_candidate_quality_blocked")
+            preferred_changed = preferred != staged_before
             active_stage.sentence = preferred
-            active_stage.deltaSuppressedChunks = 0
-            active_stage.deltaSuppressedChunkIndex = -1
+            if preferred_changed:
+                active_stage.deltaSuppressedChunks = 0
+                active_stage.deltaSuppressedChunkIndex = -1
             active_stage.confirmations = _next_revision_confirmation_count(
                 staged_before,
                 preferred,
