@@ -39,6 +39,7 @@ from src.app.dictation_transcript_logic import (
     _recent_final_output_delta,
     _should_confirm_staged_sentence,
     _should_stage_boundary_candidate,
+    _should_finalize_replaced_sentence,
     _should_suppress_delta_final,
     _should_translate_final_sentence,
     _staged_sentence_required_confirmations,
@@ -313,6 +314,24 @@ class DictationPipelineNodeTest(unittest.TestCase):
             _final_sentence_diagnostic_flags("哇，看起来就很好吃。", "zh"),
         )
         self.assertTrue(_should_stage_boundary_candidate("哇，看起来就很好吃。", "zh"))
+
+    def test_repeated_short_cjk_with_end_marker_is_not_finalizable(self) -> None:
+        sentence = "又又又又。"
+
+        self.assertIn("cjk_repeated_ngram", _final_sentence_diagnostic_flags(sentence, "zh"))
+        self.assertFalse(_should_stage_boundary_candidate(sentence, "zh"))
+        self.assertFalse(_should_confirm_staged_sentence(sentence, 6, False))
+        self.assertFalse(
+            _should_finalize_replaced_sentence(
+                sentence,
+                "今天呢是第四天。",
+                "zh",
+                6,
+                False,
+                5,
+                3,
+            )
+        )
 
     def test_short_cjk_with_end_marker_requires_extra_confirmation(self) -> None:
         sentence = "这一家餐厅呢，他。"

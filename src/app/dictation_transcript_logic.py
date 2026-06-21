@@ -710,6 +710,8 @@ def _has_cjk_internal_space_gap(text: str) -> bool:
 
 def _has_repeated_cjk_ngram(words: list[str]) -> bool:
     cjk_units = [word for word in words if _has_cjk_words([word])]
+    if 4 <= len(cjk_units) <= _short_cjk_final_units() and len(set(cjk_units)) == 1:
+        return True
     if len(cjk_units) < 40:
         return False
     for size in (14, 12, 10, 8):

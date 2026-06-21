@@ -14797,6 +14797,80 @@ stage_queue_recent_final_suppressed_count=16
 - 기대 문장은 가족과 사진 촬영 배려, 회사/가족 앞 말수 차이, 채소 권유, 옷차림 걱정 구간으로 나누었다.
 - 특정 단어 또는 언어별 문구 규칙은 추가하지 않고, `delta-suppressed`, `stage-drop`, `queue-head-stall`, `recent-final-delta`가 함께 발생하는 lifecycle 케이스로만 관리한다.
 
+### 2026-06-21 중국어 Good morning/outfit 구간 반복 short CJK false final 보정
+
+관측 구간:
+
+```text
+.tmp/logs/avc-whisper.log
+2026-06-21 18:01:00..18:01:39
+chunk=2298..2337 중심
+```
+
+감사 결과:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs --since "2026-06-21 18:01:00" --until "2026-06-21 18:01:39" --compact --summary-output .tmp/eval/dictation-ai-sbd/representative-source-audit-zh-goodmorning-outfit-180100-180139.json
+```
+
+```text
+stt_raw_line_count=40
+finalize_event_count=7
+finalize_per_stt_raw=0.175
+stage_replace_deferred_count=88
+stage_replace_deferred_per_stt_raw=2.200
+stage_queue_promote_count=21
+stage_queue_promote_per_stt_raw=0.525
+duplicate_suppressed_count=25
+duplicate_suppressed_per_stt_raw=0.625
+quality_block_count=42
+quality_block_per_stt_raw=1.050
+finalize_delta_suppressed_stage_retained_count=2
+finalize_delta_suppressed_stage_dropped_count=2
+```
+
+관측:
+
+- `又又又又。`가 queue에 오래 남은 뒤 `今天呢是第四天。` 후보로 교체되는 시점에 `replaced_confirmed`로 final 확정됐다.
+- 같은 구간에서 `手撕面包。`, `多么。`, `没有收到。` 같은 stale short stage가 반복적으로 queue head를 점유했다.
+- 기존 품질 게이트는 age finalize에서는 `short_cjk`를 막지만, repeated single-char CJK가 `cjk_repeated_ngram`로 표시되지 않아 replacement-confirmed final 경로에서는 통과했다.
+- `花田鸟笼。`, `这是咩？`처럼 짧지만 의미가 있는 CJK 문장을 막지 않기 위해, 4글자 이상이고 한 글자 반복으로만 구성된 짧은 CJK 후보만 기존 `cjk_repeated_ngram` 품질 플래그에 포함했다.
+
+반영:
+
+- `tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-6-20260621.jsonl`에 `zh_log_good_morning_outfit_repeated_short_false_final_20260621_001` 케이스를 추가했다.
+- `src/app/dictation_transcript_logic.py`의 반복 CJK 진단을 보강해 `又又又又。`류 후보가 stage/final 차단 경로를 공유하도록 했다.
+- `tests/unit/test_dictation_pipeline_nodes.py`에 repeated short CJK가 stage/final/replacement final로 소비되지 않는 회귀 테스트를 추가했다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases --max-drafts 0
+case_count=1190, expected_final_case_count=1186, zh=299
+
+./.venv/bin/python -m unittest tests.unit.test_dictation_pipeline_nodes tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle
+Ran 34 tests in 0.006s, OK
+
+./.venv/bin/python -m py_compile src/app/dictation_transcript_logic.py tests/unit/test_dictation_pipeline_nodes.py
+OK
+
+git diff --check
+OK
+```
+
+CUDA 벤치 시도:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py --cases tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-6-20260621.jsonl --model sat-3l-sm --device cuda --compute-type float16 --output .tmp/eval/dictation-ai-sbd/benchmark-zh6-20260621-short-repeat-fix.json
+[dictation-ai-sbd-benchmark] error: sentence boundary backend 'sat' initialization failed: model=sat-3l-sm device=cuda compute=float16. Fail-Fast: fix the model/device/runtime instead of falling back to regex.
+```
+
+제한:
+
+- sandbox 밖 CUDA 벤치 실행 요청은 현재 환경 정책에서 거절됐다.
+- CPU/mock fallback은 성능 근거로 사용하지 않는다.
+- 따라서 이번 패치는 구조적 false-final 차단 회귀 테스트와 case validation까지만 확인했으며, final_f1 영향은 후속 `sat + cuda + float16` 벤치에서 별도로 확인해야 한다.
+
 ### 2026-06-21 중국어 花田鸟笼 음료 주문 구간 stale short stage 케이스 추가
 
 관측 구간:
