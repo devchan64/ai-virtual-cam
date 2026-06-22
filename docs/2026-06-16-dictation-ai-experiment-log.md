@@ -15729,6 +15729,92 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-23 벤치 케이스 정의 strata 추가
+
+문제:
+
+- 전체 SBD 케이스 점수만 보면 앱 로직 개선 필요와 케이스 정의 오류 가능성이 섞인다.
+- 특히 `*_draft_*`, `reviewed-log`, `review_group_id`가 남아 있는 케이스는 로그 후보 검토 작업 단위의 흔적이 강하다.
+- 이런 케이스를 정식 기대문장 정의가 검증된 케이스와 같은 가중치로 해석하면 로직을 잘못 튜닝할 수 있다.
+
+판단 기준:
+
+- `reviewed_log_work_item`: `*_draft_*`, `reviewed-log`, `review_group_id`가 있는 케이스. 제거 대상은 아니지만 앱 로직 변경 근거로 바로 쓰지 않는다.
+- `manual_log_case`: 사람이 로그에서 승격한 케이스. 입력 로그 근거가 있으므로 주요 관측군으로 유지한다.
+- `manual_reviewed_case` / `manual_named_case`: 명시 검토 또는 직접 작성 케이스.
+- `strict_logic_candidate`: `expected_final`이 있고, expected 문장이 입력 window에 모두 존재하며, 순서가 monotonic이고, expected 품질 경고가 없는 케이스. 앱 로직 변경 판단은 이 subset을 먼저 본다.
+
+반영:
+
+- `tests/eval/dictation_ai/cases/sbd_case_loader.py`에서 challenge replay 케이스의 `source_log`, `source_chunk`, `review_group_id`, `fingerprint` 등 수집 메타데이터를 보존한다.
+- `tests/eval/dictation_ai/sbd_benchmark.py`가 케이스별 `case_metadata`를 리포트에 포함한다.
+- `tests/eval/dictation_ai/benchmark/sbd_benchmark_report.py`에 `collection_strata_summary`, `strict_logic_candidate_summary`를 추가했다.
+
+CUDA 벤치:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260623-case-strata-report.json
+```
+
+전체 결과는 케이스 정리 직후 리포트와 동일하다.
+
+```text
+case_count=1027
+finalized=4940
+stage_start=9078
+finalized_per_stage_start=0.5441727252698833
+final_precision_avg=0.6163395419363498
+final_recall_avg=0.534357277430485
+final_f1_avg=0.550492743360324
+final_ordered_f1_avg=0.5269590853705198
+final_boundary_f1_avg=0.13401379432590774
+```
+
+strata 결과:
+
+```text
+manual_log_case: cases=269, final_f1_avg=0.7052146251117528, boundary_f1_avg=0.26141702801755023
+manual_reviewed_case: cases=3, final_f1_avg=1.0, boundary_f1_avg=1.0
+reviewed_log_work_item: cases=755, final_f1_avg=0.49358054738541896, boundary_f1_avg=0.08518011421984932
+strict_logic_candidate: cases=144, final_f1_avg=0.7660832223332223, boundary_f1_avg=0.3971291825458492
+strict low<0.35: cases=10
+strict low<0.50: cases=19
+strict low<0.65: cases=33
+```
+
+해석:
+
+- 현재 낮은 전체 점수의 큰 부분은 `reviewed_log_work_item` 755개가 섞인 영향이다.
+- 이는 곧바로 "앱 로직이 0.55 수준"이라고 해석하기 어렵다는 근거다.
+- 케이스 정의가 잘못됐다고 단정할 기준은 `expected_final` 입력 근거 없음, expected 품질 경고, 순서 근거 불명확성이다.
+- 이번 기준으로 제거가 즉시 필요한 추가 케이스는 확정하지 않았다. 대신 리포트에서 작업 단위 케이스와 strict logic 후보를 분리해 이후 튜닝 근거를 제한한다.
+
+검증:
+
+```text
+./.venv/bin/python -m py_compile \
+  tests/eval/dictation_ai/cases/sbd_case_loader.py \
+  tests/eval/dictation_ai/sbd_benchmark.py \
+  tests/eval/dictation_ai/benchmark/sbd_benchmark_report.py \
+  tests/eval/dictation_ai/tool_tests/test_dictation_ai_sbd_benchmark_report.py
+
+./.venv/bin/python -m unittest \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_case_loader \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_entrypoint
+
+./.venv/bin/python tests/eval/dictation_ai/cases/validate_sbd_case_files.py \
+  tests/eval/dictation_ai/sbd_cases --min-expected-final-cases 1000 --max-drafts 0
+```
+
+```text
+unittest: Ran 33 tests, OK
+case validator: case_count=1027, expected_final_case_count=1023, draft_count=0
+```
+
 ### 2026-06-23 challenge replay 입력 근거 없는 케이스 정리
 
 배경:

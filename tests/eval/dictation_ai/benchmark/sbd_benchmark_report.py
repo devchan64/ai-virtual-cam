@@ -814,6 +814,69 @@ def summarize_results_by_input_evidence_strata(results: list[dict[str, Any]]) ->
     }
 
 
+def _case_collection_kind(result: dict[str, Any]) -> str:
+    case_id = str(result.get("id") or "")
+    metadata = dict(result.get("case_metadata", {}) or {})
+    tags = {str(tag).strip() for tag in result.get("tags", []) if str(tag).strip()}
+    if "_draft_" in case_id or metadata.get("review_group_id") or "reviewed-log" in tags:
+        return "reviewed_log_work_item"
+    if metadata.get("source_log") or any(str(tag).startswith("log-") for tag in tags):
+        return "manual_log_case"
+    if "manual-promoted" in tags or "manual-reviewed" in tags:
+        return "manual_reviewed_case"
+    return "manual_named_case"
+
+
+def summarize_results_by_collection_strata(results: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for result in results:
+        grouped.setdefault(_case_collection_kind(result), []).append(result)
+    return {
+        name: _summarize_result_group(grouped[name])
+        for name in sorted(grouped)
+    }
+
+
+def _strict_logic_candidate(case: SbdCase, result: dict[str, Any]) -> bool:
+    if not result.get("expected_final"):
+        return False
+    if _expected_final_order_support_kind(case) != "supported_monotonic":
+        return False
+    if result.get("expected_quality_flags"):
+        return False
+    if not dict(result.get("input_evidence", {})).get("fully_supported"):
+        return False
+    return True
+
+
+def summarize_strict_logic_candidate_results(cases: list[SbdCase], results: list[dict[str, Any]]) -> dict[str, Any]:
+    cases_by_id = {case.id: case for case in cases}
+    strict = [
+        result
+        for result in results
+        if (case := cases_by_id.get(str(result.get("id")))) is not None
+        and _strict_logic_candidate(case, result)
+    ]
+    low_by_threshold: dict[str, Any] = {}
+    for threshold in LOW_SCORE_THRESHOLDS:
+        low = [
+            result
+            for result in strict
+            if float(dict(result.get("final_score", {})).get("f1", 0.0)) < threshold
+        ]
+        low_by_threshold[f"{threshold:.2f}"] = _summarize_supported_low_threshold(low, threshold)
+    return {
+        "interpretation": (
+            "Strict logic candidates are supported_monotonic, fully input-supported, and have no expected quality flags. "
+            "Use this subset before changing app logic; other challenge cases may still be valid diagnostics but need review context."
+        ),
+        "strict_case_count": len(strict),
+        "summary": _summarize_result_group(strict),
+        "collection_strata": summarize_results_by_collection_strata(strict),
+        "low_score_thresholds": low_by_threshold,
+    }
+
+
 def summarize_results_by_queue_residue_strata(results: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Separate cases by residual staged queue severity."""
     no_queue: list[dict[str, Any]] = []
@@ -1140,6 +1203,8 @@ def build_benchmark_report(
     evidence_strata_summary = summarize_results_by_evidence_strata(results)
     expected_quality_strata_summary = summarize_results_by_expected_quality_strata(results)
     input_evidence_strata_summary = summarize_results_by_input_evidence_strata(results)
+    collection_strata_summary = summarize_results_by_collection_strata(results)
+    strict_logic_candidate_summary = summarize_strict_logic_candidate_results(cases, results)
     queue_residue_strata_summary = summarize_results_by_queue_residue_strata(results)
     case_exemplar_summary = summarize_case_exemplars(results)
     lifecycle_bottleneck_summary = summarize_lifecycle_bottlenecks(results, metric_totals)
@@ -1230,6 +1295,8 @@ def build_benchmark_report(
         "evidence_strata_summary": evidence_strata_summary,
         "expected_quality_strata_summary": expected_quality_strata_summary,
         "input_evidence_strata_summary": input_evidence_strata_summary,
+        "collection_strata_summary": collection_strata_summary,
+        "strict_logic_candidate_summary": strict_logic_candidate_summary,
         "case_exemplar_summary": case_exemplar_summary,
         "language_summary": language_summary,
         "tag_summary": tag_summary,

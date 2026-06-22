@@ -176,6 +176,7 @@ def main() -> int:
                 "id": case.id,
                 "language": case.language,
                 "tags": list(case.tags),
+                "case_metadata": dict(case.metadata or {}),
                 "elapsed_ms": round(elapsed_ms, 3),
                 "expected_final": case.expected_final,
                 "initial_final": list(case.initial_final),

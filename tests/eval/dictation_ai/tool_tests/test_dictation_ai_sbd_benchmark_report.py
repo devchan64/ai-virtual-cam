@@ -56,10 +56,10 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         case = SbdCase(
             id="case-a",
             language="ko",
-            chunks=["안녕하세요."],
+            chunks=["안녕하세요.", "안녕하세요. 반갑습니다."],
             expected_completed=[],
             expected_pending="",
-            expected_final=["안녕하세요."],
+            expected_final=["안녕하세요.", "반갑습니다."],
             expected_staged="",
             tags=("missing-final",),
             sentence_finalize_age=3,
@@ -69,9 +69,9 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
                 "id": "case-a",
                 "language": "ko",
                 "tags": ["missing-final"],
-                "expected_final": ["안녕하세요."],
-                "chunks": [{"input": "안녕하세요."}],
-                "actual_final": ["안녕하세요."],
+                "expected_final": ["안녕하세요.", "반갑습니다."],
+                "chunks": [{"input": "안녕하세요."}, {"input": "안녕하세요. 반갑습니다."}],
+                "actual_final": ["안녕하세요.", "반갑습니다."],
                 "actual_pending": "",
                 "actual_staged": "",
                 "actual_staged_queue": [],
@@ -82,8 +82,8 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
                 "staged_exact": True,
                 "case_exact_match": True,
                 "metrics": {
-                    "finalized": 1,
-                    "stage_start": 1,
+                    "finalized": 2,
+                    "stage_start": 2,
                     "stage_age_hold": 2,
                     "pending_overrun": 1,
                     "pending_quality_repeated_word_ngram": 1,
@@ -100,8 +100,8 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
             cases=[case],
             results=results,
             metric_totals={
-                "finalized": 1,
-                "stage_start": 1,
+                "finalized": 2,
+                "stage_start": 2,
                 "stage_age_hold": 2,
                 "pending_overrun": 1,
                 "pending_quality_repeated_word_ngram": 1,
@@ -203,14 +203,19 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
             report["input_evidence_strata_summary"]["weak_input_evidence_review"]["case_count"],
             0,
         )
+        self.assertEqual(report["collection_strata_summary"]["manual_named_case"]["case_count"], 1)
+        strict_summary = report["strict_logic_candidate_summary"]
+        self.assertEqual(strict_summary["strict_case_count"], 1)
+        self.assertEqual(strict_summary["summary"]["final_f1_avg"], 1.0)
+        self.assertEqual(strict_summary["collection_strata"]["manual_named_case"]["case_count"], 1)
         self.assertEqual(report["cases"][0]["expected_quality_flags"], [])
         self.assertTrue(report["cases"][0]["input_evidence"]["has_evidence"])
         self.assertTrue(report["cases"][0]["input_evidence"]["fully_supported"])
-        self.assertEqual(report["cases"][0]["input_evidence"]["covered_count"], 1)
+        self.assertEqual(report["cases"][0]["input_evidence"]["covered_count"], 2)
         self.assertEqual(report["case_exemplar_summary"]["lifecycle_focus_top"][0]["id"], "case-a")
         self.assertEqual(report["staged_queue_residue_summary"]["queue_residue_case_count"], 0)
         self.assertEqual(report["staged_queue_residue_summary"]["active_staged_residue_case_count"], 0)
-        self.assertEqual(report["lifecycle_bottleneck_summary"]["metrics"]["stage_start"], 1)
+        self.assertEqual(report["lifecycle_bottleneck_summary"]["metrics"]["stage_start"], 2)
         self.assertEqual(report["lifecycle_bottleneck_summary"]["metrics"]["stage_age_hold"], 2)
         self.assertEqual(report["lifecycle_bottleneck_summary"]["metrics"]["pending_overrun"], 1)
         self.assertEqual(
@@ -238,7 +243,7 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(dynamic_presence["case_count_present"], 1)
         self.assertEqual(
             report["lifecycle_bottleneck_summary"]["by_language"]["ko"]["expected_final_count"],
-            1,
+            2,
         )
 
     def test_report_summarizes_low_score_review_needed_cases(self) -> None:

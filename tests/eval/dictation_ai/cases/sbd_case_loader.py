@@ -62,7 +62,20 @@ def _load_case_file(path: Path, *, corpus_role: str) -> list[SbdCase]:
                 validate_representative_payload(payload, path=path, line_no=line_no, case_id=case_id)
                 if not any(str(item).strip() for item in payload.get("expected_final", [])):
                     raise ValueError(f"{path}:{line_no} representative case {case_id!r} has no expected_final")
-            metadata = representative_metadata_record(payload) if corpus_role == "representative" else None
+            if corpus_role == "representative":
+                metadata = representative_metadata_record(payload)
+            else:
+                metadata = {
+                    "case_file": str(path),
+                    "case_line": line_no,
+                    "source_log": str(payload.get("source_log", "")).strip(),
+                    "source_chunk": payload.get("source_chunk"),
+                    "review_group_id": str(payload.get("review_group_id", "")).strip(),
+                    "review_priority_tag": str(payload.get("review_priority_tag", "")).strip(),
+                    "review_source_file": str(payload.get("review_source_file", "")).strip(),
+                    "review_case_group": str(payload.get("review_case_group", "")).strip(),
+                    "fingerprint": str(payload.get("fingerprint", "")).strip(),
+                }
             cases.append(
                 SbdCase(
                     id=case_id,
