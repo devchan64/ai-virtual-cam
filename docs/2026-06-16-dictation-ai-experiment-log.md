@@ -15833,6 +15833,61 @@ clean_low_0.35_count=12
 - clean low의 남은 실패는 `candidate_recent_final_delta_trimmed`, `candidate_delta_trimmed`, `candidate_duplicate_suppressed`, `stage_candidate_quality_blocked`, `stage_revision_token_sentence_deferred`가 함께 나타난다.
 - 다음 개선 후보는 confirmation/age 전역값보다, recent-final delta trim과 revision/queue가 같은 후보군을 서로 다르게 소비하는 구조를 봐야 한다.
 
+### 2026-06-23 recent-final/revision queue 구조 후보 추가 검토
+
+목적:
+
+- clean low에서 반복되는 `candidate_recent_final_delta_trimmed`, `candidate_delta_trimmed`, `candidate_duplicate_suppressed`, `stage_revision_token_sentence_deferred`의 원인이 단순 recent-final suffix 임계값인지 확인했다.
+- token-sentence revision 보류 정책을 완화할 수 있는지도 확인했다.
+
+비교:
+
+```text
+base:
+final_f1_avg=0.550493
+final_boundary_f1_avg=0.134014
+strict_final_f1_avg=0.739859
+strict_boundary_f1_avg=0.393413
+clean_low_0.35_count=10
+clean_low_0.35_avg_f1=0.204579
+staged_exact=368
+finalized=4940
+
+RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS=1:
+final_f1_avg=0.549188
+final_boundary_f1_avg=0.133350
+strict_final_f1_avg=0.737838
+clean_low_0.35_count=10
+=> 짧은 suffix 회수를 늘려도 clean low 개선 없음. 전체/strict 소폭 하락으로 폐기.
+
+RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS=4:
+final_f1_avg=0.550269
+final_boundary_f1_avg=0.133666
+strict_final_f1_avg=0.738736
+clean_low_0.35_count=10
+=> suffix 회수를 더 보수화해도 baseline보다 개선 없음. 폐기.
+```
+
+token-sentence revision 보류 완화 실험:
+
+```text
+변경안:
+_should_defer_token_sentence_revision()에서 reset이 아닌 revision을 queue로 보내지 않고 즉시 active에 반영.
+
+결과:
+./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report
+FAILED: test_reset_revision_is_deferred_until_token_sentence_repeats
+
+관측:
+새 token-sentence pattern이 충분히 반복 관측되기 전에 final로 확정되는 회귀가 발생했다.
+```
+
+판단:
+
+- recent-final suffix 임계값은 현재 failure set의 주요 병목을 해결하지 못한다.
+- token-sentence revision 보류 완화는 과거 관측된 premature final 회귀를 즉시 재현하므로 폐기한다.
+- 다음 후보는 delta/recent-final 임계값이 아니라, clean low 케이스 자체의 lifecycle trace를 더 자세히 남겨 어떤 후보가 어느 단계에서 active/queue/final로 이동했는지 비교하는 쪽이다.
+
 ### 2026-06-23 SBD challenge case 정의 감사와 strict 해석 기준 보강
 
 목적:
