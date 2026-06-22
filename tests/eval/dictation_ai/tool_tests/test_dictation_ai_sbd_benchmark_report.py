@@ -725,6 +725,16 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(clean_low["case_count"], 1)
         self.assertEqual(clean_low["lowest_cases"][0]["id"], "full-input-low")
         self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 1)
+        self.assertEqual(
+            report["case_definition_action_summary"]["action_counts"],
+            {"remove_or_recut_expected_outside_replay_input": 1},
+        )
+        self.assertEqual(
+            report["case_definition_action_summary"]["by_action"][
+                "remove_or_recut_expected_outside_replay_input"
+            ]["examples"][0]["id"],
+            "partial-input-low",
+        )
 
     def test_context_strata_flags_unmodeled_prefix_context(self) -> None:
         args = Namespace(
@@ -789,12 +799,12 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(report["context_strata_summary"]["clean_context"]["case_count"], 0)
         self.assertEqual(
             report["case_definition_action_summary"]["action_counts"],
-            {"add_initial_final_or_trim_prefix": 1},
+            {"add_initial_final_or_recut_mid_stream_case": 1},
         )
         self.assertEqual(
-            report["case_definition_action_summary"]["by_action"]["add_initial_final_or_trim_prefix"]["examples"][0][
-                "id"
-            ],
+            report["case_definition_action_summary"]["by_action"][
+                "add_initial_final_or_recut_mid_stream_case"
+            ]["examples"][0]["id"],
             "prefix-context-case",
         )
         self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
@@ -888,7 +898,7 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(report["cases"][1]["case_definition_flags"], ["repeated_expected_group"])
         self.assertEqual(
             report["case_definition_action_summary"]["action_counts"],
-            {"deduplicate_shifted_window_group": 2},
+            {"deduplicate_or_justify_shifted_window_repeat": 2},
         )
         self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
         clean_low = report["clean_low_bottleneck_intersection_summary"]["thresholds"]["0.35"]
@@ -949,15 +959,77 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         action_summary = report["case_definition_action_summary"]
         self.assertEqual(
             action_summary["action_counts"],
-            {
-                "manual_boundary_review": 1,
-                "rewrite_fragment_expected_final": 1,
-            },
+            {"rewrite_expected_final_to_final_sentence_boundary": 1},
         )
         self.assertIn("lowercase_or_connector_start", action_summary["expected_quality_flag_counts"])
         self.assertEqual(
-            action_summary["by_action"]["rewrite_fragment_expected_final"]["examples"][0]["id"],
+            action_summary["by_action"]["rewrite_expected_final_to_final_sentence_boundary"]["examples"][0]["id"],
             "fragment-expected",
+        )
+        self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
+
+    def test_terminal_staged_expected_final_is_tail_review_action(self) -> None:
+        args = Namespace(
+            model="sat-3l-sm",
+            device="cuda",
+            compute_type="float16",
+            min_final_f1=0.0,
+            fail_on_regression=False,
+        )
+        case = SbdCase(
+            id="terminal-staged",
+            language="en",
+            chunks=["First sentence. The target sentence is complete."],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=["First sentence.", "The target sentence is complete."],
+            expected_staged="",
+            tags=("missing-final",),
+            sentence_finalize_age=3,
+        )
+        results = [
+            {
+                "id": "terminal-staged",
+                "language": "en",
+                "tags": ["missing-final"],
+                "expected_final": ["First sentence.", "The target sentence is complete."],
+                "chunks": [{"input": "First sentence. The target sentence is complete."}],
+                "initial_final": [],
+                "actual_final": ["First sentence."],
+                "actual_pending": "",
+                "actual_staged": "The target sentence is complete.",
+                "actual_staged_queue": [],
+                "final_score": _score(1.0, 0.5, 0.667),
+                "final_ordered_score": _score(1.0, 0.5, 0.667),
+                "final_boundary_score": _score(1.0, 0.5, 0.667),
+                "completed_last_score": _score(0.0, 0.0, 0.0),
+                "pending_exact": True,
+                "staged_exact": False,
+                "case_exact_match": False,
+                "metrics": {"stage_start": 1},
+            }
+        ]
+
+        report = build_benchmark_report(
+            args=args,
+            case_sources=["cases.jsonl"],
+            corpus_role="challenge-replay",
+            cases=[case],
+            results=results,
+            metric_totals={"stage_start": 1},
+            elapsed_ms=1.0,
+        )
+
+        action_summary = report["case_definition_action_summary"]
+        self.assertEqual(
+            action_summary["action_counts"],
+            {"extend_replay_tail_or_reclassify_staged_expectation": 1},
+        )
+        self.assertEqual(
+            action_summary["by_action"]["extend_replay_tail_or_reclassify_staged_expectation"]["examples"][0][
+                "id"
+            ],
+            "terminal-staged",
         )
         self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
 

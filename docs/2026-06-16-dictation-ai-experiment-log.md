@@ -15783,6 +15783,53 @@ deduplicate_or_justify_shifted_window_repeat=53
 Ran 6 tests in 0.002s, OK
 ```
 
+후속 보강:
+
+- benchmark report의 `case_definition_action_summary`도 같은 우선순위로 정리했다.
+- `remove_or_recut_expected_outside_replay_input`을 최우선 action으로 추가했다.
+- replay 종료 시점에 expected final이 아직 staged/queue에 남은 케이스는 `extend_replay_tail_or_reclassify_staged_expectation`으로 분리했다.
+- 이 action에 걸린 케이스는 `strict_logic_candidate_summary`와 `clean_low_bottleneck_intersection_summary`에서 제외한다.
+
+CUDA 검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260623-action-filtered-report.json
+```
+
+```text
+case_count=1027
+expected_final_case_count=1023
+overall_final_f1=0.550493
+overall_final_boundary_f1=0.134014
+finalized_per_stage_start=0.544173
+
+case_definition_action_summary.review_case_count=948
+case_definition_action_summary.logic_tuning_candidate_count=75
+
+remove_or_recut_expected_outside_replay_input=599
+rewrite_expected_final_to_final_sentence_boundary=186
+add_initial_final_or_recut_mid_stream_case=67
+deduplicate_or_justify_shifted_window_repeat=55
+extend_replay_tail_or_reclassify_staged_expectation=41
+
+strict_logic_candidate_summary.strict_case_count=60
+strict_logic_candidate_summary.final_f1_avg=0.811703
+strict_logic_candidate_summary.final_boundary_f1_avg=0.433995
+
+strict low <0.35: case_count=6 avg_final_f1=0.258
+strict low <0.50: case_count=8 avg_final_f1=0.299
+strict low <0.65: case_count=11 avg_final_f1=0.367
+```
+
+해석:
+
+- 전체 challenge 평균은 그대로지만, 케이스 정의 action을 제외한 strict 후보 평균은 `0.739859`에서 `0.811703`으로 상승했다.
+- 남은 strict low는 CJK boundary 과분할, 오염 final, duplicate suppression/queue churn이 섞인 실제 로직 분석 후보로 본다.
+
 ### 2026-06-23 clean low 입력 근거 기준 보수화
 
 목적:

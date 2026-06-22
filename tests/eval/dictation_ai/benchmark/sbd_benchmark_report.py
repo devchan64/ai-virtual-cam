@@ -177,9 +177,11 @@ SUPPORTED_LOW_BOTTLENECK_METRICS = (
     "candidate_duplicate_suppressed",
 )
 CASE_REVIEW_ACTION_FLAGS = (
-    "add_initial_final_or_trim_prefix",
-    "rewrite_fragment_expected_final",
-    "deduplicate_shifted_window_group",
+    "remove_or_recut_expected_outside_replay_input",
+    "add_initial_final_or_recut_mid_stream_case",
+    "rewrite_expected_final_to_final_sentence_boundary",
+    "extend_replay_tail_or_reclassify_staged_expectation",
+    "deduplicate_or_justify_shifted_window_repeat",
     "manual_boundary_review",
 )
 
@@ -502,6 +504,7 @@ def summarize_clean_low_bottleneck_intersections(
             and not result.get("case_context_flags")
             and not result.get("case_definition_flags")
             and dict(result.get("input_evidence", {})).get("fully_supported")
+            and not _case_review_actions(result)
         ]
         thresholds[f"{threshold:.2f}"] = _summarize_supported_low_threshold(low_results, threshold)
     return {
@@ -917,24 +920,61 @@ def summarize_results_by_case_definition_strata(results: list[dict[str, Any]]) -
     }
 
 
-def _case_review_actions(result: dict[str, Any]) -> list[str]:
-    actions: list[str] = []
+def _case_primary_review_action(result: dict[str, Any]) -> str:
+    if not result.get("expected_final"):
+        return ""
+    input_evidence = dict(result.get("input_evidence", {}))
     expected_quality = set(result.get("expected_quality_flags", []) or [])
     context_flags = set(result.get("case_context_flags", []) or [])
     definition_flags = set(result.get("case_definition_flags", []) or [])
+    if not input_evidence.get("fully_supported"):
+        return "remove_or_recut_expected_outside_replay_input"
     if "unmodeled_prefix_context" in context_flags:
-        actions.append("add_initial_final_or_trim_prefix")
+        return "add_initial_final_or_recut_mid_stream_case"
     if definition_flags.intersection({"duplicate_expected_sentence"}):
-        actions.append("rewrite_fragment_expected_final")
-    if expected_quality.intersection({"all_expected_no_terminal", "lowercase_or_connector_start"}):
-        actions.append("rewrite_fragment_expected_final")
+        return "rewrite_expected_final_to_final_sentence_boundary"
+    if expected_quality:
+        return "rewrite_expected_final_to_final_sentence_boundary"
     if "repeated_expected_group" in definition_flags:
-        actions.append("deduplicate_shifted_window_group")
+        return "deduplicate_or_justify_shifted_window_repeat"
+    if _has_expected_final_staged_residue(result):
+        return "extend_replay_tail_or_reclassify_staged_expectation"
     if definition_flags.intersection({"nested_expected_sentence"}):
-        actions.append("manual_boundary_review")
-    if expected_quality.intersection({"many_expected_sentences", "no_terminal_expected", "short_expected_fragment"}):
-        actions.append("manual_boundary_review")
-    return list(dict.fromkeys(actions))
+        return "manual_boundary_review"
+    return ""
+
+
+def _has_expected_final_staged_residue(result: dict[str, Any]) -> bool:
+    expected_final = [
+        str(sentence).strip()
+        for sentence in result.get("expected_final", []) or []
+        if str(sentence).strip()
+    ]
+    if not expected_final:
+        return False
+    actual_final = [
+        normalized_text(sentence)
+        for sentence in result.get("actual_final", []) or []
+        if normalized_text(sentence)
+    ]
+    residue = [
+        str(result.get("actual_staged") or "").strip(),
+        *[str(sentence).strip() for sentence in result.get("actual_staged_queue", []) or []],
+    ]
+    residue = [sentence for sentence in residue if sentence]
+    if not residue:
+        return False
+    for expected in expected_final:
+        if any(_sentence_support_score(expected, final) >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY for final in actual_final):
+            continue
+        if any(_sentence_support_score(expected, staged) >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY for staged in residue):
+            return True
+    return False
+
+
+def _case_review_actions(result: dict[str, Any]) -> list[str]:
+    action = _case_primary_review_action(result)
+    return [action] if action else []
 
 
 def _case_review_payload(result: dict[str, Any]) -> dict[str, Any]:
@@ -948,6 +988,8 @@ def _case_review_payload(result: dict[str, Any]) -> dict[str, Any]:
         "source_chunk": metadata.get("source_chunk"),
         "review_group_id": metadata.get("review_group_id"),
         "actions": _case_review_actions(result),
+        "primary_action": _case_primary_review_action(result),
+        "input_evidence": dict(result.get("input_evidence", {}) or {}),
         "expected_quality_flags": list(result.get("expected_quality_flags", []) or []),
         "case_context_flags": list(result.get("case_context_flags", []) or []),
         "case_definition_flags": list(result.get("case_definition_flags", []) or []),
@@ -965,6 +1007,12 @@ def summarize_case_definition_action_items(results: list[dict[str, Any]]) -> dic
         for result in results
         if _case_review_actions(result)
     ]
+    logic_tuning_candidate_count = sum(
+        1
+        for result in results
+        if result.get("expected_final")
+        and not _case_review_actions(result)
+    )
     action_counts: Counter[str] = Counter()
     language_counts: Counter[str] = Counter()
     expected_quality_counts: Counter[str] = Counter()
@@ -1002,13 +1050,17 @@ def summarize_case_definition_action_items(results: list[dict[str, Any]]) -> dic
         }
     return {
         "interpretation": (
-            "These are case-definition review actions, not automatic deletion rules. "
-            "Use add_initial_final_or_trim_prefix for mid-stream cases, "
-            "rewrite_fragment_expected_final for fragment-like expected_final labels, "
-            "deduplicate_shifted_window_group when repeated sliding-window samples overweight one log region, "
-            "and manual_boundary_review when short/nested/many expected sentences may still be valid speech."
+            "These are prioritized case-definition review actions, not automatic deletion rules. "
+            "Use remove_or_recut_expected_outside_replay_input when expected_final is not fully represented "
+            "in replay chunks, add_initial_final_or_recut_mid_stream_case for mid-stream cases, "
+            "rewrite_expected_final_to_final_sentence_boundary for fragment-like expected_final labels, "
+            "extend_replay_tail_or_reclassify_staged_expectation when expected final text is still staged "
+            "at the end of the replay window, "
+            "deduplicate_or_justify_shifted_window_repeat when repeated sliding-window samples overweight "
+            "one log region, and manual_boundary_review for remaining nested boundary ambiguities."
         ),
         "review_case_count": len(review_results),
+        "logic_tuning_candidate_count": logic_tuning_candidate_count,
         "action_counts": dict(sorted(action_counts.items())),
         "language_counts": dict(sorted(language_counts.items())),
         "expected_quality_flag_counts": dict(sorted(expected_quality_counts.items())),
@@ -1053,6 +1105,8 @@ def _strict_logic_candidate(case: SbdCase, result: dict[str, Any]) -> bool:
     if result.get("case_context_flags"):
         return False
     if result.get("case_definition_flags"):
+        return False
+    if _case_review_actions(result):
         return False
     return True
 
