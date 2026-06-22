@@ -179,6 +179,66 @@ class DictationAiSbdInitialFinalContextAuditTest(unittest.TestCase):
         self.assertEqual(summary["score_summary"]["worst_groups"][0]["group_source_chunk_max"], 44)
         self.assertEqual(summary["score_summary"]["worst_groups"][0]["review_group_id"], "group-a")
 
+    def test_reports_case_definition_review_signals(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "cases.jsonl"
+            path.write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "id": "case-a",
+                                "language": "en",
+                                "chunks": ["Repeated. Repeated. Longer repeated sentence."],
+                                "expected_final": ["Repeated.", "Repeated.", "Longer repeated sentence."],
+                                "source_log": ".tmp/logs/avc-whisper.log",
+                                "source_chunk": 1,
+                            },
+                            ensure_ascii=False,
+                        ),
+                        json.dumps(
+                            {
+                                "id": "case-b",
+                                "language": "en",
+                                "chunks": ["Longer repeated sentence."],
+                                "expected_final": ["Longer repeated sentence."],
+                                "source_log": ".tmp/logs/avc-whisper.log",
+                                "source_chunk": 2,
+                            },
+                            ensure_ascii=False,
+                        ),
+                        json.dumps(
+                            {
+                                "id": "case-c",
+                                "language": "en",
+                                "chunks": ["Longer repeated sentence."],
+                                "expected_final": ["Longer repeated sentence."],
+                                "source_log": ".tmp/logs/avc-whisper.log",
+                                "source_chunk": 3,
+                            },
+                            ensure_ascii=False,
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            summary = audit_initial_final_context([path], duplicate_group_limit=5)
+
+        review = summary["case_definition_review"]
+        self.assertEqual(review["duplicate_expected_case_count"], 1)
+        self.assertEqual(review["duplicate_expected_cases"][0]["id"], "case-a")
+        self.assertEqual(review["duplicate_expected_cases"][0]["duplicate_expected_count"], 1)
+        self.assertEqual(review["nested_expected_case_count"], 1)
+        self.assertEqual(review["nested_expected_cases"][0]["id"], "case-a")
+        self.assertEqual(review["repeated_expected_group_count"], 1)
+        self.assertEqual(review["repeated_expected_case_count"], 2)
+        self.assertEqual(
+            [item["id"] for item in review["repeated_expected_groups"][0]["cases"]],
+            ["case-b", "case-c"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

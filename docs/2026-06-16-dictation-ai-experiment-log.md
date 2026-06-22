@@ -15729,6 +15729,76 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-23 SBD challenge case 정의 감사와 strict 해석 기준 보강
+
+목적:
+
+- 반복 수집된 로그 기반 challenge case 중 앱 로직 튜닝 근거로 보기 어려운 케이스 정의 문제를 분리한다.
+- 전체 challenge 점수는 유지하되, strict/clean low subset은 케이스 정의 검토 후보를 제외해 앱 로직 개선 후보를 더 보수적으로 본다.
+
+변경:
+
+- `audit-initial-final-context`가 기존 중간 스트림 `initial_final` 누락 후보뿐 아니라 다음 신호를 함께 출력하도록 보강했다.
+  - 같은 case 내부의 중복 expected 문장
+  - 같은 case 내부의 포함/nested expected 문장
+  - 여러 sliding-window case에 같은 `expected_final`이 반복 등록된 그룹
+- CUDA benchmark report에 `case_definition_flags`를 추가했다.
+  - `duplicate_expected_sentence`
+  - `nested_expected_sentence`
+  - `repeated_expected_group`
+- `strict_logic_candidate_summary`와 `clean_low_bottleneck_intersection_summary`는 위 case-definition review flag가 있는 케이스를 제외한다.
+- 이 플래그는 자동 삭제 규칙이 아니라, 로그 근거와 lifecycle 차이를 보고 정리할 후보 목록이다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_initial_final_context_audit
+Ran 20 tests in 0.007s, OK
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260623-case-definition-flags-report.json
+
+corpus_role=challenge-replay cases=1027 finalized=4940
+stage_start=9078 finalized_per_stage_start=0.544
+final_precision_avg=0.616 final_recall_avg=0.534 final_f1_avg=0.550
+final_boundary_f1_avg=0.134
+```
+
+감사 결과:
+
+```text
+case_definition_flag_counts:
+  repeated_expected_group=680
+  duplicate_expected_sentence=3
+  nested_expected_sentence=6
+
+case_definition_strata:
+  clean_case_definition cases=341 final_f1_avg=0.646 final_boundary_f1_avg=0.233
+  case_definition_review cases=686 final_f1_avg=0.503 final_boundary_f1_avg=0.085
+
+strict_logic_candidate_summary:
+  strict_case_count=90
+  final_f1_avg=0.740
+  final_boundary_f1_avg=0.393
+
+clean_low_bottleneck_intersection_summary:
+  f1<0.35 cases=10
+  f1<0.50 cases=14
+  f1<0.65 cases=26
+```
+
+해석:
+
+- 전체 challenge 점수 `final_f1_avg=0.550`은 기존과 같은 범위이며, 이 값은 failure-enriched corpus 전체의 거친 지표로만 본다.
+- 같은 expected가 여러 sliding-window 시작점에 반복 등록된 케이스가 많아, 낮은 점수를 바로 앱 로직 문제로 해석하면 안 된다.
+- `initial_final` 누락 후보는 207건이며, 전체 정식 케이스에서 `initial_final`을 쓰는 케이스는 아직 없다. 중간 스트림에서 시작한 case는 이전 final/committed memory가 평가에 반영되지 않을 수 있다.
+- 앞으로 앱 로직 패치 후보는 `strict_logic_candidate_summary`와 `clean_low_bottleneck_intersection_summary`를 우선 기준으로 삼고, case-definition review 후보는 케이스 정리 작업으로 분리한다.
+
 ### 2026-06-23 clean-low 병목 집계의 케이스 정의 검토 대상 제외
 
 목적:

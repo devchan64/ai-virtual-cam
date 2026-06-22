@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +22,7 @@ DEFAULT_MIN_PREFIX_UNITS = 12
 DEFAULT_PREVIEW_UNITS = 80
 DEFAULT_WORST_CASE_LIMIT = 20
 DEFAULT_WORST_GROUP_LIMIT = 12
+DEFAULT_DUPLICATE_GROUP_LIMIT = 20
 
 
 def _as_float(value: object) -> float:
@@ -178,6 +179,137 @@ def _group_key(record: dict[str, Any]) -> tuple[str, str, str]:
         str(record.get("source_log", "")),
         str(record.get("review_group_id", "")),
     )
+
+
+def _expected_group_key(record: dict[str, Any]) -> str:
+    return json.dumps(
+        {
+            "language": str(record.get("language", "")),
+            "expected_final": list(record.get("expected_final_normalized", [])),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+def _case_definition_record(payload: dict[str, Any], *, path: Path, line_no: int) -> dict[str, Any]:
+    expected_final = _normalized_list(payload.get("expected_final", []))
+    raw_chunks = payload.get("chunks")
+    if raw_chunks is None:
+        raw_chunks = [payload.get("text", "")]
+    chunks = [normalized_text(chunk) for chunk in raw_chunks if normalized_text(chunk)] if isinstance(raw_chunks, list) else []
+    nested_expected_pairs: list[list[int]] = []
+    for left_index, left in enumerate(expected_final):
+        for right_index, right in enumerate(expected_final):
+            if left_index >= right_index:
+                continue
+            if left and right and (left in right or right in left):
+                nested_expected_pairs.append([left_index, right_index])
+    return {
+        "id": str(payload.get("id") or f"{path.name}:{line_no}").strip(),
+        "language": str(payload.get("language", "")).strip().lower() or "en",
+        "path": str(path),
+        "line_no": line_no,
+        "source_log": str(payload.get("source_log", "")).strip(),
+        "source_chunk": payload.get("source_chunk"),
+        "review_group_id": str(payload.get("review_group_id", "")).strip(),
+        "expected_final_normalized": expected_final,
+        "expected_sentence_count": len(expected_final),
+        "chunk_count": len(chunks),
+        "duplicate_expected_count": max(len(expected_final) - len(set(expected_final)), 0),
+        "nested_expected_pairs": nested_expected_pairs,
+        "expected_quality_flags": expected_quality_flags(expected_final),
+    }
+
+
+def _case_payload(record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": record.get("id", ""),
+        "language": record.get("language", ""),
+        "path": record.get("path", ""),
+        "line_no": record.get("line_no"),
+        "source_log": record.get("source_log", ""),
+        "source_chunk": record.get("source_chunk"),
+        "review_group_id": record.get("review_group_id", ""),
+        "expected_sentence_count": record.get("expected_sentence_count", 0),
+        "expected_quality_flags": list(record.get("expected_quality_flags", [])),
+    }
+
+
+def _case_definition_review_summary(
+    records: list[dict[str, Any]],
+    *,
+    duplicate_group_limit: int,
+) -> dict[str, Any]:
+    duplicate_expected_cases = [
+        record
+        for record in records
+        if int(record.get("duplicate_expected_count", 0)) > 0
+    ]
+    nested_expected_cases = [
+        record
+        for record in records
+        if record.get("nested_expected_pairs")
+    ]
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for record in records:
+        if record.get("expected_final_normalized"):
+            grouped[_expected_group_key(record)].append(record)
+    repeated_groups = [items for items in grouped.values() if len(items) > 1]
+    repeated_groups.sort(
+        key=lambda items: (
+            -len(items),
+            str(items[0].get("language", "")),
+            str(items[0].get("id", "")),
+        )
+    )
+    return {
+        "interpretation": (
+            "These are case-definition review signals, not automatic deletion rules. "
+            "Duplicate or nested expected sentences may be real repeated speech; repeated expected groups "
+            "usually mean shifted-window samples from the same log region and should be deduplicated only "
+            "after checking that they add no distinct lifecycle failure."
+        ),
+        "duplicate_expected_case_count": len(duplicate_expected_cases),
+        "nested_expected_case_count": len(nested_expected_cases),
+        "repeated_expected_group_count": len(repeated_groups),
+        "repeated_expected_case_count": sum(len(items) for items in repeated_groups),
+        "duplicate_expected_cases": [
+            {
+                **_case_payload(record),
+                "duplicate_expected_count": record.get("duplicate_expected_count", 0),
+                "expected_final_preview": list(record.get("expected_final_normalized", []))[:8],
+            }
+            for record in duplicate_expected_cases[:duplicate_group_limit]
+        ],
+        "nested_expected_cases": [
+            {
+                **_case_payload(record),
+                "nested_expected_pairs": list(record.get("nested_expected_pairs", [])),
+                "expected_final_preview": list(record.get("expected_final_normalized", []))[:8],
+            }
+            for record in nested_expected_cases[:duplicate_group_limit]
+        ],
+        "repeated_expected_groups": [
+            {
+                "case_count": len(items),
+                "language": str(items[0].get("language", "")),
+                "expected_sentence_count": int(items[0].get("expected_sentence_count", 0)),
+                "expected_quality_flags": dict(
+                    sorted(
+                        Counter(
+                            flag
+                            for item in items
+                            for flag in item.get("expected_quality_flags", [])
+                        ).items()
+                    )
+                ),
+                "cases": [_case_payload(item) for item in items[:duplicate_group_limit]],
+                "expected_final_preview": list(items[0].get("expected_final_normalized", []))[:5],
+            }
+            for items in repeated_groups[:duplicate_group_limit]
+        ],
+    }
 
 
 def _candidate_score_groups(records: list[dict[str, Any]], *, limit: int) -> list[dict[str, Any]]:
@@ -346,6 +478,7 @@ def audit_initial_final_context(
     benchmark_report: Path | None = None,
     worst_limit: int = DEFAULT_WORST_CASE_LIMIT,
     worst_group_limit: int = DEFAULT_WORST_GROUP_LIMIT,
+    duplicate_group_limit: int = DEFAULT_DUPLICATE_GROUP_LIMIT,
 ) -> dict[str, Any]:
     paths = iter_case_paths(inputs)
     all_case_metadata: list[dict[str, Any]] = []
@@ -377,6 +510,9 @@ def audit_initial_final_context(
                         "expected_quality_flags": expected_quality_flags(expected_final),
                     }
                 )
+                all_case_metadata[-1].update(
+                    _case_definition_record(payload, path=path, line_no=line_no)
+                )
                 candidate = _audit_payload(
                     payload,
                     path=path,
@@ -398,6 +534,10 @@ def audit_initial_final_context(
             "Candidates are cases whose first expected_final sentence appears after a non-trivial "
             "prefix inside an STT context window while initial_final is empty. They require log review "
             "before editing cases; this audit does not prove the prefix was already finalized."
+        ),
+        "case_definition_review": _case_definition_review_summary(
+            all_case_metadata,
+            duplicate_group_limit=duplicate_group_limit,
         ),
         "candidates": candidates,
     }
@@ -427,6 +567,7 @@ def main() -> int:
     )
     parser.add_argument("--worst-limit", type=int, default=DEFAULT_WORST_CASE_LIMIT)
     parser.add_argument("--worst-group-limit", type=int, default=DEFAULT_WORST_GROUP_LIMIT)
+    parser.add_argument("--duplicate-group-limit", type=int, default=DEFAULT_DUPLICATE_GROUP_LIMIT)
     parser.add_argument("--summary-output", type=Path, default=None)
     parser.add_argument("--limit", type=int, default=None)
     args = parser.parse_args()
@@ -439,6 +580,7 @@ def main() -> int:
             benchmark_report=args.benchmark_report,
             worst_limit=args.worst_limit,
             worst_group_limit=args.worst_group_limit,
+            duplicate_group_limit=args.duplicate_group_limit,
         )
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         print(f"[dictation-ai-sbd-initial-final-audit] error: {exc}", file=sys.stderr)
@@ -447,6 +589,11 @@ def main() -> int:
     output = dict(summary)
     if args.limit is not None:
         output["candidates"] = list(output["candidates"])[: args.limit]
+        review = dict(output.get("case_definition_review", {}))
+        for key in ("duplicate_expected_cases", "nested_expected_cases", "repeated_expected_groups"):
+            if isinstance(review.get(key), list):
+                review[key] = list(review[key])[: args.limit]
+        output["case_definition_review"] = review
     if args.summary_output is not None:
         args.summary_output.parent.mkdir(parents=True, exist_ok=True)
         args.summary_output.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

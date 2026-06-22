@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from collections import Counter
 from difflib import SequenceMatcher
 from itertools import combinations
@@ -493,6 +494,7 @@ def summarize_clean_low_bottleneck_intersections(
             and float(dict(result.get("final_score", {})).get("f1", 0.0)) < threshold
             and not result.get("expected_quality_flags")
             and not result.get("case_context_flags")
+            and not result.get("case_definition_flags")
             and dict(result.get("input_evidence", {})).get("has_evidence")
         ]
         thresholds[f"{threshold:.2f}"] = _summarize_supported_low_threshold(low_results, threshold)
@@ -500,6 +502,7 @@ def summarize_clean_low_bottleneck_intersections(
         "interpretation": (
             "Clean low-score cases are supported_monotonic, have input evidence, and have no expected_quality_flags. "
             "They also exclude unmodeled prefix context flags. "
+            "They exclude case-definition review flags such as repeated expected groups. "
             "Prefer this subset for app logic changes; broader low-score groups can still be label or source review work."
         ),
         "metric_candidates": list(SUPPORTED_LOW_BOTTLENECK_METRICS),
@@ -652,6 +655,7 @@ def _low_score_case_payload(result: dict[str, Any], support_kind: str) -> dict[s
         "staged_queue_len": len(result.get("actual_staged_queue", []) or []),
         "expected_quality_flags": list(result.get("expected_quality_flags", []) or []),
         "case_context_flags": list(result.get("case_context_flags", []) or []),
+        "case_definition_flags": list(result.get("case_definition_flags", []) or []),
         "expected_final_preview": _first_text_preview(result.get("expected_final")),
         "actual_final_preview": _first_text_preview(result.get("actual_final")),
         "actual_staged_preview": _text_preview(result.get("actual_staged")),
@@ -893,6 +897,20 @@ def summarize_results_by_context_strata(results: list[dict[str, Any]]) -> dict[s
     }
 
 
+def summarize_results_by_case_definition_strata(results: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    clean_definition: list[dict[str, Any]] = []
+    definition_review: list[dict[str, Any]] = []
+    for result in results:
+        if result.get("case_definition_flags"):
+            definition_review.append(result)
+        else:
+            clean_definition.append(result)
+    return {
+        "clean_case_definition": _summarize_result_group(clean_definition),
+        "case_definition_review": _summarize_result_group(definition_review),
+    }
+
+
 def _case_collection_kind(result: dict[str, Any]) -> str:
     case_id = str(result.get("id") or "")
     metadata = dict(result.get("case_metadata", {}) or {})
@@ -927,6 +945,8 @@ def _strict_logic_candidate(case: SbdCase, result: dict[str, Any]) -> bool:
         return False
     if result.get("case_context_flags"):
         return False
+    if result.get("case_definition_flags"):
+        return False
     return True
 
 
@@ -949,7 +969,7 @@ def summarize_strict_logic_candidate_results(cases: list[SbdCase], results: list
     return {
         "interpretation": (
             "Strict logic candidates are supported_monotonic, fully input-supported, have no expected quality flags, "
-            "and do not have unmodeled prefix context flags. "
+            "do not have unmodeled prefix context flags, and have no case-definition review flags. "
             "Use this subset before changing app logic; other challenge cases may still be valid diagnostics but need review context."
         ),
         "strict_case_count": len(strict),
@@ -985,16 +1005,57 @@ def summarize_results_by_queue_residue_strata(results: list[dict[str, Any]]) -> 
 
 def _with_case_evidence_metadata(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     enriched: list[dict[str, Any]] = []
+    expected_group_counts: Counter[str] = Counter()
+    normalized_expected_by_id: dict[int, list[str]] = {}
+    for result in results:
+        expected_final = [
+            normalized_text(sentence)
+            for sentence in result.get("expected_final", []) or []
+            if normalized_text(sentence)
+        ]
+        normalized_expected_by_id[id(result)] = expected_final
+        if expected_final:
+            expected_group_counts[
+                json.dumps(
+                    {
+                        "language": str(result.get("language", "")),
+                        "expected_final": expected_final,
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+            ] += 1
     for result in results:
         item = dict(result)
-        expected_final = [
-            str(sentence).strip()
-            for sentence in item.get("expected_final", []) or []
-            if str(sentence).strip()
-        ]
+        expected_final = normalized_expected_by_id.get(id(result), [])
         item["expected_quality_flags"] = expected_quality_flags(expected_final)
         item["input_evidence"] = case_input_evidence(item)
         item["case_context_flags"] = case_context_flags(item)
+        case_definition_flags: list[str] = []
+        if len(expected_final) != len(set(expected_final)):
+            case_definition_flags.append("duplicate_expected_sentence")
+        has_nested_expected = any(
+            left
+            and right
+            and (left in right or right in left)
+            for left_index, left in enumerate(expected_final)
+            for right_index, right in enumerate(expected_final)
+            if left_index < right_index
+        )
+        if has_nested_expected:
+            case_definition_flags.append("nested_expected_sentence")
+        if expected_final:
+            expected_group_key = json.dumps(
+                {
+                    "language": str(item.get("language", "")),
+                    "expected_final": expected_final,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            if expected_group_counts[expected_group_key] > 1:
+                case_definition_flags.append("repeated_expected_group")
+        item["case_definition_flags"] = case_definition_flags
         enriched.append(item)
     return enriched
 
@@ -1287,6 +1348,7 @@ def build_benchmark_report(
     expected_quality_strata_summary = summarize_results_by_expected_quality_strata(results)
     input_evidence_strata_summary = summarize_results_by_input_evidence_strata(results)
     context_strata_summary = summarize_results_by_context_strata(results)
+    case_definition_strata_summary = summarize_results_by_case_definition_strata(results)
     collection_strata_summary = summarize_results_by_collection_strata(results)
     strict_logic_candidate_summary = summarize_strict_logic_candidate_results(cases, results)
     queue_residue_strata_summary = summarize_results_by_queue_residue_strata(results)
@@ -1380,6 +1442,7 @@ def build_benchmark_report(
         "expected_quality_strata_summary": expected_quality_strata_summary,
         "input_evidence_strata_summary": input_evidence_strata_summary,
         "context_strata_summary": context_strata_summary,
+        "case_definition_strata_summary": case_definition_strata_summary,
         "collection_strata_summary": collection_strata_summary,
         "strict_logic_candidate_summary": strict_logic_candidate_summary,
         "case_exemplar_summary": case_exemplar_summary,

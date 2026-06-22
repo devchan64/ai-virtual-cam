@@ -212,9 +212,12 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(strict_summary["collection_strata"]["manual_named_case"]["case_count"], 1)
         self.assertEqual(report["cases"][0]["expected_quality_flags"], [])
         self.assertEqual(report["cases"][0]["case_context_flags"], [])
+        self.assertEqual(report["cases"][0]["case_definition_flags"], [])
         self.assertTrue(report["cases"][0]["input_evidence"]["has_evidence"])
         self.assertTrue(report["cases"][0]["input_evidence"]["fully_supported"])
         self.assertEqual(report["cases"][0]["input_evidence"]["covered_count"], 2)
+        self.assertEqual(report["case_definition_strata_summary"]["clean_case_definition"]["case_count"], 1)
+        self.assertEqual(report["case_definition_strata_summary"]["case_definition_review"]["case_count"], 0)
         self.assertEqual(report["case_exemplar_summary"]["lifecycle_focus_top"][0]["id"], "case-a")
         self.assertEqual(report["staged_queue_residue_summary"]["queue_residue_case_count"], 0)
         self.assertEqual(report["staged_queue_residue_summary"]["active_staged_residue_case_count"], 0)
@@ -678,6 +681,97 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(report["context_strata_summary"]["context_definition_review"]["case_count"], 1)
         self.assertEqual(report["context_strata_summary"]["clean_context"]["case_count"], 0)
         self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
+
+    def test_repeated_expected_groups_are_case_definition_review_not_strict_logic(self) -> None:
+        args = Namespace(
+            model="sat-3l-sm",
+            device="cuda",
+            compute_type="float16",
+            min_final_f1=0.0,
+            fail_on_regression=False,
+        )
+        cases = [
+            SbdCase(
+                id="case-a",
+                language="en",
+                chunks=["Target sentence arrived."],
+                expected_completed=[],
+                expected_pending="",
+                expected_final=["Target sentence arrived."],
+                expected_staged="",
+                tags=("missing-final",),
+                sentence_finalize_age=3,
+            ),
+            SbdCase(
+                id="case-b",
+                language="en",
+                chunks=["Target sentence arrived."],
+                expected_completed=[],
+                expected_pending="",
+                expected_final=["Target sentence arrived."],
+                expected_staged="",
+                tags=("missing-final",),
+                sentence_finalize_age=3,
+            ),
+        ]
+        results = [
+            {
+                "id": "case-a",
+                "language": "en",
+                "tags": ["missing-final"],
+                "expected_final": ["Target sentence arrived."],
+                "chunks": [{"input": "Target sentence arrived."}],
+                "actual_final": ["Target sentence arrived."],
+                "actual_pending": "",
+                "actual_staged": "",
+                "actual_staged_queue": [],
+                "final_score": _score(1.0, 1.0, 1.0, exact=True),
+                "final_ordered_score": _score(1.0, 1.0, 1.0, exact=True),
+                "final_boundary_score": _score(1.0, 1.0, 1.0, exact=True),
+                "completed_last_score": _score(1.0, 1.0, 1.0),
+                "pending_exact": True,
+                "staged_exact": True,
+                "case_exact_match": True,
+                "metrics": {"finalized": 1, "stage_start": 1},
+            },
+            {
+                "id": "case-b",
+                "language": "en",
+                "tags": ["missing-final"],
+                "expected_final": ["Target sentence arrived."],
+                "chunks": [{"input": "Target sentence arrived."}],
+                "actual_final": [],
+                "actual_pending": "",
+                "actual_staged": "Target sentence arrived.",
+                "actual_staged_queue": [],
+                "final_score": _score(0.0, 0.0, 0.0),
+                "final_ordered_score": _score(0.0, 0.0, 0.0),
+                "final_boundary_score": _score(0.0, 0.0, 0.0),
+                "completed_last_score": _score(0.0, 0.0, 0.0),
+                "pending_exact": True,
+                "staged_exact": False,
+                "case_exact_match": False,
+                "metrics": {"stage_start": 1},
+            },
+        ]
+
+        report = build_benchmark_report(
+            args=args,
+            case_sources=["cases.jsonl"],
+            corpus_role="challenge-replay",
+            cases=cases,
+            results=results,
+            metric_totals={"finalized": 1, "stage_start": 2},
+            elapsed_ms=1.0,
+        )
+
+        self.assertEqual(report["case_definition_strata_summary"]["case_definition_review"]["case_count"], 2)
+        self.assertEqual(report["case_definition_strata_summary"]["clean_case_definition"]["case_count"], 0)
+        self.assertEqual(report["cases"][0]["case_definition_flags"], ["repeated_expected_group"])
+        self.assertEqual(report["cases"][1]["case_definition_flags"], ["repeated_expected_group"])
+        self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
+        clean_low = report["clean_low_bottleneck_intersection_summary"]["thresholds"]["0.35"]
+        self.assertEqual(clean_low["case_count"], 0)
 
     def test_summarizes_evidence_strata_without_changing_scores(self) -> None:
         results = [
