@@ -26592,3 +26592,56 @@ no_expected_final:
 - traceable source log 케이스는 충분히 많아 보이지만, 그중 859건은 expected/input/context/case-definition 검토가 필요하다.
 - 현재 실제 앱 로직 튜닝 후보는 6건뿐이다. 이 수로 새 파이프라인 원칙을 채택하면 과적합 위험이 크다.
 - 다음 개선 루프는 앱 로직 완화가 아니라 traceable source log 케이스의 recut/expected 정리로 strict 후보 수를 늘린 뒤 다시 CUDA sweep을 수행하는 순서가 맞다.
+
+### 2026-06-23 source trace 필수 검증 옵션 추가
+
+목적:
+
+- 케이스 정리 후 앱 로직 튜닝용 코퍼스가 실제 로그 추적성을 만족하는지 검증한다.
+- legacy sample이나 수동 이관 케이스가 다시 strict 후보로 섞이는 것을 검증 단계에서 막는다.
+
+변경:
+
+- `tests/eval/dictation_ai/cases/validate_sbd_case_files.py`에 `--require-source-trace` 옵션을 추가했다.
+- 이 옵션은 `expected_final`이 있는 케이스에 `source_log`와 `source_chunk`가 모두 있는지 검사한다.
+- 기본 검증은 기존처럼 source trace 누락을 허용하되, summary에 `source_trace_case_count`와 `missing_source_trace_case_count`를 출력한다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_case_validator
+
+Ran 27 tests
+OK
+```
+
+현재 코퍼스 일반 검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases \
+  tests/eval/dictation_ai/sbd_cases \
+  --summary-output .tmp/eval/dictation-ai-sbd/case-validation-current-summary.json
+
+case_count=1027
+expected_final_case_count=1023
+source_trace_case_count=865
+missing_source_trace_case_count=158
+```
+
+현재 코퍼스 source trace 필수 검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases \
+  tests/eval/dictation_ai/sbd_cases \
+  --require-expected-final \
+  --require-source-trace
+
+error: reviewed-context-en-0.jsonl:28
+case 'en_log_no_end_fragment_sun_energy_decimal_20260620_001'
+missing source trace metadata: source_log, source_chunk
+```
+
+판정:
+
+- 이 실패는 현재 상태에서 정상이다. source trace 필수 검증은 정리 완료 gate로 쓰고, 지금은 정리 대상이 남아 있음을 보여준다.
+- 다음 케이스 정리 목표는 `missing_source_trace_case_count=158`을 줄이고, traceable source log 중 review action이 없는 strict 후보를 늘리는 것이다.

@@ -131,6 +131,7 @@ def validate_case_files(
     *,
     allow_drafts: bool = False,
     require_expected_final: bool = False,
+    require_source_trace: bool = False,
     review_packets: Path | None = None,
     corpus_role_override: str | None = None,
 ) -> dict[str, object]:
@@ -151,6 +152,8 @@ def validate_case_files(
     draft_count = 0
     case_count = 0
     expected_final_case_count = 0
+    source_trace_case_count = 0
+    missing_source_trace_case_count = 0
     sources: list[str] = []
     for path in _validated_case_paths(input_list):
         sources.append(str(path))
@@ -201,6 +204,22 @@ def validate_case_files(
                     raise ValueError(f"{path}:{line_no} case {case_id!r} has no expected_final")
                 if has_expected_final:
                     expected_final_case_count += 1
+                    source_log = str(payload.get("source_log", "")).strip()
+                    has_source_chunk = payload.get("source_chunk") is not None
+                    if source_log and has_source_chunk:
+                        source_trace_case_count += 1
+                    else:
+                        missing_source_trace_case_count += 1
+                        if require_source_trace:
+                            missing_parts = []
+                            if not source_log:
+                                missing_parts.append("source_log")
+                            if not has_source_chunk:
+                                missing_parts.append("source_chunk")
+                            raise ValueError(
+                                f"{path}:{line_no} case {case_id!r} missing source trace metadata: "
+                                + ", ".join(missing_parts)
+                            )
                 case_count += 1
                 language_counts[str(payload.get("language", "")).strip().lower() or "en"] += 1
                 tag_counts.update(str(tag).strip() for tag in payload.get("tags", []) if str(tag).strip())
@@ -211,6 +230,8 @@ def validate_case_files(
         "corpus_role": corpus_role,
         "draft_count": draft_count,
         "expected_final_case_count": expected_final_case_count,
+        "source_trace_case_count": source_trace_case_count,
+        "missing_source_trace_case_count": missing_source_trace_case_count,
         "language_counts": dict(sorted(language_counts.items())),
         "tag_counts": dict(sorted(tag_counts.items())),
         "sources": sources,
@@ -259,6 +280,11 @@ def main() -> int:
         action="store_true",
         help="Fail when a non-draft case has no expected_final. Use for reviewed finalization datasets.",
     )
+    parser.add_argument(
+        "--require-source-trace",
+        action="store_true",
+        help="Fail when an expected_final case has no source_log/source_chunk trace metadata.",
+    )
     parser.add_argument("--min-cases", type=int, default=None, help="Fail when loaded case count is below this value.")
     parser.add_argument(
         "--min-expected-final-cases",
@@ -287,6 +313,7 @@ def main() -> int:
             args.cases,
             allow_drafts=args.allow_drafts,
             require_expected_final=args.require_expected_final,
+            require_source_trace=args.require_source_trace,
             review_packets=args.review_packets,
             corpus_role_override=args.corpus_role,
         )

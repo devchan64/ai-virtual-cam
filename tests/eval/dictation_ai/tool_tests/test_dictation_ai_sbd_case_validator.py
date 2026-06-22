@@ -79,6 +79,8 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
         self.assertEqual(summary["case_count"], 1)
         self.assertEqual(summary["draft_count"], 0)
         self.assertEqual(summary["expected_final_case_count"], 1)
+        self.assertEqual(summary["source_trace_case_count"], 0)
+        self.assertEqual(summary["missing_source_trace_case_count"], 1)
         self.assertEqual(summary["language_counts"], {"ko": 1})
         self.assertEqual(summary["tag_counts"], {"missing-final": 1})
 
@@ -491,6 +493,48 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
 
         self.assertEqual(summary["case_count"], 1)
         self.assertEqual(summary["expected_final_case_count"], 0)
+
+    def test_can_require_source_trace_for_expected_final_cases(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "cases.jsonl"
+            self._write_payload(
+                path,
+                {
+                    "id": "case-a",
+                    "language": "ko",
+                    "chunks": ["안녕하세요."],
+                    "expected_final": ["안녕하세요."],
+                    "tags": ["missing-final"],
+                },
+            )
+
+            summary = validate_case_files([path])
+            with self.assertRaisesRegex(ValueError, "missing source trace metadata: source_log, source_chunk"):
+                validate_case_files([path], require_source_trace=True)
+
+        self.assertEqual(summary["source_trace_case_count"], 0)
+        self.assertEqual(summary["missing_source_trace_case_count"], 1)
+
+    def test_accepts_source_trace_for_expected_final_cases(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "cases.jsonl"
+            self._write_payload(
+                path,
+                {
+                    "id": "case-a",
+                    "language": "ko",
+                    "chunks": ["안녕하세요."],
+                    "expected_final": ["안녕하세요."],
+                    "source_log": ".tmp/logs/avc-whisper.log",
+                    "source_chunk": 0,
+                    "tags": ["missing-final"],
+                },
+            )
+
+            summary = validate_case_files([path], require_source_trace=True)
+
+        self.assertEqual(summary["source_trace_case_count"], 1)
+        self.assertEqual(summary["missing_source_trace_case_count"], 0)
 
     def test_enforces_case_thresholds(self) -> None:
         summary = {"case_count": 2, "draft_count": 1, "expected_final_case_count": 1}
