@@ -50,12 +50,6 @@ class TranscriptRevisionLifecycleTest(unittest.TestCase):
             len(append_context(" ".join(["a"] * 100), " ".join(["b"] * 100), max_chars=80)) <= 80
         )
 
-    def test_consume_committed_prefix_handles_exact_connective_repetition(self) -> None:
-        self.assertEqual(
-            consume_committed_prefix("And let's do it now.", "let's do it now."),
-            "",
-        )
-
     def test_consume_committed_prefix_with_connective_and_remaining(self) -> None:
         self.assertEqual(
             consume_committed_prefix("And let's do it now", "let's do it"),

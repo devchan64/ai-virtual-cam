@@ -14683,6 +14683,51 @@ git diff --check
 OK
 ```
 
+### 2026-06-22 quality block 병목 재해석
+
+목적:
+
+- 최신 CUDA 리포트에서 `stage_candidate_quality_blocked=4951`로 큰 병목처럼 보였다.
+- 품질 차단을 완화하면 확정 누락을 줄일 수 있는지, 아니면 오염 후보 차단 신호인지 분해했다.
+
+기준:
+
+```text
+.tmp/eval/dictation-ai-sbd/current-20260622-blocked-short-no-end-active-age.json
+```
+
+관측:
+
+```text
+stage_candidate_quality_blocked
+  cases=976 avg_f1=0.4754
+  without_metric_avg_f1=0.6168
+  low_f1<0.45: 440/976
+
+stage_candidate_quality_latin_only_for_zh
+  cases=60 avg_f1=0.3992
+  low_f1<0.45: 33/60
+
+stage_candidate_quality_repeated_word_ngram
+  cases=213 avg_f1=0.3435
+  low_f1<0.45: 133/213
+
+stage_candidate_quality_short_cjk
+  cases=152 avg_f1=0.6178
+  low_f1<0.45: 33/152
+
+stage_candidate_quality_low_value_cjk_fragment
+  cases=91 avg_f1=0.6462
+  low_f1<0.45: 16/91
+```
+
+해석:
+
+- `quality_blocked` 자체는 낮은 F1과 연결되지만, 사유별로 보면 `latin_only_for_zh`와 `repeated_word_ngram`이 낮은 F1 구간을 강하게 설명한다.
+- 이 둘은 확정 누락이라기보다 입력/언어 오염 또는 반복 환각 후보를 final로 보내지 않기 위한 차단에 가깝다.
+- 반대로 `short_cjk`, `low_value_cjk_fragment`는 metric 발생 케이스 평균 F1이 더 높아, 이 차단을 단순 완화하는 것은 일반 개선축으로 보기 어렵다.
+- 따라서 `stage_candidate_quality_blocked` 카운터 총량만 보고 품질 게이트를 완화하지 않는다. 후속 개선은 품질 게이트 완화보다 input evidence 품질, representative case 분리, 또는 active staged 소비 순서에서 찾아야 한다.
+
 제한:
 
 - `sat + cuda + float16` 벤치는 sandbox 밖 실행 승인이 환경 정책에서 거절되어 실행하지 못했다.
@@ -14836,6 +14881,243 @@ OK
 
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
+
+### 2026-06-22 short-no-end fragment 판정 폭 sweep
+
+목적:
+
+- `stage_candidate_quality_short_no_end_fragment`가 active staged 후보의 age 진행과 suppress에 관여하므로, 조각 판정 폭이 너무 넓거나 좁아 확정 누락/중복 균형을 깨는지 확인했다.
+- STT 정확도나 번역 품질이 아니라, 동일한 reviewed challenge replay 케이스에서 문장 확정 lifecycle trade-off만 비교했다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py run-sweep \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/short-no-end-units-20260622-post-active-age \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/short-no-end-units-20260622-post-active-age/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/short-no-end-units-20260622-post-active-age/summary.md \
+  --include-baseline \
+  --param SHORT_NO_END_FRAGMENT_UNITS=4 \
+  --param SHORT_NO_END_FRAGMENT_UNITS=6 \
+  --param SHORT_NO_END_FRAGMENT_UNITS=7
+```
+
+공통 조건:
+
+```text
+runtime=sat + cuda + float16
+model_source=local-cache-only
+HF_HUB_OFFLINE=1
+TRANSFORMERS_OFFLINE=1
+case_count=1223
+expected_final_case_count=1219
+corpus_role=challenge-replay
+claim_scope=failure-mode lifecycle trade-off only
+```
+
+결과:
+
+```text
+baseline SHORT_NO_END_FRAGMENT_UNITS=5
+final_precision_avg=0.5786
+final_recall_avg=0.4826
+final_f1_avg=0.5040
+final_boundary_f1_avg=0.1177
+finalized_per_stage_start=0.5453
+
+SHORT_NO_END_FRAGMENT_UNITS=4
+final_f1_delta=-0.0004
+precision_delta=-0.0046
+recall_delta=+0.0025
+boundary_f1_delta=-0.0007
+adoption_review=review-risk
+
+SHORT_NO_END_FRAGMENT_UNITS=6
+final_f1_delta=-0.0067
+precision_delta=-0.0024
+recall_delta=-0.0089
+boundary_f1_delta=-0.0003
+adoption_review=review-risk
+
+SHORT_NO_END_FRAGMENT_UNITS=7
+final_f1_delta=-0.0096
+precision_delta=-0.0005
+recall_delta=-0.0132
+boundary_f1_delta=-0.0024
+adoption_review=review-risk
+```
+
+해석:
+
+- 4는 recall을 조금 올리지만 precision, boundary, staged residue가 악화된다. 누락 완화만 보고 채택하면 중복/오염 확정 위험이 커진다.
+- 6과 7은 판정이 과도하게 보수적이 되어 recall과 final F1이 명확히 하락한다.
+- 현재 기본값 5는 active-stage age 보정 이후에도 가장 균형적인 값으로 유지한다.
+- 이 sweep은 파라미터 채택/폐기 근거이며, 운영 평균 품질이나 universal threshold optimality 주장은 지원하지 않는다.
+
+### 2026-06-22 blocked short-no-end age-only 변형 폐기
+
+목적:
+
+- `short_no_end_fragment` 품질 차단 후보가 active staged 후보의 age를 진행시키는 것은 도움이 됐지만, 같은 경로에서 active staged 후보를 suppress하는 동작이 일부 큰 손실 케이스를 만들었다.
+- 따라서 age tick만 유지하고 suppress를 제거하는 변형을 실험해, suppress가 과한 세부 규칙인지 확인했다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-blocked-short-no-end-age-only.json
+```
+
+비교 기준:
+
+```text
+.tmp/eval/dictation-ai-sbd/current-20260622-blocked-short-no-end-active-age.json
+```
+
+결과:
+
+```text
+final_f1_avg: 0.5039716069 -> 0.5033706476 (-0.000600959)
+final_precision_avg: 0.5786360634 -> 0.5774603633 (-0.001175700)
+final_recall_avg: 0.4825649175 -> 0.4819954247 (-0.000569493)
+final_boundary_f1_avg: 0.1177415999 -> 0.1175359837 (-0.000205616)
+finalized: 5456 -> 5447 (-9)
+stage_start: 10005 -> 9947 (-58)
+
+stage_blocked_short_no_end_aged_active_stage: 624 -> 627
+stage_blocked_short_no_end_active_stage_quality_suppressed: 138 -> 0
+stage_queue_promote: 6552 -> 6535
+```
+
+해석:
+
+- suppress 제거는 `finalized_per_stage_start`만 올렸고, precision/recall/boundary/final F1은 모두 하락했다.
+- age tick만으로는 queue 교착을 충분히 해소하지 못하고, stale active stage를 남겨 stage start와 final 소비가 줄어든다.
+- 따라서 age-only 변형은 폐기하고, 현행 `age + quality suppress + queue promote` 경로를 유지한다.
+
+### 2026-06-22 staged queue promotion age sweep
+
+목적:
+
+- 최신 CUDA 리포트에서 `stage_replace_deferred`, `stage_queue_revision`, `stage_queue_promote`가 여전히 큰 병목으로 남아 있었다.
+- 언어별 규칙을 추가하지 않고 queue 생명주기의 보존 시간을 조정해 누락/중복 균형이 개선되는지 확인했다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py run-sweep \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/staged-queue-promotion-age-20260622 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/staged-queue-promotion-age-20260622/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/staged-queue-promotion-age-20260622/summary.md \
+  --include-baseline \
+  --param STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=4 \
+  --param STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=8 \
+  --param STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=10
+```
+
+공통 조건:
+
+```text
+runtime=sat + cuda + float16
+model_source=local-cache-only
+case_count=1223
+expected_final_case_count=1219
+corpus_role=challenge-replay
+```
+
+결과:
+
+```text
+baseline STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=6
+final_precision_avg=0.5786
+final_recall_avg=0.4826
+final_f1_avg=0.5040
+final_boundary_f1_avg=0.1177
+finalized_per_stage_start=0.5453
+
+STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=4
+final_f1_delta=-0.0006
+precision_delta=-0.0001
+recall_delta=-0.0009
+boundary_f1_delta=+0.0000
+changed_cases=4
+adoption_review=review-risk
+
+STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=8
+final_f1_delta=+0.0000
+precision_delta=+0.0000
+recall_delta=+0.0000
+boundary_f1_delta=+0.0000
+changed_cases=0
+adoption_review=no-risk-flag
+
+STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=10
+final_f1_delta=+0.0000
+precision_delta=+0.0000
+recall_delta=+0.0000
+boundary_f1_delta=+0.0000
+changed_cases=0
+adoption_review=no-risk-flag
+```
+
+해석:
+
+- queue promotion age를 4로 줄이면 staged residue는 2건 줄지만 recall/final F1이 하락하고 empty final이 1건 늘어난다.
+- 8과 10은 현재 challenge replay에서 완전히 동일한 결과라, queue 보존 시간 확대는 현재 병목을 풀지 못한다.
+- 기본값 6은 유지한다.
+- 남은 병목은 단순 queue 보존 시간이 아니라 `stage_replace_deferred`와 `stage_queue_revision`이 같은 chunk/동일 후보군에서 반복되는 구조로 보는 것이 타당하다.
+
+후속 관측:
+
+```text
+stage_replace_deferred_same_chunk=0      cases=448 avg_f1=0.4443 low_f1<0.45=220
+stage_replace_deferred_same_chunk=1..3   cases=501 avg_f1=0.5306 low_f1<0.45=201
+stage_replace_deferred_same_chunk=4..10  cases=252 avg_f1=0.5442 low_f1<0.45=82
+stage_replace_deferred_same_chunk>10     cases=22  avg_f1=0.6505 low_f1<0.45=3
+```
+
+- 같은 chunk 안에서 교체 보류가 반복되는 현상은 병목 카운터로 크게 보이지만, 현재 challenge replay에서는 낮은 F1과 직접 연결되지 않는다.
+- 이는 sliding window가 같은 발화를 여러 sentence-candidate 형태로 안정화하는 과정에서 나타나는 정상적인 후보 보류 신호로 보는 편이 더 타당하다.
+- 따라서 `stage_replace_deferred_same_chunk`를 줄이는 별도 규칙은 추가하지 않는다. 후보 안정화 과정 자체를 억제하면 확정 누락보다 순서/중복 위험이 커질 수 있다.
+
+### 2026-06-22 unit helper 테스트 축소
+
+목적:
+
+- 받아쓰기 확정 품질은 단일 helper의 예시 입력/출력으로 보장하기 어렵고, 실제 app-log replay case와 CUDA/SaT/float16 벤치로 판단해야 한다.
+- `tests/unit/test_dictation_pipeline_nodes.py`에 남아 있던 recent-final delta, short CJK, token-sentence revision reset 등 세부 품질정책 테스트를 제거하고, node/contract/manifest/commit-buffer 구조 계약 위주로 남겼다.
+
+정리:
+
+- 제거한 대상은 성능 파라미터와 문장 품질 정책의 작은 예시 테스트다.
+- 유지한 대상은 `SpeechEvidenceToSttHypothesisNode`, `SttHypothesisToSentenceCandidateNode`, `SentenceCandidateCommitBufferNode`의 상태/계약, tuning manifest/protocol, final-only translation 정책이다.
+- `tests/unit/test_transcript_revision.py`에서는 같은 connective prefix 소비 사례를 반복하던 중복 테스트 1개만 제거했다.
+- 이 정리는 운영 로직 변경이 아니라, 품질 판단 권한을 unit helper 테스트에서 `tests/eval/dictation_ai/sbd_cases`와 `sbd_benchmark.py`로 되돌리는 작업이다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.unit.test_dictation_pipeline_nodes \
+  tests.unit.test_dictation_ai_contract \
+  tests.unit.test_transcript_revision \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_parameter_sweep
+Ran 86 tests in 0.013s, OK
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases --max-drafts 0
+case_count=1223
+expected_final_case_count=1219
+draft_count=0
+
+git diff --check
+OK
+```
 
 ### 2026-06-22 core manifest exploratory sweep와 기본값 유지 판단
 
