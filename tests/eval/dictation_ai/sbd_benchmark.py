@@ -215,6 +215,7 @@ def main() -> int:
     summary = dict(report["summary"])
     evidence_protocol = dict(report.get("evidence_protocol", {}))
     case_definition_actions = dict(report.get("case_definition_action_summary", {}))
+    case_definition_health = dict(report.get("case_definition_health_summary", {}))
     strict_logic_summary = dict(report.get("strict_logic_candidate_summary", {}))
     strict_summary = dict(strict_logic_summary.get("summary", {}))
     _write_report(args.output, report)
@@ -223,6 +224,7 @@ def main() -> int:
         f"corpus_role={corpus_role} cases={len(results)} finalized={summary['finalized']} "
         f"claim_scope_key={evidence_protocol.get('claim_scope_key', '')} "
         f"case_definition_review={case_definition_actions.get('review_case_count', 0)} "
+        f"case_definition_review_ratio={float(case_definition_health.get('case_definition_review_ratio', 0.0)):.3f} "
         f"logic_tuning_candidates={case_definition_actions.get('logic_tuning_candidate_count', 0)} "
         f"strict_logic_candidates={strict_logic_summary.get('strict_case_count', 0)} "
         f"stage_start={summary['stage_start']} "

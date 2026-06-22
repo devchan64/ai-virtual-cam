@@ -26445,3 +26445,50 @@ RECENT_FINAL_FRAGMENT_ECHO_MAX_LENGTH_RATIO=0.35: final_f1_delta=-0.0001, precis
 - 운영 기본값을 변경하지 않는다.
 - `recent-final echo` 축은 중복 억제 핵심 원칙으로 유지하되, 현재 케이스 집합에서는 완화해도 누락 개선 근거가 없다.
 - 다음 로직 탐색은 파라미터 완화보다 케이스 정의 정리 후 남는 clean low에서 다시 시작한다.
+
+### 2026-06-23 case-definition health 리포트 보강
+
+목적:
+
+- 전체 challenge replay 평균이 앱 로직 성능처럼 오해되는 것을 막는다.
+- 케이스 정의/라벨/윈도우 문제가 큰 상태에서는 먼저 코퍼스 정리를 우선하도록 벤치 리포트가 직접 안내한다.
+
+변경:
+
+- `tests/eval/dictation_ai/benchmark/sbd_benchmark_report.py`에 `case_definition_health_summary`를 추가했다.
+- `tests/eval/dictation_ai/sbd_benchmark.py` CLI 출력에 `case_definition_review_ratio`를 추가했다.
+- 이 값은 성능 지표가 아니라, 전체 평균을 앱 로직 튜닝 근거로 볼 수 있는지 판단하는 해석 보조 지표다.
+
+CUDA 벤치:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --output .tmp/eval/dictation-ai-sbd/current-20260623-case-health-report.json
+
+cases=1027
+expected_final_case_count=1023
+case_definition_review=979
+case_definition_review_ratio=0.957
+logic_tuning_candidates=44
+strict_logic_candidates=35
+final_f1_avg=0.551
+strict_final_f1_avg=0.942
+```
+
+상위 review action:
+
+```text
+remove_or_recut_expected_outside_replay_input=599
+rewrite_expected_final_to_observed_stt_text=141
+add_initial_final_or_recut_mid_stream_case=106
+rewrite_expected_final_to_final_sentence_boundary=77
+extend_replay_tail_or_reclassify_staged_expectation=27
+deduplicate_or_justify_shifted_window_repeat=25
+manual_boundary_review=4
+```
+
+판정:
+
+- 현재 전체 challenge 평균은 케이스 정의 문제가 지배하므로 앱 로직 변경의 직접 근거로 쓰지 않는다.
+- 운영 로직 튜닝은 `strict_logic_candidates=35`와 clean low 후보에서 다시 시작한다.
+- review 비율이 높은 shard는 성능 개선 대상이 아니라 recut, expected_final 재작성, initial_final 보강, 중복 그룹 정리 대상으로 본다.

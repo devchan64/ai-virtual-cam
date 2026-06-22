@@ -1331,6 +1331,51 @@ def summarize_strict_logic_candidate_results(cases: list[SbdCase], results: list
     }
 
 
+def summarize_case_definition_health(
+    *,
+    results: list[dict[str, Any]],
+    case_definition_action_summary: dict[str, Any],
+    strict_logic_candidate_summary: dict[str, Any],
+) -> dict[str, Any]:
+    """Summarize whether the current case set is usable as app-logic tuning evidence."""
+    expected_final_count = sum(1 for result in results if result.get("expected_final"))
+    review_case_count = int(case_definition_action_summary.get("review_case_count", 0))
+    logic_tuning_candidate_count = int(case_definition_action_summary.get("logic_tuning_candidate_count", 0))
+    strict_case_count = int(strict_logic_candidate_summary.get("strict_case_count", 0))
+    action_counts = {
+        str(action): int(count)
+        for action, count in dict(case_definition_action_summary.get("action_counts", {}) or {}).items()
+    }
+    top_actions = [
+        {"action": action, "case_count": count}
+        for action, count in sorted(action_counts.items(), key=lambda item: (-item[1], item[0]))[:CASE_EXEMPLAR_LIMIT]
+    ]
+    review_ratio = review_case_count / max(expected_final_count, 1)
+    strict_ratio = strict_case_count / max(expected_final_count, 1)
+    if strict_case_count <= 0:
+        recommendation = "case-definition-review-required"
+    elif review_ratio >= 0.50:
+        recommendation = "prioritize-case-definition-cleanup"
+    else:
+        recommendation = "app-logic-tuning-subset-usable"
+    return {
+        "interpretation": (
+            "Use this health summary before treating aggregate final_f1_avg as app-logic evidence. "
+            "High review ratios mean the challenge corpus is dominated by label/window definition work; "
+            "strict_logic_candidates are the preferred subset for conservative app-logic tuning."
+        ),
+        "expected_final_case_count": expected_final_count,
+        "case_definition_review_count": review_case_count,
+        "case_definition_review_ratio": review_ratio,
+        "logic_tuning_candidate_count": logic_tuning_candidate_count,
+        "logic_tuning_candidate_ratio": logic_tuning_candidate_count / max(expected_final_count, 1),
+        "strict_logic_candidate_count": strict_case_count,
+        "strict_logic_candidate_ratio": strict_ratio,
+        "top_review_actions": top_actions,
+        "recommendation": recommendation,
+    }
+
+
 def summarize_results_by_queue_residue_strata(results: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Separate cases by residual staged queue severity."""
     no_queue: list[dict[str, Any]] = []
@@ -1714,6 +1759,11 @@ def build_benchmark_report(
     case_definition_file_summary = summarize_case_definition_files(results)
     collection_strata_summary = summarize_results_by_collection_strata(results)
     strict_logic_candidate_summary = summarize_strict_logic_candidate_results(cases, results)
+    case_definition_health_summary = summarize_case_definition_health(
+        results=results,
+        case_definition_action_summary=case_definition_action_summary,
+        strict_logic_candidate_summary=strict_logic_candidate_summary,
+    )
     queue_residue_strata_summary = summarize_results_by_queue_residue_strata(results)
     case_exemplar_summary = summarize_case_exemplars(results)
     lifecycle_bottleneck_summary = summarize_lifecycle_bottlenecks(results, metric_totals)
@@ -1807,6 +1857,7 @@ def build_benchmark_report(
         "context_strata_summary": context_strata_summary,
         "case_definition_strata_summary": case_definition_strata_summary,
         "case_definition_action_summary": case_definition_action_summary,
+        "case_definition_health_summary": case_definition_health_summary,
         "case_definition_file_summary": case_definition_file_summary,
         "collection_strata_summary": collection_strata_summary,
         "strict_logic_candidate_summary": strict_logic_candidate_summary,

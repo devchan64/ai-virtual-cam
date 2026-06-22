@@ -224,6 +224,12 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(report["case_definition_strata_summary"]["clean_case_definition"]["case_count"], 1)
         self.assertEqual(report["case_definition_strata_summary"]["case_definition_review"]["case_count"], 0)
         self.assertEqual(report["case_definition_action_summary"]["review_case_count"], 0)
+        self.assertEqual(report["case_definition_health_summary"]["case_definition_review_count"], 0)
+        self.assertEqual(report["case_definition_health_summary"]["strict_logic_candidate_count"], 1)
+        self.assertEqual(
+            report["case_definition_health_summary"]["recommendation"],
+            "app-logic-tuning-subset-usable",
+        )
         self.assertEqual(report["case_exemplar_summary"]["lifecycle_focus_top"][0]["id"], "case-a")
         self.assertEqual(report["staged_queue_residue_summary"]["queue_residue_case_count"], 0)
         self.assertEqual(report["staged_queue_residue_summary"]["active_staged_residue_case_count"], 0)
@@ -797,6 +803,16 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(clean_low["case_count"], 1)
         self.assertEqual(clean_low["lowest_cases"][0]["id"], "full-input-low")
         self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 1)
+        health = report["case_definition_health_summary"]
+        self.assertEqual(health["expected_final_case_count"], 2)
+        self.assertEqual(health["case_definition_review_count"], 1)
+        self.assertEqual(health["logic_tuning_candidate_count"], 1)
+        self.assertEqual(health["strict_logic_candidate_count"], 1)
+        self.assertEqual(health["recommendation"], "prioritize-case-definition-cleanup")
+        self.assertEqual(
+            health["top_review_actions"],
+            [{"action": "remove_or_recut_expected_outside_replay_input", "case_count": 1}],
+        )
         self.assertEqual(
             report["case_definition_action_summary"]["action_counts"],
             {"remove_or_recut_expected_outside_replay_input": 1},
