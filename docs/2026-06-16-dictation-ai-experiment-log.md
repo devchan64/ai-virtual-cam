@@ -46,6 +46,55 @@
 - final 확정은 단일 모델 출력이 아니라 staged confirmation, `sentenceFinalizeAge`, 중복 억제, revision lifecycle로 결정한다.
 - 번역은 final transcript만 대상으로 한다.
 
+## 2026-06-23 벤치 expected_final 누락 감사 보강
+
+문제:
+
+- 일부 저점 케이스는 `expected_final`이 실제 STT window 입력에서 완결 문장으로 반복 관측되는 `actual_final` 후보를 누락한 상태였다.
+- 이런 케이스를 그대로 앱 로직 튜닝 근거로 쓰면, 앱이 완결 문장을 확정한 동작까지 오탐으로 계산되어 과도한 억제 로직을 유도할 수 있다.
+
+반영:
+
+- `tests/eval/dictation_ai/benchmark/sbd_benchmark_report.py`에 `expected_final_omits_supported_actual_sentence` 케이스 정의 플래그를 추가했다.
+- 이 플래그는 다른 품질/컨텍스트/정의 오류가 없는 케이스 중에서만 적용한다.
+- 조건은 `actual_final`이 `expected_final`보다 많고, expected와 충분히 유사하지 않은 actual 완결 문장이 replay input chunk에서 충분히 지원되는 경우다.
+- 해당 케이스는 `manual_boundary_review`로 분리하며, `strict_logic_candidate_summary`에서 제외한다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report
+Ran 23 tests in 0.013s, OK
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py --output .tmp/eval/dictation-ai-sbd/current-20260623-clean-omitted-actual-review-report.json
+cases=1027
+case_definition_review=979
+logic_tuning_candidates=44
+strict_logic_candidates=35
+final_f1_avg=0.551
+strict_final_f1_avg=0.942
+```
+
+새로 분리된 케이스:
+
+- `zh_log_duplicate_dumpling_finger_sound_fragment_20260617_001`
+- `zh_log_missing_prison_restaurant_fragment_20260617_001`
+- `zh_log_missing_mangwon_market_hotcake_queue_20260621_001`
+- `zh_log_missing_food_queue_burst_same_chunk_replace_20260621_001`
+
+해석:
+
+- `zh_log_missing_food_queue_burst_same_chunk_replace_20260621_001`는 이전 strict 저점 후보였지만, actual에 입력으로 지원되는 완결 문장이 expected보다 다수 많아 케이스 경계 재검토가 먼저다.
+- 이 감사 후 clean low case는 `<0.35`, `<0.50`에서 0건이고, `<0.65`에는 `ko_log_mixed_yuan_dollar_50years_fragment_20260618_001` 1건만 남는다.
+- 다음 앱 로직 튜닝은 이 1건처럼 케이스 정의 문제가 없는 후보를 우선 대상으로 삼는다.
+
+후속 실험:
+
+- `AVC_DICTATION_SHORT_NO_END_FRAGMENT_UNITS=2`로 짧은 no-end 차단 임계값을 완화하면 `ko_log_mixed_yuan_dollar_50years_fragment_20260618_001`는 `final_f1=1.0`으로 개선된다.
+- 하지만 전체 `final_precision_avg`가 `0.612 -> 0.587`, `final_f1_avg`가 `0.551 -> 0.541`로 하락하고 finalized 수가 `5015 -> 5279`로 증가해 과확정 위험이 커진다.
+- `later_completed_sentences`가 있는 경우에만 short no-end stage를 허용하는 구조적 완화도 `final_precision_avg=0.589`, `final_f1_avg=0.541`, `stage_start=10231`로 악화됐다.
+- 따라서 no-end 짧은 후보 완화는 현재 기본 로직으로 채택하지 않는다. 남은 한국어 케이스는 별도 원칙 없이 단일 케이스를 맞추기 위한 조정으로 보이면 앱 로직 변경 근거로 쓰지 않는다.
+
 모델 선정 기준:
 
 | 흐름 | 선정 모델 | 탈락/보류 모델 | 선정 이유 |
