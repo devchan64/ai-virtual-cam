@@ -239,6 +239,58 @@ class DictationAiSbdInitialFinalContextAuditTest(unittest.TestCase):
             ["case-b", "case-c"],
         )
 
+    def test_reports_input_evidence_review_signals(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "cases.jsonl"
+            path.write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "id": "weak-input",
+                                "language": "en",
+                                "chunks": ["Completely unrelated replay input."],
+                                "expected_final": ["The expected sentence never appears."],
+                            },
+                            ensure_ascii=False,
+                        ),
+                        json.dumps(
+                            {
+                                "id": "partial-input",
+                                "language": "en",
+                                "chunks": ["The first expected sentence appears."],
+                                "expected_final": [
+                                    "The first expected sentence appears.",
+                                    "The second expected sentence is outside the replay window.",
+                                ],
+                            },
+                            ensure_ascii=False,
+                        ),
+                        json.dumps(
+                            {
+                                "id": "full-input",
+                                "language": "en",
+                                "chunks": ["The expected sentence appears."],
+                                "expected_final": ["The expected sentence appears."],
+                            },
+                            ensure_ascii=False,
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            summary = audit_initial_final_context([path], duplicate_group_limit=5)
+
+        review = summary["case_definition_review"]
+        self.assertEqual(review["weak_input_evidence_case_count"], 1)
+        self.assertEqual(review["weak_input_evidence_cases"][0]["id"], "weak-input")
+        self.assertEqual(review["partial_input_evidence_case_count"], 1)
+        self.assertEqual(review["partial_input_evidence_cases"][0]["id"], "partial-input")
+        self.assertEqual(review["partial_input_evidence_cases"][0]["input_evidence"]["covered_count"], 1)
+        self.assertEqual(review["partial_input_evidence_cases"][0]["input_evidence"]["expected_count"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

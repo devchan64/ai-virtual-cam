@@ -45,8 +45,8 @@
 중간 스트림에서 시작한 challenge case가 이전 final/committed 상태 없이 재생되는지 확인할 때는
 `audit-initial-final-context`에 CUDA benchmark report를 함께 넘긴다.
 이 감사는 `initial_final` 보정 후보와 함께 같은 `expected_final`이 여러 sliding-window case에 반복 등록된 그룹,
-case 내부의 중복/포함 expected 문장도 케이스 정의 검토 신호로 출력한다. 출력은 자동 삭제 규칙이 아니라
-사람이 로그 근거와 lifecycle 차이를 보고 정리할 후보 목록이다.
+case 내부의 중복/포함 expected 문장, replay 입력 chunks에서 근거가 약한 expected도 케이스 정의 검토 신호로
+출력한다. 출력은 자동 삭제 규칙이 아니라 사람이 로그 근거와 lifecycle 차이를 보고 정리할 후보 목록이다.
 기본 CUDA report의 `case_definition_action_summary`도 같은 목적의 감사 신호다. 이 요약은
 `initial_final` 보정, fragment expected 재작성, shifted-window 반복 그룹 정리, 수동 문장 경계 검토를
 분리해서 보여준다. 앱 로직 튜닝 근거는 먼저 `strict_logic_candidate_summary`와

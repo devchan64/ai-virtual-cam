@@ -16,6 +16,7 @@ if str(REPO_ROOT) not in sys.path:
 from src.app.sentence_boundary import normalized_text
 from tests.eval.dictation_ai.cases.sbd_expected_quality import expected_quality_flags
 from tests.eval.dictation_ai.cases.sbd_case_paths import iter_case_paths
+from tests.eval.dictation_ai.cases.sbd_input_evidence import case_input_evidence
 
 
 DEFAULT_MIN_PREFIX_UNITS = 12
@@ -219,6 +220,7 @@ def _case_definition_record(payload: dict[str, Any], *, path: Path, line_no: int
         "duplicate_expected_count": max(len(expected_final) - len(set(expected_final)), 0),
         "nested_expected_pairs": nested_expected_pairs,
         "expected_quality_flags": expected_quality_flags(expected_final),
+        "input_evidence": case_input_evidence({"expected_final": expected_final, "chunks": chunks}),
     }
 
 
@@ -233,6 +235,7 @@ def _case_payload(record: dict[str, Any]) -> dict[str, Any]:
         "review_group_id": record.get("review_group_id", ""),
         "expected_sentence_count": record.get("expected_sentence_count", 0),
         "expected_quality_flags": list(record.get("expected_quality_flags", [])),
+        "input_evidence": dict(record.get("input_evidence", {})),
     }
 
 
@@ -251,6 +254,18 @@ def _case_definition_review_summary(
         for record in records
         if record.get("nested_expected_pairs")
     ]
+    weak_input_evidence_cases = [
+        record
+        for record in records
+        if int(dict(record.get("input_evidence", {})).get("expected_count", 0)) > 0
+        and not bool(dict(record.get("input_evidence", {})).get("has_evidence"))
+    ]
+    partial_input_evidence_cases = [
+        record
+        for record in records
+        if bool(dict(record.get("input_evidence", {})).get("has_evidence"))
+        and not bool(dict(record.get("input_evidence", {})).get("fully_supported"))
+    ]
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for record in records:
         if record.get("expected_final_normalized"):
@@ -268,12 +283,16 @@ def _case_definition_review_summary(
             "These are case-definition review signals, not automatic deletion rules. "
             "Duplicate or nested expected sentences may be real repeated speech; repeated expected groups "
             "usually mean shifted-window samples from the same log region and should be deduplicated only "
-            "after checking that they add no distinct lifecycle failure."
+            "after checking that they add no distinct lifecycle failure. Weak or partial input evidence "
+            "means expected_final is not sufficiently represented in the replay chunks and should be "
+            "fixed before using the case as app logic tuning evidence."
         ),
         "duplicate_expected_case_count": len(duplicate_expected_cases),
         "nested_expected_case_count": len(nested_expected_cases),
         "repeated_expected_group_count": len(repeated_groups),
         "repeated_expected_case_count": sum(len(items) for items in repeated_groups),
+        "weak_input_evidence_case_count": len(weak_input_evidence_cases),
+        "partial_input_evidence_case_count": len(partial_input_evidence_cases),
         "duplicate_expected_cases": [
             {
                 **_case_payload(record),
@@ -289,6 +308,34 @@ def _case_definition_review_summary(
                 "expected_final_preview": list(record.get("expected_final_normalized", []))[:8],
             }
             for record in nested_expected_cases[:duplicate_group_limit]
+        ],
+        "weak_input_evidence_cases": [
+            {
+                **_case_payload(record),
+                "expected_final_preview": list(record.get("expected_final_normalized", []))[:5],
+            }
+            for record in sorted(
+                weak_input_evidence_cases,
+                key=lambda item: (
+                    float(dict(item.get("input_evidence", {})).get("coverage_avg", 0.0)),
+                    str(item.get("language", "")),
+                    str(item.get("id", "")),
+                ),
+            )[:duplicate_group_limit]
+        ],
+        "partial_input_evidence_cases": [
+            {
+                **_case_payload(record),
+                "expected_final_preview": list(record.get("expected_final_normalized", []))[:5],
+            }
+            for record in sorted(
+                partial_input_evidence_cases,
+                key=lambda item: (
+                    float(dict(item.get("input_evidence", {})).get("coverage_avg", 0.0)),
+                    str(item.get("language", "")),
+                    str(item.get("id", "")),
+                ),
+            )[:duplicate_group_limit]
         ],
         "repeated_expected_groups": [
             {
@@ -590,7 +637,13 @@ def main() -> int:
     if args.limit is not None:
         output["candidates"] = list(output["candidates"])[: args.limit]
         review = dict(output.get("case_definition_review", {}))
-        for key in ("duplicate_expected_cases", "nested_expected_cases", "repeated_expected_groups"):
+        for key in (
+            "duplicate_expected_cases",
+            "nested_expected_cases",
+            "weak_input_evidence_cases",
+            "partial_input_evidence_cases",
+            "repeated_expected_groups",
+        ):
             if isinstance(review.get(key), list):
                 review[key] = list(review[key])[: args.limit]
         output["case_definition_review"] = review
