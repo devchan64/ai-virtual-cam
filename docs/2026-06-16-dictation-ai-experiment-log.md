@@ -15729,6 +15729,101 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-23 challenge replay 입력 근거 없는 케이스 정리
+
+배경:
+
+- 받아쓰기 확정 로직을 튜닝하기 전, 낮은 벤치 점수가 앱 로직 문제인지 케이스 정의 문제인지 분리했다.
+- 정식 challenge replay case는 `expected_final`이 같은 case의 STT context window `chunks`에서 지지되어야 한다.
+- 입력 근거가 없는 `expected_final`은 final lifecycle 실패를 재현하는 근거가 아니라 수집/정의 오류로 보며, 로직 튜닝 근거에서 제외한다.
+
+감사 기준:
+
+```text
+case_input_evidence.has_evidence=false
+expected sentence input coverage < 0.60
+```
+
+감사 결과:
+
+```text
+case_count=1044
+expected_final_case_count=1040
+full_input_evidence=424
+partial_input_evidence_review=599
+weak_input_evidence_review=21
+no_input_evidence_removed=17
+```
+
+정리 후 검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/cases/validate_sbd_case_files.py tests/eval/dictation_ai/sbd_cases --min-expected-final-cases 1000 --max-drafts 0
+case_count=1027
+expected_final_case_count=1023
+draft_count=0
+language_counts={en:383, ko:346, zh:298}
+
+input_evidence={full:424, has:599, none:4}
+```
+
+정리 후 CUDA 벤치:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py --cases tests/eval/dictation_ai/sbd_cases --device cuda --compute-type float16 --output .tmp/eval/dictation-ai-sbd/current-20260623-pruned-no-input-evidence-report.json
+
+case_count=1027
+finalized=4940
+stage_start=9078
+finalized_per_stage_start=0.5441727252698833
+final_precision_avg=0.6163395419363498
+final_recall_avg=0.534357277430485
+final_f1_avg=0.550492743360324
+final_ordered_f1_avg=0.5269590853705198
+final_boundary_f1_avg=0.13401379432590774
+```
+
+기준 리포트 대비:
+
+```text
+baseline=.tmp/eval/dictation-ai-sbd/current-20260622-right-context-aged-report.json
+case_count: 1044 -> 1027
+final_f1_avg: 0.5446897006044567 -> 0.550492743360324 (+0.005803043)
+final_ordered_f1_avg: 0.5215392535206168 -> 0.5269590853705198 (+0.005419832)
+final_boundary_f1_avg: 0.13355571529952803 -> 0.13401379432590774 (+0.000458079)
+```
+
+제거한 케이스:
+
+```text
+ko_log_draft_20260620_avc_whisper_log_002772
+ko_log_draft_20260620_avc_whisper_log_002773
+ko_log_draft_20260620_avc_whisper_log_002774
+ko_log_draft_20260620_avc_whisper_log_002775
+ko_log_draft_20260620_avc_whisper_log_002817
+ko_log_draft_20260620_avc_whisper_log_002843
+ko_log_draft_20260620_avc_whisper_log_1_002699
+ko_log_draft_20260620_avc_whisper_log_1_002711
+ko_log_draft_20260620_avc_whisper_log_1_002712
+ko_log_no_end_delta_translation_skip_guidance_fragment_20260619_001
+ko_log_repeated_overrun_level4_fragment_20260618_001
+zh_log_draft_20260620_avc_whisper_log_11_000846
+zh_log_draft_20260620_avc_whisper_log_11_000847
+zh_log_draft_20260620_avc_whisper_log_11_000848
+zh_log_draft_20260620_avc_whisper_log_11_000849
+zh_log_draft_20260620_avc_whisper_log_11_000942
+zh_log_draft_20260620_avc_whisper_log_11_000943
+```
+
+해석:
+
+- `zh_log_draft_20260620_avc_whisper_log_11_000942/000943`은 중국어 expected인데 입력 chunk 대부분이 영어 가사/영문장으로 시작해 source window가 맞지 않는다.
+- 한국어 일부 케이스는 expected 문장이 window 밖 앞뒤 문장으로 보이거나, STT window의 의미 단위와 사람이 확정한 문장이 맞지 않는다.
+- 이런 케이스는 앱 로직 개선 신호가 아니라 벤치 데이터 노이즈이므로 제거한다.
+- 부분 입력 근거가 있는 케이스는 즉시 제거하지 않는다. 순서 역전, expected 품질 flag, 중복 수집 여부를 별도 검토 대상으로 남긴다.
+- `input_evidence=none`으로 남은 4건은 `expected_final=[]`인 pending/staged 전용 케이스로, finalization 평균에는 포함되지 않는다.
+- 이번 수치 상승은 로직 성능 개선이 아니라 case-definition 정리 효과로 해석한다. 다음 로직 개선은 `supported_monotonic`, `full_input_evidence`, `clean_low` subset에서 병목이 반복되는 경우에만 진행한다.
+
 ### 2026-06-23 recent-final/queue 파라미터 추가 sweep 기각
 
 목적:
