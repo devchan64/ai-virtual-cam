@@ -47,6 +47,10 @@
 이 감사는 `initial_final` 보정 후보와 함께 같은 `expected_final`이 여러 sliding-window case에 반복 등록된 그룹,
 case 내부의 중복/포함 expected 문장도 케이스 정의 검토 신호로 출력한다. 출력은 자동 삭제 규칙이 아니라
 사람이 로그 근거와 lifecycle 차이를 보고 정리할 후보 목록이다.
+기본 CUDA report의 `case_definition_action_summary`도 같은 목적의 감사 신호다. 이 요약은
+`initial_final` 보정, fragment expected 재작성, shifted-window 반복 그룹 정리, 수동 문장 경계 검토를
+분리해서 보여준다. 앱 로직 튜닝 근거는 먼저 `strict_logic_candidate_summary`와
+`clean_low_bottleneck_intersection_summary`를 본다.
 
 ```text
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py audit-initial-final-context \

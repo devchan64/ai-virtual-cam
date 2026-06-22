@@ -176,6 +176,12 @@ SUPPORTED_LOW_BOTTLENECK_METRICS = (
     "candidate_delta_trimmed",
     "candidate_duplicate_suppressed",
 )
+CASE_REVIEW_ACTION_FLAGS = (
+    "add_initial_final_or_trim_prefix",
+    "rewrite_fragment_expected_final",
+    "deduplicate_shifted_window_group",
+    "manual_boundary_review",
+)
 
 
 def _sentence_support_score(sentence: str, chunk: str) -> float:
@@ -911,6 +917,107 @@ def summarize_results_by_case_definition_strata(results: list[dict[str, Any]]) -
     }
 
 
+def _case_review_actions(result: dict[str, Any]) -> list[str]:
+    actions: list[str] = []
+    expected_quality = set(result.get("expected_quality_flags", []) or [])
+    context_flags = set(result.get("case_context_flags", []) or [])
+    definition_flags = set(result.get("case_definition_flags", []) or [])
+    if "unmodeled_prefix_context" in context_flags:
+        actions.append("add_initial_final_or_trim_prefix")
+    if definition_flags.intersection({"duplicate_expected_sentence"}):
+        actions.append("rewrite_fragment_expected_final")
+    if expected_quality.intersection({"all_expected_no_terminal", "lowercase_or_connector_start"}):
+        actions.append("rewrite_fragment_expected_final")
+    if "repeated_expected_group" in definition_flags:
+        actions.append("deduplicate_shifted_window_group")
+    if definition_flags.intersection({"nested_expected_sentence"}):
+        actions.append("manual_boundary_review")
+    if expected_quality.intersection({"many_expected_sentences", "no_terminal_expected", "short_expected_fragment"}):
+        actions.append("manual_boundary_review")
+    return list(dict.fromkeys(actions))
+
+
+def _case_review_payload(result: dict[str, Any]) -> dict[str, Any]:
+    metadata = dict(result.get("case_metadata", {}) or {})
+    return {
+        "id": result.get("id"),
+        "language": result.get("language"),
+        "case_file": metadata.get("case_file"),
+        "case_line": metadata.get("case_line"),
+        "source_log": metadata.get("source_log"),
+        "source_chunk": metadata.get("source_chunk"),
+        "review_group_id": metadata.get("review_group_id"),
+        "actions": _case_review_actions(result),
+        "expected_quality_flags": list(result.get("expected_quality_flags", []) or []),
+        "case_context_flags": list(result.get("case_context_flags", []) or []),
+        "case_definition_flags": list(result.get("case_definition_flags", []) or []),
+        "final_f1": float(dict(result.get("final_score", {})).get("f1", 0.0)),
+        "expected_final_count": len(result.get("expected_final", []) or []),
+        "actual_final_count": len(result.get("actual_final", []) or []),
+        "expected_final_preview": _first_text_preview(result.get("expected_final")),
+        "actual_final_preview": _first_text_preview(result.get("actual_final")),
+    }
+
+
+def summarize_case_definition_action_items(results: list[dict[str, Any]]) -> dict[str, Any]:
+    review_results = [
+        result
+        for result in results
+        if _case_review_actions(result)
+    ]
+    action_counts: Counter[str] = Counter()
+    language_counts: Counter[str] = Counter()
+    expected_quality_counts: Counter[str] = Counter()
+    context_flag_counts: Counter[str] = Counter()
+    definition_flag_counts: Counter[str] = Counter()
+    for result in review_results:
+        action_counts.update(_case_review_actions(result))
+        language_counts[str(result.get("language") or "unknown")] += 1
+        expected_quality_counts.update(str(flag) for flag in result.get("expected_quality_flags", []) or [])
+        context_flag_counts.update(str(flag) for flag in result.get("case_context_flags", []) or [])
+        definition_flag_counts.update(str(flag) for flag in result.get("case_definition_flags", []) or [])
+    by_action: dict[str, Any] = {}
+    for action in CASE_REVIEW_ACTION_FLAGS:
+        action_results = [
+            result
+            for result in review_results
+            if action in _case_review_actions(result)
+        ]
+        by_action[action] = {
+            "case_count": len(action_results),
+            "final_f1_avg": _avg_final_f1(action_results),
+            "language_counts": dict(
+                sorted(Counter(str(result.get("language") or "unknown") for result in action_results).items())
+            ),
+            "examples": [
+                _case_review_payload(result)
+                for result in sorted(
+                    action_results,
+                    key=lambda result: (
+                        float(dict(result.get("final_score", {})).get("f1", 0.0)),
+                        str(result.get("id")),
+                    ),
+                )[:CASE_EXEMPLAR_LIMIT]
+            ],
+        }
+    return {
+        "interpretation": (
+            "These are case-definition review actions, not automatic deletion rules. "
+            "Use add_initial_final_or_trim_prefix for mid-stream cases, "
+            "rewrite_fragment_expected_final for fragment-like expected_final labels, "
+            "deduplicate_shifted_window_group when repeated sliding-window samples overweight one log region, "
+            "and manual_boundary_review when short/nested/many expected sentences may still be valid speech."
+        ),
+        "review_case_count": len(review_results),
+        "action_counts": dict(sorted(action_counts.items())),
+        "language_counts": dict(sorted(language_counts.items())),
+        "expected_quality_flag_counts": dict(sorted(expected_quality_counts.items())),
+        "case_context_flag_counts": dict(sorted(context_flag_counts.items())),
+        "case_definition_flag_counts": dict(sorted(definition_flag_counts.items())),
+        "by_action": by_action,
+    }
+
+
 def _case_collection_kind(result: dict[str, Any]) -> str:
     case_id = str(result.get("id") or "")
     metadata = dict(result.get("case_metadata", {}) or {})
@@ -1349,6 +1456,7 @@ def build_benchmark_report(
     input_evidence_strata_summary = summarize_results_by_input_evidence_strata(results)
     context_strata_summary = summarize_results_by_context_strata(results)
     case_definition_strata_summary = summarize_results_by_case_definition_strata(results)
+    case_definition_action_summary = summarize_case_definition_action_items(results)
     collection_strata_summary = summarize_results_by_collection_strata(results)
     strict_logic_candidate_summary = summarize_strict_logic_candidate_results(cases, results)
     queue_residue_strata_summary = summarize_results_by_queue_residue_strata(results)
@@ -1443,6 +1551,7 @@ def build_benchmark_report(
         "input_evidence_strata_summary": input_evidence_strata_summary,
         "context_strata_summary": context_strata_summary,
         "case_definition_strata_summary": case_definition_strata_summary,
+        "case_definition_action_summary": case_definition_action_summary,
         "collection_strata_summary": collection_strata_summary,
         "strict_logic_candidate_summary": strict_logic_candidate_summary,
         "case_exemplar_summary": case_exemplar_summary,

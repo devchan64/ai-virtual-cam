@@ -15729,6 +15729,50 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-23 케이스 정의 감사 기준 보강
+
+관측:
+
+- 전체 challenge replay 평균만 보면 케이스 정의 문제와 앱 lifecycle 문제가 섞여 해석된다.
+- 최근 CUDA report 기준 `case_definition_review` 대상은 686건, clean case definition은 341건이었다.
+- clean case definition의 `final_f1_avg`는 0.646, review 대상의 `final_f1_avg`는 0.503으로 차이가 컸다.
+- `repeated_expected_group`이 680건으로 많아, 같은 로그 흐름의 shifted-window 샘플이 전체 평균을 과도하게 가중할 수 있다.
+- 중간 스트림 시작 후보는 207건(`en=152`, `ko=14`, `zh=41`)으로 확인됐다.
+- 영어 `lowercase_or_connector_start` expected 품질 신호는 373건으로, 완성 문장보다 중간 조각 label일 가능성이 높다.
+
+반영:
+
+- CUDA benchmark report에 `case_definition_action_summary`를 추가했다.
+- 감사 action은 자동 삭제 규칙이 아니라 다음 정리 작업의 우선순위다.
+  - `add_initial_final_or_trim_prefix`: 중간 스트림 시작 케이스 보정.
+  - `rewrite_fragment_expected_final`: fragment expected label 재작성.
+  - `deduplicate_shifted_window_group`: 같은 expected 묶음의 shifted-window 과가중 검토.
+  - `manual_boundary_review`: 짧은 문장, 포함 문장, 다수 expected가 실제 발화인지 수동 확인.
+- 앱 로직 변경 판단은 전체 평균보다 `strict_logic_candidate_summary`와 `clean_low_bottleneck_intersection_summary`를 우선한다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report
+Ran 17 tests in 0.007s, OK
+
+./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_initial_final_context_audit tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_entrypoint
+Ran 25 tests in 0.009s, OK
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py --cases tests/eval/dictation_ai/sbd_cases --device cuda --compute-type float16 --output .tmp/eval/dictation-ai-sbd/current-20260623-case-action-summary-report.json
+cases=1027 finalized=4940 stage_start=9078 finalized_per_stage_start=0.544 final_f1_avg=0.550 final_boundary_f1_avg=0.134
+```
+
+CUDA report action summary:
+
+```text
+review_case_count=897
+add_initial_final_or_trim_prefix=126
+rewrite_fragment_expected_final=373
+deduplicate_shifted_window_group=680
+manual_boundary_review=630
+```
+
 ### 2026-06-23 SBD challenge case 정의 감사와 strict 해석 기준 보강
 
 목적:
