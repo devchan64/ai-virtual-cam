@@ -26645,3 +26645,63 @@ missing source trace metadata: source_log, source_chunk
 
 - 이 실패는 현재 상태에서 정상이다. source trace 필수 검증은 정리 완료 gate로 쓰고, 지금은 정리 대상이 남아 있음을 보여준다.
 - 다음 케이스 정리 목표는 `missing_source_trace_case_count=158`을 줄이고, traceable source log 중 review action이 없는 strict 후보를 늘리는 것이다.
+
+### 2026-06-23 source trace 누락 위치 요약 추가
+
+목적:
+
+- 벤치 케이스 정의가 잘못된 항목을 파일 단위로 찾을 수 있게 한다.
+- `expected_final`은 있지만 원본 앱 로그 위치가 없는 케이스를 앱 로직 튜닝 근거에서 분리한다.
+- 삭제 여부를 바로 판단하지 않고, 원본 로그 복구 또는 현재 로그 기준 recut 대상인지 먼저 확인한다.
+
+변경:
+
+- `validate-cases` summary에 `missing_source_trace_by_file`과 `missing_source_trace_examples`를 추가했다.
+- 예시는 최대 8개까지 `id`, `path`, `line_no`, `language`, `review_source_file`을 기록한다.
+- 이 정보는 케이스 정의 검토용이며 CUDA/SaT 실행 성능 수치가 아니다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_case_validator
+
+Ran 27 tests
+OK
+```
+
+현재 코퍼스 일반 검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases \
+  tests/eval/dictation_ai/sbd_cases \
+  --summary-output .tmp/eval/dictation-ai-sbd/case-validation-source-trace-summary.json
+
+case_count=1027
+expected_final_case_count=1023
+source_trace_case_count=865
+missing_source_trace_case_count=158
+```
+
+누락 수가 큰 파일:
+
+```text
+tests/eval/dictation_ai/sbd_cases/ko/reviewed-context-ko-5.jsonl: 11
+tests/eval/dictation_ai/sbd_cases/ko/reviewed-context-ko-3.jsonl: 8
+tests/eval/dictation_ai/sbd_cases/ko/reviewed-context-ko-e.jsonl: 8
+tests/eval/dictation_ai/sbd_cases/en/reviewed-context-en-f.jsonl: 6
+```
+
+초기 예시:
+
+```text
+en_log_no_end_fragment_sun_energy_decimal_20260620_001
+en_log_ai_friend_false_final_translation_skip_20260620_001
+en_log_supply_chain_recursive_medicine_free_20260620_001
+en_log_no_end_delta_parabolic_antennas_20260620_001
+```
+
+판정:
+
+- 현재 확인된 “정의 오류 의심”의 가장 큰 축은 expected-final이 있으나 source trace가 없는 158개 케이스다.
+- 이 케이스는 사람이 관측한 증상일 수는 있지만, 현재 기준의 “앱 로그에서 재현 가능한 컨텍스트 윈도우 입력”이라는 벤치 정의를 만족하지 않는다.
+- 다음 정리 순서는 source trace를 복구할 수 있으면 복구하고, 복구할 수 없으면 현재 앱 로그에서 같은 증상을 recut하거나 성능 튜닝 후보에서 제외하는 것이다.

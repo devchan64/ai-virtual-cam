@@ -154,6 +154,8 @@ def validate_case_files(
     expected_final_case_count = 0
     source_trace_case_count = 0
     missing_source_trace_case_count = 0
+    missing_source_trace_by_file: Counter[str] = Counter()
+    missing_source_trace_examples: list[dict[str, object]] = []
     sources: list[str] = []
     for path in _validated_case_paths(input_list):
         sources.append(str(path))
@@ -210,6 +212,17 @@ def validate_case_files(
                         source_trace_case_count += 1
                     else:
                         missing_source_trace_case_count += 1
+                        missing_source_trace_by_file[str(path)] += 1
+                        if len(missing_source_trace_examples) < 8:
+                            missing_source_trace_examples.append(
+                                {
+                                    "id": case_id,
+                                    "path": str(path),
+                                    "line_no": line_no,
+                                    "language": str(payload.get("language", "")).strip().lower() or "en",
+                                    "review_source_file": str(payload.get("review_source_file", "")).strip(),
+                                }
+                            )
                         if require_source_trace:
                             missing_parts = []
                             if not source_log:
@@ -232,6 +245,8 @@ def validate_case_files(
         "expected_final_case_count": expected_final_case_count,
         "source_trace_case_count": source_trace_case_count,
         "missing_source_trace_case_count": missing_source_trace_case_count,
+        "missing_source_trace_by_file": dict(sorted(missing_source_trace_by_file.items())),
+        "missing_source_trace_examples": missing_source_trace_examples,
         "language_counts": dict(sorted(language_counts.items())),
         "tag_counts": dict(sorted(tag_counts.items())),
         "sources": sources,

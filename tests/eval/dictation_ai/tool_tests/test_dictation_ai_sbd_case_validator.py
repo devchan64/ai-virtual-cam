@@ -81,6 +81,19 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
         self.assertEqual(summary["expected_final_case_count"], 1)
         self.assertEqual(summary["source_trace_case_count"], 0)
         self.assertEqual(summary["missing_source_trace_case_count"], 1)
+        self.assertEqual(summary["missing_source_trace_by_file"], {str(path): 1})
+        self.assertEqual(
+            summary["missing_source_trace_examples"],
+            [
+                {
+                    "id": "case-a",
+                    "path": str(path),
+                    "line_no": 1,
+                    "language": "ko",
+                    "review_source_file": "",
+                }
+            ],
+        )
         self.assertEqual(summary["language_counts"], {"ko": 1})
         self.assertEqual(summary["tag_counts"], {"missing-final": 1})
 
