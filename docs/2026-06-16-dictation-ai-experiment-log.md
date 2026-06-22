@@ -26349,3 +26349,54 @@ reviewed-context-en-c.jsonl: case_count=26, review=26, logic=0, review_ratio=1.0
 - 영어 draft shard는 `lowercase_or_connector_start`, `no_terminal_expected`, `repeated_expected_group`, `expected outside replay input`이 동시에 많아 현재 상태로는 앱 로직 튜닝 근거로 부적합하다.
 - `zh-6-20260621`, `zh-f`는 실제 로그 관측 케이스가 많지만, `many_expected_sentences`, 중간 stream 시작, expected/STT 표현 불일치가 섞여 있다. 유지할 케이스는 shard를 다시 잘라 expected를 관측 STT final 후보 기준으로 줄여야 한다.
 - clean low 후보와 strict 후보는 계속 보존한다. 반대로 review ratio가 높은 shard는 점수 개선 대상이 아니라 케이스 정의 정리 대상으로 본다.
+
+### 2026-06-23 short no-end no-blocker 후속 완료문장 승격 실험
+
+가설:
+
+- `short_no_end_fragment` 후보가 active stage/queue 없이 등장했고, 같은 SBD window 뒤쪽에 완료 문장이 있으면 단순 조각이 아니라 앞 문장일 수 있다.
+- 이전의 넓은 후속 완료문장 완화는 전체 precision을 떨어뜨렸으므로, 이번에는 `active stage/queue가 없는 경우`로 제한해 실험했다.
+
+임시 패치:
+
+- `src/app/dictation_pipeline_loop.py`와 `tests/eval/dictation_ai/benchmark/sbd_lifecycle_replay.py`에서 다음 조건을 만족하는 후보만 stage 진입 허용:
+  - candidate flag에 `short_no_end_fragment` 포함
+  - `later_completed_sentences` 존재
+  - active staged sentence 없음
+  - staged queue 없음
+
+CUDA 벤치:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py --output .tmp/eval/dictation-ai-sbd/current-20260623-short-no-end-no-blocker-later-completed-report.json
+
+base: finalized=5015, stage_start=9130, final_precision_avg=0.612, final_recall_avg=0.539, final_f1_avg=0.551, final_boundary_f1_avg=0.134, strict_final_f1_avg=0.942
+experiment: finalized=5109, stage_start=9430, final_precision_avg=0.600, final_recall_avg=0.539, final_f1_avg=0.546, final_boundary_f1_avg=0.130, strict_final_f1_avg=0.959
+promoted_metric=342
+changed_cases=103
+```
+
+개선 예시:
+
+```text
+ko_log_mixed_money_function_fragment_20260618_001: final_f1 0.000 -> 0.667
+ko_log_mixed_yuan_dollar_50years_fragment_20260618_001: final_f1 0.500 -> 0.800
+ko_log_mixed_inflation_rate_cut_fragment_20260618_001: final_f1 0.800 -> 1.000
+```
+
+회귀 예시:
+
+```text
+ko_log_draft_20260620_avc_whisper_log_002917: final_f1 0.571 -> 0.286
+ko_log_draft_20260620_avc_whisper_log_002918: final_f1 0.571 -> 0.286
+en_log_economic_doom_theme_ai_save_world_fragment_20260620_001: final_f1 0.714 -> 0.462
+ko_log_mixed_bond_manager_fragment_20260618_001: final_f1 0.857 -> 0.667
+ko_log_sliding_window_gas_facility_force_majeure_20260619_001: final_f1 0.909 -> 0.727
+```
+
+판정:
+
+- strict 후보만 보면 `0.942 -> 0.959`로 개선되지만 전체 precision, 전체 F1, boundary F1이 하락했다.
+- `stage_start`와 `finalized`가 증가해 짧은 no-end 조각이 과다 stage/final로 이어지는 부작용이 확인됐다.
+- 핵심 원칙으로 채택하기에는 “후속 완료문장 존재”가 충분한 안정성 근거가 아니다.
+- 임시 앱/replay 패치는 되돌렸다. 후속 탐색은 short fragment 허용이 아니라, clean low 케이스의 expected/context 정의를 더 엄격히 정리한 뒤 진행한다.
