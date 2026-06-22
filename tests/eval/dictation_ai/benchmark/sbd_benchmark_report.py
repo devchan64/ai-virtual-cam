@@ -185,6 +185,7 @@ CASE_REVIEW_ACTION_FLAGS = (
     "deduplicate_or_justify_shifted_window_repeat",
     "manual_boundary_review",
 )
+PREFIX_CONTEXT_MIN_SUPPORT = max(0.55, FINAL_SENTENCE_MATCH_MIN_SIMILARITY - 0.15)
 
 
 def _sentence_support_score(sentence: str, chunk: str) -> float:
@@ -241,8 +242,31 @@ def _prefix_before_expected_sentence(chunk: str, sentence: str) -> str:
     sentence_words = _word_units(normalized_sentence)
     start = _find_word_subsequence(chunk_words, sentence_words)
     if start <= 0:
-        return ""
+        return _fuzzy_prefix_before_expected_sentence(normalized_chunk, chunk_words, sentence_words)
     return "".join(chunk_words[:start]) if any(_is_cjk_word(word) for word in chunk_words) else " ".join(chunk_words[:start])
+
+
+def _fuzzy_prefix_before_expected_sentence(
+    normalized_chunk: str,
+    chunk_words: list[str],
+    sentence_words: list[str],
+) -> str:
+    if not chunk_words or not sentence_words:
+        return ""
+    matcher = SequenceMatcher(None, sentence_words, chunk_words, autojunk=False)
+    min_run = min(len(sentence_words), max(3, len(sentence_words) // 3))
+    for block in matcher.get_matching_blocks():
+        if not block.size:
+            continue
+        if block.a > 1 or block.b <= 0 or block.size < min_run:
+            continue
+        first_matched_word = chunk_words[block.b]
+        index = normalized_chunk.find(first_matched_word)
+        if index > 0:
+            return normalized_chunk[:index].strip()
+        prefix_words = chunk_words[: block.b]
+        return "".join(prefix_words) if any(_is_cjk_word(word) for word in chunk_words) else " ".join(prefix_words)
+    return ""
 
 
 def _is_cjk_word(word: str) -> bool:
@@ -269,13 +293,13 @@ def case_context_flags(result: dict[str, Any]) -> list[str]:
         if str(chunk.get("input", "") if isinstance(chunk, dict) else chunk).strip()
     ]
     if chunks:
-        first_support = _expected_sentence_support(expected_final[0], chunks)
-        if first_support.get("supported"):
-            chunk_index = int(first_support.get("chunk_index", -1))
-            if 0 <= chunk_index < len(chunks):
-                prefix = _prefix_before_expected_sentence(chunks[chunk_index], expected_final[0])
-                if _has_completed_prefix_context(prefix):
-                    flags.append("unmodeled_prefix_context")
+        for chunk in chunks:
+            if _sentence_support_score(expected_final[0], chunk) < PREFIX_CONTEXT_MIN_SUPPORT:
+                continue
+            prefix = _prefix_before_expected_sentence(chunk, expected_final[0])
+            if _has_completed_prefix_context(prefix):
+                flags.append("unmodeled_prefix_context")
+                break
     if not flags and _has_actual_prefix_before_expected_final(result):
         flags.append("actual_prefix_before_expected_final")
     return flags

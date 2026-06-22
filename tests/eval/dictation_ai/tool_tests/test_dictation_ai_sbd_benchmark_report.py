@@ -871,6 +871,71 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         )
         self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
 
+    def test_context_strata_flags_fuzzy_unmodeled_prefix_context(self) -> None:
+        args = Namespace(
+            model="sat-3l-sm",
+            device="cuda",
+            compute_type="float16",
+            min_final_f1=0.0,
+            fail_on_regression=False,
+        )
+        case = SbdCase(
+            id="fuzzy-prefix-context",
+            language="ko",
+            chunks=[
+                "앞 문장이 이미 끝났습니다. 그러다 보니까 지금 테슬라를 포함해서 전세계 자율주행이 다 요 방향으로 가는 거고 이걸 베꼈다고 얘기할 수는 없어요",
+            ],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=[
+                "지금 테슬라를 포함해서 전세계 자율주행이 다 이 방향으로 가는 거고 이걸 베꼈다고 얘기할 수는 없어요."
+            ],
+            expected_staged="",
+            tags=("missing-final",),
+            sentence_finalize_age=3,
+        )
+        results = [
+            {
+                "id": "fuzzy-prefix-context",
+                "language": "ko",
+                "tags": ["missing-final"],
+                "expected_final": [
+                    "지금 테슬라를 포함해서 전세계 자율주행이 다 이 방향으로 가는 거고 이걸 베꼈다고 얘기할 수는 없어요."
+                ],
+                "chunks": [
+                    {
+                        "input": "앞 문장이 이미 끝났습니다. 그러다 보니까 지금 테슬라를 포함해서 전세계 자율주행이 다 요 방향으로 가는 거고 이걸 베꼈다고 얘기할 수는 없어요"
+                    },
+                ],
+                "initial_final": [],
+                "actual_final": [],
+                "actual_pending": "",
+                "actual_staged": "",
+                "actual_staged_queue": [],
+                "final_score": _score(0.0, 0.0, 0.0),
+                "final_ordered_score": _score(0.0, 0.0, 0.0),
+                "final_boundary_score": _score(0.0, 0.0, 0.0),
+                "completed_last_score": _score(0.0, 0.0, 0.0),
+                "pending_exact": True,
+                "staged_exact": True,
+                "case_exact_match": False,
+                "metrics": {"stage_start": 1},
+            }
+        ]
+
+        report = build_benchmark_report(
+            args=args,
+            case_sources=["cases.jsonl"],
+            corpus_role="challenge-replay",
+            cases=[case],
+            results=results,
+            metric_totals={"stage_start": 1},
+            elapsed_ms=1.0,
+        )
+
+        self.assertEqual(report["cases"][0]["case_context_flags"], ["unmodeled_prefix_context"])
+        self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
+
     def test_repeated_expected_groups_are_case_definition_review_not_strict_logic(self) -> None:
         args = Namespace(
             model="sat-3l-sm",

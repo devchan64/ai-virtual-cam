@@ -14683,6 +14683,99 @@ git diff --check
 OK
 ```
 
+### 2026-06-23 fuzzy prefix 기반 case definition 감사 보강과 short no-end 실험 폐기
+
+목적:
+
+- actual-prefix 감사 이후에도 strict 저점에 expected 첫 문장이 replay chunk 중간에 들어간 케이스가 남았다.
+- 기존 prefix context 감지는 exact substring 또는 exact token subsequence에 의존해 STT 표기 흔들림(`이/요`, 공백, 조사 차이)이 있으면 중간 스트림 시작을 놓칠 수 있었다.
+- 케이스 정의 검토는 자동 삭제가 아니라 strict logic 후보 정화를 위한 신호이므로, token-sentence matching block 기반 fuzzy prefix 감지를 추가했다.
+
+반영:
+
+- `sbd_benchmark_report.py`의 `_prefix_before_expected_sentence`에 fuzzy matching block fallback을 추가했다.
+- 첫 expected 문장과 chunk의 유사도가 `max(0.55, FINAL_SENTENCE_MATCH_MIN_SIMILARITY - 0.15)` 이상이고, expected 시작 근처와 chunk 중간의 충분한 연속 token run이 맞으면 chunk 원문에서 그 앞 prefix를 유지해 `unmodeled_prefix_context`를 판단한다.
+- punctuation을 잃지 않도록 prefix는 재조립한 token이 아니라 chunk 원문에서 매칭 시작 위치 앞 문자열로 산출한다.
+
+CUDA benchmark:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260623-fuzzy-prefix-context-report.json
+
+cases=1027
+case_definition_review=976
+logic_tuning_candidates=47
+strict_logic_candidates=38
+final_f1_avg=0.551
+strict_final_f1_avg=0.908
+strict_final_boundary_f1_avg=0.587
+strict_low_0.65=3
+```
+
+직전 actual-prefix 감사 리포트 비교:
+
+```text
+.tmp/eval/dictation-ai-sbd/current-20260623-actual-prefix-context-report.json
+case_definition_review=975
+logic_tuning_candidates=48
+strict_logic_candidates=39
+strict_final_f1_avg=0.895
+strict_final_boundary_f1_avg=0.572
+strict_low_0.65=4
+
+.tmp/eval/dictation-ai-sbd/current-20260623-fuzzy-prefix-context-report.json
+case_definition_review=976
+logic_tuning_candidates=47
+strict_logic_candidates=38
+strict_final_f1_avg=0.908
+strict_final_boundary_f1_avg=0.587
+strict_low_0.65=3
+```
+
+남은 strict 저점:
+
+```text
+ko_log_duplicate_tesla_global_direction_fragment_20260617_001 final_f1=0.286
+zh_log_missing_food_queue_burst_same_chunk_replace_20260621_001 final_f1=0.333
+ko_log_mixed_yuan_dollar_50years_fragment_20260618_001 final_f1=0.500
+```
+
+폐기한 앱 로직 실험:
+
+```text
+가설: active/queue가 없는 고립 short_no_end_fragment 후보는 stage 진입을 허용하면
+한국어 짧은 no-end 문장 누락이 줄어들 수 있다.
+
+report=.tmp/eval/dictation-ai-sbd/current-20260623-isolated-short-no-end-report.json
+final_f1_avg 0.551 -> 0.545
+final_precision_avg 0.612 -> 0.599
+strict_final_f1_avg 0.908 -> 0.924
+finalized 5015 -> 5089
+final_quality_no_end_marker 626 -> 712
+```
+
+판단:
+
+- strict 평균은 올랐지만 남은 주요 저점 케이스의 F1은 개선되지 않았다.
+- 전체 precision과 final_f1이 하락했고 no-end final이 증가했다.
+- 따라서 고립 short-no-end stage 허용은 기본 앱 로직으로 채택하지 않고 폐기했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report
+Ran 41 tests in 0.024s, OK
+
+git diff --check
+OK
+```
+
 ### 2026-06-22 입력 지지 0 케이스 제거와 정리 후 CUDA 벤치
 
 목적:
