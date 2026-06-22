@@ -15729,6 +15729,50 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-23 clean-low 병목 집계의 케이스 정의 검토 대상 제외
+
+목적:
+
+- 벤치 케이스의 정의가 잘못된 경우가 로직 튜닝 후보에 섞이지 않도록 `clean_low_bottleneck_intersection_summary` 기준을 정리했다.
+- 공식 strict 후보는 이미 `unmodeled_prefix_context`를 제외했지만, clean-low 집계는 `expected_quality_flags`와 입력 근거만 보고 있어 중간 임계값의 병목 요약에 정의 검토 대상이 섞일 수 있었다.
+
+변경:
+
+- `clean_low_bottleneck_intersection_summary`에서 `case_context_flags`가 있는 케이스를 제외한다.
+- low-score exemplar payload에 `expected_quality_flags`, `case_context_flags`를 포함하여 리포트만 보고도 케이스 정의 검토 여부를 확인할 수 있게 했다.
+
+CUDA 검증:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260623-clean-low-context-report.json
+
+cases=1027
+final_f1_avg=0.550492743360324
+final_boundary_f1_avg=0.13401379432590774
+context_definition_review=126
+strict_case_count=124
+strict_final_f1_avg=0.7791216400087367
+strict_final_boundary_f1_avg=0.4406875830262927
+```
+
+비교:
+
+```text
+supported_low / clean_low
+threshold 0.35: 32 / 10 -> 32 / 10
+threshold 0.50: 61 / 20 -> 61 / 16
+threshold 0.65: 91 / 35 -> 91 / 30
+```
+
+해석:
+
+- 전체 점수는 바뀌지 않았다. 앱 로직 변경이 아니라 리포트 해석 기준 정리이기 때문이다.
+- `clean_low`의 0.50, 0.65 구간에서 정의 검토 대상이 제거되어 로직 튜닝 후보가 더 좁아졌다.
+- 0.35 이하의 낮은 clean 후보 10건은 그대로 남아 있으므로, 다음 로직 개선 검토는 이 구간을 우선 대상으로 삼는 것이 맞다.
+
 ### 2026-06-23 벤치 케이스 정의 strata 추가
 
 문제:

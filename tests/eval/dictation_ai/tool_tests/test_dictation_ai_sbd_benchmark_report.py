@@ -279,6 +279,17 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
             tags=("missing-final", "stage-queue"),
             sentence_finalize_age=3,
         )
+        unmodeled_prefix_case = SbdCase(
+            id="case-unmodeled-prefix",
+            language="en",
+            chunks=["This part already ended. Target sentence arrived. Another sentence arrived."],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=["Target sentence arrived.", "Another sentence arrived."],
+            expected_staged="",
+            tags=("missing-final", "stage-queue"),
+            sentence_finalize_age=3,
+        )
         results = [
             {
                 "id": "case-review-needed",
@@ -307,6 +318,7 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
                 "language": "zh",
                 "tags": ["missing-final", "stage-queue"],
                 "expected_final": ["第一句到了。", "第二句也到了。"],
+                "chunks": [{"input": "第一句到了。"}, {"input": "第一句到了。第二句也到了。"}],
                 "actual_final": ["第一句到了。"],
                 "actual_pending": "",
                 "actual_staged": "第二句也到了。",
@@ -325,19 +337,42 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
                     "stage_candidate_quality_blocked": 1,
                     "candidate_recent_final_delta_trimmed": 1,
                 },
-            }
+            },
+            {
+                "id": "case-unmodeled-prefix",
+                "language": "en",
+                "tags": ["missing-final", "stage-queue"],
+                "expected_final": ["Target sentence arrived.", "Another sentence arrived."],
+                "chunks": [{"input": "This part already ended. Target sentence arrived. Another sentence arrived."}],
+                "actual_final": ["This part already ended."],
+                "actual_pending": "",
+                "actual_staged": "Target sentence arrived.",
+                "actual_staged_queue": [],
+                "final_score": _score(0.0, 0.0, 0.0),
+                "final_ordered_score": _score(0.0, 0.0, 0.0),
+                "final_boundary_score": _score(0.0, 0.0, 0.0),
+                "completed_last_score": _score(0.0, 0.0, 0.0),
+                "pending_exact": True,
+                "staged_exact": False,
+                "case_exact_match": False,
+                "metrics": {
+                    "stage_start": 1,
+                    "stage_queue_revision": 1,
+                    "stage_candidate_quality_blocked": 1,
+                },
+            },
         ]
 
         report = build_benchmark_report(
             args=args,
             case_sources=["cases.jsonl"],
             corpus_role="challenge-replay",
-            cases=[case, supported_case],
+            cases=[case, supported_case, unmodeled_prefix_case],
             results=results,
             metric_totals={
-                "stage_start": 2,
-                "stage_queue_revision": 3,
-                "stage_candidate_quality_blocked": 1,
+                "stage_start": 3,
+                "stage_queue_revision": 4,
+                "stage_candidate_quality_blocked": 2,
                 "candidate_recent_final_delta_trimmed": 1,
                 "stage_age_hold": 2,
             },
@@ -345,21 +380,30 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         )
 
         low_score = report["low_score_characteristics_summary"]["thresholds"]["0.35"]
-        self.assertEqual(low_score["case_count"], 2)
-        self.assertEqual(low_score["support_kind_counts"], {"review_needed": 1, "supported_monotonic": 1})
-        self.assertEqual(low_score["language_counts"], {"en": 1, "zh": 1})
-        self.assertEqual(low_score["staged_residue_count"], 2)
+        self.assertEqual(low_score["case_count"], 3)
+        self.assertEqual(low_score["support_kind_counts"], {"review_needed": 1, "supported_monotonic": 2})
+        self.assertEqual(low_score["language_counts"], {"en": 2, "zh": 1})
+        self.assertEqual(low_score["staged_residue_count"], 3)
         self.assertEqual(low_score["by_support_kind"]["review_needed"]["case_count"], 1)
-        self.assertEqual(low_score["by_support_kind"]["supported_monotonic"]["case_count"], 1)
-        self.assertAlmostEqual(low_score["by_support_kind"]["supported_monotonic"]["avg_final_f1"], 0.3333333333)
-        self.assertEqual(low_score["by_support_kind"]["supported_monotonic"]["staged_residue_count"], 1)
+        self.assertEqual(low_score["by_support_kind"]["supported_monotonic"]["case_count"], 2)
+        self.assertAlmostEqual(low_score["by_support_kind"]["supported_monotonic"]["avg_final_f1"], 0.16666666665)
+        self.assertEqual(low_score["by_support_kind"]["supported_monotonic"]["staged_residue_count"], 2)
         self.assertEqual(low_score["top_lifecycle_metrics"][0]["metric"], "stage_queue_revision")
         self.assertEqual(low_score["lowest_cases"][0]["support_kind"], "review_needed")
         supported_low = report["supported_low_bottleneck_intersection_summary"]["thresholds"]["0.35"]
-        self.assertEqual(supported_low["case_count"], 1)
+        self.assertEqual(supported_low["case_count"], 2)
+        clean_low = report["clean_low_bottleneck_intersection_summary"]["thresholds"]["0.35"]
+        self.assertEqual(clean_low["case_count"], 1)
+        self.assertEqual(clean_low["lowest_cases"][0]["id"], "case-supported-monotonic")
+        self.assertEqual(clean_low["lowest_cases"][0]["case_context_flags"], [])
+        self.assertEqual(
+            report["cases"][2]["case_context_flags"],
+            ["unmodeled_prefix_context"],
+        )
+        self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 1)
         self.assertEqual(
             supported_low["metric_presence"]["stage_candidate_quality_blocked"]["case_count"],
-            1,
+            2,
         )
         self.assertEqual(
             supported_low["metric_presence"]["candidate_recent_final_delta_trimmed"]["case_count"],
@@ -368,12 +412,12 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertIn(
             {
                 "metrics": ["stage_candidate_quality_blocked", "stage_queue_revision"],
-                "case_count": 1,
+                "case_count": 2,
                 "case_ratio": 1.0,
-                "avg_final_f1": 0.3333333333,
-                "avg_ordered_f1": 0.3333333333,
+                "avg_final_f1": 0.16666666665,
+                "avg_ordered_f1": 0.16666666665,
                 "avg_boundary_f1": 0.0,
-                "top_cases": ["case-supported-monotonic"],
+                "top_cases": ["case-unmodeled-prefix", "case-supported-monotonic"],
             },
             supported_low["top_metric_pairs"],
         )

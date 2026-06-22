@@ -492,12 +492,14 @@ def summarize_clean_low_bottleneck_intersections(
             and isinstance(result.get("final_score"), dict)
             and float(dict(result.get("final_score", {})).get("f1", 0.0)) < threshold
             and not result.get("expected_quality_flags")
+            and not result.get("case_context_flags")
             and dict(result.get("input_evidence", {})).get("has_evidence")
         ]
         thresholds[f"{threshold:.2f}"] = _summarize_supported_low_threshold(low_results, threshold)
     return {
         "interpretation": (
             "Clean low-score cases are supported_monotonic, have input evidence, and have no expected_quality_flags. "
+            "They also exclude unmodeled prefix context flags. "
             "Prefer this subset for app logic changes; broader low-score groups can still be label or source review work."
         ),
         "metric_candidates": list(SUPPORTED_LOW_BOTTLENECK_METRICS),
@@ -648,6 +650,8 @@ def _low_score_case_payload(result: dict[str, Any], support_kind: str) -> dict[s
         "expected_final_count": len(result.get("expected_final", []) or []),
         "actual_final_count": len(result.get("actual_final", []) or []),
         "staged_queue_len": len(result.get("actual_staged_queue", []) or []),
+        "expected_quality_flags": list(result.get("expected_quality_flags", []) or []),
+        "case_context_flags": list(result.get("case_context_flags", []) or []),
         "expected_final_preview": _first_text_preview(result.get("expected_final")),
         "actual_final_preview": _first_text_preview(result.get("actual_final")),
         "actual_staged_preview": _text_preview(result.get("actual_staged")),
