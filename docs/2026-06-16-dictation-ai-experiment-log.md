@@ -26400,3 +26400,48 @@ ko_log_sliding_window_gas_facility_force_majeure_20260619_001: final_f1 0.909 ->
 - `stage_start`와 `finalized`가 증가해 짧은 no-end 조각이 과다 stage/final로 이어지는 부작용이 확인됐다.
 - 핵심 원칙으로 채택하기에는 “후속 완료문장 존재”가 충분한 안정성 근거가 아니다.
 - 임시 앱/replay 패치는 되돌렸다. 후속 탐색은 short fragment 허용이 아니라, clean low 케이스의 expected/context 정의를 더 엄격히 정리한 뒤 진행한다.
+
+### 2026-06-23 recent-final echo 축 sweep
+
+가설:
+
+- recent final echo/fragment 억제가 너무 강하면 앞 문장 또는 suffix 후보를 과하게 잘라 누락을 만들 수 있다.
+- 억제 조건을 더 보수적으로 만들면 누락이 줄어들 수 있다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py run-sweep \
+  --include-baseline \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260623-recent-final-echo-axis \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260623-recent-final-echo-axis/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260623-recent-final-echo-axis/summary.md \
+  --param RECENT_FINAL_FRAGMENT_ECHO_COVERAGE_MIN=0.70 \
+  --param RECENT_FINAL_FRAGMENT_ECHO_COVERAGE_MIN=0.80 \
+  --param RECENT_FINAL_FRAGMENT_ECHO_MIN_UNITS=7 \
+  --param RECENT_FINAL_FRAGMENT_ECHO_MAX_LENGTH_RATIO=0.35
+```
+
+결과:
+
+```text
+baseline: final_precision_avg=0.6118, final_recall_avg=0.5385, final_f1_avg=0.5508, final_boundary_f1_avg=0.1343, strict_final_f1_avg=0.9417
+RECENT_FINAL_FRAGMENT_ECHO_COVERAGE_MIN=0.70: final_f1_delta=+0.0000, precision_delta=-0.0001, boundary_delta=-0.0001, strict_delta=+0.0000
+RECENT_FINAL_FRAGMENT_ECHO_COVERAGE_MIN=0.80: final_f1_delta=-0.0001, precision_delta=-0.0002, boundary_delta=+0.0000, strict_delta=+0.0000
+RECENT_FINAL_FRAGMENT_ECHO_MIN_UNITS=7: final_f1_delta=-0.0001, precision_delta=-0.0002, boundary_delta=+0.0000, strict_delta=+0.0000
+RECENT_FINAL_FRAGMENT_ECHO_MAX_LENGTH_RATIO=0.35: final_f1_delta=-0.0001, precision_delta=-0.0002, boundary_delta=+0.0001, strict_delta=+0.0000
+```
+
+해석:
+
+- 네 축 모두 adoption review가 `review-risk`로 분류됐다.
+- strict 후보 `35건 / strict_final_f1_avg=0.9417`은 모든 축에서 변하지 않았다.
+- clean low `0.65` 구간도 1건, 평균 `0.5000`으로 변하지 않았다.
+- 변경 케이스 수는 2~3건 수준이고, 개선보다 language/key-tag precision regression 신호가 먼저 나타났다.
+- recent-final echo 억제는 현재 clean/strict 저점의 주된 병목이 아니다.
+
+판정:
+
+- 운영 기본값을 변경하지 않는다.
+- `recent-final echo` 축은 중복 억제 핵심 원칙으로 유지하되, 현재 케이스 집합에서는 완화해도 누락 개선 근거가 없다.
+- 다음 로직 탐색은 파라미터 완화보다 케이스 정의 정리 후 남는 clean low에서 다시 시작한다.
