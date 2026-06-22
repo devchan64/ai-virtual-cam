@@ -15811,6 +15811,68 @@ Ran 26 tests in 0.014s, OK
 case_count=1027, expected_final_case_count=1023
 ```
 
+### 2026-06-23 strict logic 후보 기준 revision/short-stage 파라미터 실험
+
+목적:
+
+- case definition review 후보를 제외한 `strict_logic_candidate_summary` 저점에서 실제 앱 로직 개선 축을 찾는다.
+- STT 정확도나 번역 품질이 아니라 finalization lifecycle의 중복/누락 균형만 본다.
+- 특정 문구나 언어별 예외가 아니라 token-sentence revision, 짧은 CJK stage 보류, confirmation 보존 같은 공통 파라미터만 실험했다.
+
+기준선:
+
+```text
+report=.tmp/eval/dictation-ai-sbd/current-20260623-case-definition-stdout-report.json
+final_f1_avg=0.550
+strict_logic_candidates=51
+strict_final_f1_avg=0.814
+strict_final_boundary_f1_avg=0.440
+strict_low_0.35=5
+strict_low_0.50=7
+strict_low_0.65=10
+finalized=4940
+```
+
+strict 저점 병목:
+
+```text
+threshold=0.35
+stage_revision_token_sentence_deferred: 5/5 cases
+candidate_recent_final_delta_trimmed: 5/5 cases
+candidate_delta_trimmed: 5/5 cases
+candidate_duplicate_suppressed: 5/5 cases
+stage_candidate_quality_blocked: 4/5 cases
+stage_age_quality_blocked: 4/5 cases
+stage_replace_deferred: 4/5 cases
+```
+
+실험 결과:
+
+```text
+base                    final_f1=0.550 strict_n=51 strict_f1=0.814 strict_boundary_f1=0.440 lows=5/7/10 finalized=4940
+short_cjk_extra2        final_f1=0.545 strict_n=48 strict_f1=0.783 strict_boundary_f1=0.401 lows=5/9/11 finalized=4696
+short_cjk_extra0        final_f1=0.532 strict_n=51 strict_f1=0.764 strict_boundary_f1=0.401 lows=5/9/14 finalized=5375
+no_crossing_defer       final_f1=0.543 strict_n=57 strict_f1=0.770 strict_boundary_f1=0.393 lows=4/8/13 finalized=5273
+confirm_preserve_0.40   final_f1=0.551 strict_n=51 strict_f1=0.813 strict_boundary_f1=0.439 lows=5/7/10 finalized=4939
+short_cjk_hold1         final_f1=0.548 strict_n=49 strict_f1=0.816 strict_boundary_f1=0.447 lows=4/6/9  finalized=4902
+hold1_preserve_0.40     final_f1=0.548 strict_n=50 strict_f1=0.805 strict_boundary_f1=0.441 lows=5/7/10 finalized=4902
+```
+
+해석:
+
+- `SHORT_CJK_CONFIRM_EXTRA_CHUNKS`를 0이나 2로 바꾸면 모두 strict F1이 크게 악화됐다. 짧은 문장을 더 빨리 확정하면 overfinal이 늘고, 더 늦추면 누락이 늘어난다.
+- token-sentence revision이 confirmation 기준에 도달하는 순간 보류하지 않는 패치는 strict 후보 수는 늘렸지만 strict F1이 0.814에서 0.770으로 하락했다. 기존 보류 규칙은 stale stage를 만들 수 있지만 premature revision final도 억제한다.
+- `CJK_CONFIRM_PRESERVE_RATIO_MIN=0.40`은 전체 F1만 0.0001 수준으로 오르고 strict F1은 소폭 하락해 반영 근거가 약하다.
+- `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=1`은 strict 저점 수와 boundary F1을 조금 개선했지만 전체 F1이 하락하고 strict 후보 수가 줄었다. 단독 기본값 변경으로 보기에는 효과가 작다.
+- `hold1 + preserve_0.40` 조합은 strict F1이 하락해 채택하지 않는다.
+
+결론:
+
+- 현재 남은 strict 저점은 단순 confirmation/hold 파라미터 변경으로 안정적으로 개선되지 않는다.
+- 기본값은 유지한다.
+- 다음 개선 후보는 파라미터 숫자 변경보다, recent-final delta trimming과 token-sentence revision queue가 같은 case에서 동시에 발생할 때 어떤 stage를 소비/보류할지에 대한 더 명확한 생명주기 원칙이다.
+- 다만 이번 결과상 “리비전 확인 기준 도달 즉시 확정” 또는 “짧은 CJK 문장 확정 지연/완화” 같은 단순 규칙은 폐기한다.
+
 ### 2026-06-23 benchmark case definition 감사 기준 보강
 
 목적:
