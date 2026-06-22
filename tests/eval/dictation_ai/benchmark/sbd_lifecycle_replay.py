@@ -332,6 +332,57 @@ def _score_sequence(expected: list[str], actual: list[str]) -> dict[str, Any]:
     }
 
 
+def _score_ordered_sequence(expected: list[str], actual: list[str]) -> dict[str, Any]:
+    expected_normalized = [normalized_text(item) for item in expected if normalized_text(item)]
+    actual_normalized = [normalized_text(item) for item in actual if normalized_text(item)]
+    if not expected_normalized and not actual_normalized:
+        return {
+            "true_positive": 0,
+            "false_positive": 0,
+            "false_negative": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "similarity_avg": 1.0,
+            "similarity_coverage": 1.0,
+            "match_min_similarity": FINAL_SENTENCE_MATCH_MIN_SIMILARITY,
+            "exact": True,
+        }
+    actual_index = 0
+    matched_similarities: list[float] = []
+    for expected_sentence in expected_normalized:
+        best_index = -1
+        best_similarity = 0.0
+        for index in range(actual_index, len(actual_normalized)):
+            similarity = _sentence_similarity(expected_sentence, actual_normalized[index])
+            if similarity > best_similarity:
+                best_index = index
+                best_similarity = similarity
+        if best_index >= 0 and best_similarity >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY:
+            actual_index = best_index + 1
+            matched_similarities.append(best_similarity)
+    true_positive = len(matched_similarities)
+    false_positive = len(actual_normalized) - true_positive
+    false_negative = len(expected_normalized) - true_positive
+    precision = true_positive / max(true_positive + false_positive, 1)
+    recall = true_positive / max(true_positive + false_negative, 1)
+    f1 = (2 * precision * recall / (precision + recall)) if precision + recall else 0.0
+    similarity_avg = sum(matched_similarities) / max(true_positive, 1)
+    similarity_coverage = sum(matched_similarities) / max(len(expected_normalized), len(actual_normalized), 1)
+    return {
+        "true_positive": true_positive,
+        "false_positive": false_positive,
+        "false_negative": false_negative,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "similarity_avg": similarity_avg,
+        "similarity_coverage": similarity_coverage,
+        "match_min_similarity": FINAL_SENTENCE_MATCH_MIN_SIMILARITY,
+        "exact": actual_normalized == expected_normalized,
+    }
+
+
 def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str, chunk_index: int) -> list[str]:
     if not state.staged_sentence:
         return []

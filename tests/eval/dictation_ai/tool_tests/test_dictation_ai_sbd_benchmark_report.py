@@ -81,7 +81,15 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
                 "pending_exact": True,
                 "staged_exact": True,
                 "case_exact_match": True,
-                "metrics": {"finalized": 1, "stage_start": 1},
+                "metrics": {
+                    "finalized": 1,
+                    "stage_start": 1,
+                    "stage_age_hold": 2,
+                    "pending_overrun": 1,
+                    "pending_quality_repeated_word_ngram": 1,
+                    "stage_candidate_quality_repeated_word_ngram": 1,
+                    "stage_replace_decision_open_latin_clause": 1,
+                },
             }
         ]
 
@@ -91,7 +99,15 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
             corpus_role="challenge-replay",
             cases=[case],
             results=results,
-            metric_totals={"finalized": 1, "stage_start": 1},
+            metric_totals={
+                "finalized": 1,
+                "stage_start": 1,
+                "stage_age_hold": 2,
+                "pending_overrun": 1,
+                "pending_quality_repeated_word_ngram": 1,
+                "stage_candidate_quality_repeated_word_ngram": 1,
+                "stage_replace_decision_open_latin_clause": 1,
+            },
             elapsed_ms=12.345,
         )
 
@@ -195,9 +211,163 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(report["staged_queue_residue_summary"]["queue_residue_case_count"], 0)
         self.assertEqual(report["staged_queue_residue_summary"]["active_staged_residue_case_count"], 0)
         self.assertEqual(report["lifecycle_bottleneck_summary"]["metrics"]["stage_start"], 1)
+        self.assertEqual(report["lifecycle_bottleneck_summary"]["metrics"]["stage_age_hold"], 2)
+        self.assertEqual(report["lifecycle_bottleneck_summary"]["metrics"]["pending_overrun"], 1)
+        self.assertEqual(
+            report["lifecycle_bottleneck_summary"]["metrics"]["pending_quality_repeated_word_ngram"],
+            1,
+        )
+        self.assertIn(
+            "stage_candidate_quality_repeated_word_ngram",
+            report["lifecycle_bottleneck_summary"]["metric_keys"],
+        )
+        self.assertEqual(
+            report["lifecycle_bottleneck_summary"]["metrics"]["stage_replace_decision_open_latin_clause"],
+            1,
+        )
+        stage_age_hold_presence = report["lifecycle_bottleneck_summary"]["metric_presence_summary"]["stage_age_hold"]
+        self.assertEqual(stage_age_hold_presence["total_count"], 2)
+        self.assertEqual(stage_age_hold_presence["case_count_present"], 1)
+        self.assertEqual(stage_age_hold_presence["case_count_absent"], 0)
+        self.assertEqual(stage_age_hold_presence["final_f1_avg_present"], 1.0)
+        self.assertEqual(stage_age_hold_presence["low_final_f1_present_count"], 0)
+        dynamic_presence = report["lifecycle_bottleneck_summary"]["metric_presence_summary"][
+            "stage_candidate_quality_repeated_word_ngram"
+        ]
+        self.assertEqual(dynamic_presence["total_count"], 1)
+        self.assertEqual(dynamic_presence["case_count_present"], 1)
         self.assertEqual(
             report["lifecycle_bottleneck_summary"]["by_language"]["ko"]["expected_final_count"],
             1,
+        )
+
+    def test_report_summarizes_low_score_review_needed_cases(self) -> None:
+        args = Namespace(
+            model="sat-3l-sm",
+            device="cuda",
+            compute_type="float16",
+            min_final_f1=0.0,
+            fail_on_regression=False,
+        )
+        case = SbdCase(
+            id="case-review-needed",
+            language="en",
+            chunks=["A later sentence appears here."],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=["The missing earlier sentence.", "A later sentence appears here."],
+            expected_staged="",
+            tags=("missing-final", "stage-queue"),
+            sentence_finalize_age=3,
+        )
+        supported_case = SbdCase(
+            id="case-supported-monotonic",
+            language="zh",
+            chunks=["第一句到了。", "第一句到了。第二句也到了。"],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=["第一句到了。", "第二句也到了。"],
+            expected_staged="",
+            tags=("missing-final", "stage-queue"),
+            sentence_finalize_age=3,
+        )
+        results = [
+            {
+                "id": "case-review-needed",
+                "language": "en",
+                "tags": ["missing-final", "stage-queue"],
+                "expected_final": ["The missing earlier sentence.", "A later sentence appears here."],
+                "actual_final": [],
+                "actual_pending": "",
+                "actual_staged": "A later sentence appears here.",
+                "actual_staged_queue": ["The missing earlier sentence."],
+                "final_score": _score(0.0, 0.0, 0.0),
+                "final_ordered_score": _score(0.0, 0.0, 0.0),
+                "final_boundary_score": _score(0.0, 0.0, 0.0),
+                "completed_last_score": _score(0.0, 0.0, 0.0),
+                "pending_exact": True,
+                "staged_exact": False,
+                "case_exact_match": False,
+                "metrics": {
+                    "stage_start": 1,
+                    "stage_queue_revision": 2,
+                    "stage_candidate_quality_blocked": 1,
+                },
+            },
+            {
+                "id": "case-supported-monotonic",
+                "language": "zh",
+                "tags": ["missing-final", "stage-queue"],
+                "expected_final": ["第一句到了。", "第二句也到了。"],
+                "actual_final": ["第一句到了。"],
+                "actual_pending": "",
+                "actual_staged": "第二句也到了。",
+                "actual_staged_queue": [],
+                "final_score": _score(0.5, 0.25, 0.3333333333),
+                "final_ordered_score": _score(0.5, 0.25, 0.3333333333),
+                "final_boundary_score": _score(0.0, 0.0, 0.0),
+                "completed_last_score": _score(0.0, 0.0, 0.0),
+                "pending_exact": True,
+                "staged_exact": False,
+                "case_exact_match": False,
+                "metrics": {
+                    "stage_start": 1,
+                    "stage_queue_revision": 1,
+                    "stage_age_hold": 2,
+                    "stage_candidate_quality_blocked": 1,
+                    "candidate_recent_final_delta_trimmed": 1,
+                },
+            }
+        ]
+
+        report = build_benchmark_report(
+            args=args,
+            case_sources=["cases.jsonl"],
+            corpus_role="challenge-replay",
+            cases=[case, supported_case],
+            results=results,
+            metric_totals={
+                "stage_start": 2,
+                "stage_queue_revision": 3,
+                "stage_candidate_quality_blocked": 1,
+                "candidate_recent_final_delta_trimmed": 1,
+                "stage_age_hold": 2,
+            },
+            elapsed_ms=1.0,
+        )
+
+        low_score = report["low_score_characteristics_summary"]["thresholds"]["0.35"]
+        self.assertEqual(low_score["case_count"], 2)
+        self.assertEqual(low_score["support_kind_counts"], {"review_needed": 1, "supported_monotonic": 1})
+        self.assertEqual(low_score["language_counts"], {"en": 1, "zh": 1})
+        self.assertEqual(low_score["staged_residue_count"], 2)
+        self.assertEqual(low_score["by_support_kind"]["review_needed"]["case_count"], 1)
+        self.assertEqual(low_score["by_support_kind"]["supported_monotonic"]["case_count"], 1)
+        self.assertAlmostEqual(low_score["by_support_kind"]["supported_monotonic"]["avg_final_f1"], 0.3333333333)
+        self.assertEqual(low_score["by_support_kind"]["supported_monotonic"]["staged_residue_count"], 1)
+        self.assertEqual(low_score["top_lifecycle_metrics"][0]["metric"], "stage_queue_revision")
+        self.assertEqual(low_score["lowest_cases"][0]["support_kind"], "review_needed")
+        supported_low = report["supported_low_bottleneck_intersection_summary"]["thresholds"]["0.35"]
+        self.assertEqual(supported_low["case_count"], 1)
+        self.assertEqual(
+            supported_low["metric_presence"]["stage_candidate_quality_blocked"]["case_count"],
+            1,
+        )
+        self.assertEqual(
+            supported_low["metric_presence"]["candidate_recent_final_delta_trimmed"]["case_count"],
+            1,
+        )
+        self.assertIn(
+            {
+                "metrics": ["stage_candidate_quality_blocked", "stage_queue_revision"],
+                "case_count": 1,
+                "case_ratio": 1.0,
+                "avg_final_f1": 0.3333333333,
+                "avg_ordered_f1": 0.3333333333,
+                "avg_boundary_f1": 0.0,
+                "top_cases": ["case-supported-monotonic"],
+            },
+            supported_low["top_metric_pairs"],
         )
 
     def test_representative_benchmark_report_preserves_sampling_metadata(self) -> None:

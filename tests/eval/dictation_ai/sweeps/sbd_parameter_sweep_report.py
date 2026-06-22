@@ -13,6 +13,7 @@ METRIC_KEYS = (
     "final_precision_avg",
     "final_recall_avg",
     "final_f1_avg",
+    "final_ordered_f1_avg",
     "final_boundary_f1_avg",
     "finalized_per_stage_start",
 )
@@ -72,6 +73,7 @@ def summarize_case_scores(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not isinstance(case, dict):
             continue
         final_score = dict(case.get("final_score", {}))
+        ordered_score = dict(case.get("final_ordered_score", {}))
         boundary_score = dict(case.get("final_boundary_score", {}))
         summaries.append(
             {
@@ -81,6 +83,7 @@ def summarize_case_scores(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "final_precision": final_score.get("precision"),
                 "final_recall": final_score.get("recall"),
                 "final_f1": final_score.get("f1"),
+                "ordered_f1": ordered_score.get("f1"),
                 "boundary_f1": boundary_score.get("f1"),
                 "expected_final_preview": _preview_sentences(case.get("expected_final")),
                 "actual_final_preview": _preview_sentences(case.get("actual_final")),
@@ -98,8 +101,11 @@ def _case_score_delta(current: dict[str, Any], baseline: dict[str, Any]) -> dict
         "precision_delta": numeric_delta(current.get("final_precision"), baseline.get("final_precision")),
         "recall_delta": numeric_delta(current.get("final_recall"), baseline.get("final_recall")),
         "boundary_f1_delta": numeric_delta(current.get("boundary_f1"), baseline.get("boundary_f1")),
+        "ordered_f1_delta": numeric_delta(current.get("ordered_f1"), baseline.get("ordered_f1")),
         "baseline_final_f1": baseline.get("final_f1"),
         "current_final_f1": current.get("final_f1"),
+        "baseline_ordered_f1": baseline.get("ordered_f1"),
+        "current_ordered_f1": current.get("ordered_f1"),
         "baseline_boundary_f1": baseline.get("boundary_f1"),
         "current_boundary_f1": current.get("boundary_f1"),
         "expected_final_preview": current.get("expected_final_preview", ""),
@@ -123,6 +129,7 @@ def summarize_case_score_deltas(
             delta.get("final_f1_delta"),
             delta.get("precision_delta"),
             delta.get("recall_delta"),
+            delta.get("ordered_f1_delta"),
             delta.get("boundary_f1_delta"),
         ]
         if any(isinstance(value, (int, float)) and not isinstance(value, bool) and abs(float(value)) > 1e-12 for value in numeric_values):
@@ -179,8 +186,27 @@ def _lifecycle_bottleneck_deltas(
             dict(current.get("quality_block_reason_counts", {})),
             dict(baseline.get("quality_block_reason_counts", {})),
         ),
+        "metric_presence_summary": _metric_presence_summary_deltas(
+            dict(current.get("metric_presence_summary", {})),
+            dict(baseline.get("metric_presence_summary", {})),
+        ),
         "by_language": language_deltas,
     }
+
+
+def _metric_presence_summary_deltas(
+    current: dict[str, Any],
+    baseline: dict[str, Any],
+) -> dict[str, dict[str, float]]:
+    deltas: dict[str, dict[str, float]] = {}
+    for metric, current_summary in current.items():
+        baseline_summary = baseline.get(metric, {})
+        if not isinstance(current_summary, dict) or not isinstance(baseline_summary, dict):
+            continue
+        metric_deltas = _numeric_deltas(current_summary, baseline_summary)
+        if metric_deltas:
+            deltas[str(metric)] = metric_deltas
+    return deltas
 
 
 def _queue_residue_strata_deltas(
@@ -195,6 +221,34 @@ def _queue_residue_strata_deltas(
     return deltas
 
 
+def _low_score_threshold_deltas(
+    current: dict[str, Any],
+    baseline: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    deltas: dict[str, dict[str, Any]] = {}
+    current_thresholds = dict(current.get("thresholds", {}))
+    baseline_thresholds = dict(baseline.get("thresholds", {}))
+    for threshold, current_summary in current_thresholds.items():
+        baseline_summary = baseline_thresholds.get(threshold, {})
+        if not isinstance(current_summary, dict) or not isinstance(baseline_summary, dict):
+            continue
+        threshold_deltas: dict[str, Any] = _numeric_deltas(current_summary, baseline_summary)
+        threshold_deltas["support_kind_counts"] = _numeric_deltas(
+            dict(current_summary.get("support_kind_counts", {})),
+            dict(baseline_summary.get("support_kind_counts", {})),
+        )
+        threshold_deltas["support_kind_ratios"] = _numeric_deltas(
+            dict(current_summary.get("support_kind_ratios", {})),
+            dict(baseline_summary.get("support_kind_ratios", {})),
+        )
+        threshold_deltas["language_counts"] = _numeric_deltas(
+            dict(current_summary.get("language_counts", {})),
+            dict(baseline_summary.get("language_counts", {})),
+        )
+        deltas[str(threshold)] = threshold_deltas
+    return deltas
+
+
 def attach_baseline_deltas(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     baseline = next((result for result in results if not result.get("env_overrides")), None)
     if baseline is None:
@@ -204,6 +258,8 @@ def attach_baseline_deltas(results: list[dict[str, Any]]) -> list[dict[str, Any]
     baseline_tags = dict(baseline.get("tag_summary", {}))
     baseline_lifecycle_bottlenecks = dict(baseline.get("lifecycle_bottleneck_summary", {}))
     baseline_queue_residue = dict(baseline.get("staged_queue_residue_summary", {}))
+    baseline_ordered_gap = dict(baseline.get("ordered_final_gap_summary", {}))
+    baseline_low_score = dict(baseline.get("low_score_characteristics_summary", {}))
     baseline_queue_strata = dict(baseline.get("queue_residue_strata_summary", {}))
     baseline_strata = dict(baseline.get("evidence_strata_summary", {}))
     baseline_expected_quality_strata = dict(baseline.get("expected_quality_strata_summary", {}))
@@ -235,6 +291,14 @@ def attach_baseline_deltas(results: list[dict[str, Any]]) -> list[dict[str, Any]
         item["staged_queue_residue_deltas"] = _numeric_deltas(
             dict(result.get("staged_queue_residue_summary", {})),
             baseline_queue_residue,
+        )
+        item["ordered_final_gap_deltas"] = _numeric_deltas(
+            dict(result.get("ordered_final_gap_summary", {})),
+            baseline_ordered_gap,
+        )
+        item["low_score_characteristics_deltas"] = _low_score_threshold_deltas(
+            dict(result.get("low_score_characteristics_summary", {})),
+            baseline_low_score,
         )
         queue_strata_deltas: dict[str, dict[str, Any]] = {}
         for stratum, stratum_summary in dict(result.get("queue_residue_strata_summary", {})).items():
@@ -388,6 +452,12 @@ def build_evidence_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
                 "lifecycle_bottleneck_deltas": result.get("lifecycle_bottleneck_deltas", {}),
                 "staged_queue_residue_summary": result.get("staged_queue_residue_summary", {}),
                 "staged_queue_residue_deltas": result.get("staged_queue_residue_deltas", {}),
+                "ordered_final_gap_summary": result.get("ordered_final_gap_summary", {}),
+                "ordered_final_gap_deltas": result.get("ordered_final_gap_deltas", {}),
+                "expected_final_order_support_summary": result.get("expected_final_order_support_summary", {}),
+                "expected_order_support_result_summary": result.get("expected_order_support_result_summary", {}),
+                "low_score_characteristics_summary": result.get("low_score_characteristics_summary", {}),
+                "low_score_characteristics_deltas": result.get("low_score_characteristics_deltas", {}),
                 "queue_residue_strata_summary": result.get("queue_residue_strata_summary", {}),
                 "queue_residue_strata_deltas": result.get("queue_residue_strata_deltas", {}),
                 "evidence_strata_summary": result.get("evidence_strata_summary", {}),
@@ -436,6 +506,28 @@ def _format_markdown_counts(value: Any) -> str:
     if not isinstance(value, dict):
         return ""
     return ", ".join(f"{key}={count}" for key, count in sorted(value.items()))
+
+
+def _low_score_value(summary: dict[str, Any], primary_key: str, legacy_key: str) -> Any:
+    if primary_key in summary:
+        return summary.get(primary_key)
+    return summary.get(legacy_key)
+
+
+def _top_metric_presence_row(result: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    presence = dict(dict(result.get("lifecycle_bottleneck_summary", {})).get("metric_presence_summary", {}))
+    candidates: list[tuple[float, str, dict[str, Any]]] = []
+    for metric, summary in presence.items():
+        if not isinstance(summary, dict):
+            continue
+        delta = summary.get("final_f1_avg_delta_present_minus_absent")
+        if not isinstance(delta, (int, float)) or isinstance(delta, bool):
+            continue
+        candidates.append((float(delta), str(metric), summary))
+    if not candidates:
+        return "", {}
+    _, metric, summary = sorted(candidates, key=lambda item: (item[0], item[1]))[0]
+    return metric, dict(summary)
 
 
 def _append_case_delta_markdown(lines: list[str], results: list[dict[str, Any]]) -> None:
@@ -495,8 +587,8 @@ def _append_evidence_summary_markdown(lines: list[str], evidence_summary: dict[s
             "",
             "## Evidence Summary",
             "",
-            "| label | env | final_f1_delta | precision_delta | recall_delta | boundary_f1_delta |",
-            "| --- | --- | ---: | ---: | ---: | ---: |",
+            "| label | env | final_f1_delta | ordered_f1_delta | precision_delta | recall_delta | boundary_f1_delta |",
+            "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
         ]
     )
     for result in results:
@@ -505,6 +597,7 @@ def _append_evidence_summary_markdown(lines: list[str], evidence_summary: dict[s
         lines.append(
             f"| {result.get('label', '')} | {env} | "
             f"{_format_markdown_delta(deltas.get('final_f1_avg'))} | "
+            f"{_format_markdown_delta(deltas.get('final_ordered_f1_avg'))} | "
             f"{_format_markdown_delta(deltas.get('final_precision_avg'))} | "
             f"{_format_markdown_delta(deltas.get('final_recall_avg'))} | "
             f"{_format_markdown_delta(deltas.get('final_boundary_f1_avg'))} |"
@@ -617,6 +710,29 @@ def _append_evidence_summary_markdown(lines: list[str], evidence_summary: dict[s
     lines.extend(
         [
             "",
+            "| label | worst_presence_metric | present_cases | present_f1 | absent_f1 | present_minus_absent | present_f1_delta | absent_f1_delta |",
+            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for result in all_results:
+        metric, summary = _top_metric_presence_row(result)
+        presence_deltas = dict(
+            dict(result.get("lifecycle_bottleneck_deltas", {})).get("metric_presence_summary", {})
+        )
+        metric_deltas = dict(presence_deltas.get(metric, {})) if metric else {}
+        lines.append(
+            f"| {result.get('label', '')} | {metric} | "
+            f"{_format_markdown_number(summary.get('case_count_present'))} | "
+            f"{_format_markdown_number(summary.get('final_f1_avg_present'))} | "
+            f"{_format_markdown_number(summary.get('final_f1_avg_absent'))} | "
+            f"{_format_markdown_delta(summary.get('final_f1_avg_delta_present_minus_absent'))} | "
+            f"{_format_markdown_delta(metric_deltas.get('final_f1_avg_present'))} | "
+            f"{_format_markdown_delta(metric_deltas.get('final_f1_avg_absent'))} |"
+        )
+
+    lines.extend(
+        [
+            "",
             "| label | queue_residue_cases | queue_residue_total | queue_residue_avg_when_present | queue_residue_max | queue_len_ge_2 | queue_len_ge_5 | active_staged_residue | pending_residue |",
             "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
         ]
@@ -633,6 +749,56 @@ def _append_evidence_summary_markdown(lines: list[str], evidence_summary: dict[s
             f"{_format_markdown_number(queue_summary.get('queue_residue_len_ge_5_count'))} | "
             f"{_format_markdown_number(queue_summary.get('active_staged_residue_case_count'))} | "
             f"{_format_markdown_number(queue_summary.get('pending_residue_case_count'))} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "| label | ordered_gap_cases | ordered_gap_avg | ordered_gap_max | ordered_gap_cases_delta | ordered_gap_avg_delta | ordered_gap_max_delta |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for result in all_results:
+        ordered_gap = dict(result.get("ordered_final_gap_summary", {}))
+        ordered_gap_deltas = dict(result.get("ordered_final_gap_deltas", {}))
+        lines.append(
+            f"| {result.get('label', '')} | "
+            f"{_format_markdown_number(ordered_gap.get('ordered_gap_case_count'))} | "
+            f"{_format_markdown_number(ordered_gap.get('ordered_gap_avg_when_present'))} | "
+            f"{_format_markdown_number(ordered_gap.get('ordered_gap_max'))} | "
+            f"{_format_markdown_delta(ordered_gap_deltas.get('ordered_gap_case_count'))} | "
+            f"{_format_markdown_delta(ordered_gap_deltas.get('ordered_gap_avg_when_present'))} | "
+            f"{_format_markdown_delta(ordered_gap_deltas.get('ordered_gap_max'))} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "| label | low_score_threshold | low_cases | review_needed | supported_monotonic | avg_f1 | ordered_f1 | boundary_f1 | supported_monotonic_avg_f1 | low_cases_delta | review_needed_delta | supported_monotonic_delta |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for result in all_results:
+        low_score = dict(result.get("low_score_characteristics_summary", {}))
+        thresholds = dict(low_score.get("thresholds", {}))
+        threshold = dict(thresholds.get("0.35", {}))
+        by_support_kind = dict(threshold.get("by_support_kind", {}))
+        supported_monotonic = dict(by_support_kind.get("supported_monotonic", {}))
+        deltas = dict(dict(result.get("low_score_characteristics_deltas", {})).get("0.35", {}))
+        support_counts = dict(threshold.get("support_kind_counts", {}))
+        support_count_deltas = dict(deltas.get("support_kind_counts", {}))
+        lines.append(
+            f"| {result.get('label', '')} | 0.35 | "
+            f"{_format_markdown_number(threshold.get('case_count'))} | "
+            f"{_format_markdown_number(support_counts.get('review_needed'))} | "
+            f"{_format_markdown_number(support_counts.get('supported_monotonic'))} | "
+            f"{_format_markdown_number(_low_score_value(threshold, 'avg_final_f1', 'final_f1_avg'))} | "
+            f"{_format_markdown_number(_low_score_value(threshold, 'avg_ordered_f1', 'final_ordered_f1_avg'))} | "
+            f"{_format_markdown_number(_low_score_value(threshold, 'avg_boundary_f1', 'final_boundary_f1_avg'))} | "
+            f"{_format_markdown_number(_low_score_value(supported_monotonic, 'avg_final_f1', 'final_f1_avg'))} | "
+            f"{_format_markdown_delta(deltas.get('case_count'))} | "
+            f"{_format_markdown_delta(support_count_deltas.get('review_needed'))} | "
+            f"{_format_markdown_delta(support_count_deltas.get('supported_monotonic'))} |"
         )
 
     lines.extend(

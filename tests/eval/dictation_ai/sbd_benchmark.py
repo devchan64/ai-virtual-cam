@@ -34,6 +34,7 @@ from tests.eval.dictation_ai.benchmark.sbd_lifecycle_replay import (
     _finalize_staged_sentence,
     _run_lifecycle_case,
     _score_boundary_offsets,
+    _score_ordered_sequence,
     _score_sequence,
     _stage_completed_sentence,
 )
@@ -162,6 +163,7 @@ def main() -> int:
         lifecycle = _run_lifecycle_case(case, detector)
         elapsed_ms = (time.perf_counter() - case_started) * 1000.0
         final_score = _score_sequence(case.expected_final, lifecycle["actual_final"])
+        final_ordered_score = _score_ordered_sequence(case.expected_final, lifecycle["actual_final"])
         final_boundary_score = _score_boundary_offsets(case.expected_final, lifecycle["actual_final"])
         completed_score = _score_sequence(case.expected_completed, lifecycle["actual_completed_last"])
         pending_exact = lifecycle["actual_pending"] == case.expected_pending
@@ -184,6 +186,7 @@ def main() -> int:
                 "actual_staged": lifecycle["actual_staged"],
                 "actual_staged_queue": lifecycle["actual_staged_queue"],
                 "final_score": final_score,
+                "final_ordered_score": final_ordered_score,
                 "final_boundary_score": final_boundary_score,
                 "completed_last_score": completed_score,
                 "pending_exact": pending_exact,

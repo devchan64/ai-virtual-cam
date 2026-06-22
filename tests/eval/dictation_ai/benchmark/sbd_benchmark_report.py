@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
+from difflib import SequenceMatcher
+from itertools import combinations
 from typing import Any
 
 from src.app.dictation_pipeline_settings import (
+    FINAL_SENTENCE_MATCH_MIN_SIMILARITY,
     SBD_BENCHMARK_BACKEND,
     dictation_pipeline_policy,
     dictation_tuning_manifest,
     dictation_tuning_protocol,
     lifecycle_tuning_policy,
 )
-from src.app.dictation_transcript_logic import _revision_similarity_policy
+from src.app.dictation_transcript_logic import _revision_similarity_policy, _word_units
+from src.app.sentence_boundary import normalized_text
 from tests.eval.dictation_ai.cases.sbd_case_loader import SbdCase
 from tests.eval.dictation_ai.cases.sbd_case_paths import (
     build_evidence_protocol,
@@ -39,6 +44,10 @@ LIFECYCLE_BOTTLENECK_METRICS = (
     "stage_queue_revision_preempt_deferred_replaced_confirmed",
     "stage_queue_revision_preempt_deferred_terminal_tail_revision_split",
     "stage_finalize_deferred_for_queue_revision",
+    "stage_age_hold",
+    "stage_age_tick",
+    "stage_age_finalize",
+    "stage_age_quality_blocked",
     "stage_revision_internal_stability_high",
     "stage_revision_internal_stability_mid",
     "stage_revision_internal_stability_low",
@@ -61,6 +70,11 @@ LIFECYCLE_BOTTLENECK_METRICS = (
     "stage_blocked_short_no_end_aged_active_stage",
     "stage_blocked_short_no_end_active_stage_quality_suppressed",
     "final_quality_no_end_marker",
+    "pending_overrun",
+    "pending_overrun_reason_long_no_boundary",
+    "pending_quality_repeated_word_ngram",
+    "pending_quality_cjk_repeated_ngram",
+    "pending_quality_overrun_long_no_boundary",
     "candidate_delta_trimmed",
     "candidate_delta_trimmed_cjk",
     "candidate_recent_final_delta_trimmed",
@@ -108,6 +122,8 @@ CASE_EXEMPLAR_METRICS = (
     "stage_revision_confirmation_reset",
     "stage_queue_quality_suppressed",
     "stage_replace_deferred",
+    "stage_age_hold",
+    "stage_age_quality_blocked",
     "stage_candidate_quality_blocked",
     "stage_candidate_quality_no_end_marker",
     "stage_candidate_quality_no_end_marker_with_active_stage",
@@ -123,6 +139,9 @@ CASE_EXEMPLAR_METRICS = (
     "stage_candidate_quality_trailing_ellipsis_without_blocker",
     "stage_blocked_short_no_end_aged_active_stage",
     "stage_blocked_short_no_end_active_stage_quality_suppressed",
+    "pending_overrun",
+    "pending_quality_repeated_word_ngram",
+    "pending_quality_overrun_long_no_boundary",
     "candidate_delta_trimmed",
     "candidate_delta_trimmed_cjk",
     "candidate_recent_final_delta_trimmed",
@@ -132,6 +151,412 @@ CASE_EXEMPLAR_METRICS = (
 )
 CASE_EXEMPLAR_LIMIT = 8
 CASE_EXEMPLAR_PREVIEW_CHARS = 160
+LOW_SCORE_THRESHOLDS = (0.35, 0.50, 0.65)
+LOW_SCORE_METRIC_PREFIXES = (
+    "candidate_",
+    "finalize_",
+    "final_quality_",
+    "pending_",
+    "stage_",
+)
+SUPPORTED_LOW_BOTTLENECK_METRICS = (
+    "stage_candidate_quality_blocked",
+    "stage_revision_token_sentence_deferred",
+    "stage_age_quality_blocked",
+    "stage_replace_deferred",
+    "stage_finalize_deferred_for_queue_revision",
+    "stage_queue_revision",
+    "candidate_recent_final_delta_trimmed",
+    "candidate_delta_trimmed",
+    "candidate_duplicate_suppressed",
+)
+
+
+def _sentence_support_score(sentence: str, chunk: str) -> float:
+    sentence_words = _word_units(sentence)
+    chunk_words = _word_units(chunk)
+    if sentence_words and chunk_words:
+        matcher = SequenceMatcher(None, sentence_words, chunk_words, autojunk=False)
+        ratio = matcher.ratio()
+        common_run = max((block.size for block in matcher.get_matching_blocks()), default=0)
+        coverage = common_run / max(len(sentence_words), 1)
+        return max(ratio, coverage)
+    return SequenceMatcher(None, normalized_text(sentence), normalized_text(chunk), autojunk=False).ratio()
+
+
+def _expected_sentence_support(sentence: str, chunks: list[str]) -> dict[str, Any]:
+    best_index = -1
+    best_similarity = 0.0
+    for index, chunk in enumerate(chunks):
+        similarity = _sentence_support_score(sentence, chunk)
+        if similarity > best_similarity:
+            best_index = index
+            best_similarity = similarity
+        if similarity >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY:
+            return {
+                "chunk_index": index,
+                "similarity": similarity,
+                "supported": True,
+            }
+    return {
+        "chunk_index": best_index,
+        "similarity": best_similarity,
+        "supported": False,
+    }
+
+
+def _expected_final_order_support_kind(case: SbdCase) -> str:
+    if len(case.expected_final) < 2:
+        return "single"
+    supports = [_expected_sentence_support(sentence, case.chunks) for sentence in case.expected_final]
+    if any(not support["supported"] for support in supports):
+        return "review_needed"
+    supported_indices = [int(support["chunk_index"]) for support in supports]
+    if any(right < left for left, right in zip(supported_indices, supported_indices[1:])):
+        return "review_needed"
+    return "supported_monotonic"
+
+
+def summarize_expected_final_order_support(cases: list[SbdCase]) -> dict[str, Any]:
+    review_cases: list[dict[str, Any]] = []
+    multi_expected_cases = [case for case in cases if len(case.expected_final) >= 2]
+    unsupported_case_count = 0
+    inversion_case_count = 0
+    all_supported_monotonic_count = 0
+    for case in multi_expected_cases:
+        supports = [_expected_sentence_support(sentence, case.chunks) for sentence in case.expected_final]
+        unsupported = [support for support in supports if not support["supported"]]
+        if unsupported:
+            unsupported_case_count += 1
+        supported_indices = [int(support["chunk_index"]) for support in supports if support["supported"]]
+        inversion_count = sum(
+            1
+            for left, right in zip(supported_indices, supported_indices[1:])
+            if right < left
+        )
+        if inversion_count:
+            inversion_case_count += 1
+        if not unsupported and not inversion_count:
+            all_supported_monotonic_count += 1
+        if unsupported or inversion_count:
+            review_cases.append(
+                {
+                    "id": case.id,
+                    "language": case.language,
+                    "tags": list(case.tags),
+                    "unsupported_expected_count": len(unsupported),
+                    "supported_order_inversion_count": inversion_count,
+                    "support_chunk_indices": [int(support["chunk_index"]) for support in supports],
+                    "support_similarities": [round(float(support["similarity"]), 4) for support in supports],
+                    "expected_final_preview": _first_text_preview(case.expected_final),
+                    "chunk_preview": _first_text_preview(case.chunks),
+                }
+            )
+    review_cases.sort(
+        key=lambda item: (
+            -int(item["supported_order_inversion_count"]),
+            -int(item["unsupported_expected_count"]),
+            str(item["id"]),
+        )
+    )
+    total = len(multi_expected_cases)
+    return {
+        "multi_expected_case_count": total,
+        "all_supported_monotonic_case_count": all_supported_monotonic_count,
+        "all_supported_monotonic_case_ratio": all_supported_monotonic_count / max(total, 1),
+        "unsupported_expected_case_count": unsupported_case_count,
+        "supported_order_inversion_case_count": inversion_case_count,
+        "review_needed_case_count": len(review_cases),
+        "match_min_similarity": FINAL_SENTENCE_MATCH_MIN_SIMILARITY,
+        "top_review_needed_cases": review_cases[:CASE_EXEMPLAR_LIMIT],
+    }
+
+
+def summarize_results_by_expected_order_support(cases: list[SbdCase], results: list[dict[str, Any]]) -> dict[str, Any]:
+    support_by_id = {case.id: _expected_final_order_support_kind(case) for case in cases}
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for result in results:
+        grouped.setdefault(support_by_id.get(str(result.get("id")), "unknown"), []).append(result)
+    return {
+        group: _summarize_result_group(group_results)
+        for group, group_results in sorted(grouped.items())
+    }
+
+
+def summarize_low_score_characteristics(cases: list[SbdCase], results: list[dict[str, Any]]) -> dict[str, Any]:
+    support_by_id = {case.id: _expected_final_order_support_kind(case) for case in cases}
+    expected_results = [
+        result
+        for result in results
+        if result.get("expected_final") and isinstance(result.get("final_score"), dict)
+    ]
+    thresholds: dict[str, dict[str, Any]] = {}
+    for threshold in LOW_SCORE_THRESHOLDS:
+        low_results = [
+            result
+            for result in expected_results
+            if float(dict(result.get("final_score", {})).get("f1", 0.0)) < threshold
+        ]
+        support_counts = Counter(support_by_id.get(str(result.get("id")), "unknown") for result in low_results)
+        language_counts = Counter(str(result.get("language") or "unknown") for result in low_results)
+        tag_counts = Counter(str(tag) for result in low_results for tag in result.get("tags", []))
+        metric_case_counts: Counter[str] = Counter()
+        metric_total_counts: Counter[str] = Counter()
+        by_support_kind: dict[str, dict[str, Any]] = {}
+        for support_kind in sorted(support_counts):
+            support_results = [
+                result
+                for result in low_results
+                if support_by_id.get(str(result.get("id")), "unknown") == support_kind
+            ]
+            by_support_kind[support_kind] = _summarize_low_score_support_group(support_results)
+        for result in low_results:
+            for key, value in dict(result.get("metrics", {})).items():
+                value_int = int(value)
+                if not value_int or not key.startswith(LOW_SCORE_METRIC_PREFIXES):
+                    continue
+                metric_case_counts[key] += 1
+                metric_total_counts[key] += value_int
+        thresholds[f"{threshold:.2f}"] = {
+            "threshold": threshold,
+            "case_count": len(low_results),
+            "case_ratio": len(low_results) / max(len(expected_results), 1),
+            "avg_final_f1": _avg_final_f1(low_results),
+            "avg_ordered_f1": _avg_score_f1(low_results, "final_ordered_score"),
+            "avg_boundary_f1": _avg_score_f1(low_results, "final_boundary_score"),
+            "empty_actual_count": sum(1 for result in low_results if not result.get("actual_final")),
+            "staged_residue_count": sum(
+                1
+                for result in low_results
+                if result.get("actual_staged") or result.get("actual_staged_queue")
+            ),
+            "underfinal_count": sum(
+                1
+                for result in low_results
+                if len(result.get("actual_final", []) or []) < len(result.get("expected_final", []) or [])
+            ),
+            "overfinal_count": sum(
+                1
+                for result in low_results
+                if len(result.get("actual_final", []) or []) > len(result.get("expected_final", []) or [])
+            ),
+            "support_kind_counts": dict(sorted(support_counts.items())),
+            "support_kind_ratios": {
+                key: value / max(len(low_results), 1)
+                for key, value in sorted(support_counts.items())
+            },
+            "by_support_kind": by_support_kind,
+            "language_counts": dict(sorted(language_counts.items())),
+            "top_tags": [
+                {"tag": tag, "case_count": count}
+                for tag, count in tag_counts.most_common(CASE_EXEMPLAR_LIMIT)
+            ],
+            "top_lifecycle_metrics": [
+                {
+                    "metric": metric,
+                    "case_count": count,
+                    "total_count": int(metric_total_counts[metric]),
+                }
+                for metric, count in sorted(
+                    metric_case_counts.items(),
+                    key=lambda item: (-item[1], -metric_total_counts[item[0]], item[0]),
+                )[:CASE_EXEMPLAR_LIMIT]
+            ],
+            "lowest_cases": [
+                _low_score_case_payload(result, support_by_id.get(str(result.get("id")), "unknown"))
+                for result in sorted(
+                    low_results,
+                    key=lambda result: (
+                        float(dict(result.get("final_score", {})).get("f1", 0.0)),
+                        float(dict(result.get("final_ordered_score", {})).get("f1", 0.0)),
+                        str(result.get("id")),
+                    ),
+                )[:CASE_EXEMPLAR_LIMIT]
+            ],
+        }
+    return {
+        "interpretation": (
+            "Low-F1 cases are diagnostics, not direct optimization targets. "
+            "Prefer supported_monotonic low cases for app logic tuning; review_needed cases require expected_final/input-order audit first."
+        ),
+        "expected_result_count": len(expected_results),
+        "thresholds": thresholds,
+    }
+
+
+def summarize_supported_low_bottleneck_intersections(
+    cases: list[SbdCase],
+    results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    support_by_id = {case.id: _expected_final_order_support_kind(case) for case in cases}
+    thresholds: dict[str, dict[str, Any]] = {}
+    for threshold in LOW_SCORE_THRESHOLDS:
+        low_results = [
+            result
+            for result in results
+            if support_by_id.get(str(result.get("id")), "unknown") == "supported_monotonic"
+            and result.get("expected_final")
+            and isinstance(result.get("final_score"), dict)
+            and float(dict(result.get("final_score", {})).get("f1", 0.0)) < threshold
+        ]
+        thresholds[f"{threshold:.2f}"] = _summarize_supported_low_threshold(low_results, threshold)
+    return {
+        "interpretation": (
+            "These are low-score cases whose expected_final sentences are supported by input chunks in monotonic order. "
+            "Use them before changing app logic; review_needed cases may be collection or labeling issues."
+        ),
+        "metric_candidates": list(SUPPORTED_LOW_BOTTLENECK_METRICS),
+        "thresholds": thresholds,
+    }
+
+
+def _summarize_supported_low_threshold(results: list[dict[str, Any]], threshold: float) -> dict[str, Any]:
+    metric_presence = {
+        metric: _summarize_supported_low_metric_presence(results, metric)
+        for metric in SUPPORTED_LOW_BOTTLENECK_METRICS
+    }
+    metric_presence = {
+        metric: summary
+        for metric, summary in metric_presence.items()
+        if int(summary["case_count"]) > 0
+    }
+    return {
+        "threshold": threshold,
+        "case_count": len(results),
+        "avg_final_f1": _avg_final_f1(results),
+        "avg_ordered_f1": _avg_score_f1(results, "final_ordered_score"),
+        "avg_boundary_f1": _avg_score_f1(results, "final_boundary_score"),
+        "staged_residue_count": sum(
+            1
+            for result in results
+            if result.get("actual_staged") or result.get("actual_staged_queue")
+        ),
+        "underfinal_count": sum(
+            1
+            for result in results
+            if len(result.get("actual_final", []) or []) < len(result.get("expected_final", []) or [])
+        ),
+        "overfinal_count": sum(
+            1
+            for result in results
+            if len(result.get("actual_final", []) or []) > len(result.get("expected_final", []) or [])
+        ),
+        "metric_presence": metric_presence,
+        "top_metric_pairs": _summarize_supported_low_metric_intersections(results, size=2),
+        "top_metric_triples": _summarize_supported_low_metric_intersections(results, size=3),
+        "lowest_cases": [
+            _low_score_case_payload(result, "supported_monotonic")
+            for result in sorted(
+                results,
+                key=lambda result: (
+                    float(dict(result.get("final_score", {})).get("f1", 0.0)),
+                    float(dict(result.get("final_ordered_score", {})).get("f1", 0.0)),
+                    str(result.get("id")),
+                ),
+            )[:CASE_EXEMPLAR_LIMIT]
+        ],
+    }
+
+
+def _summarize_supported_low_metric_presence(results: list[dict[str, Any]], metric: str) -> dict[str, Any]:
+    present = [result for result in results if int(dict(result.get("metrics", {})).get(metric, 0)) > 0]
+    return {
+        "case_count": len(present),
+        "case_ratio": len(present) / max(len(results), 1),
+        "total_count": int(sum(int(dict(result.get("metrics", {})).get(metric, 0)) for result in present)),
+        "avg_final_f1": _avg_final_f1(present),
+        "avg_ordered_f1": _avg_score_f1(present, "final_ordered_score"),
+        "avg_boundary_f1": _avg_score_f1(present, "final_boundary_score"),
+    }
+
+
+def _summarize_supported_low_metric_intersections(results: list[dict[str, Any]], *, size: int) -> list[dict[str, Any]]:
+    summaries: list[dict[str, Any]] = []
+    for metrics in combinations(SUPPORTED_LOW_BOTTLENECK_METRICS, size):
+        present = [
+            result
+            for result in results
+            if all(int(dict(result.get("metrics", {})).get(metric, 0)) > 0 for metric in metrics)
+        ]
+        if not present:
+            continue
+        summaries.append(
+            {
+                "metrics": list(metrics),
+                "case_count": len(present),
+                "case_ratio": len(present) / max(len(results), 1),
+                "avg_final_f1": _avg_final_f1(present),
+                "avg_ordered_f1": _avg_score_f1(present, "final_ordered_score"),
+                "avg_boundary_f1": _avg_score_f1(present, "final_boundary_score"),
+                "top_cases": [
+                    str(result.get("id"))
+                    for result in sorted(
+                        present,
+                        key=lambda result: (
+                            float(dict(result.get("final_score", {})).get("f1", 0.0)),
+                            str(result.get("id")),
+                        ),
+                    )[:CASE_EXEMPLAR_LIMIT]
+                ],
+            }
+        )
+    summaries.sort(
+        key=lambda item: (
+            -int(item["case_count"]),
+            float(item["avg_final_f1"]),
+            item["metrics"],
+        )
+    )
+    return summaries[:CASE_EXEMPLAR_LIMIT]
+
+
+def _summarize_low_score_support_group(results: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "case_count": len(results),
+        "avg_final_f1": _avg_final_f1(results),
+        "avg_ordered_f1": _avg_score_f1(results, "final_ordered_score"),
+        "avg_boundary_f1": _avg_score_f1(results, "final_boundary_score"),
+        "empty_actual_count": sum(1 for result in results if not result.get("actual_final")),
+        "staged_residue_count": sum(
+            1
+            for result in results
+            if result.get("actual_staged") or result.get("actual_staged_queue")
+        ),
+        "underfinal_count": sum(
+            1
+            for result in results
+            if len(result.get("actual_final", []) or []) < len(result.get("expected_final", []) or [])
+        ),
+        "overfinal_count": sum(
+            1
+            for result in results
+            if len(result.get("actual_final", []) or []) > len(result.get("expected_final", []) or [])
+        ),
+    }
+
+
+def _avg_score_f1(results: list[dict[str, Any]], key: str) -> float:
+    if not results:
+        return 0.0
+    return sum(float(dict(result.get(key, {})).get("f1", 0.0)) for result in results) / len(results)
+
+
+def _low_score_case_payload(result: dict[str, Any], support_kind: str) -> dict[str, Any]:
+    return {
+        "id": result.get("id"),
+        "language": result.get("language"),
+        "support_kind": support_kind,
+        "tags": list(result.get("tags", [])),
+        "final_f1": float(dict(result.get("final_score", {})).get("f1", 0.0)),
+        "final_ordered_f1": float(dict(result.get("final_ordered_score", {})).get("f1", 0.0)),
+        "final_boundary_f1": float(dict(result.get("final_boundary_score", {})).get("f1", 0.0)),
+        "expected_final_count": len(result.get("expected_final", []) or []),
+        "actual_final_count": len(result.get("actual_final", []) or []),
+        "staged_queue_len": len(result.get("actual_staged_queue", []) or []),
+        "expected_final_preview": _first_text_preview(result.get("expected_final")),
+        "actual_final_preview": _first_text_preview(result.get("actual_final")),
+        "actual_staged_preview": _text_preview(result.get("actual_staged")),
+    }
 
 
 def _staged_queue_lengths(results: list[dict[str, Any]]) -> list[int]:
@@ -163,20 +588,57 @@ def summarize_staged_queue_residue(results: list[dict[str, Any]]) -> dict[str, A
     }
 
 
+def summarize_ordered_final_gap(results: list[dict[str, Any]]) -> dict[str, Any]:
+    gap_cases: list[dict[str, Any]] = []
+    for result in results:
+        final_score = dict(result.get("final_score", {}))
+        ordered_score = dict(result.get("final_ordered_score", final_score))
+        final_f1 = float(final_score.get("f1", 0.0))
+        ordered_f1 = float(ordered_score.get("f1", final_f1))
+        gap = final_f1 - ordered_f1
+        if gap <= 0.0:
+            continue
+        gap_cases.append(
+            {
+                "id": result.get("id"),
+                "language": result.get("language"),
+                "tags": list(result.get("tags", [])),
+                "final_f1": final_f1,
+                "final_ordered_f1": ordered_f1,
+                "ordered_gap": gap,
+                "expected_final_count": len(result.get("expected_final", []) or []),
+                "actual_final_count": len(result.get("actual_final", []) or []),
+                "expected_final_preview": _first_text_preview(result.get("expected_final")),
+                "actual_final_preview": _first_text_preview(result.get("actual_final")),
+            }
+        )
+    return {
+        "ordered_gap_case_count": len(gap_cases),
+        "ordered_gap_avg_when_present": sum(float(item["ordered_gap"]) for item in gap_cases) / max(len(gap_cases), 1),
+        "ordered_gap_max": max((float(item["ordered_gap"]) for item in gap_cases), default=0.0),
+        "top_ordered_gap_cases": sorted(gap_cases, key=lambda item: (-float(item["ordered_gap"]), str(item["id"])))[
+            :CASE_EXEMPLAR_LIMIT
+        ],
+    }
+
+
 def _average_scores(results: list[dict[str, Any]], key: str) -> dict[str, float]:
     if not results:
         return {"precision": 0.0, "recall": 0.0, "f1": 0.0, "similarity_coverage": 0.0}
+    fallback_key = "final_score" if key == "final_ordered_score" else key
+    scores = [dict(result.get(key) or result.get(fallback_key, {})) for result in results]
     return {
-        "precision": sum(float(result[key]["precision"]) for result in results) / len(results),
-        "recall": sum(float(result[key]["recall"]) for result in results) / len(results),
-        "f1": sum(float(result[key]["f1"]) for result in results) / len(results),
-        "similarity_coverage": sum(float(result[key].get("similarity_coverage", 0.0)) for result in results)
+        "precision": sum(float(score["precision"]) for score in scores) / len(scores),
+        "recall": sum(float(score["recall"]) for score in scores) / len(scores),
+        "f1": sum(float(score["f1"]) for score in scores) / len(scores),
+        "similarity_coverage": sum(float(score.get("similarity_coverage", 0.0)) for score in scores)
         / len(results),
     }
 
 
 def _summarize_result_group(group_results: list[dict[str, Any]]) -> dict[str, Any]:
     final_score_avg = _average_scores(group_results, "final_score")
+    final_ordered_score_avg = _average_scores(group_results, "final_ordered_score")
     final_boundary_score_avg = _average_scores(group_results, "final_boundary_score")
     completed_last_score_avg = _average_scores(group_results, "completed_last_score")
     metrics_total: dict[str, int] = {}
@@ -197,6 +659,10 @@ def _summarize_result_group(group_results: list[dict[str, Any]]) -> dict[str, An
         "final_recall_avg": final_score_avg["recall"],
         "final_f1_avg": final_score_avg["f1"],
         "final_similarity_coverage_avg": final_score_avg["similarity_coverage"],
+        "final_ordered_precision_avg": final_ordered_score_avg["precision"],
+        "final_ordered_recall_avg": final_ordered_score_avg["recall"],
+        "final_ordered_f1_avg": final_ordered_score_avg["f1"],
+        "final_ordered_similarity_coverage_avg": final_ordered_score_avg["similarity_coverage"],
         "final_boundary_precision_avg": final_boundary_score_avg["precision"],
         "final_boundary_recall_avg": final_boundary_score_avg["recall"],
         "final_boundary_f1_avg": final_boundary_score_avg["f1"],
@@ -369,6 +835,7 @@ def _first_text_preview(values: Any) -> str:
 def _case_exemplar_score(result: dict[str, Any]) -> float:
     metrics = dict(result.get("metrics", {}))
     final_score = dict(result.get("final_score", {}))
+    ordered_score = dict(result.get("final_ordered_score", {}))
     boundary_score = dict(result.get("final_boundary_score", {}))
     score = 0.0
     score += min(float(metrics.get("stage_queue_revision", 0)), 20.0)
@@ -382,6 +849,8 @@ def _case_exemplar_score(result: dict[str, Any]) -> float:
         score += 8.0
     if float(final_score.get("f1", 0.0)) < 0.35:
         score += 6.0
+    if float(ordered_score.get("f1", 0.0)) < float(final_score.get("f1", 0.0)):
+        score += 3.0
     if float(boundary_score.get("f1", 0.0)) == 0.0:
         score += 4.0
     return score
@@ -390,6 +859,7 @@ def _case_exemplar_score(result: dict[str, Any]) -> float:
 def _case_exemplar_payload(result: dict[str, Any]) -> dict[str, Any]:
     metrics = dict(result.get("metrics", {}))
     final_score = dict(result.get("final_score", {}))
+    ordered_score = dict(result.get("final_ordered_score", {}))
     boundary_score = dict(result.get("final_boundary_score", {}))
     return {
         "id": result.get("id"),
@@ -397,6 +867,7 @@ def _case_exemplar_payload(result: dict[str, Any]) -> dict[str, Any]:
         "tags": list(result.get("tags", [])),
         "bottleneck_score": round(_case_exemplar_score(result), 3),
         "final_f1": float(final_score.get("f1", 0.0)),
+        "final_ordered_f1": float(ordered_score.get("f1", 0.0)),
         "final_boundary_f1": float(boundary_score.get("f1", 0.0)),
         "expected_final_count": len(result.get("expected_final", []) or []),
         "actual_final_count": len(result.get("actual_final", []) or []),
@@ -536,9 +1007,11 @@ def summarize_lifecycle_bottlenecks(results: list[dict[str, Any]], metric_totals
         and key != "stage_candidate_quality_blocked"
         and int(value)
     }
+    metric_keys = _lifecycle_metric_keys(metric_totals)
     return {
-        "metric_keys": list(LIFECYCLE_BOTTLENECK_METRICS),
-        "metrics": {key: int(metric_totals.get(key, 0)) for key in LIFECYCLE_BOTTLENECK_METRICS},
+        "metric_keys": metric_keys,
+        "metrics": {key: int(metric_totals.get(key, 0)) for key in metric_keys},
+        "metric_presence_summary": _summarize_metric_presence(results, tuple(metric_keys)),
         "replacement_decision_counts": replacement_decision_counts,
         "deferred_replacement_decision_counts": {
             key: value
@@ -551,6 +1024,60 @@ def summarize_lifecycle_bottlenecks(results: list[dict[str, Any]], metric_totals
             for language in sorted(language_groups)
         },
     }
+
+
+def _lifecycle_metric_keys(metric_totals: dict[str, int]) -> list[str]:
+    keys = set(LIFECYCLE_BOTTLENECK_METRICS)
+    for key, value in metric_totals.items():
+        if not int(value):
+            continue
+        if key.startswith(
+            (
+                "stage_candidate_quality_",
+                "final_quality_",
+                "pending_quality_",
+                "stage_replace_decision_",
+            )
+        ):
+            keys.add(key)
+    return sorted(keys)
+
+
+def _summarize_metric_presence(results: list[dict[str, Any]], metric_keys: tuple[str, ...]) -> dict[str, dict[str, Any]]:
+    expected_results = [
+        result
+        for result in results
+        if result.get("expected_final") and isinstance(result.get("final_score"), dict)
+    ]
+    summary: dict[str, dict[str, Any]] = {}
+    for key in metric_keys:
+        present = [result for result in expected_results if int(dict(result.get("metrics", {})).get(key, 0)) > 0]
+        absent = [result for result in expected_results if int(dict(result.get("metrics", {})).get(key, 0)) == 0]
+        if not present:
+            continue
+        present_f1 = _avg_final_f1(present)
+        absent_f1 = _avg_final_f1(absent)
+        summary[key] = {
+            "total_count": int(sum(int(dict(result.get("metrics", {})).get(key, 0)) for result in expected_results)),
+            "case_count_present": len(present),
+            "case_count_absent": len(absent),
+            "final_f1_avg_present": present_f1,
+            "final_f1_avg_absent": absent_f1,
+            "final_f1_avg_delta_present_minus_absent": present_f1 - absent_f1,
+            "low_final_f1_present_count": _low_final_f1_count(present),
+            "low_final_f1_absent_count": _low_final_f1_count(absent),
+        }
+    return summary
+
+
+def _avg_final_f1(results: list[dict[str, Any]]) -> float:
+    if not results:
+        return 0.0
+    return sum(float(result["final_score"]["f1"]) for result in results) / len(results)
+
+
+def _low_final_f1_count(results: list[dict[str, Any]], threshold: float = 0.45) -> int:
+    return sum(1 for result in results if float(result["final_score"]["f1"]) < threshold)
 
 
 def build_benchmark_report(
@@ -571,6 +1098,7 @@ def build_benchmark_report(
     finalized = metric_totals.get("finalized", 0)
     stage_start = metric_totals.get("stage_start", 0)
     final_score_avg = _average_scores(results, "final_score")
+    final_ordered_score_avg = _average_scores(results, "final_ordered_score")
     final_boundary_score_avg = _average_scores(results, "final_boundary_score")
     completed_last_score_avg = _average_scores(results, "completed_last_score")
     language_summary = summarize_results_by_language(results)
@@ -582,6 +1110,11 @@ def build_benchmark_report(
     case_exemplar_summary = summarize_case_exemplars(results)
     lifecycle_bottleneck_summary = summarize_lifecycle_bottlenecks(results, metric_totals)
     staged_queue_residue_summary = summarize_staged_queue_residue(results)
+    ordered_final_gap_summary = summarize_ordered_final_gap(results)
+    expected_final_order_support_summary = summarize_expected_final_order_support(cases)
+    expected_order_support_result_summary = summarize_results_by_expected_order_support(cases, results)
+    low_score_characteristics_summary = summarize_low_score_characteristics(cases, results)
+    supported_low_bottleneck_intersection_summary = summarize_supported_low_bottleneck_intersections(cases, results)
     expected_final_case_count = sum(1 for case in cases if case.expected_final)
     case_summary = {
         "case_count": len(results),
@@ -635,6 +1168,10 @@ def build_benchmark_report(
             "final_recall_avg": final_score_avg["recall"],
             "final_f1_avg": final_score_avg["f1"],
             "final_similarity_coverage_avg": final_score_avg["similarity_coverage"],
+            "final_ordered_precision_avg": final_ordered_score_avg["precision"],
+            "final_ordered_recall_avg": final_ordered_score_avg["recall"],
+            "final_ordered_f1_avg": final_ordered_score_avg["f1"],
+            "final_ordered_similarity_coverage_avg": final_ordered_score_avg["similarity_coverage"],
             "final_boundary_precision_avg": final_boundary_score_avg["precision"],
             "final_boundary_recall_avg": final_boundary_score_avg["recall"],
             "final_boundary_f1_avg": final_boundary_score_avg["f1"],
@@ -648,6 +1185,11 @@ def build_benchmark_report(
         },
         "lifecycle_bottleneck_summary": lifecycle_bottleneck_summary,
         "staged_queue_residue_summary": staged_queue_residue_summary,
+        "ordered_final_gap_summary": ordered_final_gap_summary,
+        "expected_final_order_support_summary": expected_final_order_support_summary,
+        "expected_order_support_result_summary": expected_order_support_result_summary,
+        "low_score_characteristics_summary": low_score_characteristics_summary,
+        "supported_low_bottleneck_intersection_summary": supported_low_bottleneck_intersection_summary,
         "queue_residue_strata_summary": queue_residue_strata_summary,
         "evidence_strata_summary": evidence_strata_summary,
         "expected_quality_strata_summary": expected_quality_strata_summary,

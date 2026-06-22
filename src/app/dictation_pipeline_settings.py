@@ -164,11 +164,11 @@ CJK_REVISION_INTERNAL_STABILITY_MIN_CHARS = 40
 # 더 나은 CUDA/AI 벤치 결과가 실험일지에 기록되기 전까지 checked-in 값을 쓴다.
 CJK_REVISION_SHORT_MAX_UNITS = 4
 CJK_REVISION_MAX_LENGTH_DELTA = 4
-CJK_REVISION_RATIO_MIN = 0.78
+CJK_REVISION_RATIO_MIN = 0.82
 CJK_REVISION_COMMON_RUN_MIN = 3
-CJK_REVISION_COVERAGE_MIN = 0.75
+CJK_REVISION_COVERAGE_MIN = 0.80
 CJK_REVISION_FALLBACK_RATIO_MIN = 0.70
-CJK_CONFIRM_PRESERVE_RATIO_MIN = 0.55
+CJK_CONFIRM_PRESERVE_RATIO_MIN = 0.50
 CJK_CONFIRM_PRESERVE_COMMON_RUN_MIN = 3
 CJK_CONFIRM_PRESERVE_COVERAGE_MIN = 0.70
 REVISION_TAIL_COMMON_RUN_MIN = 8
@@ -694,6 +694,16 @@ def dictation_tuning_manifest() -> list[dict[str, int | float | str]]:
             max_value=0.95,
             scope="revision-similarity",
             intent="classify CJK candidate revisions without language-specific phrase rules",
+        ),
+        _tuning_manifest_entry(
+            "CJK_REVISION_COVERAGE_MIN",
+            default=CJK_REVISION_COVERAGE_MIN,
+            current=cjk_revision_coverage_min(),
+            value_type="float",
+            min_value=0.50,
+            max_value=0.95,
+            scope="revision-similarity",
+            intent="require enough shared token-sentence coverage before accepting a CJK fallback revision match",
         ),
         _tuning_manifest_entry(
             "CJK_CONFIRM_PRESERVE_RATIO_MIN",
