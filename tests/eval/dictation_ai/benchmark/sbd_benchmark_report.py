@@ -1278,6 +1278,64 @@ def summarize_results_by_collection_strata(results: list[dict[str, Any]]) -> dic
     }
 
 
+def _case_source_trace_kind(result: dict[str, Any]) -> str:
+    if not result.get("expected_final"):
+        return "no_expected_final"
+    metadata = dict(result.get("case_metadata", {}) or {})
+    if metadata.get("source_log") and metadata.get("source_chunk") is not None:
+        return "traceable_source_log"
+    if "legacy_sample_without_source_trace" in set(result.get("case_definition_flags", []) or []):
+        return "legacy_sample_without_source_trace"
+    return "missing_source_trace"
+
+
+def summarize_results_by_source_trace_strata(results: list[dict[str, Any]]) -> dict[str, Any]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for result in results:
+        grouped.setdefault(_case_source_trace_kind(result), []).append(result)
+
+    strata: dict[str, Any] = {}
+    for name in sorted(grouped):
+        items = grouped[name]
+        review_items = [result for result in items if _case_review_actions(result)]
+        logic_items = [
+            result
+            for result in items
+            if result.get("expected_final")
+            and not _case_review_actions(result)
+        ]
+        source_logs = Counter(
+            str(dict(result.get("case_metadata", {}) or {}).get("source_log") or "")
+            for result in items
+            if str(dict(result.get("case_metadata", {}) or {}).get("source_log") or "")
+        )
+        strata[name] = {
+            **_summarize_result_group(items),
+            "expected_final_case_count": sum(1 for result in items if result.get("expected_final")),
+            "review_case_count": len(review_items),
+            "logic_tuning_candidate_count": len(logic_items),
+            "source_log_count": len(source_logs),
+            "source_log_counts": dict(sorted(source_logs.items())),
+            "examples": [
+                _case_review_payload(result)
+                for result in sorted(
+                    review_items,
+                    key=lambda result: (
+                        float(dict(result.get("final_score", {})).get("f1", 0.0)),
+                        str(result.get("id")),
+                    ),
+                )[:CASE_EXEMPLAR_LIMIT]
+            ],
+        }
+    return {
+        "interpretation": (
+            "Separates cases with traceable source_log/source_chunk from migrated or manual cases whose "
+            "original log location is missing. App-logic tuning should prefer traceable_source_log cases."
+        ),
+        "strata": strata,
+    }
+
+
 def _strict_logic_candidate(case: SbdCase, result: dict[str, Any]) -> bool:
     if not result.get("expected_final"):
         return False
@@ -1774,6 +1832,7 @@ def build_benchmark_report(
     case_definition_action_summary = summarize_case_definition_action_items(results)
     case_definition_file_summary = summarize_case_definition_files(results)
     collection_strata_summary = summarize_results_by_collection_strata(results)
+    source_trace_strata_summary = summarize_results_by_source_trace_strata(results)
     strict_logic_candidate_summary = summarize_strict_logic_candidate_results(cases, results)
     case_definition_health_summary = summarize_case_definition_health(
         results=results,
@@ -1876,6 +1935,7 @@ def build_benchmark_report(
         "case_definition_health_summary": case_definition_health_summary,
         "case_definition_file_summary": case_definition_file_summary,
         "collection_strata_summary": collection_strata_summary,
+        "source_trace_strata_summary": source_trace_strata_summary,
         "strict_logic_candidate_summary": strict_logic_candidate_summary,
         "case_exemplar_summary": case_exemplar_summary,
         "language_summary": language_summary,

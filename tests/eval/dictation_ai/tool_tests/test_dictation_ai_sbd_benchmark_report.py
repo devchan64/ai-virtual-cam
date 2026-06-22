@@ -230,6 +230,9 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
             report["case_definition_health_summary"]["recommendation"],
             "app-logic-tuning-subset-usable",
         )
+        source_trace = report["source_trace_strata_summary"]["strata"]
+        self.assertEqual(source_trace["missing_source_trace"]["expected_final_case_count"], 1)
+        self.assertEqual(source_trace["missing_source_trace"]["logic_tuning_candidate_count"], 1)
         self.assertEqual(report["case_exemplar_summary"]["lifecycle_focus_top"][0]["id"], "case-a")
         self.assertEqual(report["staged_queue_residue_summary"]["queue_residue_case_count"], 0)
         self.assertEqual(report["staged_queue_residue_summary"]["active_staged_residue_case_count"], 0)
@@ -1039,6 +1042,13 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(
             report["case_definition_health_summary"]["recommendation"],
             "case-definition-review-required",
+        )
+        source_trace = report["source_trace_strata_summary"]["strata"]
+        self.assertEqual(source_trace["legacy_sample_without_source_trace"]["expected_final_case_count"], 1)
+        self.assertEqual(source_trace["legacy_sample_without_source_trace"]["review_case_count"], 1)
+        self.assertEqual(
+            source_trace["legacy_sample_without_source_trace"]["examples"][0]["primary_action"],
+            "restore_source_log_or_recut_from_observed_log",
         )
 
     def test_context_strata_flags_fuzzy_unmodeled_prefix_context(self) -> None:

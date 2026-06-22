@@ -26541,3 +26541,54 @@ manual_boundary_review=2
 - 로직 튜닝 후보는 `44 -> 6`, strict 후보는 `35 -> 5`로 줄었다.
 - clean low threshold `0.65` 미만 후보는 0건이 되었다.
 - 현재 상태에서는 앱 로직을 추가로 완화할 근거가 부족하다. 다음 우선순위는 legacy sample의 원본 로그 복구/recut 또는 추적 가능한 앱 로그 케이스 추가다.
+
+### 2026-06-23 source trace strata 리포트 추가
+
+목적:
+
+- 앱 로직 튜닝 후보가 부족한 이유를 케이스 정의 action만이 아니라 source trace 관점에서도 확인한다.
+- 원본 로그 위치가 있는 케이스와 legacy/manual 이관 케이스를 분리해, 벤치 평균과 튜닝 후보 수를 오해하지 않게 한다.
+
+변경:
+
+- `source_trace_strata_summary`를 벤치 리포트에 추가했다.
+- strata는 `traceable_source_log`, `legacy_sample_without_source_trace`, `missing_source_trace`, `no_expected_final`로 구분한다.
+- 앱 로직 튜닝은 `traceable_source_log` 중에서도 case-definition review action이 없는 후보를 우선한다.
+
+CUDA 벤치:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --output .tmp/eval/dictation-ai-sbd/current-20260623-source-trace-strata-report.json
+```
+
+source trace strata:
+
+```text
+traceable_source_log:
+  case_count=865
+  expected_final_case_count=865
+  review_case_count=859
+  logic_tuning_candidate_count=6
+  source_log_count=5
+  final_f1_avg=0.516
+  final_boundary_f1_avg=0.097
+
+legacy_sample_without_source_trace:
+  case_count=158
+  expected_final_case_count=158
+  review_case_count=158
+  logic_tuning_candidate_count=0
+  source_log_count=0
+  final_f1_avg=0.732
+  final_boundary_f1_avg=0.319
+
+no_expected_final:
+  case_count=4
+```
+
+판정:
+
+- traceable source log 케이스는 충분히 많아 보이지만, 그중 859건은 expected/input/context/case-definition 검토가 필요하다.
+- 현재 실제 앱 로직 튜닝 후보는 6건뿐이다. 이 수로 새 파이프라인 원칙을 채택하면 과적합 위험이 크다.
+- 다음 개선 루프는 앱 로직 완화가 아니라 traceable source log 케이스의 recut/expected 정리로 strict 후보 수를 늘린 뒤 다시 CUDA sweep을 수행하는 순서가 맞다.
