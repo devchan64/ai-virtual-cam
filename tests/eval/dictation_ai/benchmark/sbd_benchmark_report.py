@@ -185,7 +185,7 @@ CASE_REVIEW_ACTION_FLAGS = (
     "deduplicate_or_justify_shifted_window_repeat",
     "manual_boundary_review",
 )
-PREFIX_CONTEXT_MIN_SUPPORT = max(0.55, FINAL_SENTENCE_MATCH_MIN_SIMILARITY - 0.15)
+PREFIX_CONTEXT_MIN_SUPPORT = max(0.30, FINAL_SENTENCE_MATCH_MIN_SIMILARITY - 0.40)
 
 
 def _sentence_support_score(sentence: str, chunk: str) -> float:

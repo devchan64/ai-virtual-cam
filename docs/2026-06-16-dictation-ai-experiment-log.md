@@ -14776,6 +14776,71 @@ git diff --check
 OK
 ```
 
+#### prefix context support gate 0.30 후속 확인
+
+목적:
+
+- `ko_log_duplicate_tesla_global_direction_fragment_20260617_001`는 여전히 strict 저점에 남았지만, 첫 chunk에는 `라고들 생각을 합니다.` 같은 완결 prefix가 있고 이후 expected 첫 문장으로 이어진다.
+- 다만 expected 첫 문장이 긴 문장이라 전체 chunk 유사도는 `0.312` 수준으로 낮아 기존 `PREFIX_CONTEXT_MIN_SUPPORT=0.55`에서 중간 스트림 검토 대상으로 빠지지 않았다.
+- case definition 감사는 자동 삭제가 아니라 strict 후보 정화 신호이므로, fuzzy prefix가 완결 prefix를 찾은 경우 support gate를 더 낮춰도 되는지 확인했다.
+
+반영:
+
+- `PREFIX_CONTEXT_MIN_SUPPORT`를 `max(0.55, FINAL_SENTENCE_MATCH_MIN_SIMILARITY - 0.15)`에서 `max(0.30, FINAL_SENTENCE_MATCH_MIN_SIMILARITY - 0.40)`로 조정했다.
+- 오프라인 점검에서 threshold `0.30`은 기존 context flag가 없는 케이스 중 10건만 추가 검토 대상으로 잡았고, Tesla strict 저점 케이스를 포함했다.
+- threshold `0.35` 이상에서는 해당 Tesla 케이스가 여전히 strict 후보로 남았다.
+
+CUDA benchmark:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260623-prefix-support030-report.json
+
+cases=1027
+case_definition_review=977
+logic_tuning_candidates=46
+strict_logic_candidates=37
+final_f1_avg=0.551
+strict_final_f1_avg=0.924
+strict_final_boundary_f1_avg=0.603
+strict_low_0.65=2
+```
+
+직전 fuzzy-prefix 리포트 비교:
+
+```text
+.tmp/eval/dictation-ai-sbd/current-20260623-fuzzy-prefix-context-report.json
+case_definition_review=976
+logic_tuning_candidates=47
+strict_logic_candidates=38
+strict_final_f1_avg=0.908
+strict_final_boundary_f1_avg=0.587
+strict_low_0.65=3
+
+.tmp/eval/dictation-ai-sbd/current-20260623-prefix-support030-report.json
+case_definition_review=977
+logic_tuning_candidates=46
+strict_logic_candidates=37
+strict_final_f1_avg=0.924
+strict_final_boundary_f1_avg=0.603
+strict_low_0.65=2
+```
+
+남은 strict 저점:
+
+```text
+zh_log_missing_food_queue_burst_same_chunk_replace_20260621_001 final_f1=0.333
+ko_log_mixed_yuan_dollar_50years_fragment_20260618_001 final_f1=0.500
+```
+
+해석:
+
+- 전체 challenge `final_f1_avg`는 변하지 않았고 strict 후보만 정화됐다.
+- 이제 남은 2건은 케이스 정의보다 실제 lifecycle 품질/경계 정책 후보로 우선 분석할 수 있다.
+
 ### 2026-06-22 입력 지지 0 케이스 제거와 정리 후 CUDA 벤치
 
 목적:
