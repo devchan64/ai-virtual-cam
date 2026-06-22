@@ -15773,6 +15773,66 @@ deduplicate_shifted_window_group=680
 manual_boundary_review=630
 ```
 
+### 2026-06-23 clean low 기준 파라미터/로직 개선 후보 폐기
+
+목적:
+
+- case-definition review 대상을 분리한 뒤, `clean_low_bottleneck_intersection_summary` 기준으로 앱 로직 개선 가능성을 다시 확인했다.
+- 세부 문구 규칙이 아니라 보편 lifecycle 원칙 후보만 검토했다.
+
+비교 기준:
+
+```text
+base:
+final_f1_avg=0.550493
+final_boundary_f1_avg=0.134014
+strict_final_f1_avg=0.739859
+strict_boundary_f1_avg=0.393413
+clean_low_0.35_count=10
+clean_low_0.35_avg_f1=0.204579
+finalized=4940
+```
+
+폐기한 후보:
+
+```text
+SENTENCE_CONFIRM_CHUNKS=2:
+final_f1_avg=0.542018
+strict_final_f1_avg=0.695082
+clean_low_0.35_count=12
+=> 전역 confirmation 증가가 일부 조각 final은 줄였지만 전체/strict 누락을 키워 폐기.
+
+STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=3:
+final_f1_avg=0.549558
+strict_final_f1_avg=0.739859
+clean_low_0.35_count=10
+=> baseline과 거의 같고 개선 근거가 약해 기본값 변경 폐기.
+
+no_end_marker confirmation-only final 금지:
+final_f1_avg=0.520461
+strict_final_f1_avg=0.687116
+clean_low_0.35_count=15
+=> 종결부호 없는 실제 발화의 누락이 크게 늘어 앱 패치 되돌림.
+
+SHORT_CJK_CONFIRM_EXTRA_CHUNKS=0:
+final_f1_avg=0.532061
+strict_final_f1_avg=0.699846
+clean_low_0.35_avg_f1=0.114177
+=> 짧은 CJK 대기를 제거하면 false final이 늘어 폐기.
+
+SHORT_CJK_CONFIRM_EXTRA_CHUNKS=2:
+final_f1_avg=0.544890
+strict_final_f1_avg=0.709877
+clean_low_0.35_count=12
+=> 대기 강화도 누락을 늘려 폐기.
+```
+
+판단:
+
+- 현재 낮은 전체 점수는 단일 임계값 조정으로 개선되는 구조가 아니다.
+- clean low의 남은 실패는 `candidate_recent_final_delta_trimmed`, `candidate_delta_trimmed`, `candidate_duplicate_suppressed`, `stage_candidate_quality_blocked`, `stage_revision_token_sentence_deferred`가 함께 나타난다.
+- 다음 개선 후보는 confirmation/age 전역값보다, recent-final delta trim과 revision/queue가 같은 후보군을 서로 다르게 소비하는 구조를 봐야 한다.
+
 ### 2026-06-23 SBD challenge case 정의 감사와 strict 해석 기준 보강
 
 목적:
