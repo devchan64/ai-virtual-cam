@@ -15729,6 +15729,74 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-22 right-context 후보 품질 게이트 강화 기각
+
+목적:
+
+- 직전 채택한 `stage_finalize_right_context` 규칙은 전체 F1을 올렸지만 일부 케이스에서 짧은 응답이나 noisy 후보를 오른쪽 문맥으로 보고 앞 staged 문장을 너무 빨리 final하는 퇴행이 있었다.
+- 이를 완화하기 위해 뒤따르는 candidate buffer 후보 자체도 신뢰 가능한 다음 문장인지 검사하는 조건을 실험했다.
+
+실험 조건:
+
+- right-context 후보가 종결 표지를 가진다.
+- right-context 후보가 stage boundary 품질 게이트를 통과한다.
+- 너무 짧은 후보와 `mixed_latin_zh`, `short_cjk` 후보는 오른쪽 문맥 증거로 쓰지 않는다.
+
+CUDA 벤치:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --model sat-3l-sm \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-right-context-reliable-report.json
+
+cases=1044
+finalized=4932
+stage_start=9076
+stage_finalize_right_context=179
+finalized_per_stage_start=0.5434111944
+final_precision_avg=0.6125062291
+final_recall_avg=0.5265101442
+final_f1_avg=0.5440519231
+final_ordered_f1_avg=0.5208474326
+final_boundary_f1_avg=0.1334918583
+case_exact_match=27
+pending_exact_match=638
+staged_exact_match=372
+```
+
+직전 채택안 대비:
+
+```text
+stage_finalize_right_context_delta=-79
+final_precision_avg_delta=+0.0009346682
+final_recall_avg_delta=-0.0017001916
+final_f1_avg_delta=-0.0006377775
+final_ordered_f1_avg_delta=-0.0006918210
+final_boundary_f1_avg_delta=-0.0000638570
+staged_exact_match_delta=-7
+```
+
+케이스 변화:
+
+- 퇴행 완화 예:
+  - `zh_log_missing_hotel_tambourine_popup_store_queue_20260621_001`: `0.6667 -> 0.8000`
+  - `ko_log_draft_20260620_avc_whisper_log_002891`: `0.3333 -> 0.5000`
+- 더 큰 손실:
+  - `en_log_draft_20260620_avc_whisper_log_000309`: `0.2500 -> 0.0000`
+  - `en_log_draft_20260620_avc_whisper_log_000311`: `0.2222 -> 0.0000`
+  - `ko_log_mixed_nvidia_earnings_repeated_sales_fragment_20260618_001`: `1.0000 -> 0.8000`
+  - `zh_log_draft_20260620_avc_whisper_log_11_000992`: `0.8571 -> 0.6667`
+
+판단:
+
+- right-context 증거를 더 엄격하게 만들면 일부 false final은 줄지만, 전체 recall과 ordered F1을 잃는다.
+- “뒤 후보가 충분히 좋은 문장이어야 한다”는 직관은 맞지만 현재 품질 게이트는 실제로 필요한 right-context 소비까지 막는다.
+- 따라서 이 강화 조건은 채택하지 않고, 직전의 보수 조건인 “이전 chunk부터 staged였던 후보만 right-context final 허용”을 유지한다.
+- 다음 개선은 right-context 후보 품질을 전역 차단하는 방식보다, final 이후 recent-final delta가 문장 앞부분을 잃는 구간을 더 직접적으로 설명하는 지표/원칙에서 찾아야 한다.
+
 ### 2026-06-22 벤치 케이스 정의 오류 추가 감사
 
 목적:
