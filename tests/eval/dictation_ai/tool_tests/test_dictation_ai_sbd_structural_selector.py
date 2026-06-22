@@ -23,9 +23,9 @@ def _case(case_id: str, *, queue_len: int, boundary_f1: float, queue_revision: i
         "expected_final": ["First sentence.", "Second sentence.", "Third sentence."],
         "expected_pending": "",
         "expected_staged": "",
-        "actual_final": ["First sentence."],
+        "actual_final": ["First sentence.", "Second sentence.", "Third sentence."],
         "actual_pending": "",
-        "actual_staged": "Second sentence.",
+        "actual_staged": "Unrelated staged residue.",
         "actual_staged_queue": [f"Queued {index}." for index in range(queue_len)],
         "final_score": {"f1": 0.25},
         "final_boundary_score": {"f1": boundary_f1},
@@ -35,6 +35,13 @@ def _case(case_id: str, *, queue_len: int, boundary_f1: float, queue_revision: i
             "stage_candidate_quality_blocked": 3,
             "candidate_duplicate_suppressed": 4,
         },
+        "case_metadata": {
+            "source_log": ".tmp/logs/avc-whisper.log",
+            "source_chunk": 1,
+            "review_group_id": "group-a",
+            "review_source_file": "tests/eval/dictation_ai/sbd_cases/en/reviewed-context-en-a.jsonl",
+        },
+        "case_definition_flags": [],
     }
 
 
@@ -57,6 +64,8 @@ class DictationAiSbdStructuralSelectorTest(unittest.TestCase):
         self.assertEqual(selected[0]["input_evidence"]["covered_count"], 3)
         self.assertIn("- expected_quality_mode: exclude", markdown)
         self.assertIn("- input_evidence_mode: require", markdown)
+        self.assertIn("- case_definition_mode: clean", markdown)
+        self.assertIn("- source_trace_mode: require", markdown)
         self.assertIn("- corpus_role: exploratory", markdown)
         self.assertIn("- paper_evidence: false", markdown)
         self.assertIn("structural lifecycle preflight only", markdown)
@@ -74,12 +83,14 @@ class DictationAiSbdStructuralSelectorTest(unittest.TestCase):
             limit=2,
             expected_quality_mode="include",
             input_evidence_mode="include",
+            case_definition_mode="include",
         )
         quality_only = select_structural_cases(
             report,
             limit=2,
             expected_quality_mode="only",
             input_evidence_mode="include",
+            case_definition_mode="include",
         )
 
         self.assertEqual([case["id"] for case in selected], ["clean-structural"])
@@ -96,8 +107,18 @@ class DictationAiSbdStructuralSelectorTest(unittest.TestCase):
         report = {"cases": [weak_case, partial_case, clean_case]}
 
         selected = select_structural_cases(report, limit=2)
-        included = select_structural_cases(report, limit=3, input_evidence_mode="include")
-        weak_only = select_structural_cases(report, limit=2, input_evidence_mode="weak-only")
+        included = select_structural_cases(
+            report,
+            limit=3,
+            input_evidence_mode="include",
+            case_definition_mode="include",
+        )
+        weak_only = select_structural_cases(
+            report,
+            limit=2,
+            input_evidence_mode="weak-only",
+            case_definition_mode="include",
+        )
 
         self.assertEqual([case["id"] for case in selected], ["clean-input"])
         self.assertEqual([case["id"] for case in included], ["weak-input", "partial-input", "clean-input"])
@@ -105,6 +126,34 @@ class DictationAiSbdStructuralSelectorTest(unittest.TestCase):
         self.assertTrue(included[1]["input_evidence"]["has_evidence"])
         self.assertFalse(included[1]["input_evidence"]["fully_supported"])
         self.assertFalse(weak_only[0]["input_evidence"]["has_evidence"])
+
+    def test_excludes_case_definition_review_candidates_by_default(self) -> None:
+        review_case = _case("definition-review", queue_len=8, boundary_f1=0.0, queue_revision=80, replace_deferred=80)
+        review_case["case_definition_flags"] = ["repeated_expected_group"]
+        clean_case = _case("clean-structural", queue_len=1, boundary_f1=0.0, queue_revision=1, replace_deferred=1)
+        report = {"cases": [review_case, clean_case]}
+
+        selected = select_structural_cases(report, limit=2)
+        included = select_structural_cases(report, limit=2, case_definition_mode="include")
+        review_only = select_structural_cases(report, limit=2, case_definition_mode="review-only")
+
+        self.assertEqual([case["id"] for case in selected], ["clean-structural"])
+        self.assertEqual([case["id"] for case in included], ["definition-review", "clean-structural"])
+        self.assertEqual([case["id"] for case in review_only], ["definition-review"])
+
+    def test_requires_source_trace_by_default(self) -> None:
+        missing_trace = _case("missing-trace", queue_len=8, boundary_f1=0.0, queue_revision=80, replace_deferred=80)
+        missing_trace["case_metadata"] = {}
+        clean_case = _case("clean-trace", queue_len=1, boundary_f1=0.0, queue_revision=1, replace_deferred=1)
+        report = {"cases": [missing_trace, clean_case]}
+
+        selected = select_structural_cases(report, limit=2)
+        included = select_structural_cases(report, limit=2, source_trace_mode="include")
+        missing_only = select_structural_cases(report, limit=2, source_trace_mode="missing-only")
+
+        self.assertEqual([case["id"] for case in selected], ["clean-trace"])
+        self.assertEqual([case["id"] for case in included], ["missing-trace", "clean-trace"])
+        self.assertEqual([case["id"] for case in missing_only], ["missing-trace"])
 
     def test_writes_benchmark_compatible_case_jsonl(self) -> None:
         selected = [_case("high-queue", queue_len=6, boundary_f1=0.0, queue_revision=20, replace_deferred=15)]
@@ -120,7 +169,11 @@ class DictationAiSbdStructuralSelectorTest(unittest.TestCase):
         self.assertEqual([case.id for case in cases], ["high-queue"])
         self.assertEqual(cases[0].chunks, ["First sentence. Second sentence.", "Second sentence. Third sentence."])
         self.assertEqual(cases[0].expected_final, ["First sentence.", "Second sentence.", "Third sentence."])
+        self.assertEqual(cases[0].metadata["source_log"], ".tmp/logs/avc-whisper.log")
+        self.assertEqual(cases[0].metadata["source_chunk"], 1)
         self.assertIn("structural-lifecycle", payload["tags"])
+        self.assertEqual(payload["source_log"], ".tmp/logs/avc-whisper.log")
+        self.assertEqual(payload["source_chunk"], 1)
 
 
 if __name__ == "__main__":

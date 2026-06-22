@@ -67,6 +67,24 @@ shifted-window 반복 그룹 정리, 수동 문장 경계 검토를 분리해서
 `strict_final_f1_avg`는 전체 challenge 점수와 앱 로직 튜닝 후보 점수를 즉시 구분하기 위한 확인값이다.
 파라미터 변경이나 앱 로직 변경의 유효성은 전체 `final_f1_avg`보다 strict 후보 요약을 먼저 비교한다.
 
+앱 lifecycle 병목만 따로 재생할 때는 `select-structural-cases`를 사용한다. 기본값은
+case-definition review action이 없는 케이스, `source_log/source_chunk`가 있는 케이스,
+expected-quality flag가 없는 케이스, replay input evidence가 충분한 케이스만 고른다.
+이 subset은 paper evidence가 아니라 다음 로직 튜닝 후보를 좁히는 exploratory preflight다.
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py select-structural-cases \
+  .tmp/eval/dictation-ai-sbd/current-20260623-case-health-trace-report.json \
+  --case-output .tmp/eval/dictation-ai-sbd/clean-structural-preflight-cases.jsonl \
+  --markdown-output .tmp/eval/dictation-ai-sbd/clean-structural-preflight-cases.md
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases \
+  .tmp/eval/dictation-ai-sbd/clean-structural-preflight-cases.jsonl \
+  --require-expected-final \
+  --require-source-trace \
+  --require-input-evidence
+```
+
 ```text
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py audit-initial-final-context \
   tests/eval/dictation_ai/sbd_cases \

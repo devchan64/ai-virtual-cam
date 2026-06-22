@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tests.eval.dictation_ai.benchmark.sbd_benchmark_report import (  # noqa: E402
+    _case_review_actions,
     summarize_case_exemplars,
     summarize_staged_queue_residue,
 )
@@ -26,6 +27,8 @@ from tests.eval.dictation_ai.cases.sbd_input_evidence import (  # noqa: E402
 DEFAULT_LIMIT = 16
 EXPECTED_QUALITY_MODES = ("exclude", "include", "only")
 INPUT_EVIDENCE_MODES = ("require", "include", "weak-only")
+CASE_DEFINITION_MODES = ("clean", "include", "review-only")
+SOURCE_TRACE_MODES = ("require", "include", "missing-only")
 
 
 def _load_report(path: Path) -> dict[str, Any]:
@@ -111,6 +114,55 @@ def _filter_input_evidence_cases(cases: list[dict[str, Any]], *, mode: str) -> l
     return filtered
 
 
+def _filter_case_definition_cases(cases: list[dict[str, Any]], *, mode: str) -> list[dict[str, Any]]:
+    if mode not in CASE_DEFINITION_MODES:
+        raise ValueError(f"unsupported case definition mode: {mode!r}")
+    if mode == "include":
+        return cases
+    filtered: list[dict[str, Any]] = []
+    for case in cases:
+        has_review_action = bool(_case_review_actions_for_selection(case))
+        if mode == "clean" and not has_review_action:
+            filtered.append(case)
+        elif mode == "review-only" and has_review_action:
+            filtered.append(case)
+    return filtered
+
+
+def _case_review_actions_for_selection(case: dict[str, Any]) -> list[str]:
+    item = dict(case)
+    item.setdefault("input_evidence", case_input_evidence(case))
+    item.setdefault("expected_quality_flags", _case_expected_quality_flags(case))
+    item.setdefault("case_context_flags", [])
+    item.setdefault("case_definition_flags", [])
+    return _case_review_actions(item)
+
+
+def _case_metadata(case: dict[str, Any]) -> dict[str, Any]:
+    metadata = case.get("case_metadata", {})
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _has_source_trace(case: dict[str, Any]) -> bool:
+    metadata = _case_metadata(case)
+    return bool(str(metadata.get("source_log", "")).strip()) and metadata.get("source_chunk") is not None
+
+
+def _filter_source_trace_cases(cases: list[dict[str, Any]], *, mode: str) -> list[dict[str, Any]]:
+    if mode not in SOURCE_TRACE_MODES:
+        raise ValueError(f"unsupported source trace mode: {mode!r}")
+    if mode == "include":
+        return cases
+    filtered: list[dict[str, Any]] = []
+    for case in cases:
+        has_trace = _has_source_trace(case)
+        if mode == "require" and has_trace:
+            filtered.append(case)
+        elif mode == "missing-only" and not has_trace:
+            filtered.append(case)
+    return filtered
+
+
 def _append_unique(
     selected: list[dict[str, Any]],
     seen: set[str],
@@ -140,8 +192,12 @@ def select_structural_cases(
     limit: int = DEFAULT_LIMIT,
     expected_quality_mode: str = "exclude",
     input_evidence_mode: str = "require",
+    case_definition_mode: str = "clean",
+    source_trace_mode: str = "require",
 ) -> list[dict[str, Any]]:
     cases = _report_cases(report, path=Path("<memory>"))
+    cases = _filter_case_definition_cases(cases, mode=case_definition_mode)
+    cases = _filter_source_trace_cases(cases, mode=source_trace_mode)
     cases = _filter_expected_quality_cases(cases, mode=expected_quality_mode)
     cases = _filter_input_evidence_cases(cases, mode=input_evidence_mode)
     by_id = {_case_id(case): case for case in cases if _case_id(case)}
@@ -202,7 +258,8 @@ def _case_payload(case: dict[str, Any]) -> dict[str, Any]:
     for tag in ("structural-lifecycle", "manual-reviewed"):
         if tag not in tags:
             tags.append(tag)
-    return {
+    metadata = _case_metadata(case)
+    payload: dict[str, Any] = {
         "id": str(case.get("id", "")),
         "language": str(case.get("language", "en")),
         "chunks": _chunk_inputs(case),
@@ -213,6 +270,19 @@ def _case_payload(case: dict[str, Any]) -> dict[str, Any]:
         "sentence_finalize_age": int(case.get("sentence_finalize_age", 3) or 3),
         "tags": tags,
     }
+    for key in (
+        "source_log",
+        "source_chunk",
+        "review_group_id",
+        "review_priority_tag",
+        "review_source_file",
+        "review_case_group",
+        "fingerprint",
+    ):
+        value = metadata.get(key)
+        if value not in ("", None):
+            payload[key] = value
+    return payload
 
 
 def write_case_jsonl(cases: list[dict[str, Any]], path: Path) -> None:
@@ -229,6 +299,8 @@ def render_markdown(
     source_report: str,
     expected_quality_mode: str = "exclude",
     input_evidence_mode: str = "require",
+    case_definition_mode: str = "clean",
+    source_trace_mode: str = "require",
 ) -> str:
     lines = [
         "# Dictation AI Structural Case Selection",
@@ -237,10 +309,12 @@ def render_markdown(
         f"- selected_case_count: {len(cases)}",
         f"- expected_quality_mode: {expected_quality_mode}",
         f"- input_evidence_mode: {input_evidence_mode}",
+        f"- case_definition_mode: {case_definition_mode}",
+        f"- source_trace_mode: {source_trace_mode}",
         f"- min_input_evidence_coverage: {MIN_INPUT_EVIDENCE_COVERAGE:.2f}",
         "- corpus_role: exploratory",
         "- paper_evidence: false",
-        "- interpretation: structural lifecycle preflight only; expected-quality review candidates and partial/weak input-evidence candidates are excluded by default; rerun the full challenge replay with sat + cuda + float16 before using any metric as paper evidence.",
+        "- interpretation: structural lifecycle preflight only; case-definition review candidates, missing source trace cases, expected-quality review candidates, and partial/weak input-evidence candidates are excluded by default; rerun the full challenge replay with sat + cuda + float16 before using any metric as paper evidence.",
         "",
         "| rank | id | language | score | reasons | expected_quality_flags | input_evidence | final_f1 | boundary_f1 | queue_len | stage_queue_revision | stage_replace_deferred |",
         "| ---: | --- | --- | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
@@ -296,6 +370,18 @@ def main() -> int:
         default="require",
         help="How to handle cases where expected_final has partial or weak evidence in replay input chunks.",
     )
+    parser.add_argument(
+        "--case-definition",
+        choices=CASE_DEFINITION_MODES,
+        default="clean",
+        help="How to handle benchmark report case-definition review actions. Default keeps only clean app-logic candidates.",
+    )
+    parser.add_argument(
+        "--source-trace",
+        choices=SOURCE_TRACE_MODES,
+        default="require",
+        help="How to handle cases without source_log/source_chunk trace metadata. Default requires traceability.",
+    )
     parser.add_argument("--case-output", type=Path, default=None)
     parser.add_argument("--markdown-output", type=Path, default=None)
     args = parser.parse_args()
@@ -309,6 +395,8 @@ def main() -> int:
             limit=args.limit,
             expected_quality_mode=args.expected_quality,
             input_evidence_mode=args.input_evidence,
+            case_definition_mode=args.case_definition,
+            source_trace_mode=args.source_trace,
         )
         if args.case_output is not None:
             write_case_jsonl(cases, args.case_output)
@@ -320,6 +408,8 @@ def main() -> int:
                     source_report=str(args.report),
                     expected_quality_mode=args.expected_quality,
                     input_evidence_mode=args.input_evidence,
+                    case_definition_mode=args.case_definition,
+                    source_trace_mode=args.source_trace,
                 ),
                 encoding="utf-8",
             )

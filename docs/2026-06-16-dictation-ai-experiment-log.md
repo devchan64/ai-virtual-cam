@@ -26769,3 +26769,72 @@ tests/eval/dictation_ai/sbd_cases/en/reviewed-context-en-b.jsonl: 19
 - 따라서 현재 낮은 전체 `final_f1_avg`의 큰 부분은 앱 로직 실패가 아니라 라벨/윈도우 정의 오류로 설명된다.
 - 이 599개는 삭제 규칙이 아니라 recut, expected-final 재작성, 또는 튜닝 후보 제외 대상으로 취급한다.
 - 앱 로직 최적화는 source trace와 input support를 만족하는 strict 후보를 늘린 뒤 CUDA/SaT 벤치로 판단해야 한다.
+
+### 2026-06-23 clean structural preflight 선별 기준 보강
+
+목적:
+
+- 전체 challenge 평균이 케이스 정의 오류에 지배되는 상황에서, 앱 lifecycle 튜닝 후보만 따로 재생할 수 있게 한다.
+- `select-structural-cases`가 source trace를 잃지 않게 하고, case-definition review action이 없는 후보만 기본 선별하게 한다.
+- 선별 subset은 논문 근거가 아니라 앱 로직 변경 전 병목 확인용 preflight로 해석한다.
+
+변경:
+
+- `select-structural-cases` 기본값을 case-definition clean, source trace required, expected-quality exclude, input-evidence require로 정리했다.
+- export JSONL에 `source_log`, `source_chunk`, review metadata를 보존하도록 수정했다.
+- `--case-definition`과 `--source-trace` 옵션을 추가해 review 후보를 의도적으로 볼 때만 포함할 수 있게 했다.
+
+선별:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py select-structural-cases \
+  .tmp/eval/dictation-ai-sbd/current-20260623-case-health-trace-report.json \
+  --limit 16 \
+  --case-output .tmp/eval/dictation-ai-sbd/clean-structural-preflight-cases.jsonl \
+  --markdown-output .tmp/eval/dictation-ai-sbd/clean-structural-preflight-cases.md
+
+selected_case_count=6
+```
+
+선별 subset 검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases \
+  .tmp/eval/dictation-ai-sbd/clean-structural-preflight-cases.jsonl \
+  --require-expected-final \
+  --require-source-trace \
+  --require-input-evidence \
+  --summary-output .tmp/eval/dictation-ai-sbd/clean-structural-preflight-validation.json
+
+case_count=6
+expected_final_case_count=6
+source_trace_case_count=6
+missing_source_trace_case_count=0
+input_unsupported_case_count=0
+```
+
+CUDA 벤치:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases .tmp/eval/dictation-ai-sbd/clean-structural-preflight-cases.jsonl \
+  --output .tmp/eval/dictation-ai-sbd/clean-structural-preflight-benchmark.json \
+  --device cuda \
+  --compute-type float16
+
+cases=6
+case_definition_review=0
+logic_tuning_candidates=6
+strict_logic_candidates=5
+final_precision_avg=0.967
+final_recall_avg=0.900
+final_f1_avg=0.921
+strict_final_f1_avg=0.906
+final_boundary_f1_avg=0.282
+```
+
+판정:
+
+- clean structural subset에서는 `case_definition_review=0`으로 유지된다. 따라서 이 subset은 앱 로직 병목을 보는 최소 후보로 사용할 수 있다.
+- 전체 challenge의 낮은 `final_f1_avg`를 앱 로직 문제로 해석하면 안 된다. 현재 전체 점수는 source trace 누락, input support 부족, raw STT text와 다른 expected label, mid-stream prefix 누락 같은 케이스 정의 문제가 지배한다.
+- clean subset의 `final_f1_avg=0.921`은 현재 핵심 lifecycle 로직이 이미 상당 부분 동작한다는 근거다. 남은 개선은 전체 파라미터 완화가 아니라 `final_boundary_f1_avg=0.282`와 strict 후보 5건의 구체 lifecycle 병목을 기준으로 좁혀야 한다.
