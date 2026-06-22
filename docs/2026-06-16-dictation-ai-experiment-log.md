@@ -15729,6 +15729,136 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-23 recent-final/queue 파라미터 추가 sweep 기각
+
+목적:
+
+- right-context final 보강 후에도 clean low subset에는 `candidate_recent_final_delta_trimmed`, `candidate_delta_trimmed`, `candidate_duplicate_suppressed`, `stage_revision_token_sentence_deferred`가 함께 남는다.
+- 새 ad-hoc 규칙을 추가하기 전에, 기존 공통 파라미터만으로 recent-final delta와 queue 잔류를 개선할 수 있는지 확인한다.
+
+사전 검토:
+
+- final 직전 출력에 여러 hard punctuation 문장이 들어 있을 때 강제로 재분할하는 방안을 오프라인 시뮬레이션했다.
+- 결과는 전체 지표 하락이었다.
+
+```text
+actual_final hard punctuation split simulation
+changed_cases=9
+baseline:
+  final_f1_avg=0.5446897006
+  final_ordered_f1_avg=0.5215392535
+  final_boundary_f1_avg=0.1335557153
+simulated:
+  final_f1_avg=0.5441086616
+  final_ordered_f1_avg=0.5209675721
+  final_boundary_f1_avg=0.1328060982
+```
+
+판단:
+
+- 단순 punctuation 재분할은 문장 경계 복원이 아니라 과분할을 만든다.
+- SaT/SBD가 이미 만든 boundary를 final 직전에 regex로 다시 자르는 방향은 재설계 기준과 맞지 않아 기각한다.
+
+CUDA sweep:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py run-sweep \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-1044-recent-final-queue-20260623 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-1044-recent-final-queue-20260623/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-1044-recent-final-queue-20260623/summary.md \
+  --include-baseline \
+  --param RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS=6 \
+  --param RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS=10 \
+  --param RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS=2 \
+  --param RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS=4 \
+  --param RECENT_FINAL_FRAGMENT_ECHO_COVERAGE_MIN=0.50 \
+  --param RECENT_FINAL_FRAGMENT_ECHO_COVERAGE_MIN=0.70 \
+  --param STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=5 \
+  --param STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=7
+```
+
+baseline:
+
+```text
+case_count=1044
+runtime=sat + cuda + float16
+final_precision_avg=0.6116
+final_recall_avg=0.5282
+final_f1_avg=0.5447
+final_ordered_f1_avg=0.5215
+final_boundary_f1_avg=0.1336
+```
+
+결과:
+
+```text
+RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS=6
+  final_f1_delta=+0.0002
+  ordered_f1_delta=+0.0003
+  precision_delta=+0.0001
+  recall_delta=+0.0005
+  boundary_f1_delta=+0.0001
+  adoption_review=review-risk
+  risk=language/key-tag/case final-F1 regression
+
+RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS=10
+  final_f1_delta=-0.0002
+  ordered_f1_delta=-0.0002
+  precision_delta=-0.0006
+  boundary_f1_delta=-0.0005
+  adoption_review=review-risk
+
+RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS=2
+  final_f1_delta=-0.0006
+  ordered_f1_delta=-0.0005
+  precision_delta=-0.0005
+  recall_delta=-0.0007
+  adoption_review=review-risk
+
+RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS=4
+  final_f1_delta=-0.0002
+  ordered_f1_delta=-0.0003
+  recall_delta=-0.0004
+  boundary_f1_delta=-0.0003
+  adoption_review=review-risk
+
+RECENT_FINAL_FRAGMENT_ECHO_COVERAGE_MIN=0.50
+  final_f1_delta=-0.0001
+  ordered_f1_delta=-0.0001
+  precision_delta=-0.0002
+  adoption_review=review-risk
+
+RECENT_FINAL_FRAGMENT_ECHO_COVERAGE_MIN=0.70
+  final_f1_delta=-0.0000
+  ordered_f1_delta=-0.0000
+  precision_delta=-0.0001
+  boundary_f1_delta=-0.0001
+  adoption_review=review-risk
+
+STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=5
+  final_f1_delta=-0.0006
+  ordered_f1_delta=-0.0002
+  recall_delta=-0.0010
+  boundary_f1_delta=-0.0002
+  adoption_review=review-risk
+
+STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=7
+  final_f1_delta=+0.0000
+  ordered_f1_delta=+0.0000
+  boundary_f1_delta=+0.0000
+  adoption_review=no-risk-flag
+```
+
+판단:
+
+- 채택 가능한 파라미터 변경은 없다.
+- `RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS=6`은 전체 수치가 미세하게 오르지만, language/key-tag/case regression이 있어 운영 기본값으로 반영하지 않는다.
+- `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=7`은 no-op에 가까우므로 기본값 변경 근거가 없다.
+- recent-final/queue 축의 단순 threshold 변경만으로는 남은 저득점 병목을 설명하지 못한다.
+- 다음 개선은 threshold가 아니라, recent-final delta가 실제 신규 문장 앞부분을 잃는 상황과 staged/queue가 이미 포함 관계인 후보를 어떻게 소비해야 하는지의 lifecycle 원칙을 더 좁혀야 한다.
+
 ### 2026-06-22 right-context 후보 품질 게이트 강화 기각
 
 목적:
