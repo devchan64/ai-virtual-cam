@@ -15815,6 +15815,98 @@ unittest: Ran 33 tests, OK
 case validator: case_count=1027, expected_final_case_count=1023, draft_count=0
 ```
 
+### 2026-06-23 strict logic 기준 lifecycle 파라미터 sweep
+
+목적:
+
+- `strict_logic_candidate` 144개를 기준으로 앱 로직 변경 후보를 찾는다.
+- 전체 challenge replay 점수와 strict subset 점수가 다르게 해석되는지 확인한다.
+- queue stale age와 delta suppressed stage 유지 길이가 확정 누락/중복 개선의 보편 파라미터인지 검토한다.
+
+사전 로직 실험:
+
+- `_should_defer_token_sentence_revision`에서 token-sentence revision이 다음 confirmation으로 확정 가능해지는 경우 보류하지 않는 패치를 시도했다.
+- `test_reset_revision_is_deferred_until_token_sentence_repeats`가 실패했고, 이는 사용자가 관측한 `刚好明天要拍夜拍...` premature final 우려와 같은 방향이다.
+- 이 변경은 빠른 확정은 늘릴 수 있지만 reset revision을 보수적으로 관리한다는 핵심 원칙과 충돌하므로 폐기했다.
+
+CUDA sweep:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py run-sweep \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --include-baseline \
+  --param STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=3 \
+  --param STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=9 \
+  --param DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=1 \
+  --param DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=3 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260623-strict-logic-lifecycle \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260623-strict-logic-lifecycle-summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260623-strict-logic-lifecycle-summary.md
+```
+
+결과:
+
+```text
+baseline:
+  overall final_f1_avg=0.550492743360324
+  strict final_f1_avg=0.7660832223332223
+  strict boundary_f1_avg=0.3971291825458492
+  strict low<0.65 cases=33
+
+STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=3:
+  overall final_f1_delta=-0.0009345049792894855
+  strict final_f1_delta=0.0
+  strict low<0.65 delta=0
+
+STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=9:
+  overall final_f1_delta=0.0
+  strict final_f1_delta=0.0
+  strict low<0.65 delta=0
+
+DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=1:
+  overall final_f1_delta=+0.0006481563443588856
+  overall boundary_f1_delta=-0.00029211266028081674
+  strict final_f1_delta=0.0
+  strict low<0.65 delta=0
+
+DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=3:
+  overall final_f1_delta=-0.00012982797792915335
+  overall boundary_f1_delta=+0.0003245699448231292
+  strict final_f1_delta=0.0
+  strict low<0.65 delta=0
+```
+
+해석:
+
+- 이번 두 파라미터 축은 strict logic 후보의 성능을 전혀 바꾸지 않았다.
+- `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=1`은 전체 final_f1을 소폭 올렸지만 boundary가 내려가고, 변화 케이스가 주로 `reviewed_log_work_item`에 머물렀다.
+- 따라서 기본값 변경 근거로는 부족하다.
+- 현재 개선 방향은 단순 queue age/delta 유지 길이보다 strict low 케이스에서 반복되는 `candidate_recent_final_delta_trimmed`, `candidate_duplicate_suppressed`, `stage_candidate_quality_blocked`, `stage_revision_token_sentence_deferred`의 결합 원인을 더 좁히는 것이다.
+
+도구 보강:
+
+- `run_sbd_parameter_sweep.py` summary payload에 `collection_strata_summary`, `strict_logic_candidate_summary`를 보존하도록 했다.
+- `sbd_parameter_sweep_report.py` markdown Evidence Summary에 strict logic 후보 표를 추가했다.
+- 이후 sweep은 전체 challenge 점수와 strict logic 후보 점수를 같은 리포트에서 비교한다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_parameter_sweep
+Ran 38 tests, OK
+
+./.venv/bin/python -m py_compile \
+  tests/eval/dictation_ai/sweeps/run_sbd_parameter_sweep.py \
+  tests/eval/dictation_ai/sweeps/sbd_parameter_sweep_report.py \
+  tests/eval/dictation_ai/tool_tests/test_dictation_ai_sbd_parameter_sweep.py
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py refresh-sweep \
+  .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260623-strict-logic-lifecycle-summary.json \
+  --output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260623-strict-logic-lifecycle-summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260623-strict-logic-lifecycle-summary.md \
+  --not-paper-evidence
+```
+
 ### 2026-06-23 challenge replay 입력 근거 없는 케이스 정리
 
 배경:

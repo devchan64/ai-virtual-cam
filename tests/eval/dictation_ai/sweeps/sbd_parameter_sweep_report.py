@@ -264,6 +264,10 @@ def attach_baseline_deltas(results: list[dict[str, Any]]) -> list[dict[str, Any]
     baseline_strata = dict(baseline.get("evidence_strata_summary", {}))
     baseline_expected_quality_strata = dict(baseline.get("expected_quality_strata_summary", {}))
     baseline_input_evidence_strata = dict(baseline.get("input_evidence_strata_summary", {}))
+    baseline_collection_strata = dict(baseline.get("collection_strata_summary", {}))
+    baseline_strict_logic = dict(baseline.get("strict_logic_candidate_summary", {}))
+    baseline_strict_summary = dict(baseline_strict_logic.get("summary", {}))
+    baseline_strict_low = dict(baseline_strict_logic.get("low_score_thresholds", {}))
     baseline_case_scores = list(baseline.get("case_score_summary", []))
     updated: list[dict[str, Any]] = []
     for result in results:
@@ -328,6 +332,25 @@ def attach_baseline_deltas(results: list[dict[str, Any]]) -> list[dict[str, Any]
                 continue
             input_evidence_strata_deltas[stratum] = _numeric_deltas(stratum_summary, baseline_summary)
         item["input_evidence_strata_deltas"] = input_evidence_strata_deltas
+        collection_strata_deltas: dict[str, dict[str, float]] = {}
+        for stratum, stratum_summary in dict(result.get("collection_strata_summary", {})).items():
+            baseline_summary = baseline_collection_strata.get(stratum, {})
+            if not isinstance(stratum_summary, dict) or not isinstance(baseline_summary, dict):
+                continue
+            collection_strata_deltas[stratum] = _numeric_deltas(stratum_summary, baseline_summary)
+        item["collection_strata_deltas"] = collection_strata_deltas
+        strict_logic = dict(result.get("strict_logic_candidate_summary", {}))
+        strict_low = dict(strict_logic.get("low_score_thresholds", {}))
+        strict_low_deltas: dict[str, dict[str, float]] = {}
+        for threshold, threshold_summary in strict_low.items():
+            baseline_summary = baseline_strict_low.get(threshold, {})
+            if not isinstance(threshold_summary, dict) or not isinstance(baseline_summary, dict):
+                continue
+            strict_low_deltas[str(threshold)] = _numeric_deltas(threshold_summary, baseline_summary)
+        item["strict_logic_candidate_deltas"] = {
+            "summary": _numeric_deltas(dict(strict_logic.get("summary", {})), baseline_strict_summary),
+            "low_score_thresholds": strict_low_deltas,
+        }
         item["case_delta_summary"] = summarize_case_score_deltas(
             list(result.get("case_score_summary", [])),
             baseline_case_scores,
@@ -466,6 +489,10 @@ def build_evidence_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
                 "expected_quality_strata_deltas": result.get("expected_quality_strata_deltas", {}),
                 "input_evidence_strata_summary": result.get("input_evidence_strata_summary", {}),
                 "input_evidence_strata_deltas": result.get("input_evidence_strata_deltas", {}),
+                "collection_strata_summary": result.get("collection_strata_summary", {}),
+                "collection_strata_deltas": result.get("collection_strata_deltas", {}),
+                "strict_logic_candidate_summary": result.get("strict_logic_candidate_summary", {}),
+                "strict_logic_candidate_deltas": result.get("strict_logic_candidate_deltas", {}),
                 "case_exemplar_summary": result.get("case_exemplar_summary", {}),
                 "case_delta_summary": case_delta_summary,
                 "interpretation_flags": interpretation_flags,
@@ -601,6 +628,31 @@ def _append_evidence_summary_markdown(lines: list[str], evidence_summary: dict[s
             f"{_format_markdown_delta(deltas.get('final_precision_avg'))} | "
             f"{_format_markdown_delta(deltas.get('final_recall_avg'))} | "
             f"{_format_markdown_delta(deltas.get('final_boundary_f1_avg'))} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "| label | strict_cases | strict_final_f1 | strict_f1_delta | strict_boundary_f1 | strict_boundary_delta | strict_low_0.65 | strict_low_0.65_delta |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for result in all_results:
+        strict = dict(result.get("strict_logic_candidate_summary", {}))
+        strict_summary = dict(strict.get("summary", {}))
+        strict_low = dict(dict(strict.get("low_score_thresholds", {})).get("0.65", {}))
+        strict_deltas = dict(result.get("strict_logic_candidate_deltas", {}))
+        strict_summary_deltas = dict(strict_deltas.get("summary", {}))
+        strict_low_deltas = dict(dict(strict_deltas.get("low_score_thresholds", {})).get("0.65", {}))
+        lines.append(
+            f"| {result.get('label', '')} | "
+            f"{_format_markdown_number(strict.get('strict_case_count'))} | "
+            f"{_format_markdown_number(strict_summary.get('final_f1_avg'))} | "
+            f"{_format_markdown_delta(strict_summary_deltas.get('final_f1_avg'))} | "
+            f"{_format_markdown_number(strict_summary.get('final_boundary_f1_avg'))} | "
+            f"{_format_markdown_delta(strict_summary_deltas.get('final_boundary_f1_avg'))} | "
+            f"{_format_markdown_number(strict_low.get('case_count'))} | "
+            f"{_format_markdown_delta(strict_low_deltas.get('case_count'))} |"
         )
 
     lines.extend(
