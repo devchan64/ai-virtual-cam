@@ -15729,6 +15729,60 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-23 challenge case 정의 감사 action summary 추가
+
+목적:
+
+- 벤치 전체 평균이 앱 로직 성능만 반영하는지 확인하기 위해 `expected_final` 정의 품질, replay 입력 근거, 중간 스트림 시작, shifted-window 반복을 분리했다.
+- 수집 오류 또는 label/window 오류로 판단되는 케이스를 앱 로직 튜닝 근거에서 제외할 수 있도록 감사 도구에 `case_definition_action_summary`를 추가했다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/cases/audit_sbd_initial_final_context.py \
+  tests/eval/dictation_ai/sbd_cases \
+  --benchmark-report .tmp/eval/dictation-ai-sbd/current-20260623-clean-full-input-report.json \
+  --summary-output .tmp/eval/dictation-ai-sbd/case-definition-action-audit-current.json \
+  --limit 3
+```
+
+결과:
+
+```text
+case_count=1027
+expected_final_case_count=1023
+mid_stream_without_initial_final=207
+partial_input_evidence_case_count=599
+repeated_expected_group_count=158
+repeated_expected_case_count=680
+
+case_definition_action_summary.review_case_count=915
+case_definition_action_summary.logic_tuning_candidate_count=108
+
+remove_or_recut_expected_outside_replay_input=599
+  en=260 ko=197 zh=142
+rewrite_expected_final_to_final_sentence_boundary=166
+  en=69 ko=43 zh=54
+add_initial_final_or_recut_mid_stream_case=97
+  en=50 ko=10 zh=37
+deduplicate_or_justify_shifted_window_repeat=53
+  ko=28 zh=25
+```
+
+해석:
+
+- 현재 challenge set 전체 `final_f1_avg=0.550`은 앱 로직 성능 지표로 그대로 쓰기 어렵다.
+- `full_input_evidence + expected 품질 플래그 없음` subset은 `final_f1_avg=0.719`로 전체 평균과 차이가 크다.
+- 특히 `remove_or_recut_expected_outside_replay_input`은 expected 문장이 replay 입력에 충분히 없으므로 로직 누락으로 해석하지 않는다.
+- 다음 로직 튜닝은 `logic_tuning_candidate_count`, `strict_logic_candidate_summary`, `clean_low_bottleneck_intersection_summary`를 우선 근거로 삼는다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_initial_final_context_audit
+Ran 6 tests in 0.002s, OK
+```
+
 ### 2026-06-23 clean low 입력 근거 기준 보수화
 
 목적:

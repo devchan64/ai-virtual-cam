@@ -291,6 +291,102 @@ class DictationAiSbdInitialFinalContextAuditTest(unittest.TestCase):
         self.assertEqual(review["partial_input_evidence_cases"][0]["input_evidence"]["covered_count"], 1)
         self.assertEqual(review["partial_input_evidence_cases"][0]["input_evidence"]["expected_count"], 2)
 
+    def test_reports_case_definition_review_actions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "cases.jsonl"
+            path.write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "id": "partial-input",
+                                "language": "en",
+                                "chunks": ["The first expected sentence appears."],
+                                "expected_final": [
+                                    "The first expected sentence appears.",
+                                    "The second expected sentence is outside the replay window.",
+                                ],
+                            },
+                            ensure_ascii=False,
+                        ),
+                        json.dumps(
+                            {
+                                "id": "mid-stream",
+                                "language": "en",
+                                "chunks": ["Already final sentence. Target sentence."],
+                                "expected_final": ["Target sentence."],
+                            },
+                            ensure_ascii=False,
+                        ),
+                        json.dumps(
+                            {
+                                "id": "fragment",
+                                "language": "en",
+                                "chunks": ["and then continues"],
+                                "expected_final": ["and then continues"],
+                            },
+                            ensure_ascii=False,
+                        ),
+                        json.dumps(
+                            {
+                                "id": "repeat-a",
+                                "language": "en",
+                                "chunks": ["Repeated target."],
+                                "expected_final": ["Repeated target."],
+                            },
+                            ensure_ascii=False,
+                        ),
+                        json.dumps(
+                            {
+                                "id": "repeat-b",
+                                "language": "en",
+                                "chunks": ["Repeated target."],
+                                "expected_final": ["Repeated target."],
+                            },
+                            ensure_ascii=False,
+                        ),
+                        json.dumps(
+                            {
+                                "id": "logic-ready",
+                                "language": "en",
+                                "chunks": ["Stable target sentence."],
+                                "expected_final": ["Stable target sentence."],
+                            },
+                            ensure_ascii=False,
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            summary = audit_initial_final_context(
+                [path],
+                min_prefix_units=5,
+                duplicate_group_limit=3,
+            )
+
+        actions = summary["case_definition_action_summary"]
+        by_action = actions["by_action"]
+        self.assertEqual(actions["review_case_count"], 5)
+        self.assertEqual(actions["logic_tuning_candidate_count"], 1)
+        self.assertEqual(
+            by_action["remove_or_recut_expected_outside_replay_input"]["examples"][0]["id"],
+            "partial-input",
+        )
+        self.assertEqual(
+            by_action["add_initial_final_or_recut_mid_stream_case"]["examples"][0]["id"],
+            "mid-stream",
+        )
+        self.assertEqual(
+            by_action["rewrite_expected_final_to_final_sentence_boundary"]["examples"][0]["id"],
+            "fragment",
+        )
+        self.assertEqual(
+            [item["id"] for item in by_action["deduplicate_or_justify_shifted_window_repeat"]["examples"]],
+            ["repeat-a", "repeat-b"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

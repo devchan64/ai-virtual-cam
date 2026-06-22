@@ -52,6 +52,15 @@ case 내부의 중복/포함 expected 문장, replay 입력 chunks에서 근거�
 분리해서 보여준다. 앱 로직 튜닝 근거는 먼저 `strict_logic_candidate_summary`와
 `clean_low_bottleneck_intersection_summary`를 본다. 두 요약은 모든 `expected_final`이 replay 입력에서
 확인되는 `fully_supported` 케이스를 기준으로 해석한다.
+`case_definition_action_summary`의 우선순위는 다음과 같다.
+
+1. `remove_or_recut_expected_outside_replay_input`: `expected_final`이 replay chunks에 충분히 없으므로 제거하거나 window/label을 다시 잡는다.
+2. `add_initial_final_or_recut_mid_stream_case`: 중간 스트림 시작 후보이므로 이미 확정됐어야 할 prefix를 `initial_final`로 옮기거나 시작점을 조정한다.
+3. `rewrite_expected_final_to_final_sentence_boundary`: final-only 번역 큐 기준의 완성 문장으로 expected를 다시 쓴다.
+4. `deduplicate_or_justify_shifted_window_repeat`: 같은 expected 묶음이 반복된 case는 distinct lifecycle failure가 있는 경우만 남긴다.
+
+이 action에 걸린 case는 앱 로직 성능 저하로 해석하지 않는다. 로직 튜닝 후보는 action summary의
+`logic_tuning_candidate_count`와 clean/strict 요약을 기준으로 좁힌다.
 
 ```text
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py audit-initial-final-context \

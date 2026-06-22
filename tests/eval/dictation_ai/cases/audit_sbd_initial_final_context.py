@@ -239,6 +239,115 @@ def _case_payload(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _case_definition_action_payload(record: dict[str, Any], *, action: str, reason: str) -> dict[str, Any]:
+    return {
+        **_case_payload(record),
+        "action": action,
+        "reason": reason,
+        "expected_final_preview": list(record.get("expected_final_normalized", []))[:5],
+    }
+
+
+def _case_definition_action_summary(
+    records: list[dict[str, Any]],
+    *,
+    mid_stream_candidates: list[dict[str, Any]],
+    duplicate_group_limit: int,
+) -> dict[str, Any]:
+    """Classify case-definition review work before using cases as tuning evidence."""
+    repeated_case_ids: set[str] = set()
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for record in records:
+        if record.get("expected_final_normalized"):
+            grouped[_expected_group_key(record)].append(record)
+    for items in grouped.values():
+        if len(items) > 1:
+            repeated_case_ids.update(str(item.get("id", "")) for item in items)
+
+    mid_stream_ids = {str(candidate.get("id", "")) for candidate in mid_stream_candidates}
+    by_action: dict[str, dict[str, Any]] = {}
+
+    def add(record: dict[str, Any], *, action: str, reason: str) -> None:
+        bucket = by_action.setdefault(
+            action,
+            {
+                "case_count": 0,
+                "reason": reason,
+                "language_counts": Counter(),
+                "examples": [],
+            },
+        )
+        bucket["case_count"] += 1
+        bucket["language_counts"][str(record.get("language", ""))] += 1
+        if len(bucket["examples"]) < duplicate_group_limit:
+            bucket["examples"].append(
+                _case_definition_action_payload(record, action=action, reason=reason)
+            )
+
+    logic_ready_count = 0
+    for record in records:
+        expected_count = int(record.get("expected_sentence_count", 0))
+        if expected_count <= 0:
+            continue
+        record_id = str(record.get("id", ""))
+        input_evidence = dict(record.get("input_evidence", {}))
+        if not bool(input_evidence.get("fully_supported")):
+            action = "remove_or_recut_expected_outside_replay_input"
+            reason = (
+                "expected_final is not fully represented in this case's replay chunks; "
+                "do not use it as app-logic tuning evidence until the window or labels are fixed."
+            )
+            add(record, action=action, reason=reason)
+            continue
+        if record_id in mid_stream_ids:
+            action = "add_initial_final_or_recut_mid_stream_case"
+            reason = (
+                "the first expected sentence starts after a non-trivial replay prefix while "
+                "initial_final is empty; verify whether the prefix was already finalized."
+            )
+            add(record, action=action, reason=reason)
+            continue
+        if record.get("expected_quality_flags"):
+            action = "rewrite_expected_final_to_final_sentence_boundary"
+            reason = (
+                "expected_final has fragment or boundary-quality flags and may not match the "
+                "final-only translation queue definition."
+            )
+            add(record, action=action, reason=reason)
+            continue
+        if record_id in repeated_case_ids:
+            action = "deduplicate_or_justify_shifted_window_repeat"
+            reason = (
+                "the same expected_final group appears in multiple cases; keep only cases that "
+                "add a distinct lifecycle failure."
+            )
+            add(record, action=action, reason=reason)
+            continue
+        logic_ready_count += 1
+
+    ordered_actions = {
+        action: {
+            **bucket,
+            "language_counts": dict(sorted(bucket["language_counts"].items())),
+        }
+        for action, bucket in sorted(
+            by_action.items(),
+            key=lambda item: (-int(item[1]["case_count"]), item[0]),
+        )
+    }
+    review_case_count = sum(int(bucket["case_count"]) for bucket in ordered_actions.values())
+    return {
+        "interpretation": (
+            "Actions are ordered by review priority. They are not app-logic failures; they mark "
+            "cases that should be fixed, removed, or explicitly justified before being used as "
+            "pipeline tuning evidence."
+        ),
+        "review_case_count": review_case_count,
+        "logic_tuning_candidate_count": logic_ready_count,
+        "by_action": ordered_actions,
+    }
+
+
 def _case_definition_review_summary(
     records: list[dict[str, Any]],
     *,
@@ -584,6 +693,11 @@ def audit_initial_final_context(
         ),
         "case_definition_review": _case_definition_review_summary(
             all_case_metadata,
+            duplicate_group_limit=duplicate_group_limit,
+        ),
+        "case_definition_action_summary": _case_definition_action_summary(
+            all_case_metadata,
+            mid_stream_candidates=candidates,
             duplicate_group_limit=duplicate_group_limit,
         ),
         "candidates": candidates,
