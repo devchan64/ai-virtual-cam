@@ -809,6 +809,68 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         )
         self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
 
+    def test_actual_prefix_before_expected_final_is_mid_stream_review(self) -> None:
+        args = Namespace(
+            model="sat-3l-sm",
+            device="cuda",
+            compute_type="float16",
+            min_final_f1=0.0,
+            fail_on_regression=False,
+        )
+        case = SbdCase(
+            id="actual-prefix-case",
+            language="ko",
+            chunks=["목표 문장이 도착했습니다.", "목표 문장이 도착했습니다. 다음 문장입니다."],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=["목표 문장이 도착했습니다.", "다음 문장입니다."],
+            expected_staged="",
+            tags=("missing-final",),
+            sentence_finalize_age=3,
+        )
+        results = [
+            {
+                "id": "actual-prefix-case",
+                "language": "ko",
+                "tags": ["missing-final"],
+                "expected_final": ["목표 문장이 도착했습니다.", "다음 문장입니다."],
+                "chunks": [
+                    {"input": "목표 문장이 도착했습니다."},
+                    {"input": "목표 문장이 도착했습니다. 다음 문장입니다."},
+                ],
+                "initial_final": [],
+                "actual_final": ["앞 문장이 이미 끝났습니다.", "목표 문장이 도착했습니다."],
+                "actual_pending": "",
+                "actual_staged": "다음 문장입니다.",
+                "actual_staged_queue": [],
+                "final_score": _score(0.5, 0.5, 0.5),
+                "final_ordered_score": _score(0.5, 0.5, 0.5),
+                "final_boundary_score": _score(0.5, 0.5, 0.5),
+                "completed_last_score": _score(0.0, 0.0, 0.0),
+                "pending_exact": True,
+                "staged_exact": False,
+                "case_exact_match": False,
+                "metrics": {"finalized": 2, "stage_start": 2},
+            }
+        ]
+
+        report = build_benchmark_report(
+            args=args,
+            case_sources=["cases.jsonl"],
+            corpus_role="challenge-replay",
+            cases=[case],
+            results=results,
+            metric_totals={"finalized": 2, "stage_start": 2},
+            elapsed_ms=1.0,
+        )
+
+        self.assertEqual(report["cases"][0]["case_context_flags"], ["actual_prefix_before_expected_final"])
+        self.assertEqual(
+            report["case_definition_action_summary"]["action_counts"],
+            {"add_initial_final_or_recut_mid_stream_case": 1},
+        )
+        self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
+
     def test_repeated_expected_groups_are_case_definition_review_not_strict_logic(self) -> None:
         args = Namespace(
             model="sat-3l-sm",

@@ -262,23 +262,43 @@ def case_context_flags(result: dict[str, Any]) -> list[str]:
     expected_final = [str(sentence).strip() for sentence in result.get("expected_final", []) if str(sentence).strip()]
     if not expected_final or result.get("initial_final"):
         return []
+    flags: list[str] = []
     chunks = [
         str(chunk.get("input", "") if isinstance(chunk, dict) else chunk).strip()
         for chunk in result.get("chunks", [])
         if str(chunk.get("input", "") if isinstance(chunk, dict) else chunk).strip()
     ]
-    if not chunks:
-        return []
-    first_support = _expected_sentence_support(expected_final[0], chunks)
-    if not first_support.get("supported"):
-        return []
-    chunk_index = int(first_support.get("chunk_index", -1))
-    if chunk_index < 0 or chunk_index >= len(chunks):
-        return []
-    prefix = _prefix_before_expected_sentence(chunks[chunk_index], expected_final[0])
-    if _has_completed_prefix_context(prefix):
-        return ["unmodeled_prefix_context"]
-    return []
+    if chunks:
+        first_support = _expected_sentence_support(expected_final[0], chunks)
+        if first_support.get("supported"):
+            chunk_index = int(first_support.get("chunk_index", -1))
+            if 0 <= chunk_index < len(chunks):
+                prefix = _prefix_before_expected_sentence(chunks[chunk_index], expected_final[0])
+                if _has_completed_prefix_context(prefix):
+                    flags.append("unmodeled_prefix_context")
+    if not flags and _has_actual_prefix_before_expected_final(result):
+        flags.append("actual_prefix_before_expected_final")
+    return flags
+
+
+def _has_actual_prefix_before_expected_final(result: dict[str, Any]) -> bool:
+    expected_final = [
+        str(sentence).strip()
+        for sentence in result.get("expected_final", []) or []
+        if str(sentence).strip()
+    ]
+    actual_final = [
+        str(sentence).strip()
+        for sentence in result.get("actual_final", []) or []
+        if str(sentence).strip()
+    ]
+    if not expected_final or len(actual_final) < 2 or result.get("initial_final"):
+        return False
+    first_expected = expected_final[0]
+    for index, actual in enumerate(actual_final):
+        if _sentence_support_score(first_expected, actual) >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY:
+            return index > 0 and any(_has_completed_prefix_context(prefix) for prefix in actual_final[:index])
+    return False
 
 
 def _expected_final_order_support_kind(case: SbdCase) -> str:
@@ -932,7 +952,7 @@ def _case_primary_review_action(result: dict[str, Any]) -> str:
         return "remove_or_recut_expected_outside_replay_input"
     if not input_evidence.get("observed_fully_supported", True):
         return "rewrite_expected_final_to_observed_stt_text"
-    if "unmodeled_prefix_context" in context_flags:
+    if context_flags.intersection({"unmodeled_prefix_context", "actual_prefix_before_expected_final"}):
         return "add_initial_final_or_recut_mid_stream_case"
     if definition_flags.intersection({"duplicate_expected_sentence"}):
         return "rewrite_expected_final_to_final_sentence_boundary"
@@ -1057,7 +1077,8 @@ def summarize_case_definition_action_items(results: list[dict[str, Any]]) -> dic
             "Use remove_or_recut_expected_outside_replay_input when expected_final is not fully represented "
             "in replay chunks, rewrite_expected_final_to_observed_stt_text when expected labels have similar "
             "unit coverage but are not observed as raw STT text, add_initial_final_or_recut_mid_stream_case "
-            "for mid-stream cases, rewrite_expected_final_to_final_sentence_boundary for fragment-like "
+            "for mid-stream cases or actual finals that show missing prefix context, "
+            "rewrite_expected_final_to_final_sentence_boundary for fragment-like "
             "expected_final labels, extend_replay_tail_or_reclassify_staged_expectation when expected final "
             "text is still staged at the end of the replay window, "
             "deduplicate_or_justify_shifted_window_repeat when repeated sliding-window samples overweight "

@@ -20,6 +20,7 @@
 - 입력 근거가 없거나 일부 expected만 chunks에서 확인되는 케이스, `expected_final`이 window 밖 문장으로 보이는 케이스, 유사 unit coverage는 높지만 raw STT text로 관측되지 않는 케이스는 로직 튜닝 근거로 쓰지 않고 제거하거나 재검토한다.
 - raw STT 자체가 해석 불가능하거나 입력 음성과 무관한 경우, 연속 window 문맥이 부족한 경우, 사람이 봐도 하나의 `expected_final`을 정하기 어려운 경우, 같은 로그 구간의 거의 동일한 반복 후보는 정식 케이스로 승격하지 않는다.
 - 중간 스트림에서 시작한 케이스는 이전에 이미 확정됐어야 할 문장을 `expected_final`에 섞지 않는다. 필요하면 `initial_final`에 넣거나 케이스 시작점을 조정한다.
+- benchmark 실행 결과의 `actual_final`이 첫 `expected_final`보다 앞선 완결 문장을 먼저 내보낸다면, 그 문장은 앱 로직 실패로 단정하지 않고 `initial_final` 누락 또는 케이스 시작점 오류로 먼저 검토한다.
 - `expected_final`은 final-only 번역 큐에 들어갈 완성 문장 기준이다. 영어 소문자 접속구로 시작하는 조각, 모든 expected가 종결부호 없이 끝나는 조각, 같은 expected 묶음의 과도한 shifted-window 반복은 benchmark report의 case-definition review 신호로 보며 앱 로직 튜닝 근거에서 먼저 제외한다.
 - 앱 로직 튜닝 근거는 모든 `expected_final`이 replay 입력에서 확인되고 raw STT text로 관측되는 `full_input_evidence` 또는 `strict_logic_candidate_summary`를 우선한다. 일부 expected만 확인되거나 관측 텍스트와 다른 `expected_final`은 케이스 정의/수집 검토 대상으로 본다.
 - pending/staged 전용 benchmark case는 `expected_final=[]`일 수 있다. finalization 목표 검증에는 비어 있지 않은 `expected_final` 케이스 수를 별도로 확인한다.

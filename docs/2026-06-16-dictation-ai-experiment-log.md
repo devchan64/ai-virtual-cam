@@ -15729,6 +15729,81 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-23 actual final prefix 기반 case definition 감사 보강
+
+목적:
+
+- strict logic 후보에 case 정의 오류가 섞이면 앱 로직 튜닝 방향이 흐려진다.
+- `expected_final`은 replay input에서 시작하는 final-only 번역 대상이어야 하며, 이미 앞에서 확정됐어야 할 문장이 있으면 `initial_final` 또는 case 시작점으로 표현해야 한다.
+- 기존 `unmodeled_prefix_context`는 입력 chunk 내부 prefix만 보았고, benchmark 실행 결과의 `actual_final`이 expected 앞문장을 먼저 확정한 경우는 별도로 분리하지 못했다.
+
+반영:
+
+- `sbd_benchmark_report.py`에 `actual_prefix_before_expected_final` context flag를 추가했다.
+- 첫 `expected_final`이 `actual_final`의 두 번째 이후 문장과 강하게 맞고, 그 앞 actual 문장이 완결 prefix로 보이면 `add_initial_final_or_recut_mid_stream_case` 검토 대상으로 분류한다.
+- 기존 chunk 기반 `unmodeled_prefix_context`가 이미 있으면 actual-prefix 보조 플래그는 중복으로 붙이지 않는다.
+- 이 분류는 자동 삭제 규칙이 아니라 `initial_final` 보강 또는 case 시작점 재절단 검토 신호다.
+
+CUDA benchmark:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260623-actual-prefix-context-report.json
+
+cases=1027
+case_definition_review=975
+logic_tuning_candidates=48
+strict_logic_candidates=39
+final_f1_avg=0.551
+strict_final_f1_avg=0.895
+final_boundary_f1_avg=0.134
+```
+
+직전 기준 리포트 비교:
+
+```text
+.tmp/eval/dictation-ai-sbd/current-20260623-queue-reset-defer-no-append-report.json
+case_definition_review=961
+logic_tuning_candidates=62
+strict_logic_candidates=49
+strict_final_f1_avg=0.821
+strict_final_boundary_f1_avg=0.460
+strict_low_0.65=10
+
+.tmp/eval/dictation-ai-sbd/current-20260623-actual-prefix-context-report.json
+case_definition_review=975
+logic_tuning_candidates=48
+strict_logic_candidates=39
+strict_final_f1_avg=0.895
+strict_final_boundary_f1_avg=0.572
+strict_low_0.65=4
+```
+
+해석:
+
+- strict 후보 수가 줄고 strict F1이 크게 오른 것은 일부 저점 케이스가 앱 로직 문제가 아니라 `expected_final`/구간 정의 검토 대상이었음을 보여준다.
+- 전체 `final_f1_avg`는 변하지 않는다. 이 변경은 앱 런타임 성능 개선이 아니라 로직 튜닝 근거를 정화하는 benchmark 해석 개선이다.
+- 새 strict 저점은 `ko_log_duplicate_tesla_global_direction_fragment_20260617_001`, `zh_log_missing_food_queue_burst_same_chunk_replace_20260621_001`, `ko_log_duplicate_li_auto_xiaomi_fragment_20260617_001`, `ko_log_mixed_yuan_dollar_50years_fragment_20260618_001`로 줄었다. 이 케이스들은 여전히 실제 로직 병목 또는 더 정교한 정의 검토가 필요한 후보로 남긴다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report
+Ran 21 tests in 0.012s, OK
+
+./.venv/bin/python tests/eval/dictation_ai/cases/validate_sbd_case_files.py \
+  tests/eval/dictation_ai/sbd_cases \
+  --min-expected-final-cases 1000 \
+  --max-drafts 0
+case_count=1027, expected_final_case_count=1023
+
+git diff --check
+OK
+```
+
 ### 2026-06-23 SBD challenge case 정의 오류 후보 감사와 stdout 분리
 
 목적:
