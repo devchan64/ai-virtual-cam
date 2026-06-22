@@ -15824,6 +15824,84 @@ zh_log_draft_20260620_avc_whisper_log_11_000943
 - `input_evidence=none`으로 남은 4건은 `expected_final=[]`인 pending/staged 전용 케이스로, finalization 평균에는 포함되지 않는다.
 - 이번 수치 상승은 로직 성능 개선이 아니라 case-definition 정리 효과로 해석한다. 다음 로직 개선은 `supported_monotonic`, `full_input_evidence`, `clean_low` subset에서 병목이 반복되는 경우에만 진행한다.
 
+### 2026-06-23 recent-final delta fragment 보존 실험 기각
+
+가설:
+
+- clean-low subset의 주요 병목은 `candidate_recent_final_delta_trimmed`, `candidate_delta_trimmed`, `candidate_duplicate_suppressed`가 함께 나타나는 케이스다.
+- finalization 경로에는 이미 staged 문장이 delta fragment로 잘릴 때 원 staged 문장을 보존하는 규칙이 있다.
+- 같은 원칙을 completed candidate stage 진입 전에도 적용해, recent-final delta가 stageable 후보를 `no_end_marker`, `short_no_end_fragment`, `trailing_ellipsis` fragment로 깎으면 원 후보를 보존하는 실험을 했다.
+
+실험 패치:
+
+```text
+src/app/dictation_transcript_logic.py
+src/app/dictation_pipeline_loop.py
+tests/eval/dictation_ai/benchmark/sbd_lifecycle_replay.py
+tests/eval/dictation_ai/benchmark/sbd_benchmark_report.py
+```
+
+검증:
+
+```text
+./.venv/bin/python -m py_compile src/app/dictation_transcript_logic.py src/app/dictation_pipeline_loop.py tests/eval/dictation_ai/benchmark/sbd_lifecycle_replay.py tests/eval/dictation_ai/benchmark/sbd_benchmark_report.py
+
+./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report
+Ran 33 tests in 0.013s, OK
+```
+
+CUDA 벤치:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py --cases tests/eval/dictation_ai/sbd_cases --device cuda --compute-type float16 --output .tmp/eval/dictation-ai-sbd/current-20260623-preserve-stage-candidate-recent-delta-fragment-report.json
+```
+
+기준 리포트:
+
+```text
+.tmp/eval/dictation-ai-sbd/current-20260623-pruned-no-input-evidence-report.json
+```
+
+결과:
+
+```text
+case_count: 1027 -> 1027
+finalized: 4940 -> 4945
+stage_start: 9078 -> 9146
+finalized_per_stage_start: 0.5441727252698833 -> 0.5406735184780231 (-0.003499207)
+final_precision_avg: 0.6163395419363498 -> 0.6160247371911654 (-0.000314805)
+final_recall_avg: 0.534357277430485 -> 0.5347954468559962 (+0.000438169)
+final_f1_avg: 0.550492743360324 -> 0.55056690422573 (+0.000074161)
+final_ordered_f1_avg: 0.5269590853705198 -> 0.5270374614300144 (+0.000078376)
+final_boundary_f1_avg: 0.13401379432590774 -> 0.13411991803590337 (+0.000106124)
+case_exact_match: 27 -> 24
+staged_exact_match: 368 -> 361
+candidate_recent_final_delta_fragment_preserved=113
+```
+
+부분 집합:
+
+```text
+supported_monotonic final_f1_avg: 0.7068822917086017 -> 0.7065510749312602
+supported_monotonic final_ordered_f1_avg: 0.6892596426685346 -> 0.688928425891193
+clean_low 0.35 avg_final_f1: 0.20457875457875457 -> 0.20457875457875457
+clean_low 0.50 avg_final_f1: 0.30617438117438117 -> 0.30617438117438117
+clean_low 0.65 avg_final_f1: 0.4036024293167151 -> 0.4036024293167151
+```
+
+해석:
+
+- 전체 final F1은 아주 작게 상승했지만, 효과 크기가 `+0.000074`로 미미하다.
+- 입력 근거가 더 강한 `supported_monotonic` subset은 하락했다.
+- 실제 다음 개선 대상으로 삼은 clean-low subset은 전혀 개선되지 않았다.
+- `stage_start`는 68 증가하고 `case_exact_match`, `staged_exact_match`는 하락해 stage 후보를 더 많이 만들 뿐 핵심 병목을 풀지는 못했다.
+
+결론:
+
+- 패치는 기각하고 되돌렸다.
+- recent-final delta fragment 보존은 finalization 경로에는 유효하지만, stage candidate 진입 전으로 넓히면 보편 개선 원칙으로 보기 어렵다.
+- 다음 개선은 clean-low에서 반복되는 `stage_candidate_quality_blocked`, `stage_revision_token_sentence_deferred`, `stage_age_quality_blocked`의 공통 원인을 더 좁혀야 한다.
+
 ### 2026-06-23 recent-final/queue 파라미터 추가 sweep 기각
 
 목적:
