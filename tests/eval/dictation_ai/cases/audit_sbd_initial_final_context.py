@@ -299,6 +299,14 @@ def _case_definition_action_summary(
             )
             add(record, action=action, reason=reason)
             continue
+        if not bool(input_evidence.get("observed_fully_supported", True)):
+            action = "rewrite_expected_final_to_observed_stt_text"
+            reason = (
+                "expected_final has enough partial unit coverage but is not observed as raw STT text "
+                "in the replay chunks; rewrite labels to observed STT text or recut the case."
+            )
+            add(record, action=action, reason=reason)
+            continue
         if record_id in mid_stream_ids:
             action = "add_initial_final_or_recut_mid_stream_case"
             reason = (
@@ -375,6 +383,12 @@ def _case_definition_review_summary(
         if bool(dict(record.get("input_evidence", {})).get("has_evidence"))
         and not bool(dict(record.get("input_evidence", {})).get("fully_supported"))
     ]
+    unobserved_stt_text_cases = [
+        record
+        for record in records
+        if bool(dict(record.get("input_evidence", {})).get("fully_supported"))
+        and not bool(dict(record.get("input_evidence", {})).get("observed_fully_supported", True))
+    ]
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for record in records:
         if record.get("expected_final_normalized"):
@@ -394,7 +408,8 @@ def _case_definition_review_summary(
             "usually mean shifted-window samples from the same log region and should be deduplicated only "
             "after checking that they add no distinct lifecycle failure. Weak or partial input evidence "
             "means expected_final is not sufficiently represented in the replay chunks and should be "
-            "fixed before using the case as app logic tuning evidence."
+            "fixed before using the case as app logic tuning evidence. Fully covered but unobserved STT "
+            "text usually means expected_final was human-corrected away from the raw STT input."
         ),
         "duplicate_expected_case_count": len(duplicate_expected_cases),
         "nested_expected_case_count": len(nested_expected_cases),
@@ -402,6 +417,7 @@ def _case_definition_review_summary(
         "repeated_expected_case_count": sum(len(items) for items in repeated_groups),
         "weak_input_evidence_case_count": len(weak_input_evidence_cases),
         "partial_input_evidence_case_count": len(partial_input_evidence_cases),
+        "unobserved_stt_text_case_count": len(unobserved_stt_text_cases),
         "duplicate_expected_cases": [
             {
                 **_case_payload(record),
@@ -444,6 +460,21 @@ def _case_definition_review_summary(
                     str(item.get("language", "")),
                     str(item.get("id", "")),
                 ),
+            )[:duplicate_group_limit]
+        ],
+        "unobserved_stt_text_cases": [
+            {
+                **_case_payload(record),
+                "expected_final_preview": list(record.get("expected_final_normalized", []))[:5],
+            }
+            for record in sorted(
+                unobserved_stt_text_cases,
+                key=lambda item: (
+                    int(dict(item.get("input_evidence", {})).get("unobserved_count", 0)),
+                    str(item.get("language", "")),
+                    str(item.get("id", "")),
+                ),
+                reverse=True,
             )[:duplicate_group_limit]
         ],
         "repeated_expected_groups": [
@@ -756,6 +787,7 @@ def main() -> int:
             "nested_expected_cases",
             "weak_input_evidence_cases",
             "partial_input_evidence_cases",
+            "unobserved_stt_text_cases",
             "repeated_expected_groups",
         ):
             if isinstance(review.get(key), list):

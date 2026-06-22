@@ -968,6 +968,68 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         )
         self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
 
+    def test_human_corrected_expected_final_is_observed_stt_text_review_action(self) -> None:
+        args = Namespace(
+            model="sat-3l-sm",
+            device="cuda",
+            compute_type="float16",
+            min_final_f1=0.0,
+            fail_on_regression=False,
+        )
+        case = SbdCase(
+            id="human-corrected-stt",
+            language="zh",
+            chunks=["提灯灯面，这个可以点。"],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=["十八梯灯灯面，这个可以点。"],
+            expected_staged="",
+            tags=("missing-final",),
+            sentence_finalize_age=3,
+        )
+        results = [
+            {
+                "id": "human-corrected-stt",
+                "language": "zh",
+                "tags": ["missing-final"],
+                "expected_final": ["十八梯灯灯面，这个可以点。"],
+                "chunks": [{"input": "提灯灯面，这个可以点。"}],
+                "initial_final": [],
+                "actual_final": ["提灯灯面，这个可以点。"],
+                "actual_pending": "",
+                "actual_staged": "",
+                "actual_staged_queue": [],
+                "final_score": _score(0.8, 0.8, 0.8),
+                "final_ordered_score": _score(0.8, 0.8, 0.8),
+                "final_boundary_score": _score(1.0, 1.0, 1.0),
+                "completed_last_score": _score(0.0, 0.0, 0.0),
+                "pending_exact": True,
+                "staged_exact": True,
+                "case_exact_match": False,
+                "metrics": {"finalized": 1, "stage_start": 1},
+            }
+        ]
+
+        report = build_benchmark_report(
+            args=args,
+            case_sources=["cases.jsonl"],
+            corpus_role="challenge-replay",
+            cases=[case],
+            results=results,
+            metric_totals={"finalized": 1, "stage_start": 1},
+            elapsed_ms=1.0,
+        )
+
+        action_summary = report["case_definition_action_summary"]
+        self.assertEqual(
+            action_summary["action_counts"],
+            {"rewrite_expected_final_to_observed_stt_text": 1},
+        )
+        self.assertEqual(report["cases"][0]["input_evidence"]["covered_count"], 1)
+        self.assertEqual(report["cases"][0]["input_evidence"]["observed_count"], 0)
+        self.assertFalse(report["cases"][0]["input_evidence"]["observed_fully_supported"])
+        self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
+
     def test_terminal_staged_expected_final_is_tail_review_action(self) -> None:
         args = Namespace(
             model="sat-3l-sm",

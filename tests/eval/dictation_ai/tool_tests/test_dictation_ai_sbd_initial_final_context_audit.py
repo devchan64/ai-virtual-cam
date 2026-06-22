@@ -275,6 +275,15 @@ class DictationAiSbdInitialFinalContextAuditTest(unittest.TestCase):
                             },
                             ensure_ascii=False,
                         ),
+                        json.dumps(
+                            {
+                                "id": "human-corrected-stt",
+                                "language": "zh",
+                                "chunks": ["提灯灯面，这个可以点。"],
+                                "expected_final": ["十八梯灯灯面，这个可以点。"],
+                            },
+                            ensure_ascii=False,
+                        ),
                     ]
                 )
                 + "\n",
@@ -290,6 +299,10 @@ class DictationAiSbdInitialFinalContextAuditTest(unittest.TestCase):
         self.assertEqual(review["partial_input_evidence_cases"][0]["id"], "partial-input")
         self.assertEqual(review["partial_input_evidence_cases"][0]["input_evidence"]["covered_count"], 1)
         self.assertEqual(review["partial_input_evidence_cases"][0]["input_evidence"]["expected_count"], 2)
+        self.assertEqual(review["unobserved_stt_text_case_count"], 1)
+        self.assertEqual(review["unobserved_stt_text_cases"][0]["id"], "human-corrected-stt")
+        self.assertTrue(review["unobserved_stt_text_cases"][0]["input_evidence"]["fully_supported"])
+        self.assertFalse(review["unobserved_stt_text_cases"][0]["input_evidence"]["observed_fully_supported"])
 
     def test_reports_case_definition_review_actions(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -315,6 +328,15 @@ class DictationAiSbdInitialFinalContextAuditTest(unittest.TestCase):
                                 "language": "en",
                                 "chunks": ["Already final sentence. Target sentence."],
                                 "expected_final": ["Target sentence."],
+                            },
+                            ensure_ascii=False,
+                        ),
+                        json.dumps(
+                            {
+                                "id": "human-corrected-stt",
+                                "language": "zh",
+                                "chunks": ["提灯灯面，这个可以点。"],
+                                "expected_final": ["十八梯灯灯面，这个可以点。"],
                             },
                             ensure_ascii=False,
                         ),
@@ -368,7 +390,7 @@ class DictationAiSbdInitialFinalContextAuditTest(unittest.TestCase):
 
         actions = summary["case_definition_action_summary"]
         by_action = actions["by_action"]
-        self.assertEqual(actions["review_case_count"], 5)
+        self.assertEqual(actions["review_case_count"], 6)
         self.assertEqual(actions["logic_tuning_candidate_count"], 1)
         self.assertEqual(
             by_action["remove_or_recut_expected_outside_replay_input"]["examples"][0]["id"],
@@ -377,6 +399,10 @@ class DictationAiSbdInitialFinalContextAuditTest(unittest.TestCase):
         self.assertEqual(
             by_action["add_initial_final_or_recut_mid_stream_case"]["examples"][0]["id"],
             "mid-stream",
+        )
+        self.assertEqual(
+            by_action["rewrite_expected_final_to_observed_stt_text"]["examples"][0]["id"],
+            "human-corrected-stt",
         )
         self.assertEqual(
             by_action["rewrite_expected_final_to_final_sentence_boundary"]["examples"][0]["id"],

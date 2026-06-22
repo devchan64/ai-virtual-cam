@@ -15729,6 +15729,86 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-23 benchmark case definition 감사 기준 보강
+
+목적:
+
+- 앱 로직 튜닝 전에 benchmark case의 `expected_final` 정의가 STT 이후 파이프라인 평가에 적합한지 다시 확인했다.
+- 기존 `full_input_evidence`는 expected와 chunk 사이의 공통 unit coverage를 보므로, 사람이 STT 오류를 보정한 expected나 여러 window 변형을 합친 expected를 모두 걸러내지 못했다.
+- 이번 기준은 `expected_final`이 raw STT replay chunk 안에서 compact text로 실제 관측되는지 별도 확인한다. raw STT 정확도 자체를 평가하지 않는 실험이므로, expected도 raw STT output 이후 파이프라인이 소비할 수 있는 표현이어야 한다.
+
+변경:
+
+- `tests/eval/dictation_ai/cases/sbd_input_evidence.py`
+  - `observed_count`, `unobserved_count`, `observed_fully_supported`를 추가했다.
+  - 공백/문장부호를 제거한 compact text 기준으로 `expected_final`이 같은 case의 replay chunk에 실제 포함되는지 확인한다.
+- `tests/eval/dictation_ai/cases/audit_sbd_initial_final_context.py`
+  - `rewrite_expected_final_to_observed_stt_text` action을 추가했다.
+  - coverage는 충분하지만 raw STT text로 관측되지 않는 expected를 앱 로직 튜닝 후보에서 분리한다.
+- `tests/eval/dictation_ai/benchmark/sbd_benchmark_report.py`
+  - CUDA benchmark report의 `case_definition_action_summary`에도 같은 action을 반영했다.
+- `tests/eval/dictation_ai/README.md`, `tests/eval/dictation_ai/sbd_cases/README.md`
+  - `expected_final`은 사람이 의미를 보정한 참조 전사가 아니라 raw STT text에서 관측된 표현 기준이어야 한다고 명시했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_initial_final_context_audit \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_structural_selector
+
+Ran 30 tests in 0.014s
+OK
+
+./.venv/bin/python tests/eval/dictation_ai/cases/validate_sbd_case_files.py \
+  tests/eval/dictation_ai/sbd_cases \
+  --min-expected-final-cases 1000 \
+  --max-drafts 0
+
+case_count=1027
+expected_final_case_count=1023
+draft_count=0
+language_counts={"en":383,"ko":346,"zh":298}
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260623-observed-stt-text-report.json
+
+cases=1027
+finalized=4940
+stage_start=9078
+finalized_per_stage_start=0.544
+final_precision_avg=0.616
+final_recall_avg=0.534
+final_f1_avg=0.550
+final_boundary_f1_avg=0.134
+```
+
+case definition action 결과:
+
+```text
+review_case_count=961
+logic_tuning_candidate_count=62
+
+remove_or_recut_expected_outside_replay_input=599
+rewrite_expected_final_to_observed_stt_text=141
+rewrite_expected_final_to_final_sentence_boundary=113
+add_initial_final_or_recut_mid_stream_case=45
+extend_replay_tail_or_reclassify_staged_expectation=35
+deduplicate_or_justify_shifted_window_repeat=28
+```
+
+해석:
+
+- 전체 `final_f1_avg=0.550`은 현재 case 정의 문제가 많이 섞인 challenge replay 평균이므로 앱 로직 성능으로 바로 해석하지 않는다.
+- `rewrite_expected_final_to_observed_stt_text=141`은 기존 coverage 기준으로는 통과했지만 raw STT text로는 관측되지 않은 expected다. 이 그룹은 사람이 STT 오류를 보정했거나, 여러 window의 의미를 하나의 expected로 합친 케이스일 수 있다.
+- 앱 로직 패치 판단은 `strict_logic_candidate_summary` 또는 clean/strict low subset에서 반복되는 병목을 먼저 본다.
+- 이번 새 기준 적용 후 strict logic candidate는 51건이고, strict subset의 `final_f1_avg=0.814`, `final_boundary_f1_avg=0.440`이다. 따라서 현재 낮은 전체 평균의 상당 부분은 파이프라인 로직 자체보다 case 정의/수집 품질에 의해 설명된다.
+- 다음 단계는 961건 review action 후보를 일괄 삭제하는 것이 아니라, `remove_or_recut_expected_outside_replay_input`과 `rewrite_expected_final_to_observed_stt_text` 상위 그룹부터 원 로그를 확인해 제거, 재컷, raw STT 기준 expected 재작성 중 하나로 정리하는 것이다.
+
 ### 2026-06-23 challenge case 정의 감사 action summary 추가
 
 목적:

@@ -48,17 +48,18 @@
 case 내부의 중복/포함 expected 문장, replay 입력 chunks에서 근거가 약한 expected도 케이스 정의 검토 신호로
 출력한다. 출력은 자동 삭제 규칙이 아니라 사람이 로그 근거와 lifecycle 차이를 보고 정리할 후보 목록이다.
 기본 CUDA report의 `case_definition_action_summary`도 같은 목적의 감사 신호다. 이 요약은
-`initial_final` 보정, fragment expected 재작성, shifted-window 반복 그룹 정리, 수동 문장 경계 검토를
-분리해서 보여준다. 앱 로직 튜닝 근거는 먼저 `strict_logic_candidate_summary`와
+`initial_final` 보정, raw STT에서 관측되지 않은 expected 재작성, fragment expected 재작성,
+shifted-window 반복 그룹 정리, 수동 문장 경계 검토를 분리해서 보여준다. 앱 로직 튜닝 근거는 먼저 `strict_logic_candidate_summary`와
 `clean_low_bottleneck_intersection_summary`를 본다. 두 요약은 모든 `expected_final`이 replay 입력에서
-확인되는 `fully_supported` 케이스를 기준으로 해석한다.
+확인되고 raw STT text로 관측되는 케이스를 기준으로 해석한다.
 `case_definition_action_summary`의 우선순위는 다음과 같다.
 
 1. `remove_or_recut_expected_outside_replay_input`: `expected_final`이 replay chunks에 충분히 없으므로 제거하거나 window/label을 다시 잡는다.
-2. `add_initial_final_or_recut_mid_stream_case`: 중간 스트림 시작 후보이므로 이미 확정됐어야 할 prefix를 `initial_final`로 옮기거나 시작점을 조정한다.
-3. `rewrite_expected_final_to_final_sentence_boundary`: final-only 번역 큐 기준의 완성 문장으로 expected를 다시 쓴다.
-4. `extend_replay_tail_or_reclassify_staged_expectation`: replay 끝에서 expected final 문장이 아직 staged/queue에 있으면 tail을 연장하거나 pending/staged 기대값으로 재분류한다.
-5. `deduplicate_or_justify_shifted_window_repeat`: 같은 expected 묶음이 반복된 case는 distinct lifecycle failure가 있는 경우만 남긴다.
+2. `rewrite_expected_final_to_observed_stt_text`: `expected_final`이 유사 unit으로는 커버되지만 raw STT text로 관측되지 않으므로 STT 출력 기준으로 label을 다시 쓴다.
+3. `add_initial_final_or_recut_mid_stream_case`: 중간 스트림 시작 후보이므로 이미 확정됐어야 할 prefix를 `initial_final`로 옮기거나 시작점을 조정한다.
+4. `rewrite_expected_final_to_final_sentence_boundary`: final-only 번역 큐 기준의 완성 문장으로 expected를 다시 쓴다.
+5. `extend_replay_tail_or_reclassify_staged_expectation`: replay 끝에서 expected final 문장이 아직 staged/queue에 있으면 tail을 연장하거나 pending/staged 기대값으로 재분류한다.
+6. `deduplicate_or_justify_shifted_window_repeat`: 같은 expected 묶음이 반복된 case는 distinct lifecycle failure가 있는 경우만 남긴다.
 
 이 action에 걸린 case는 앱 로직 성능 저하로 해석하지 않는다. 로직 튜닝 후보는 action summary의
 `logic_tuning_candidate_count`와 clean/strict 요약을 기준으로 좁힌다.

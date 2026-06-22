@@ -178,6 +178,7 @@ SUPPORTED_LOW_BOTTLENECK_METRICS = (
 )
 CASE_REVIEW_ACTION_FLAGS = (
     "remove_or_recut_expected_outside_replay_input",
+    "rewrite_expected_final_to_observed_stt_text",
     "add_initial_final_or_recut_mid_stream_case",
     "rewrite_expected_final_to_final_sentence_boundary",
     "extend_replay_tail_or_reclassify_staged_expectation",
@@ -929,6 +930,8 @@ def _case_primary_review_action(result: dict[str, Any]) -> str:
     definition_flags = set(result.get("case_definition_flags", []) or [])
     if not input_evidence.get("fully_supported"):
         return "remove_or_recut_expected_outside_replay_input"
+    if not input_evidence.get("observed_fully_supported", True):
+        return "rewrite_expected_final_to_observed_stt_text"
     if "unmodeled_prefix_context" in context_flags:
         return "add_initial_final_or_recut_mid_stream_case"
     if definition_flags.intersection({"duplicate_expected_sentence"}):
@@ -1052,10 +1055,11 @@ def summarize_case_definition_action_items(results: list[dict[str, Any]]) -> dic
         "interpretation": (
             "These are prioritized case-definition review actions, not automatic deletion rules. "
             "Use remove_or_recut_expected_outside_replay_input when expected_final is not fully represented "
-            "in replay chunks, add_initial_final_or_recut_mid_stream_case for mid-stream cases, "
-            "rewrite_expected_final_to_final_sentence_boundary for fragment-like expected_final labels, "
-            "extend_replay_tail_or_reclassify_staged_expectation when expected final text is still staged "
-            "at the end of the replay window, "
+            "in replay chunks, rewrite_expected_final_to_observed_stt_text when expected labels have similar "
+            "unit coverage but are not observed as raw STT text, add_initial_final_or_recut_mid_stream_case "
+            "for mid-stream cases, rewrite_expected_final_to_final_sentence_boundary for fragment-like "
+            "expected_final labels, extend_replay_tail_or_reclassify_staged_expectation when expected final "
+            "text is still staged at the end of the replay window, "
             "deduplicate_or_justify_shifted_window_repeat when repeated sliding-window samples overweight "
             "one log region, and manual_boundary_review for remaining nested boundary ambiguities."
         ),
