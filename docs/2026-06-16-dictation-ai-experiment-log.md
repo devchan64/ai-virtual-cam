@@ -96,6 +96,41 @@ strict_final_f1_avg=0.942
 - 따라서 no-end 짧은 후보 완화는 현재 기본 로직으로 채택하지 않는다. 남은 한국어 케이스는 별도 원칙 없이 단일 케이스를 맞추기 위한 조정으로 보이면 앱 로직 변경 근거로 쓰지 않는다.
 - 후속 리포트 `current-20260623-strict-lowest-metrics-report.json`부터는 `strict_logic_candidate_summary.lowest_cases`에 개별 strict 저점과 `lifecycle_metrics`를 포함한다. 다음 앱 로직 변경은 이 목록에서 여러 케이스에 공통으로 반복되는 병목이 확인될 때만 시도한다.
 
+### 2026-06-23 revision similarity 축 sweep
+
+목적:
+
+- strict 저점에서 CJK `stage_revision_token_sentence_deferred`, `stage_age_quality_blocked`, `stage_replace_deferred`가 반복되어 revision similarity 계열 파라미터를 비교했다.
+- no-end 완화는 이미 전체 precision/f1 하락이 확인됐으므로 제외했다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py run-sweep \
+  --include-baseline \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260623-revision-axis \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260623-revision-axis/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260623-revision-axis/summary.md \
+  --param CJK_REVISION_RATIO_MIN=0.75 \
+  --param REVISION_FALLBACK_COVERAGE_MIN=0.50 \
+  --param CJK_CONFIRM_PRESERVE_RATIO_MIN=0.60
+```
+
+결과:
+
+| 축 | final_f1_delta | final_precision_delta | final_recall_delta | strict_final_f1_delta | 판정 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `CJK_REVISION_RATIO_MIN=0.75` | -0.000158 | -0.000344 | +0.000236 | 0.000000 | 채택 안 함 |
+| `REVISION_FALLBACK_COVERAGE_MIN=0.50` | -0.000494 | -0.000279 | -0.000784 | 0.000000 | 채택 안 함 |
+| `CJK_CONFIRM_PRESERVE_RATIO_MIN=0.60` | -0.000330 | +0.000238 | -0.000816 | +0.005638 | 채택 안 함 |
+
+해석:
+
+- 세 축 모두 sweep evidence summary에서 `review-risk`로 분류됐다.
+- `CJK_CONFIRM_PRESERVE_RATIO_MIN=0.60`은 strict 평균만 보면 개선처럼 보이지만 strict 후보 수가 `35 -> 34`로 줄고, 전체 recall/f1이 하락하며 `zh_log_missing_chongqing_baixiangju_ropeway_20260621_001` 같은 strict 저점 후보가 악화됐다.
+- `REVISION_FALLBACK_COVERAGE_MIN=0.50`은 변경 케이스가 36건으로 많고 best/worst가 동시에 커져, 일반 원칙으로 채택하기 어렵다.
+- 따라서 revision similarity 기본값은 유지한다. 다음 앱 로직 변경은 단일 threshold 완화보다 queue/stage 생명주기에서 여러 strict 저점에 반복되는 구조적 병목이 확인될 때만 시도한다.
+
 모델 선정 기준:
 
 | 흐름 | 선정 모델 | 탈락/보류 모델 | 선정 이유 |
