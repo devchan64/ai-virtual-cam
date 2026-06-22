@@ -175,6 +175,7 @@ def _load_report_summary(job: SweepJob) -> dict[str, Any]:
         "expected_final_order_support_summary": report.get("expected_final_order_support_summary", {}),
         "expected_order_support_result_summary": report.get("expected_order_support_result_summary", {}),
         "low_score_characteristics_summary": report.get("low_score_characteristics_summary", {}),
+        "clean_low_bottleneck_intersection_summary": report.get("clean_low_bottleneck_intersection_summary", {}),
         "queue_residue_strata_summary": report.get("queue_residue_strata_summary", {}),
         "evidence_strata_summary": report.get("evidence_strata_summary", {}),
         "expected_quality_strata_summary": report.get("expected_quality_strata_summary", {}),

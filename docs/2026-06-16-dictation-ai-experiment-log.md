@@ -15773,6 +15773,75 @@ threshold 0.65: 91 / 35 -> 91 / 30
 - `clean_low`의 0.50, 0.65 구간에서 정의 검토 대상이 제거되어 로직 튜닝 후보가 더 좁아졌다.
 - 0.35 이하의 낮은 clean 후보 10건은 그대로 남아 있으므로, 다음 로직 개선 검토는 이 구간을 우선 대상으로 삼는 것이 맞다.
 
+### 2026-06-23 recent-final 단독 임계값 sweep
+
+목적:
+
+- `clean_low < 0.35` 10건의 공통 지표가 `candidate_recent_final_delta_trimmed`, `candidate_duplicate_suppressed`, `stage_candidate_quality_blocked`, `stage_revision_token_sentence_deferred`에 몰려 있어 recent-final echo/delta 임계값 단독 조정이 개선으로 이어지는지 확인했다.
+- 앱 로직을 바꾸기 전, 기존 tuning manifest의 override 가능한 상수만 독립 sweep했다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py run-sweep \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --include-baseline \
+  --param RECENT_FINAL_FRAGMENT_ECHO_COVERAGE_MIN=0.75 \
+  --param RECENT_FINAL_FRAGMENT_ECHO_MAX_UNMATCHED_UNITS=2 \
+  --param RECENT_FINAL_FRAGMENT_ECHO_MAX_LENGTH_RATIO=0.35 \
+  --param RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS=5 \
+  --param RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS=12 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260623-recent-final-clean-low \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260623-recent-final-clean-low-summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260623-recent-final-clean-low-summary.md
+```
+
+결과:
+
+```text
+baseline:
+  final_f1_avg=0.550492743360324
+  final_boundary_f1_avg=0.13401379432590774
+  strict_final_f1_avg=0.7791216400087367
+  strict_final_boundary_f1_avg=0.4406875830262927
+  clean_low_0.35=10
+  clean_low_0.50=16
+  clean_low_0.65=30
+
+RECENT_FINAL_FRAGMENT_ECHO_COVERAGE_MIN=0.75:
+  clean_low_0.35=10, clean_low_0.50=16, clean_low_0.65=30
+  strict 변화 없음
+
+RECENT_FINAL_FRAGMENT_ECHO_MAX_UNMATCHED_UNITS=2:
+  clean_low_0.35=10, clean_low_0.50=16, clean_low_0.65=30
+  strict 변화 없음
+
+RECENT_FINAL_FRAGMENT_ECHO_MAX_LENGTH_RATIO=0.35:
+  clean_low_0.35=10, clean_low_0.50=16, clean_low_0.65=30
+  strict 변화 없음
+
+RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS=5:
+  final_f1_avg=0.5505097663004098
+  final_boundary_f1_avg=0.1334609875950025
+  strict_final_f1_avg=0.7757916814368427
+  strict_final_boundary_f1_avg=0.43961231420908836
+  clean_low_0.35=10, clean_low_0.50=17, clean_low_0.65=31
+
+RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS=12:
+  final_f1_avg=0.5502895462099936
+  final_boundary_f1_avg=0.1335619545899126
+  strict_final_f1_avg=0.7780463711915325
+  strict_final_boundary_f1_avg=0.43961231420908836
+  clean_low_0.35=10, clean_low_0.50=16, clean_low_0.65=30
+```
+
+해석:
+
+- recent-final fragment echo 임계값 단독 보수화는 `clean_low < 0.35`를 줄이지 못했다.
+- suffix extension 보수화는 전체 `final_f1_avg`를 아주 작게 올렸지만 recall, boundary, strict 지표가 내려갔고 clean-low 케이스 수가 늘었다.
+- prefix extension 보수화도 strict/boundary 저하가 있어 기본값 반영 근거가 없다.
+- 따라서 다음 개선은 recent-final 임계값 단독 변경보다, recent-final delta 후 품질 차단/queue 보류로 이어지는 생명주기 전이 자체를 확인해야 한다.
+
 ### 2026-06-23 벤치 케이스 정의 strata 추가
 
 문제:

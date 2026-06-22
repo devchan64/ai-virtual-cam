@@ -175,6 +175,9 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
                         "evidence_strata_summary": {
                             "lifecycle_without_input_review": {"case_count": 2},
                         },
+                        "clean_low_bottleneck_intersection_summary": {
+                            "thresholds": {"0.35": {"case_count": 1, "avg_final_f1": 0.2}},
+                        },
                         "staged_queue_residue_summary": {
                             "queue_residue_case_count": 1,
                             "queue_residue_total": 2,
@@ -233,6 +236,10 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
             self.assertEqual(
                 summary["evidence_strata_summary"],
                 {"lifecycle_without_input_review": {"case_count": 2}},
+            )
+            self.assertEqual(
+                summary["clean_low_bottleneck_intersection_summary"],
+                {"thresholds": {"0.35": {"case_count": 1, "avg_final_f1": 0.2}}},
             )
             self.assertEqual(
                 summary["staged_queue_residue_summary"],
@@ -311,6 +318,17 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
                         }
                     }
                 },
+                "clean_low_bottleneck_intersection_summary": {
+                    "thresholds": {
+                        "0.35": {
+                            "case_count": 2,
+                            "avg_final_f1": 0.20,
+                            "avg_ordered_f1": 0.18,
+                            "avg_boundary_f1": 0.05,
+                        },
+                        "0.50": {"case_count": 3, "avg_final_f1": 0.30, "avg_boundary_f1": 0.10},
+                    }
+                },
                 "queue_residue_strata_summary": {
                     "no_queue": {"case_count": 6, "final_f1_avg": 0.6, "final_boundary_f1_avg": 0.3, "staged_residue_count": 1, "empty_final_count": 1, "metrics": {"stage_queue_revision": 1, "stage_replace_deferred": 2}},
                     "queue_len_1": {"case_count": 1, "final_f1_avg": 0.4, "final_boundary_f1_avg": 0.2, "staged_residue_count": 1, "empty_final_count": 0, "metrics": {"stage_queue_revision": 2, "stage_replace_deferred": 3}},
@@ -380,6 +398,17 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
                         }
                     }
                 },
+                "clean_low_bottleneck_intersection_summary": {
+                    "thresholds": {
+                        "0.35": {
+                            "case_count": 1,
+                            "avg_final_f1": 0.25,
+                            "avg_ordered_f1": 0.20,
+                            "avg_boundary_f1": 0.07,
+                        },
+                        "0.50": {"case_count": 4, "avg_final_f1": 0.31, "avg_boundary_f1": 0.09},
+                    }
+                },
                 "queue_residue_strata_summary": {
                     "no_queue": {"case_count": 7, "final_f1_avg": 0.7, "final_boundary_f1_avg": 0.4, "staged_residue_count": 0, "empty_final_count": 0, "metrics": {"stage_queue_revision": 1, "stage_replace_deferred": 1}},
                     "queue_len_1": {"case_count": 0, "final_f1_avg": 0.0, "final_boundary_f1_avg": 0.0, "staged_residue_count": 0, "empty_final_count": 0, "metrics": {"stage_queue_revision": 0, "stage_replace_deferred": 0}},
@@ -440,6 +469,18 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
             updated[1]["low_score_characteristics_deltas"]["0.35"]["support_kind_counts"][
                 "supported_monotonic"
             ],
+            1.0,
+        )
+        self.assertEqual(
+            updated[1]["clean_low_bottleneck_intersection_deltas"]["0.35"]["case_count"],
+            -1.0,
+        )
+        self.assertAlmostEqual(
+            updated[1]["clean_low_bottleneck_intersection_deltas"]["0.35"]["avg_final_f1"],
+            0.05,
+        )
+        self.assertEqual(
+            updated[1]["clean_low_bottleneck_intersection_deltas"]["0.50"]["case_count"],
             1.0,
         )
         self.assertEqual(
@@ -2017,6 +2058,45 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
                                 },
                             }
                         },
+                        "clean_low_bottleneck_intersection_summary": {
+                            "thresholds": {
+                                "0.35": {
+                                    "case_count": 4,
+                                    "avg_final_f1": 0.20,
+                                    "avg_ordered_f1": 0.18,
+                                    "avg_boundary_f1": 0.05,
+                                },
+                                "0.50": {
+                                    "case_count": 6,
+                                    "avg_final_f1": 0.30,
+                                    "avg_ordered_f1": 0.27,
+                                    "avg_boundary_f1": 0.08,
+                                },
+                                "0.65": {
+                                    "case_count": 8,
+                                    "avg_final_f1": 0.40,
+                                    "avg_ordered_f1": 0.35,
+                                    "avg_boundary_f1": 0.10,
+                                },
+                            }
+                        },
+                        "clean_low_bottleneck_intersection_deltas": {
+                            "0.35": {
+                                "case_count": 0.0,
+                                "avg_final_f1": 0.0,
+                                "avg_boundary_f1": 0.0,
+                            },
+                            "0.50": {
+                                "case_count": 0.0,
+                                "avg_final_f1": 0.0,
+                                "avg_boundary_f1": 0.0,
+                            },
+                            "0.65": {
+                                "case_count": 0.0,
+                                "avg_final_f1": 0.0,
+                                "avg_boundary_f1": 0.0,
+                            },
+                        },
                         "strict_logic_candidate_summary": {
                             "strict_case_count": 12,
                             "summary": {
@@ -2276,6 +2356,45 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
                                 },
                             }
                         },
+                        "clean_low_bottleneck_intersection_summary": {
+                            "thresholds": {
+                                "0.35": {
+                                    "case_count": 4,
+                                    "avg_final_f1": 0.20,
+                                    "avg_ordered_f1": 0.18,
+                                    "avg_boundary_f1": 0.05,
+                                },
+                                "0.50": {
+                                    "case_count": 5,
+                                    "avg_final_f1": 0.31,
+                                    "avg_ordered_f1": 0.28,
+                                    "avg_boundary_f1": 0.09,
+                                },
+                                "0.65": {
+                                    "case_count": 7,
+                                    "avg_final_f1": 0.42,
+                                    "avg_ordered_f1": 0.36,
+                                    "avg_boundary_f1": 0.09,
+                                },
+                            }
+                        },
+                        "clean_low_bottleneck_intersection_deltas": {
+                            "0.35": {
+                                "case_count": 0.0,
+                                "avg_final_f1": 0.0,
+                                "avg_boundary_f1": 0.0,
+                            },
+                            "0.50": {
+                                "case_count": -1.0,
+                                "avg_final_f1": 0.01,
+                                "avg_boundary_f1": 0.01,
+                            },
+                            "0.65": {
+                                "case_count": -1.0,
+                                "avg_final_f1": 0.02,
+                                "avg_boundary_f1": -0.01,
+                            },
+                        },
                         "strict_logic_candidate_summary": {
                             "strict_case_count": 12,
                             "summary": {
@@ -2524,6 +2643,22 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
         )
         self.assertIn(
             "| sentence_confirm_chunks-1 | 0.35 | 9 | 6 | 3 | 0.2100 | 0.1900 | 0.0600 | 0.2400 | -1.0000 | -2.0000 | +1.0000 |",
+            markdown,
+        )
+        self.assertIn(
+            "| label | clean_low_threshold | clean_low_cases | avg_f1 | ordered_f1 | boundary_f1 | clean_low_cases_delta | avg_f1_delta | boundary_delta |",
+            markdown,
+        )
+        self.assertIn(
+            "| baseline | 0.35 | 4 | 0.2000 | 0.1800 | 0.0500 | +0.0000 | +0.0000 | +0.0000 |",
+            markdown,
+        )
+        self.assertIn(
+            "| sentence_confirm_chunks-1 | 0.50 | 5 | 0.3100 | 0.2800 | 0.0900 | -1.0000 | +0.0100 | +0.0100 |",
+            markdown,
+        )
+        self.assertIn(
+            "| sentence_confirm_chunks-1 | 0.65 | 7 | 0.4200 | 0.3600 | 0.0900 | -1.0000 | +0.0200 | -0.0100 |",
             markdown,
         )
         self.assertIn(

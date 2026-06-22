@@ -260,6 +260,7 @@ def attach_baseline_deltas(results: list[dict[str, Any]]) -> list[dict[str, Any]
     baseline_queue_residue = dict(baseline.get("staged_queue_residue_summary", {}))
     baseline_ordered_gap = dict(baseline.get("ordered_final_gap_summary", {}))
     baseline_low_score = dict(baseline.get("low_score_characteristics_summary", {}))
+    baseline_clean_low = dict(baseline.get("clean_low_bottleneck_intersection_summary", {}))
     baseline_queue_strata = dict(baseline.get("queue_residue_strata_summary", {}))
     baseline_strata = dict(baseline.get("evidence_strata_summary", {}))
     baseline_expected_quality_strata = dict(baseline.get("expected_quality_strata_summary", {}))
@@ -304,6 +305,10 @@ def attach_baseline_deltas(results: list[dict[str, Any]]) -> list[dict[str, Any]
         item["low_score_characteristics_deltas"] = _low_score_threshold_deltas(
             dict(result.get("low_score_characteristics_summary", {})),
             baseline_low_score,
+        )
+        item["clean_low_bottleneck_intersection_deltas"] = _low_score_threshold_deltas(
+            dict(result.get("clean_low_bottleneck_intersection_summary", {})),
+            baseline_clean_low,
         )
         queue_strata_deltas: dict[str, dict[str, Any]] = {}
         for stratum, stratum_summary in dict(result.get("queue_residue_strata_summary", {})).items():
@@ -489,6 +494,14 @@ def build_evidence_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
                 "expected_order_support_result_summary": result.get("expected_order_support_result_summary", {}),
                 "low_score_characteristics_summary": result.get("low_score_characteristics_summary", {}),
                 "low_score_characteristics_deltas": result.get("low_score_characteristics_deltas", {}),
+                "clean_low_bottleneck_intersection_summary": result.get(
+                    "clean_low_bottleneck_intersection_summary",
+                    {},
+                ),
+                "clean_low_bottleneck_intersection_deltas": result.get(
+                    "clean_low_bottleneck_intersection_deltas",
+                    {},
+                ),
                 "queue_residue_strata_summary": result.get("queue_residue_strata_summary", {}),
                 "queue_residue_strata_deltas": result.get("queue_residue_strata_deltas", {}),
                 "evidence_strata_summary": result.get("evidence_strata_summary", {}),
@@ -885,6 +898,31 @@ def _append_evidence_summary_markdown(lines: list[str], evidence_summary: dict[s
             f"{_format_markdown_delta(support_count_deltas.get('review_needed'))} | "
             f"{_format_markdown_delta(support_count_deltas.get('supported_monotonic'))} |"
         )
+
+    lines.extend(
+        [
+            "",
+            "| label | clean_low_threshold | clean_low_cases | avg_f1 | ordered_f1 | boundary_f1 | clean_low_cases_delta | avg_f1_delta | boundary_delta |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for result in all_results:
+        clean_low = dict(result.get("clean_low_bottleneck_intersection_summary", {}))
+        thresholds = dict(clean_low.get("thresholds", {}))
+        deltas_by_threshold = dict(result.get("clean_low_bottleneck_intersection_deltas", {}))
+        for threshold_key in ("0.35", "0.50", "0.65"):
+            threshold = dict(thresholds.get(threshold_key, {}))
+            deltas = dict(deltas_by_threshold.get(threshold_key, {}))
+            lines.append(
+                f"| {result.get('label', '')} | {threshold_key} | "
+                f"{_format_markdown_number(threshold.get('case_count'))} | "
+                f"{_format_markdown_number(_low_score_value(threshold, 'avg_final_f1', 'final_f1_avg'))} | "
+                f"{_format_markdown_number(_low_score_value(threshold, 'avg_ordered_f1', 'final_ordered_f1_avg'))} | "
+                f"{_format_markdown_number(_low_score_value(threshold, 'avg_boundary_f1', 'final_boundary_f1_avg'))} | "
+                f"{_format_markdown_delta(deltas.get('case_count'))} | "
+                f"{_format_markdown_delta(deltas.get('avg_final_f1'))} | "
+                f"{_format_markdown_delta(deltas.get('avg_boundary_f1'))} |"
+            )
 
     lines.extend(
         [
