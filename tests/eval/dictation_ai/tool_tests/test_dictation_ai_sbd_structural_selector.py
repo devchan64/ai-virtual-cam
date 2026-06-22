@@ -103,13 +103,16 @@ class DictationAiSbdStructuralSelectorTest(unittest.TestCase):
         weak_case["expected_final"] = ["A sentence that never appears in any replay input."]
         partial_case = _case("partial-input", queue_len=7, boundary_f1=0.0, queue_revision=70, replace_deferred=70)
         partial_case["expected_final"] = ["First sentence.", "A sentence that never appears in any replay input."]
+        unobserved_case = _case("unobserved-input", queue_len=6, boundary_f1=0.0, queue_revision=60, replace_deferred=60)
+        unobserved_case["chunks"] = [{"index": 1, "input": "Tesla fraudster person waited with support."}]
+        unobserved_case["expected_final"] = ["Tesla fraudulent person waited with support."]
         clean_case = _case("clean-input", queue_len=1, boundary_f1=0.0, queue_revision=1, replace_deferred=1)
-        report = {"cases": [weak_case, partial_case, clean_case]}
+        report = {"cases": [weak_case, partial_case, unobserved_case, clean_case]}
 
         selected = select_structural_cases(report, limit=2)
         included = select_structural_cases(
             report,
-            limit=3,
+            limit=4,
             input_evidence_mode="include",
             case_definition_mode="include",
         )
@@ -121,10 +124,15 @@ class DictationAiSbdStructuralSelectorTest(unittest.TestCase):
         )
 
         self.assertEqual([case["id"] for case in selected], ["clean-input"])
-        self.assertEqual([case["id"] for case in included], ["weak-input", "partial-input", "clean-input"])
+        self.assertEqual(
+            [case["id"] for case in included],
+            ["weak-input", "partial-input", "unobserved-input", "clean-input"],
+        )
         self.assertEqual([case["id"] for case in weak_only], ["weak-input"])
         self.assertTrue(included[1]["input_evidence"]["has_evidence"])
         self.assertFalse(included[1]["input_evidence"]["fully_supported"])
+        self.assertTrue(included[2]["input_evidence"]["fully_supported"])
+        self.assertFalse(included[2]["input_evidence"]["observed_fully_supported"])
         self.assertFalse(weak_only[0]["input_evidence"]["has_evidence"])
 
     def test_excludes_case_definition_review_candidates_by_default(self) -> None:

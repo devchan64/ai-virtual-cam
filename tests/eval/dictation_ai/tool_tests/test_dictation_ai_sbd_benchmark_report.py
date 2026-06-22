@@ -267,6 +267,124 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
             2,
         )
 
+    def test_report_marks_boundary_zero_high_final_as_metric_sensitivity(self) -> None:
+        args = Namespace(
+            model="sat-3l-sm",
+            device="cuda",
+            compute_type="float16",
+            min_final_f1=0.0,
+            fail_on_regression=False,
+        )
+        case = SbdCase(
+            id="case-a",
+            language="ko",
+            chunks=["문장입니다."],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=["문장입니다."],
+            expected_staged="",
+            tags=("missing-final",),
+            sentence_finalize_age=3,
+        )
+        results = [
+            {
+                "id": "case-a",
+                "language": "ko",
+                "tags": ["missing-final"],
+                "expected_final": ["문장입니다."],
+                "chunks": [{"input": "문장입니다."}],
+                "actual_final": ["문장입니다"],
+                "actual_pending": "",
+                "actual_staged": "",
+                "actual_staged_queue": [],
+                "final_score": _score(1.0, 1.0, 1.0),
+                "final_ordered_score": _score(1.0, 1.0, 1.0),
+                "final_boundary_score": _score(0.0, 0.0, 0.0),
+                "completed_last_score": _score(1.0, 1.0, 1.0),
+                "pending_exact": True,
+                "staged_exact": True,
+                "case_exact_match": False,
+                "metrics": {"finalized": 1, "stage_start": 1},
+            }
+        ]
+
+        report = build_benchmark_report(
+            args=args,
+            case_sources=["cases.jsonl"],
+            corpus_role="challenge-replay",
+            cases=[case],
+            results=results,
+            metric_totals={"finalized": 1, "stage_start": 1},
+            elapsed_ms=1.0,
+        )
+
+        summary = report["boundary_zero_high_final_summary"]
+        self.assertEqual(summary["expected_case_count"], 1)
+        self.assertEqual(summary["boundary_zero_high_final_count"], 1)
+        self.assertEqual(summary["boundary_zero_high_ordered_count"], 1)
+        self.assertEqual(summary["boundary_zero_high_final_examples"][0]["id"], "case-a")
+
+    def test_report_marks_high_recall_oversegmentation_as_boundary_granularity(self) -> None:
+        args = Namespace(
+            model="sat-3l-sm",
+            device="cuda",
+            compute_type="float16",
+            min_final_f1=0.0,
+            fail_on_regression=False,
+        )
+        case = SbdCase(
+            id="case-split",
+            language="zh",
+            chunks=["第一句。第二句。第三句前半。第三句后半。第四句。"],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=["第一句。", "第二句。", "第三句前半第三句后半。", "第四句。"],
+            expected_staged="",
+            tags=("missing-final",),
+            sentence_finalize_age=3,
+        )
+        results = [
+            {
+                "id": "case-split",
+                "language": "zh",
+                "tags": ["missing-final"],
+                "expected_final": ["第一句。", "第二句。", "第三句前半第三句后半。", "第四句。"],
+                "chunks": [{"input": "第一句。第二句。第三句前半。第三句后半。第四句。"}],
+                "actual_final": ["第一句。", "第二句。", "第三句前半。", "第三句后半。", "第四句。"],
+                "actual_pending": "",
+                "actual_staged": "",
+                "actual_staged_queue": [],
+                "final_score": _score(0.8, 1.0, 0.888888888888889),
+                "final_ordered_score": _score(0.8, 1.0, 0.888888888888889),
+                "final_boundary_score": _score(0.2, 0.25, 0.22222222222222224),
+                "completed_last_score": _score(1.0, 1.0, 1.0),
+                "pending_exact": True,
+                "staged_exact": True,
+                "case_exact_match": False,
+                "metrics": {"finalized": 3, "stage_start": 3},
+            }
+        ]
+
+        report = build_benchmark_report(
+            args=args,
+            case_sources=["cases.jsonl"],
+            corpus_role="challenge-replay",
+            cases=[case],
+            results=results,
+            metric_totals={"finalized": 3, "stage_start": 3},
+            elapsed_ms=1.0,
+        )
+
+        summary = report["boundary_granularity_summary"]
+        self.assertEqual(summary["expected_case_count"], 1)
+        self.assertEqual(summary["boundary_granularity_case_count"], 1)
+        example = summary["boundary_granularity_examples"][0]
+        self.assertEqual(example["id"], "case-split")
+        self.assertEqual(example["expected_final_count"], 4)
+        self.assertEqual(example["actual_final_count"], 5)
+        self.assertEqual(report["case_definition_action_summary"]["action_counts"], {"manual_boundary_review": 1})
+        self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
+
     def test_report_summarizes_low_score_review_needed_cases(self) -> None:
         args = Namespace(
             model="sat-3l-sm",
@@ -411,14 +529,13 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         supported_low = report["supported_low_bottleneck_intersection_summary"]["thresholds"]["0.35"]
         self.assertEqual(supported_low["case_count"], 2)
         clean_low = report["clean_low_bottleneck_intersection_summary"]["thresholds"]["0.35"]
-        self.assertEqual(clean_low["case_count"], 1)
-        self.assertEqual(clean_low["lowest_cases"][0]["id"], "case-supported-monotonic")
-        self.assertEqual(clean_low["lowest_cases"][0]["case_context_flags"], [])
+        self.assertEqual(clean_low["case_count"], 0)
+        self.assertEqual(clean_low["lowest_cases"], [])
         self.assertEqual(
             report["cases"][2]["case_context_flags"],
             ["unmodeled_prefix_context"],
         )
-        self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 1)
+        self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
         self.assertEqual(
             supported_low["metric_presence"]["stage_candidate_quality_blocked"]["case_count"],
             2,
@@ -1402,6 +1519,104 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         )
         self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
 
+    def test_terminal_suffix_residue_is_tail_review_action(self) -> None:
+        args = Namespace(
+            model="sat-3l-sm",
+            device="cuda",
+            compute_type="float16",
+            min_final_f1=0.0,
+            fail_on_regression=False,
+        )
+        cases = [
+            SbdCase(
+                id="long-suffix",
+                language="zh",
+                chunks=["我感觉我就是在一层的一个大广场上，结果我往下看，我实际现在在二十二层哎。"],
+                expected_completed=[],
+                expected_pending="",
+                expected_final=["我感觉我就是在一层的一个大广场上，结果我往下看，我实际现在在二十二层哎。"],
+                expected_staged="",
+                tags=("missing-final",),
+                sentence_finalize_age=3,
+            ),
+            SbdCase(
+                id="short-suffix",
+                language="zh",
+                chunks=["哦，是那里一间。"],
+                expected_completed=[],
+                expected_pending="",
+                expected_final=["哦，是那里一间。"],
+                expected_staged="",
+                tags=("missing-final",),
+                sentence_finalize_age=3,
+            ),
+        ]
+        results = [
+            {
+                "id": "long-suffix",
+                "language": "zh",
+                "tags": ["missing-final"],
+                "expected_final": ["我感觉我就是在一层的一个大广场上，结果我往下看，我实际现在在二十二层哎。"],
+                "chunks": [{"input": "我感觉我就是在一层的一个大广场上，结果我往下看，我实际现在在二十二层哎。"}],
+                "initial_final": [],
+                "actual_final": ["我感觉我就是在一层的一个大广场上，结果我忘。"],
+                "actual_pending": "",
+                "actual_staged": "往下看我实际现在在二十二层哎。",
+                "actual_staged_queue": [],
+                "final_score": _score(0.5, 0.5, 0.5),
+                "final_ordered_score": _score(0.5, 0.5, 0.5),
+                "final_boundary_score": _score(0.0, 0.0, 0.0),
+                "completed_last_score": _score(0.0, 0.0, 0.0),
+                "pending_exact": True,
+                "staged_exact": False,
+                "case_exact_match": False,
+                "metrics": {"stage_start": 1},
+            },
+            {
+                "id": "short-suffix",
+                "language": "zh",
+                "tags": ["missing-final"],
+                "expected_final": ["哦，是那里一间。"],
+                "chunks": [{"input": "哦，是那里一间。"}],
+                "initial_final": [],
+                "actual_final": ["哦，是那里。"],
+                "actual_pending": "",
+                "actual_staged": "一件。",
+                "actual_staged_queue": [],
+                "final_score": _score(0.5, 0.5, 0.5),
+                "final_ordered_score": _score(0.5, 0.5, 0.5),
+                "final_boundary_score": _score(0.0, 0.0, 0.0),
+                "completed_last_score": _score(0.0, 0.0, 0.0),
+                "pending_exact": True,
+                "staged_exact": False,
+                "case_exact_match": False,
+                "metrics": {"stage_start": 1},
+            },
+        ]
+
+        report = build_benchmark_report(
+            args=args,
+            case_sources=["cases.jsonl"],
+            corpus_role="challenge-replay",
+            cases=cases,
+            results=results,
+            metric_totals={"stage_start": 2},
+            elapsed_ms=1.0,
+        )
+
+        action_summary = report["case_definition_action_summary"]
+        self.assertEqual(
+            action_summary["action_counts"],
+            {"extend_replay_tail_or_reclassify_staged_expectation": 1},
+        )
+        self.assertEqual(
+            action_summary["by_action"]["extend_replay_tail_or_reclassify_staged_expectation"]["examples"][0][
+                "id"
+            ],
+            "long-suffix",
+        )
+        self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
+
     def test_summarizes_evidence_strata_without_changing_scores(self) -> None:
         results = [
             {
@@ -1499,9 +1714,17 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         results = [
             {"actual_staged_queue": [], "actual_staged": "", "actual_pending": ""},
             {
+                "id": "active-pending",
+                "language": "ko",
+                "tags": ["missing-final"],
+                "expected_final": ["expected"],
+                "actual_final": ["actual"],
                 "actual_staged_queue": ["queued one", "queued two"],
                 "actual_staged": "active",
                 "actual_pending": "pending",
+                "final_score": _score(0.2, 0.2, 0.2),
+                "final_boundary_score": _score(0.0, 0.0, 0.0),
+                "metrics": {"stage_age_quality_blocked": 2, "stage_revision": 3},
             },
             {
                 "actual_staged_queue": ["a", "b", "c", "d", "e"],
@@ -1527,6 +1750,10 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(summary["top_queue_residue_cases"][0]["active_staged"], False)
         self.assertEqual(summary["top_queue_residue_cases"][1]["queue_len"], 2)
         self.assertEqual(summary["top_queue_residue_cases"][1]["pending"], True)
+        self.assertEqual(summary["top_active_or_pending_residue_cases"][0]["id"], "active-pending")
+        self.assertEqual(summary["top_active_or_pending_residue_cases"][0]["actual_staged_preview"], "active")
+        self.assertEqual(summary["top_active_or_pending_residue_cases"][0]["actual_pending_preview"], "pending")
+        self.assertEqual(summary["top_active_or_pending_residue_cases"][0]["stage_age_quality_blocked"], 2)
 
     def test_summarizes_top_queue_residue_cases_with_context(self) -> None:
         results = [

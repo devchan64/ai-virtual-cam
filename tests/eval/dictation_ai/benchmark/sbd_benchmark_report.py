@@ -155,6 +155,10 @@ CASE_EXEMPLAR_METRICS = (
 )
 CASE_EXEMPLAR_LIMIT = 8
 CASE_EXEMPLAR_PREVIEW_CHARS = 160
+BOUNDARY_ZERO_HIGH_FINAL_F1 = 0.95
+BOUNDARY_GRANULARITY_FINAL_RECALL = 0.95
+BOUNDARY_GRANULARITY_FINAL_F1 = 0.85
+BOUNDARY_GRANULARITY_MAX_BOUNDARY_F1 = 0.50
 LOW_SCORE_THRESHOLDS = (0.35, 0.50, 0.65)
 LOW_SCORE_METRIC_PREFIXES = (
     "candidate_",
@@ -189,6 +193,9 @@ CASE_REVIEW_ACTION_FLAGS = (
     "manual_boundary_review",
 )
 PREFIX_CONTEXT_MIN_SUPPORT = max(0.30, FINAL_SENTENCE_MATCH_MIN_SIMILARITY - 0.40)
+TERMINAL_RESIDUE_MIN_UNITS = 6
+TERMINAL_RESIDUE_SUFFIX_COVERAGE_MIN = 0.85
+TERMINAL_RESIDUE_ACTUAL_COMPLETE_MIN = 0.95
 
 
 def _sentence_support_score(sentence: str, chunk: str) -> float:
@@ -776,6 +783,11 @@ def summarize_staged_queue_residue(results: list[dict[str, Any]]) -> dict[str, A
     lengths = _staged_queue_lengths(results)
     non_empty_lengths = [length for length in lengths if length > 0]
     case_count = len(results)
+    active_or_pending_residue = [
+        result
+        for result in results
+        if result.get("actual_staged") or result.get("actual_pending")
+    ]
     return {
         "case_count": case_count,
         "queue_residue_case_count": len(non_empty_lengths),
@@ -792,6 +804,10 @@ def summarize_staged_queue_residue(results: list[dict[str, Any]]) -> dict[str, A
             _queue_residue_case_payload(result)
             for result in sorted(results, key=_queue_residue_case_sort_key, reverse=True)
             if result.get("actual_staged_queue")
+        ][:CASE_EXEMPLAR_LIMIT],
+        "top_active_or_pending_residue_cases": [
+            _active_or_pending_residue_case_payload(result)
+            for result in sorted(active_or_pending_residue, key=_active_or_pending_residue_case_sort_key, reverse=True)
         ][:CASE_EXEMPLAR_LIMIT],
     }
 
@@ -826,6 +842,143 @@ def summarize_ordered_final_gap(results: list[dict[str, Any]]) -> dict[str, Any]
         "ordered_gap_max": max((float(item["ordered_gap"]) for item in gap_cases), default=0.0),
         "top_ordered_gap_cases": sorted(gap_cases, key=lambda item: (-float(item["ordered_gap"]), str(item["id"])))[
             :CASE_EXEMPLAR_LIMIT
+        ],
+    }
+
+
+def _boundary_zero_high_final_payload(result: dict[str, Any]) -> dict[str, Any]:
+    final_score = dict(result.get("final_score", {}))
+    ordered_score = dict(result.get("final_ordered_score", final_score))
+    boundary_score = dict(result.get("final_boundary_score", {}))
+    return {
+        "id": result.get("id"),
+        "language": result.get("language"),
+        "tags": list(result.get("tags", [])),
+        "final_f1": float(final_score.get("f1", 0.0)),
+        "final_ordered_f1": float(ordered_score.get("f1", final_score.get("f1", 0.0))),
+        "final_boundary_f1": float(boundary_score.get("f1", 0.0)),
+        "expected_final_preview": _first_text_preview(result.get("expected_final")),
+        "actual_final_preview": _first_text_preview(result.get("actual_final")),
+    }
+
+
+def summarize_boundary_zero_high_final_cases(results: list[dict[str, Any]]) -> dict[str, Any]:
+    """Find cases where exact boundary offsets are stricter than final sentence matching."""
+    expected_results = [
+        result
+        for result in results
+        if result.get("expected_final") and isinstance(result.get("final_boundary_score"), dict)
+    ]
+    high_final_boundary_zero: list[dict[str, Any]] = []
+    high_ordered_boundary_zero: list[dict[str, Any]] = []
+    for result in expected_results:
+        final_score = dict(result.get("final_score", {}))
+        ordered_score = dict(result.get("final_ordered_score", final_score))
+        boundary_score = dict(result.get("final_boundary_score", {}))
+        final_f1 = float(final_score.get("f1", 0.0))
+        ordered_f1 = float(ordered_score.get("f1", final_f1))
+        boundary_f1 = float(boundary_score.get("f1", 0.0))
+        if boundary_f1 != 0.0:
+            continue
+        if final_f1 >= BOUNDARY_ZERO_HIGH_FINAL_F1:
+            high_final_boundary_zero.append(result)
+        if ordered_f1 >= BOUNDARY_ZERO_HIGH_FINAL_F1:
+            high_ordered_boundary_zero.append(result)
+    return {
+        "interpretation": (
+            "final_boundary_f1 is an exact boundary-offset diagnostic. Cases in this summary "
+            "matched final sentences well but scored zero on boundary offsets, so they should be "
+            "reviewed as metric sensitivity or label-boundary issues before treating them as app "
+            "logic failures."
+        ),
+        "high_final_threshold": BOUNDARY_ZERO_HIGH_FINAL_F1,
+        "expected_case_count": len(expected_results),
+        "boundary_zero_high_final_count": len(high_final_boundary_zero),
+        "boundary_zero_high_ordered_count": len(high_ordered_boundary_zero),
+        "boundary_zero_high_final_examples": [
+            _boundary_zero_high_final_payload(result)
+            for result in sorted(
+                high_final_boundary_zero,
+                key=lambda item: (
+                    -float(dict(item.get("final_score", {})).get("f1", 0.0)),
+                    str(item.get("id", "")),
+                ),
+            )[:CASE_EXEMPLAR_LIMIT]
+        ],
+    }
+
+
+def _boundary_granularity_payload(result: dict[str, Any]) -> dict[str, Any]:
+    final_score = dict(result.get("final_score", {}))
+    ordered_score = dict(result.get("final_ordered_score", final_score))
+    boundary_score = dict(result.get("final_boundary_score", {}))
+    expected_final = list(result.get("expected_final", []) or [])
+    actual_final = list(result.get("actual_final", []) or [])
+    return {
+        "id": result.get("id"),
+        "language": result.get("language"),
+        "tags": list(result.get("tags", [])),
+        "final_precision": float(final_score.get("precision", 0.0)),
+        "final_recall": float(final_score.get("recall", 0.0)),
+        "final_f1": float(final_score.get("f1", 0.0)),
+        "final_ordered_f1": float(ordered_score.get("f1", final_score.get("f1", 0.0))),
+        "final_boundary_f1": float(boundary_score.get("f1", 0.0)),
+        "expected_final_count": len(expected_final),
+        "actual_final_count": len(actual_final),
+        "expected_final_preview": _first_text_preview(expected_final),
+        "actual_final_preview": _first_text_preview(actual_final),
+    }
+
+
+def summarize_boundary_granularity_cases(results: list[dict[str, Any]]) -> dict[str, Any]:
+    """Find likely label granularity cases where content is recalled but split differently."""
+    expected_results = [
+        result
+        for result in results
+        if result.get("expected_final") and isinstance(result.get("final_boundary_score"), dict)
+    ]
+    granularity_cases: list[dict[str, Any]] = []
+    for result in expected_results:
+        final_score = dict(result.get("final_score", {}))
+        boundary_score = dict(result.get("final_boundary_score", {}))
+        expected_count = len(list(result.get("expected_final", []) or []))
+        actual_count = len(list(result.get("actual_final", []) or []))
+        final_recall = float(final_score.get("recall", 0.0))
+        final_f1 = float(final_score.get("f1", 0.0))
+        boundary_f1 = float(boundary_score.get("f1", 0.0))
+        if actual_count <= expected_count:
+            continue
+        if final_recall < BOUNDARY_GRANULARITY_FINAL_RECALL:
+            continue
+        if final_f1 < BOUNDARY_GRANULARITY_FINAL_F1:
+            continue
+        if boundary_f1 > BOUNDARY_GRANULARITY_MAX_BOUNDARY_F1:
+            continue
+        granularity_cases.append(result)
+    return {
+        "interpretation": (
+            "These cases recovered expected content with high recall but emitted more final "
+            "segments than expected and scored low on exact boundary offsets. Review them as "
+            "boundary granularity or label-boundary cases before using them as missing-final "
+            "app-logic evidence."
+        ),
+        "thresholds": {
+            "min_final_recall": BOUNDARY_GRANULARITY_FINAL_RECALL,
+            "min_final_f1": BOUNDARY_GRANULARITY_FINAL_F1,
+            "max_boundary_f1": BOUNDARY_GRANULARITY_MAX_BOUNDARY_F1,
+        },
+        "expected_case_count": len(expected_results),
+        "boundary_granularity_case_count": len(granularity_cases),
+        "boundary_granularity_examples": [
+            _boundary_granularity_payload(result)
+            for result in sorted(
+                granularity_cases,
+                key=lambda item: (
+                    float(dict(item.get("final_boundary_score", {})).get("f1", 0.0)),
+                    -float(dict(item.get("final_score", {})).get("recall", 0.0)),
+                    str(item.get("id", "")),
+                ),
+            )[:CASE_EXEMPLAR_LIMIT]
         ],
     }
 
@@ -1041,9 +1194,28 @@ def _case_primary_review_action(result: dict[str, Any]) -> str:
         return "manual_boundary_review"
     if _has_expected_final_staged_residue(result):
         return "extend_replay_tail_or_reclassify_staged_expectation"
+    if _is_boundary_granularity_review(result):
+        return "manual_boundary_review"
     if definition_flags.intersection({"nested_expected_sentence"}):
         return "manual_boundary_review"
     return ""
+
+
+def _is_boundary_granularity_review(result: dict[str, Any]) -> bool:
+    if not result.get("expected_final"):
+        return False
+    if not isinstance(result.get("final_boundary_score"), dict):
+        return False
+    final_score = dict(result.get("final_score", {}))
+    boundary_score = dict(result.get("final_boundary_score", {}))
+    expected_count = len(list(result.get("expected_final", []) or []))
+    actual_count = len(list(result.get("actual_final", []) or []))
+    return (
+        actual_count > expected_count
+        and float(final_score.get("recall", 0.0)) >= BOUNDARY_GRANULARITY_FINAL_RECALL
+        and float(final_score.get("f1", 0.0)) >= BOUNDARY_GRANULARITY_FINAL_F1
+        and float(boundary_score.get("f1", 0.0)) <= BOUNDARY_GRANULARITY_MAX_BOUNDARY_F1
+    )
 
 
 def _has_expected_final_staged_residue(result: dict[str, Any]) -> bool:
@@ -1061,17 +1233,44 @@ def _has_expected_final_staged_residue(result: dict[str, Any]) -> bool:
     ]
     residue = [
         str(result.get("actual_staged") or "").strip(),
+        str(result.get("actual_pending") or "").strip(),
         *[str(sentence).strip() for sentence in result.get("actual_staged_queue", []) or []],
     ]
     residue = [sentence for sentence in residue if sentence]
     if not residue:
         return False
     for expected in expected_final:
-        if any(_sentence_support_score(expected, final) >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY for final in actual_final):
+        actual_support = max(
+            (_sentence_support_score(expected, final) for final in actual_final),
+            default=0.0,
+        )
+        if actual_support >= TERMINAL_RESIDUE_ACTUAL_COMPLETE_MIN:
             continue
         if any(_sentence_support_score(expected, staged) >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY for staged in residue):
             return True
+        if any(_is_expected_terminal_residue(expected, staged) for staged in residue):
+            return True
+        if actual_support >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY:
+            continue
     return False
+
+
+def _is_expected_terminal_residue(expected: str, residue: str) -> bool:
+    expected_words = _word_units(normalized_text(expected))
+    residue_words = _word_units(normalized_text(residue))
+    if len(residue_words) < TERMINAL_RESIDUE_MIN_UNITS or len(expected_words) <= len(residue_words):
+        return False
+    matcher = SequenceMatcher(None, expected_words, residue_words, autojunk=False)
+    best_tail_coverage = 0.0
+    for block in matcher.get_matching_blocks():
+        if block.size <= 0:
+            continue
+        if block.b + block.size != len(residue_words):
+            continue
+        if block.a + block.size != len(expected_words):
+            continue
+        best_tail_coverage = max(best_tail_coverage, block.size / max(len(residue_words), 1))
+    return best_tail_coverage >= TERMINAL_RESIDUE_SUFFIX_COVERAGE_MIN
 
 
 def _case_review_actions(result: dict[str, Any]) -> list[str]:
@@ -1635,6 +1834,42 @@ def _queue_residue_case_payload(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _active_or_pending_residue_case_sort_key(result: dict[str, Any]) -> tuple[float, float, int, int, int]:
+    final_score = dict(result.get("final_score", {}))
+    boundary_score = dict(result.get("final_boundary_score", {}))
+    metrics = dict(result.get("metrics", {}))
+    return (
+        -float(final_score.get("f1", 0.0)),
+        -float(boundary_score.get("f1", 0.0)),
+        len(str(result.get("actual_staged") or "")),
+        len(str(result.get("actual_pending") or "")),
+        int(metrics.get("stage_age_quality_blocked", 0)) + int(metrics.get("stage_candidate_quality_blocked", 0)),
+    )
+
+
+def _active_or_pending_residue_case_payload(result: dict[str, Any]) -> dict[str, Any]:
+    metrics = dict(result.get("metrics", {}))
+    final_score = dict(result.get("final_score", {}))
+    boundary_score = dict(result.get("final_boundary_score", {}))
+    return {
+        "id": result.get("id"),
+        "language": result.get("language"),
+        "tags": list(result.get("tags", [])),
+        "active_staged": bool(result.get("actual_staged")),
+        "pending": bool(result.get("actual_pending")),
+        "final_f1": float(final_score.get("f1", 0.0)),
+        "final_boundary_f1": float(boundary_score.get("f1", 0.0)),
+        "stage_age_quality_blocked": int(metrics.get("stage_age_quality_blocked", 0)),
+        "stage_candidate_quality_blocked": int(metrics.get("stage_candidate_quality_blocked", 0)),
+        "stage_revision": int(metrics.get("stage_revision", 0)),
+        "stage_replace_deferred": int(metrics.get("stage_replace_deferred", 0)),
+        "expected_final_preview": _first_text_preview(result.get("expected_final")),
+        "actual_final_preview": _first_text_preview(result.get("actual_final")),
+        "actual_staged_preview": _text_preview(result.get("actual_staged")),
+        "actual_pending_preview": _text_preview(result.get("actual_pending")),
+    }
+
+
 def summarize_case_exemplars(results: list[dict[str, Any]]) -> dict[str, Any]:
     """Return compact high-bottleneck cases for qualitative paper analysis."""
     lifecycle_candidates = [
@@ -1844,6 +2079,8 @@ def build_benchmark_report(
     lifecycle_bottleneck_summary = summarize_lifecycle_bottlenecks(results, metric_totals)
     staged_queue_residue_summary = summarize_staged_queue_residue(results)
     ordered_final_gap_summary = summarize_ordered_final_gap(results)
+    boundary_zero_high_final_summary = summarize_boundary_zero_high_final_cases(results)
+    boundary_granularity_summary = summarize_boundary_granularity_cases(results)
     expected_final_order_support_summary = summarize_expected_final_order_support(cases)
     expected_order_support_result_summary = summarize_results_by_expected_order_support(cases, results)
     low_score_characteristics_summary = summarize_low_score_characteristics(cases, results)
@@ -1920,6 +2157,8 @@ def build_benchmark_report(
         "lifecycle_bottleneck_summary": lifecycle_bottleneck_summary,
         "staged_queue_residue_summary": staged_queue_residue_summary,
         "ordered_final_gap_summary": ordered_final_gap_summary,
+        "boundary_zero_high_final_summary": boundary_zero_high_final_summary,
+        "boundary_granularity_summary": boundary_granularity_summary,
         "expected_final_order_support_summary": expected_final_order_support_summary,
         "expected_order_support_result_summary": expected_order_support_result_summary,
         "low_score_characteristics_summary": low_score_characteristics_summary,

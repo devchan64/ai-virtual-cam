@@ -26838,3 +26838,598 @@ final_boundary_f1_avg=0.282
 - clean structural subset에서는 `case_definition_review=0`으로 유지된다. 따라서 이 subset은 앱 로직 병목을 보는 최소 후보로 사용할 수 있다.
 - 전체 challenge의 낮은 `final_f1_avg`를 앱 로직 문제로 해석하면 안 된다. 현재 전체 점수는 source trace 누락, input support 부족, raw STT text와 다른 expected label, mid-stream prefix 누락 같은 케이스 정의 문제가 지배한다.
 - clean subset의 `final_f1_avg=0.921`은 현재 핵심 lifecycle 로직이 이미 상당 부분 동작한다는 근거다. 남은 개선은 전체 파라미터 완화가 아니라 `final_boundary_f1_avg=0.282`와 strict 후보 5건의 구체 lifecycle 병목을 기준으로 좁혀야 한다.
+
+### 2026-06-23 벤치 케이스 정의 감사와 clean subset 파라미터 재검토
+
+목적:
+
+- 낮은 전체 challenge 점수가 앱 로직 실패인지, 케이스 정의 오류인지 분리한다.
+- clean structural subset에서 일반 파라미터 변경이 실제 개선으로 이어지는지 CUDA/SaT로 확인한다.
+- 성능 근거가 없는 앱 로직 변경은 남기지 않는다.
+
+케이스 정의 감사:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases \
+  tests/eval/dictation_ai/sbd_cases \
+  --summary-output .tmp/eval/dictation-ai-sbd/case-definition-audit-20260623.json
+
+case_count=1027
+expected_final_case_count=1023
+input_unsupported_case_count=599
+input_unobserved_case_count=739
+missing_source_trace_case_count=158
+source_trace_case_count=865
+```
+
+언어별 입력 근거 부족:
+
+```text
+en: 260 / 382 = 0.681
+ko: 197 / 343 = 0.574
+zh: 142 / 298 = 0.477
+```
+
+추가 감사 결과:
+
+```text
+repeated_expected_group_count=158
+repeated_expected_case_count=680
+human_corrected_or_unobserved_candidates=141
+lowercase_fragment_start_candidates=304
+too_many_expected_candidates=192
+```
+
+해석:
+
+- `expected_final`이 replay `chunks` 안에서 충분히 지지되지 않는 case가 599개다. 이 값은 case-definition action의 `remove_or_recut_expected_outside_replay_input=599`와 일치한다.
+- `expected_final`이 raw STT text 그대로 관측되지 않는 case는 739개다. 이 값은 입력 밖 expected 599개와, unit coverage는 있지만 사람이 교정한 label로 보이는 case를 함께 포함한다.
+- 일부 case는 현재 window보다 앞선 prefix 문장을 `expected_final`에 포함한다. 이 경우 앱이 final을 누락한 것이 아니라 case 시작점 또는 `initial_final` 정의가 잘못된 것이다.
+- 일부 case는 raw STT text가 아니라 사람이 교정한 문장을 expected로 사용한 것으로 보인다. 받아쓰기 확정 파이프라인 평가는 STT 이후 처리이므로 expected는 replay 입력에서 관측된 STT 표현에 근거해야 한다.
+- 동일 expected 묶음이 여러 shifted-window case에 반복 등록된 그룹이 많다. distinct lifecycle failure가 없으면 corpus 가중치만 왜곡한다.
+
+clean structural subset CUDA 비교:
+
+```text
+baseline clean structural:
+final_precision_avg=0.967
+final_recall_avg=0.900
+final_f1_avg=0.921
+strict_final_f1_avg=0.906
+final_boundary_f1_avg=0.282
+
+SaT segment 내부 hard punctuation post-split:
+final_precision_avg=0.967
+final_recall_avg=0.900
+final_f1_avg=0.921
+strict_final_f1_avg=0.906
+final_boundary_f1_avg=0.282
+
+SHORT_CJK_FINAL_UNITS=6:
+final_precision_avg=0.875
+final_recall_avg=0.933
+final_f1_avg=0.886
+strict_final_f1_avg=0.869
+final_boundary_f1_avg=0.239
+
+SHORT_CJK_FINAL_UNITS=4:
+final_precision_avg=0.783
+final_recall_avg=0.858
+final_f1_avg=0.795
+strict_final_f1_avg=0.761
+final_boundary_f1_avg=0.239
+
+SHORT_CJK_CONFIRM_EXTRA_CHUNKS=0:
+final_precision_avg=0.766
+final_recall_avg=0.867
+final_f1_avg=0.779
+strict_final_f1_avg=0.829
+final_boundary_f1_avg=0.112
+
+SHORT_CJK_CONFIRM_EXTRA_CHUNKS=2:
+final_precision_avg=0.917
+final_recall_avg=0.744
+final_f1_avg=0.806
+strict_final_f1_avg=0.887
+final_boundary_f1_avg=0.223
+
+STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=8:
+final_precision_avg=0.967
+final_recall_avg=0.900
+final_f1_avg=0.921
+strict_final_f1_avg=0.906
+final_boundary_f1_avg=0.282
+
+STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=10:
+final_precision_avg=0.967
+final_recall_avg=0.900
+final_f1_avg=0.921
+strict_final_f1_avg=0.906
+final_boundary_f1_avg=0.282
+
+SENTENCE_CONFIRM_MAX_AGE_CHUNKS=2:
+final_precision_avg=0.967
+final_recall_avg=0.900
+final_f1_avg=0.921
+strict_final_f1_avg=0.906
+final_boundary_f1_avg=0.282
+
+SENTENCE_CONFIRM_MAX_AGE_CHUNKS=4:
+final_precision_avg=0.967
+final_recall_avg=0.900
+final_f1_avg=0.921
+strict_final_f1_avg=0.906
+final_boundary_f1_avg=0.282
+```
+
+판정:
+
+- SaT hard punctuation post-split은 일반 규칙으로는 타당해 보였지만 clean subset 수치를 개선하지 못했다. 성능 근거가 없으므로 앱 코드 변경으로 남기지 않았다.
+- `SHORT_CJK_FINAL_UNITS` 완화와 short CJK 추가 confirmation 완화는 recall 일부를 올리더라도 precision, strict F1, boundary F1을 악화시켰다. 짧은 CJK를 더 쉽게 final하는 방향은 현재 근거로 부적합하다.
+- queue promotion age와 fallback age 변경은 clean subset에서 영향이 없었다.
+- 다음 개선은 전체 파라미터 완화가 아니라, clean/strict 후보의 `stage_revision_token_sentence_deferred`, `stage_age_quality_blocked`, `candidate_recent_final_delta_trimmed`가 실제로 어떤 후보를 막는지 case 단위 trace로 좁혀야 한다.
+- 전체 challenge 점수 개선보다 먼저 잘못 정의된 599개 case를 recut, `initial_final` 보정, raw STT 기준 expected 재작성, 또는 튜닝 후보 제외로 정리해야 한다.
+
+### 2026-06-23 case-definition action item export
+
+목적:
+
+- 잘못 정의된 case를 사람이 정리할 수 있도록 action별 전체 작업 목록을 만든다.
+- 새 도구를 늘리지 않고 기존 `audit-initial-final-context` subcommand에 `--action-output`만 추가한다.
+- summary는 요약과 제한된 예시만 담고, 전체 후보는 JSONL로 분리한다.
+
+명령:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py audit-initial-final-context \
+  tests/eval/dictation_ai/sbd_cases \
+  --summary-output .tmp/eval/dictation-ai-sbd/case-definition-action-audit-20260623-latest.json \
+  --action-output .tmp/eval/dictation-ai-sbd/case-definition-action-items-20260623.jsonl \
+  --duplicate-group-limit 1 \
+  --limit 1
+```
+
+결과:
+
+```text
+action_items=934
+
+remove_or_recut_expected_outside_replay_input=599
+rewrite_expected_final_to_observed_stt_text=141
+rewrite_expected_final_to_final_sentence_boundary=100
+add_initial_final_or_recut_mid_stream_case=69
+deduplicate_or_justify_shifted_window_repeat=25
+```
+
+언어별:
+
+```text
+remove_or_recut_expected_outside_replay_input: en=260 ko=197 zh=142
+rewrite_expected_final_to_observed_stt_text: en=37 ko=55 zh=49
+rewrite_expected_final_to_final_sentence_boundary: en=49 ko=21 zh=30
+add_initial_final_or_recut_mid_stream_case: en=34 ko=9 zh=26
+deduplicate_or_justify_shifted_window_repeat: ko=8 zh=17
+```
+
+evidence disposition:
+
+```text
+exclude_from_logic_tuning_until_fixed=909
+manual_review_before_deduplicate=25
+```
+
+판정:
+
+- 전체 action item은 자동 삭제 대상이 아니다. 각 항목은 case를 recut, `initial_final` 보정, raw STT 기준 expected 재작성, 또는 반복 case 정당화 여부를 검토하기 위한 작업 단위다.
+- `exclude_from_logic_tuning_until_fixed`는 window, label, initial state, final sentence boundary가 고쳐지기 전까지 앱 로직 성능 근거에서 제외한다.
+- `manual_review_before_deduplicate`는 입력 근거는 충분하지만 shifted-window 반복이므로 distinct lifecycle failure가 있는지 사람이 확인한 뒤 유지 여부를 결정한다.
+- 이 목록을 기준으로 challenge corpus를 정리해야 앱 로직 변경 효과를 전체 점수에서 더 명확히 볼 수 있다.
+
+### 2026-06-23 recent-final tail anchor prefix 파괴 검토
+
+관측:
+
+- clean structural subset의 `zh_log_restaurant_branch_market_premature_short_final_20260621_001`에서 최근 final tail `"一家餐厅"`이 새 후보 `"这一家餐厅呢，它是有很多分店的。"`의 내부에 매칭되었다.
+- 기존 `_recent_final_tail_anchor_delta`는 후보 시작 후 4 unit 이내의 anchor match를 허용했다. 그 결과 새 문장의 prefix `"这一家餐厅"`이 잘려 `"呢它是有很多分店的。"`만 final되는 경로가 있었다.
+- 이 동작은 중복 억제가 아니라 새 문장 prefix 파괴다.
+
+변경:
+
+- CJK recent-final tail anchor delta는 최근 final tail이 후보 시작부와 정확히 맞을 때만 허용한다.
+- 후보 내부 시작점 match로는 delta를 만들지 않는다.
+- 기존 following sentence recovery는 `_recent_final_internal_match_can_recover_following_sentence`로 별도 경로가 유지되므로 이 변경의 대상이 아니다.
+
+회귀 테스트:
+
+```text
+candidate = "这一家餐厅呢，它是有很多分店的。"
+recent = "我的父母呢，他们讲他们想要吃饭，所以我就找了一家餐厅。"
+
+expected delta = candidate
+expected source = None
+```
+
+CUDA/SaT clean subset 검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases .tmp/eval/dictation-ai-sbd/clean-observed-structural-preflight-cases.jsonl \
+  --output .tmp/eval/dictation-ai-sbd/clean-observed-structural-tail-anchor-final-benchmark.json \
+  --device cuda \
+  --compute-type float16
+
+cases=6
+finalized=19
+stage_start=54
+finalized_per_stage_start=0.352
+final_precision_avg=0.967
+final_recall_avg=0.900
+final_f1_avg=0.921
+strict_final_f1_avg=0.906
+final_similarity_coverage_avg=0.796
+final_boundary_f1_avg=0.282
+```
+
+판정:
+
+- 평균 `final_f1_avg`와 `strict_final_f1_avg`는 baseline과 동일하다.
+- `final_similarity_coverage_avg`는 0.789에서 0.796으로 소폭 개선되었다.
+- 핵심 근거는 평균 개선보다 prefix 파괴 케이스가 정상 final로 회복된 것이다. 이 변경은 성능 튜닝이 아니라 recent-final echo 억제의 적용 범위를 좁혀 문장 파괴를 방지하는 보수적 수정이다.
+
+### 2026-06-23 right-context 없는 confirmation 보류 실험
+
+가설:
+
+- final-only 번역 큐 기준으로는 문장 boundary가 중요하다.
+- 같은 chunk 안에 우측 context가 없는 마지막 completed 후보는 STT가 임시로 찍은 terminal punctuation일 수 있다.
+- 따라서 confirmation만으로 final하지 않고 age/replacement 경로로 넘기면 premature fragment final이 줄어들 수 있다.
+
+검토 변경:
+
+- active staged sentence가 forced가 아니고, 같은 chunk에 `later_completed_sentences`가 없으며, terminal mark가 있는 경우 `confirmed` final을 보류했다.
+- age final과 replacement final은 유지했다.
+- runtime loop와 benchmark replay에 같은 규칙을 적용해 CUDA/SaT clean subset을 측정했다.
+
+CUDA/SaT clean subset 결과:
+
+```text
+baseline tail-anchor-disposition:
+final_f1_avg=0.921
+strict_final_f1_avg=0.906
+final_similarity_coverage_avg=0.796
+final_boundary_f1_avg=0.282
+stage_start=54
+
+right-context confirmation defer:
+final_f1_avg=0.921
+strict_final_f1_avg=0.906
+final_similarity_coverage_avg=0.802
+final_boundary_f1_avg=0.282
+stage_start=56
+```
+
+판정:
+
+- boundary F1이 개선되지 않았다.
+- stage churn이 늘었고, 평균 F1 개선도 없었다.
+- similarity coverage 소폭 증가는 있지만 핵심 문제인 boundary 분할을 해결하지 못했다.
+- 따라서 앱 로직 변경으로 남기지 않는다. right-context 원칙은 유지하되, 현재 형태의 confirmation 보류는 보편 개선으로 채택하지 않는다.
+
+### 2026-06-23 boundary offset 지표 민감도 분리
+
+관측:
+
+- clean structural subset은 `case_definition_review=0`, `logic_tuning_candidates=6`으로 case 정의 문제를 제거한 최소 튜닝 후보로 사용할 수 있다.
+- 같은 subset에서 `final_f1_avg=0.921`, `strict_final_f1_avg=0.906`이지만 `final_boundary_f1_avg=0.282`로 낮다.
+- 일부 케이스는 final 문장 유사도와 ordered final F1이 1.0인데도 boundary offset F1이 0.0이다.
+- 예: 기대 문장과 실제 final이 punctuation 또는 STT 표기 차이만 있어도 exact boundary offset은 0점이 될 수 있다.
+
+변경:
+
+- `sbd_benchmark.py` report에 `boundary_zero_high_final_summary`를 추가했다.
+- 이 요약은 `final_f1 >= 0.95` 또는 ordered final F1이 높은데 `final_boundary_f1 == 0.0`인 케이스를 별도 집계한다.
+- 점수 계산 자체는 변경하지 않았다. boundary F1은 final-only 번역 큐의 문장 경계 품질을 보는 보조 지표로 유지한다.
+
+CUDA/SaT clean subset 확인:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases .tmp/eval/dictation-ai-sbd/clean-observed-structural-preflight-cases.jsonl \
+  --output .tmp/eval/dictation-ai-sbd/clean-observed-structural-boundary-sensitivity-benchmark.json \
+  --device cuda \
+  --compute-type float16
+
+cases=6
+case_definition_review=0
+logic_tuning_candidates=6
+strict_logic_candidates=5
+final_f1_avg=0.921
+strict_final_f1_avg=0.906
+final_boundary_f1_avg=0.282
+boundary_zero_high_final_count=2
+boundary_zero_high_ordered_count=2
+```
+
+민감도 예시:
+
+- `ko_log_draft_20260620_avc_whisper_log_002814`: expected는 마침표가 있고 actual은 마침표만 빠졌지만 final/ordered F1은 1.0, boundary F1은 0.0이다.
+- `zh_log_chinese_massage_connector_tail_suppressed_20260621_001`: actual final이 expected 앞에 `"种也很好吃，"` prefix를 포함하지만 문장 유사도 기준 final/ordered F1은 1.0, boundary F1은 0.0이다.
+
+판정:
+
+- `final_boundary_f1_avg`가 낮다는 사실만으로 앱 lifecycle 로직 실패라고 단정하지 않는다.
+- 먼저 `boundary_zero_high_final_summary`를 확인해 metric sensitivity 또는 label boundary 문제를 분리한다.
+- 앱 로직 튜닝은 `case_definition_action_summary`, `strict_logic_candidate_summary`, clean/strict subset의 final F1, precision/recall, queue residue를 함께 보고 판단한다.
+
+### 2026-06-23 confirmed short CJK replacement 허용 실험
+
+가설:
+
+- 짧은 CJK 완결문은 confirmation 경로에서는 추가 확인 후 final 가능하다.
+- 하지만 `_should_finalize_before_replacement()`는 `short_cjk`를 일괄 차단하고 있어 replacement 직전 확정 경로와 confirmation 경로가 서로 다른 판단을 한다.
+- 이 불일치를 제거하면 `白象居。`처럼 짧은 독립 문장 누락이 줄 수 있다.
+
+검토 변경:
+
+- `short_cjk`라도 `no_end_marker`와 `cjk_internal_gap`가 없고 `_should_confirm_staged_sentence()`를 통과하면 replacement 직전 final을 허용했다.
+
+CUDA/SaT clean subset 결과:
+
+```text
+baseline:
+final_f1_avg=0.921296
+strict_final_f1_avg=0.905556
+final_boundary_f1_avg=0.282407
+finalized=19
+stage_start=54
+
+confirmed short CJK replacement:
+final_f1_avg=0.921296
+strict_final_f1_avg=0.905556
+final_boundary_f1_avg=0.282407
+finalized=19
+stage_start=54
+```
+
+전체 challenge 참고 결과:
+
+```text
+baseline:
+final_precision_avg=0.611815
+final_recall_avg=0.538532
+final_f1_avg=0.550775
+final_boundary_f1_avg=0.134298
+finalized=5015
+stage_start=9130
+
+experiment:
+final_precision_avg=0.611697
+final_recall_avg=0.538777
+final_f1_avg=0.550932
+final_boundary_f1_avg=0.134900
+finalized=5021
+stage_start=9093
+```
+
+판정:
+
+- clean/strict subset에서 개선이 전혀 없다.
+- 전체 challenge는 `final_f1`과 boundary가 미세하게 오르지만 `case_definition_review_ratio=0.994`라 앱 로직 채택 근거로 약하다.
+- 변경된 38건을 보면 일부 케이스는 개선되지만 일부는 짧은 CJK를 더 잘게 final해 F1이 하락한다.
+- 따라서 이 변경은 채택하지 않고 되돌렸다. 짧은 문장 누락 개선은 replacement 직전 `short_cjk` 일괄 허용이 아니라, case 정의가 clean한 샘플에서 missing short final이 실제 병목으로 남는지 먼저 더 수집해야 한다.
+
+### 2026-06-23 active staged/pending residue 해석 보강
+
+관측:
+
+- clean structural subset은 queue residue가 0이지만 active staged residue가 4건, pending residue가 1건 남는다.
+- 기존 `staged_queue_residue_summary`는 queue residue 예시만 제공해 active staged/pending tail이 실제 누락인지, 다음 chunk로 이어질 tail인지 해석하기 어려웠다.
+
+변경:
+
+- `staged_queue_residue_summary.top_active_or_pending_residue_cases`를 추가했다.
+- 각 예시는 `final_f1`, `final_boundary_f1`, `stage_age_quality_blocked`, `stage_candidate_quality_blocked`, `stage_revision`, `stage_replace_deferred`, expected/actual/staged/pending preview를 포함한다.
+
+CUDA/SaT clean subset 확인:
+
+```text
+cases=6
+queue_residue_case_count=0
+active_staged_residue_case_count=4
+pending_residue_case_count=1
+```
+
+상위 active/pending residue:
+
+```text
+zh_log_missing_chongqing_vendor_plaza_layer_20260621_001
+  final_f1=0.889
+  final_boundary_f1=0.222
+  staged="往下看我实际现在在二十二层哎。"
+  stage_age_quality_blocked=4
+  stage_candidate_quality_blocked=6
+
+zh_log_restaurant_branch_market_premature_short_final_20260621_001
+  final_f1=0.889
+  final_boundary_f1=0.222
+  staged="一件。"
+  stage_age_quality_blocked=11
+  stage_candidate_quality_blocked=17
+
+ko_log_draft_20260620_avc_whisper_log_002814
+  final_f1=1.000
+  final_boundary_f1=0.000
+  staged/pending residue present
+
+zh_log_flower_bird_cup_stale_short_stage_20260621_001
+  final_f1=1.000
+  final_boundary_f1=1.000
+  staged="什么杯？"
+```
+
+판정:
+
+- active/pending residue가 있다는 사실만으로 앱 로직 실패로 보지 않는다.
+- final F1이 이미 1.0인 residue는 tail residue 또는 metric/label 해석 대상으로 먼저 분류한다.
+- 다음 로직 후보는 final F1이 낮고 `stage_age_quality_blocked`, `stage_candidate_quality_blocked`, `stage_revision`이 함께 높은 케이스에 집중한다.
+- clean subset 기준으로는 `zh_log_missing_chongqing_vendor_plaza_layer_20260621_001`, `zh_log_restaurant_branch_market_premature_short_final_20260621_001`가 우선 분석 대상이다.
+
+### 2026-06-23 terminal staged residue 케이스 정의 분리
+
+질문:
+
+- 벤치 케이스 정의 자체가 잘못되어 앱 로직 실패처럼 보이는 항목이 있는가?
+- clean structural subset 안에서도 expected의 끝부분이 replay 종료 시점에 staged/pending으로 남은 케이스가 있는가?
+
+변경:
+
+- `sbd_benchmark_report.py`의 `extend_replay_tail_or_reclassify_staged_expectation` 판정에 terminal staged/pending residue를 추가했다.
+- expected 전체가 final로 나오지 않았더라도, 남은 tail이 active staged/pending에 충분히 보존되어 있으면 앱 로직 실패가 아니라 replay tail 또는 expected 분류 문제로 먼저 본다.
+- 짧은 잔여 조각(`一件。` 같은 short residue)은 이 규칙으로 자동 제외하지 않는다.
+
+CUDA/SaT clean subset 확인:
+
+```text
+cases=6
+case_definition_review=1
+logic_tuning_candidates=5
+strict_logic_candidates=4
+final_f1_avg=0.921
+strict_final_f1_avg=0.910
+final_boundary_f1_avg=0.282
+```
+
+새로 분리된 케이스:
+
+```text
+zh_log_missing_chongqing_vendor_plaza_layer_20260621_001
+action=extend_replay_tail_or_reclassify_staged_expectation
+actual_staged="往下看我实际现在在二十二层哎。"
+```
+
+판정:
+
+- 이 케이스는 expected final의 terminal suffix가 replay 마지막에 staged로 남아 있으므로, 현재 window만으로 final 누락이라고 단정하면 안 된다.
+- 이 경우는 replay tail을 늘려 실제로 다음 chunk에서 final로 소비되는지 확인하거나, expected를 final/staged expectation으로 재분류해야 한다.
+- clean subset도 고정된 truth가 아니라 case-definition action을 거쳐 계속 좁혀야 한다.
+- 현재 전체 코퍼스 기준 `input_unsupported_case_count=599`, `input_unobserved_case_count=739`, `case_definition_review=934`이므로 전체 `final_f1_avg`는 앱 로직 개선 판단의 주 지표로 쓰기 어렵다.
+
+### 2026-06-23 boundary granularity 케이스 정의 분리
+
+관측:
+
+- `zh_log_restaurant_branch_market_premature_short_final_20260621_001`는 strict 저점으로 보였지만, 실제로는 `final_recall=1.0`이다.
+- actual final은 expected 문장 하나를 더 잘게 나눠 `actual_final_count=5`, `expected_final_count=4`가 됐다.
+- 따라서 이 케이스는 확정 누락이라기보다 boundary granularity 또는 label boundary 검토 대상이다.
+
+변경:
+
+- `boundary_granularity_summary`를 추가했다.
+- 조건은 expected content recall이 높고, actual final 수가 expected보다 많으며, exact boundary F1이 낮은 경우다.
+- 같은 조건은 `manual_boundary_review` action에도 연결하여 strict logic candidate에서 제외한다.
+
+CUDA/SaT clean subset 확인:
+
+```text
+cases=6
+case_definition_review=2
+logic_tuning_candidates=4
+strict_logic_candidates=3
+strict_final_f1_avg=0.917
+boundary_granularity_case_count=1
+```
+
+분리된 케이스:
+
+```text
+zh_log_restaurant_branch_market_premature_short_final_20260621_001
+final_precision=0.800
+final_recall=1.000
+final_f1=0.889
+final_boundary_f1=0.222
+expected_final_count=4
+actual_final_count=5
+action=manual_boundary_review
+```
+
+판정:
+
+- “누락”이라고 태그된 케이스라도 final recall이 충분하면 앱 로직 누락 병목으로 보지 않는다.
+- 실제 다음 로직 분석 대상은 strict 후보 중 `final_recall`이 낮고 case-definition action이 없는 케이스다.
+- 현재 clean subset의 남은 실질 저점은 `zh_log_missing_chongqing_baixiangju_ropeway_20260621_001`에 집중된다.
+
+### 2026-06-23 벤치 확인 로직의 앱 반영 범위
+
+정리:
+
+- 벤치에서 확인된 성능 개선 로직은 운영 앱 코드에 반영되어야 한다.
+- 현재 replay benchmark는 `_recent_final_output_delta`, `_sentence_output_delta`, revision/replace/finalize 관련 핵심 함수를 `src/app/dictation_transcript_logic.py`에서 직접 import한다.
+- 따라서 앱 코드에 반영되지 않은 벤치 전용 개선은 성능 개선으로 보지 않는다.
+
+앱 반영된 개선:
+
+- `src/app/dictation_transcript_logic.py`의 `_recent_final_tail_anchor_delta`를 수정했다.
+- CJK recent-final tail anchor는 recent final tail이 candidate prefix와 정확히 맞을 때만 delta trim을 허용한다.
+- candidate 내부의 유사 tail match로 새 문장 prefix를 잘라내는 경로는 제거했다.
+- 운영 경로 `dictation_pipeline_loop.py`도 동일한 `_recent_final_output_delta`를 호출하므로 앱 실행에 반영된다.
+
+회귀 테스트:
+
+- `test_recent_final_tail_anchor_does_not_drop_new_sentence_prefix`는 다음 후보가 recent final 내부 tail과 부분적으로만 겹칠 때 원문 candidate를 보존하는지 확인한다.
+
+```text
+candidate="这一家餐厅呢，它是有很多分店的。"
+recent_final="我的父母呢，他们讲他们想要吃饭，所以我就找了一家餐厅。"
+expected=candidate preserved
+```
+
+CUDA/SaT 확인:
+
+```text
+clean subset:
+cases=6
+case_definition_review=2
+logic_tuning_candidates=4
+strict_logic_candidates=3
+final_f1_avg=0.921
+strict_final_f1_avg=0.917
+```
+
+전체 `tests/eval/dictation_ai/sbd_cases` CUDA/SaT 확인:
+
+```text
+full corpus:
+cases=1027
+case_definition_review=1019
+case_definition_review_ratio=0.996
+logic_tuning_candidates=4
+strict_logic_candidates=3
+final_f1_avg=0.551
+strict_final_f1_avg=0.917
+final_boundary_f1_avg=0.134
+```
+
+전체 코퍼스 action 분포:
+
+```text
+remove_or_recut_expected_outside_replay_input=599
+rewrite_expected_final_to_observed_stt_text=141
+add_initial_final_or_recut_mid_stream_case=106
+restore_source_log_or_recut_from_observed_log=94
+rewrite_expected_final_to_final_sentence_boundary=44
+deduplicate_or_justify_shifted_window_repeat=25
+extend_replay_tail_or_reclassify_staged_expectation=7
+manual_boundary_review=3
+```
+
+해석:
+
+- clean subset 수치는 앱 로직 분석용 preflight이며 전체 성능 대표값이 아니다.
+- full corpus 기준으로는 1023개 expected-final 케이스 중 1019개가 case-definition review 대상이다.
+- 따라서 전체 `final_f1_avg=0.551`은 앱 성능 개선/악화 판단보다 케이스 정의 오염을 더 크게 반영한다.
+- 앱 로직 튜닝 근거는 full corpus의 `strict_logic_candidates=3`과 clean subset의 동일 후보를 기준으로 제한한다.
+
+앱 반영하지 않는 항목:
+
+- `boundary_granularity_summary`, `boundary_zero_high_final_summary`, case-definition action 분류는 벤치 해석과 케이스 정리용이다.
+- 이들은 앱 확정 정책이 아니라 평가 데이터 오염과 label boundary 문제를 분리하기 위한 도구이므로 운영 앱 로직에 넣지 않는다.

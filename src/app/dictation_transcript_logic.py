@@ -1331,14 +1331,12 @@ def _recent_final_tail_anchor_delta(
     max_tail_len = min(8, len(recent_words), len(candidate_words) - 4)
     for tail_len in range(max_tail_len, 3, -1):
         recent_tail = recent_words[-tail_len:]
-        max_start = min(4, len(candidate_words) - tail_len - 4)
-        for start in range(0, max_start + 1):
-            if candidate_words[start : start + tail_len] != recent_tail:
-                continue
-            suffix_words = candidate_words[start + tail_len :]
-            if len(suffix_words) < 4:
-                return ""
-            return _with_candidate_terminal(_cjk_delta_from_words(suffix_words), normalized_candidate)
+        if candidate_words[:tail_len] != recent_tail:
+            continue
+        suffix_words = candidate_words[tail_len:]
+        if len(suffix_words) < 4:
+            return ""
+        return _with_candidate_terminal(_cjk_delta_from_words(suffix_words), normalized_candidate)
     return None
 
 

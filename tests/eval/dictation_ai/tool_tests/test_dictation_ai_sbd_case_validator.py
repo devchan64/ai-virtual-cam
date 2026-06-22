@@ -97,6 +97,9 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
         self.assertEqual(summary["input_unsupported_case_count"], 0)
         self.assertEqual(summary["input_unsupported_by_file"], {})
         self.assertEqual(summary["input_unsupported_examples"], [])
+        self.assertEqual(summary["input_unobserved_case_count"], 0)
+        self.assertEqual(summary["input_unobserved_by_file"], {})
+        self.assertEqual(summary["input_unobserved_examples"], [])
         self.assertEqual(summary["language_counts"], {"ko": 1})
         self.assertEqual(summary["tag_counts"], {"missing-final": 1})
 
@@ -134,6 +137,8 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
                 }
             ],
         )
+        self.assertEqual(summary["input_unobserved_case_count"], 1)
+        self.assertEqual(summary["input_unobserved_by_file"], {str(path): 1})
 
     def test_can_require_expected_final_input_support(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -151,6 +156,50 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "expected_final is not fully supported"):
                 validate_case_files([path], require_input_evidence=True)
+
+    def test_can_require_expected_final_observed_input_text(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "cases.jsonl"
+            self._write_payload(
+                path,
+                {
+                    "id": "case-a",
+                    "language": "ko",
+                    "chunks": [
+                        "테슬라 뭐 사기꾼인 한 사람들 물론 있지만 "
+                        "미국에서는 믿어주고 응원해주고 조금 기다려줬습니다."
+                    ],
+                    "expected_final": [
+                        "테슬라 뭐 사기꾼이 한 사람들 물론 있지만 "
+                        "미국에서는 믿어주고 응원해주고 조금 기다려줬습니다."
+                    ],
+                    "tags": ["missing-final"],
+                },
+            )
+
+            summary = validate_case_files([path])
+            with self.assertRaisesRegex(ValueError, "expected_final is not observed as raw STT text"):
+                validate_case_files([path], require_observed_input_evidence=True)
+
+        self.assertEqual(summary["input_unsupported_case_count"], 0)
+        self.assertEqual(summary["input_unobserved_case_count"], 1)
+        self.assertEqual(summary["input_unobserved_by_file"], {str(path): 1})
+        self.assertEqual(
+            summary["input_unobserved_examples"],
+            [
+                {
+                    "id": "case-a",
+                    "path": str(path),
+                    "line_no": 1,
+                    "language": "ko",
+                    "expected_count": 1,
+                    "observed_count": 0,
+                    "covered_count": 1,
+                    "coverage_min": 0.75,
+                    "coverage_avg": 0.75,
+                }
+            ],
+        )
 
     def test_loads_reviewed_cases_recursively_from_group_directories(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

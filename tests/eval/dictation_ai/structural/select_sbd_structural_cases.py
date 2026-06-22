@@ -107,7 +107,11 @@ def _filter_input_evidence_cases(cases: list[dict[str, Any]], *, mode: str) -> l
     filtered: list[dict[str, Any]] = []
     for case in cases:
         evidence = case_input_evidence(case)
-        if mode == "require" and bool(evidence["fully_supported"]):
+        if (
+            mode == "require"
+            and bool(evidence["fully_supported"])
+            and bool(evidence["observed_fully_supported"])
+        ):
             filtered.append(case)
         elif mode == "weak-only" and not bool(evidence["has_evidence"]):
             filtered.append(case)

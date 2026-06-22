@@ -331,6 +331,15 @@ class DictationAiSbdLifecycleTest(unittest.TestCase):
         self.assertEqual(source, recent)
         self.assertEqual(delta, "也要逛街才有力气。")
 
+    def test_recent_final_tail_anchor_does_not_drop_new_sentence_prefix(self) -> None:
+        candidate = "这一家餐厅呢，它是有很多分店的。"
+        recent = "我的父母呢，他们讲他们想要吃饭，所以我就找了一家餐厅。"
+
+        delta, source = _recent_final_output_delta(candidate, (recent,), "zh")
+
+        self.assertIsNone(source)
+        self.assertEqual(delta, candidate)
+
     def test_terminal_prefix_revision_wins_over_short_appended_tail(self) -> None:
         preferred = _prefer_sentence_revision(
             "被吓到了想要炸鸡可能吃不下去了我们来看看。",

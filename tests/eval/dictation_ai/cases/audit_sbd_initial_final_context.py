@@ -243,17 +243,23 @@ def _case_definition_action_payload(record: dict[str, Any], *, action: str, reas
     return {
         **_case_payload(record),
         "action": action,
+        "evidence_disposition": _case_definition_evidence_disposition(action),
         "reason": reason,
         "expected_final_preview": list(record.get("expected_final_normalized", []))[:5],
     }
 
 
-def _case_definition_action_summary(
+def _case_definition_evidence_disposition(action: str) -> str:
+    if action == "deduplicate_or_justify_shifted_window_repeat":
+        return "manual_review_before_deduplicate"
+    return "exclude_from_logic_tuning_until_fixed"
+
+
+def _case_definition_action_items(
     records: list[dict[str, Any]],
     *,
     mid_stream_candidates: list[dict[str, Any]],
-    duplicate_group_limit: int,
-) -> dict[str, Any]:
+) -> tuple[list[dict[str, Any]], int]:
     """Classify case-definition review work before using cases as tuning evidence."""
     repeated_case_ids: set[str] = set()
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -265,25 +271,8 @@ def _case_definition_action_summary(
             repeated_case_ids.update(str(item.get("id", "")) for item in items)
 
     mid_stream_ids = {str(candidate.get("id", "")) for candidate in mid_stream_candidates}
-    by_action: dict[str, dict[str, Any]] = {}
 
-    def add(record: dict[str, Any], *, action: str, reason: str) -> None:
-        bucket = by_action.setdefault(
-            action,
-            {
-                "case_count": 0,
-                "reason": reason,
-                "language_counts": Counter(),
-                "examples": [],
-            },
-        )
-        bucket["case_count"] += 1
-        bucket["language_counts"][str(record.get("language", ""))] += 1
-        if len(bucket["examples"]) < duplicate_group_limit:
-            bucket["examples"].append(
-                _case_definition_action_payload(record, action=action, reason=reason)
-            )
-
+    action_items: list[dict[str, Any]] = []
     logic_ready_count = 0
     for record in records:
         expected_count = int(record.get("expected_sentence_count", 0))
@@ -297,7 +286,7 @@ def _case_definition_action_summary(
                 "expected_final is not fully represented in this case's replay chunks; "
                 "do not use it as app-logic tuning evidence until the window or labels are fixed."
             )
-            add(record, action=action, reason=reason)
+            action_items.append(_case_definition_action_payload(record, action=action, reason=reason))
             continue
         if not bool(input_evidence.get("observed_fully_supported", True)):
             action = "rewrite_expected_final_to_observed_stt_text"
@@ -305,7 +294,7 @@ def _case_definition_action_summary(
                 "expected_final has enough partial unit coverage but is not observed as raw STT text "
                 "in the replay chunks; rewrite labels to observed STT text or recut the case."
             )
-            add(record, action=action, reason=reason)
+            action_items.append(_case_definition_action_payload(record, action=action, reason=reason))
             continue
         if record_id in mid_stream_ids:
             action = "add_initial_final_or_recut_mid_stream_case"
@@ -313,7 +302,7 @@ def _case_definition_action_summary(
                 "the first expected sentence starts after a non-trivial replay prefix while "
                 "initial_final is empty; verify whether the prefix was already finalized."
             )
-            add(record, action=action, reason=reason)
+            action_items.append(_case_definition_action_payload(record, action=action, reason=reason))
             continue
         if record.get("expected_quality_flags"):
             action = "rewrite_expected_final_to_final_sentence_boundary"
@@ -321,7 +310,7 @@ def _case_definition_action_summary(
                 "expected_final has fragment or boundary-quality flags and may not match the "
                 "final-only translation queue definition."
             )
-            add(record, action=action, reason=reason)
+            action_items.append(_case_definition_action_payload(record, action=action, reason=reason))
             continue
         if record_id in repeated_case_ids:
             action = "deduplicate_or_justify_shifted_window_repeat"
@@ -329,10 +318,41 @@ def _case_definition_action_summary(
                 "the same expected_final group appears in multiple cases; keep only cases that "
                 "add a distinct lifecycle failure."
             )
-            add(record, action=action, reason=reason)
+            action_items.append(_case_definition_action_payload(record, action=action, reason=reason))
             continue
         logic_ready_count += 1
+    return action_items, logic_ready_count
 
+
+def _case_definition_action_summary(
+    records: list[dict[str, Any]],
+    *,
+    mid_stream_candidates: list[dict[str, Any]],
+    duplicate_group_limit: int,
+) -> dict[str, Any]:
+    action_items, logic_ready_count = _case_definition_action_items(
+        records,
+        mid_stream_candidates=mid_stream_candidates,
+    )
+    by_action: dict[str, dict[str, Any]] = {}
+    disposition_counts: Counter[str] = Counter()
+    for item in action_items:
+        action = str(item.get("action", ""))
+        disposition_counts[str(item.get("evidence_disposition", ""))] += 1
+        bucket = by_action.setdefault(
+            action,
+            {
+                "case_count": 0,
+                "reason": str(item.get("reason", "")),
+                "evidence_disposition": str(item.get("evidence_disposition", "")),
+                "language_counts": Counter(),
+                "examples": [],
+            },
+        )
+        bucket["case_count"] += 1
+        bucket["language_counts"][str(item.get("language", ""))] += 1
+        if len(bucket["examples"]) < duplicate_group_limit:
+            bucket["examples"].append(item)
     ordered_actions = {
         action: {
             **bucket,
@@ -352,6 +372,7 @@ def _case_definition_action_summary(
         ),
         "review_case_count": review_case_count,
         "logic_tuning_candidate_count": logic_ready_count,
+        "evidence_disposition_counts": dict(sorted(disposition_counts.items())),
         "by_action": ordered_actions,
     }
 
@@ -666,6 +687,7 @@ def audit_initial_final_context(
     worst_limit: int = DEFAULT_WORST_CASE_LIMIT,
     worst_group_limit: int = DEFAULT_WORST_GROUP_LIMIT,
     duplicate_group_limit: int = DEFAULT_DUPLICATE_GROUP_LIMIT,
+    include_action_items: bool = False,
 ) -> dict[str, Any]:
     paths = iter_case_paths(inputs)
     all_case_metadata: list[dict[str, Any]] = []
@@ -710,6 +732,10 @@ def audit_initial_final_context(
                 if candidate is not None:
                     candidates.append(candidate)
                     candidate_language_counts[str(candidate.get("language", ""))] += 1
+    action_items, _logic_ready_count = _case_definition_action_items(
+        all_case_metadata,
+        mid_stream_candidates=candidates,
+    )
     summary: dict[str, Any] = {
         "case_count": case_count,
         "expected_final_case_count": expected_final_case_count,
@@ -733,6 +759,8 @@ def audit_initial_final_context(
         ),
         "candidates": candidates,
     }
+    if include_action_items:
+        summary["case_definition_action_items"] = action_items
     if benchmark_report is not None:
         summary["score_summary"] = _load_candidate_score_summary(
             benchmark_report,
@@ -761,6 +789,12 @@ def main() -> int:
     parser.add_argument("--worst-group-limit", type=int, default=DEFAULT_WORST_GROUP_LIMIT)
     parser.add_argument("--duplicate-group-limit", type=int, default=DEFAULT_DUPLICATE_GROUP_LIMIT)
     parser.add_argument("--summary-output", type=Path, default=None)
+    parser.add_argument(
+        "--action-output",
+        type=Path,
+        default=None,
+        help="Write all case-definition review action items as JSONL for case cleanup work.",
+    )
     parser.add_argument("--limit", type=int, default=None)
     args = parser.parse_args()
 
@@ -773,11 +807,13 @@ def main() -> int:
             worst_limit=args.worst_limit,
             worst_group_limit=args.worst_group_limit,
             duplicate_group_limit=args.duplicate_group_limit,
+            include_action_items=args.action_output is not None,
         )
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         print(f"[dictation-ai-sbd-initial-final-audit] error: {exc}", file=sys.stderr)
         return 1
 
+    action_items = list(summary.pop("case_definition_action_items", []) or [])
     output = dict(summary)
     if args.limit is not None:
         output["candidates"] = list(output["candidates"])[: args.limit]
@@ -796,6 +832,12 @@ def main() -> int:
     if args.summary_output is not None:
         args.summary_output.parent.mkdir(parents=True, exist_ok=True)
         args.summary_output.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if args.action_output is not None:
+        args.action_output.parent.mkdir(parents=True, exist_ok=True)
+        args.action_output.write_text(
+            "".join(json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n" for item in action_items),
+            encoding="utf-8",
+        )
     print(json.dumps(output, ensure_ascii=False, sort_keys=True))
     return 0
 

@@ -386,15 +386,51 @@ class DictationAiSbdInitialFinalContextAuditTest(unittest.TestCase):
                 [path],
                 min_prefix_units=5,
                 duplicate_group_limit=3,
+                include_action_items=True,
             )
 
         actions = summary["case_definition_action_summary"]
         by_action = actions["by_action"]
+        action_items = summary["case_definition_action_items"]
         self.assertEqual(actions["review_case_count"], 6)
         self.assertEqual(actions["logic_tuning_candidate_count"], 1)
         self.assertEqual(
+            actions["evidence_disposition_counts"],
+            {
+                "exclude_from_logic_tuning_until_fixed": 4,
+                "manual_review_before_deduplicate": 2,
+            },
+        )
+        self.assertEqual(len(action_items), 6)
+        self.assertEqual(
+            [item["action"] for item in action_items],
+            [
+                "remove_or_recut_expected_outside_replay_input",
+                "add_initial_final_or_recut_mid_stream_case",
+                "rewrite_expected_final_to_observed_stt_text",
+                "rewrite_expected_final_to_final_sentence_boundary",
+                "deduplicate_or_justify_shifted_window_repeat",
+                "deduplicate_or_justify_shifted_window_repeat",
+            ],
+        )
+        self.assertEqual(
+            [item["evidence_disposition"] for item in action_items],
+            [
+                "exclude_from_logic_tuning_until_fixed",
+                "exclude_from_logic_tuning_until_fixed",
+                "exclude_from_logic_tuning_until_fixed",
+                "exclude_from_logic_tuning_until_fixed",
+                "manual_review_before_deduplicate",
+                "manual_review_before_deduplicate",
+            ],
+        )
+        self.assertEqual(
             by_action["remove_or_recut_expected_outside_replay_input"]["examples"][0]["id"],
             "partial-input",
+        )
+        self.assertEqual(
+            by_action["remove_or_recut_expected_outside_replay_input"]["evidence_disposition"],
+            "exclude_from_logic_tuning_until_fixed",
         )
         self.assertEqual(
             by_action["add_initial_final_or_recut_mid_stream_case"]["examples"][0]["id"],
@@ -411,6 +447,10 @@ class DictationAiSbdInitialFinalContextAuditTest(unittest.TestCase):
         self.assertEqual(
             [item["id"] for item in by_action["deduplicate_or_justify_shifted_window_repeat"]["examples"]],
             ["repeat-a", "repeat-b"],
+        )
+        self.assertEqual(
+            by_action["deduplicate_or_justify_shifted_window_repeat"]["evidence_disposition"],
+            "manual_review_before_deduplicate",
         )
 
 

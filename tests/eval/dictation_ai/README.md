@@ -52,24 +52,47 @@ case 내부의 중복/포함 expected 문장, replay 입력 chunks에서 근거�
 shifted-window 반복 그룹 정리, 수동 문장 경계 검토를 분리해서 보여준다. 앱 로직 튜닝 근거는 먼저 `strict_logic_candidate_summary`와
 `clean_low_bottleneck_intersection_summary`를 본다. 두 요약은 모든 `expected_final`이 replay 입력에서
 확인되고 raw STT text로 관측되는 케이스를 기준으로 해석한다.
+`validate-cases`의 `input_unsupported_case_count`는 `expected_final`이 replay 입력에서 충분히
+지지되지 않는 케이스 수다. `input_unobserved_case_count`는 충분한 unit coverage가 있어도
+`expected_final`이 raw STT text 그대로 관측되지 않는 케이스까지 포함한다.
+`case_definition_action_summary.evidence_disposition_counts`는 action을 두 부류로 다시 묶는다.
+`exclude_from_logic_tuning_until_fixed`는 window/label/initial state가 고쳐지기 전까지 앱 로직
+성능 근거에서 제외할 케이스다. `manual_review_before_deduplicate`는 입력 근거는 충분하지만
+shifted-window 반복이므로 distinct lifecycle failure가 있는지 사람이 확인할 케이스다.
 `case_definition_action_summary`의 우선순위는 다음과 같다.
 
 1. `remove_or_recut_expected_outside_replay_input`: `expected_final`이 replay chunks에 충분히 없으므로 제거하거나 window/label을 다시 잡는다.
 2. `rewrite_expected_final_to_observed_stt_text`: `expected_final`이 유사 unit으로는 커버되지만 raw STT text로 관측되지 않으므로 STT 출력 기준으로 label을 다시 쓴다.
 3. `add_initial_final_or_recut_mid_stream_case`: 중간 스트림 시작 후보이므로 이미 확정됐어야 할 prefix를 `initial_final`로 옮기거나 시작점을 조정한다. 입력 chunk 또는 actual final에서 expected 앞의 완결 prefix가 보이면 이 검토 대상으로 분류한다.
-4. `rewrite_expected_final_to_final_sentence_boundary`: final-only 번역 큐 기준의 완성 문장으로 expected를 다시 쓴다.
-5. `extend_replay_tail_or_reclassify_staged_expectation`: replay 끝에서 expected final 문장이 아직 staged/queue에 있으면 tail을 연장하거나 pending/staged 기대값으로 재분류한다.
-6. `deduplicate_or_justify_shifted_window_repeat`: 같은 expected 묶음이 반복된 case는 distinct lifecycle failure가 있는 경우만 남긴다.
+4. `restore_source_log_or_recut_from_observed_log`: source trace가 없는 이관 케이스는 원 로그 근거를 복원하거나 관측 로그에서 다시 자른다.
+5. `rewrite_expected_final_to_final_sentence_boundary`: final-only 번역 큐 기준의 완성 문장으로 expected를 다시 쓴다.
+6. `extend_replay_tail_or_reclassify_staged_expectation`: expected의 terminal suffix가 replay 종료 시점에 staged/pending으로 남아 있으면 tail을 늘리거나 final expectation에서 분리한다.
+7. `deduplicate_or_justify_shifted_window_repeat`: 같은 expected 묶음이 반복된 case는 distinct lifecycle failure가 있는 경우만 남긴다.
+8. `manual_boundary_review`: nested boundary, label boundary, 또는 높은 recall이지만 actual final이 더 잘게 나뉜 boundary granularity 케이스는 사람이 경계를 다시 판단한다.
 
 이 action에 걸린 case는 앱 로직 성능 저하로 해석하지 않는다. 로직 튜닝 후보는 action summary의
 `logic_tuning_candidate_count`와 clean/strict 요약을 기준으로 좁힌다.
 벤치 stdout의 `case_definition_review`, `logic_tuning_candidates`, `strict_logic_candidates`,
 `strict_final_f1_avg`는 전체 challenge 점수와 앱 로직 튜닝 후보 점수를 즉시 구분하기 위한 확인값이다.
 파라미터 변경이나 앱 로직 변경의 유효성은 전체 `final_f1_avg`보다 strict 후보 요약을 먼저 비교한다.
+`final_boundary_f1_avg`는 문장 boundary offset을 엄격하게 비교하는 보조 지표다. final 문장 유사도와
+순서가 충분히 맞아도 STT 표기 차이, punctuation 차이, label boundary 차이 때문에 0점이 될 수 있다.
+이 경우 report의 `boundary_zero_high_final_summary`를 같이 확인한다. 여기에 잡힌 케이스는 먼저
+metric sensitivity 또는 label boundary 검토 대상으로 보고, 곧바로 앱 로직 실패로 보지 않는다.
+`boundary_granularity_summary`는 expected content recall은 높지만 actual final이 expected보다 더 잘게
+나뉘어 boundary 점수가 낮은 케이스를 보여준다. 이 케이스는 missing-final 병목이 아니라 label boundary
+또는 허용 가능한 과분할 여부를 먼저 검토한다.
+`staged_queue_residue_summary.top_active_or_pending_residue_cases`는 queue가 비어 있어도 active staged
+또는 pending tail이 남은 케이스를 보여준다. 여기서 `final_f1`이 이미 높은 케이스는 다음 chunk에서
+소비될 tail 또는 label/metric 해석 문제일 수 있으므로, 낮은 `final_f1`과 높은 quality/revision metric이
+같이 보이는 케이스부터 앱 lifecycle 병목 후보로 검토한다. expected의 마지막 구간이 active staged/pending
+tail로 남아 있으면 `extend_replay_tail_or_reclassify_staged_expectation`으로 분류되며, 이 상태에서는 앱
+로직 튜닝 후보에서 제외한다.
 
 앱 lifecycle 병목만 따로 재생할 때는 `select-structural-cases`를 사용한다. 기본값은
 case-definition review action이 없는 케이스, `source_log/source_chunk`가 있는 케이스,
-expected-quality flag가 없는 케이스, replay input evidence가 충분한 케이스만 고른다.
+expected-quality flag가 없는 케이스, replay input evidence가 충분하고 raw STT text로 관측되는
+케이스만 고른다.
 이 subset은 paper evidence가 아니라 다음 로직 튜닝 후보를 좁히는 exploratory preflight다.
 
 ```text
@@ -82,14 +105,21 @@ expected-quality flag가 없는 케이스, replay input evidence가 충분한 �
   .tmp/eval/dictation-ai-sbd/clean-structural-preflight-cases.jsonl \
   --require-expected-final \
   --require-source-trace \
-  --require-input-evidence
+  --require-input-evidence \
+  --require-observed-input-evidence
 ```
 
 ```text
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py audit-initial-final-context \
   tests/eval/dictation_ai/sbd_cases \
-  --benchmark-report .tmp/eval/dictation-ai-sbd/current-20260622-short-cjk-hold-0-default.json
+  --benchmark-report .tmp/eval/dictation-ai-sbd/current-20260622-short-cjk-hold-0-default.json \
+  --summary-output .tmp/eval/dictation-ai-sbd/case-definition-action-audit.json \
+  --action-output .tmp/eval/dictation-ai-sbd/case-definition-action-items.jsonl
 ```
+
+`--summary-output`은 action별 개수와 제한된 예시를 저장한다. `--action-output`은 정리 대상
+전체를 JSONL로 저장한다. 이 JSONL은 대량 삭제 명령이 아니라 recut, `initial_final` 보정,
+raw STT 기준 expected 재작성, 반복 case 정당화 여부를 사람이 검토하기 위한 작업 목록이다.
 
 로그 기반 감사는 패치 전후가 섞이지 않도록 시간 구간을 명시할 수 있다.
 
