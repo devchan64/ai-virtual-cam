@@ -15842,6 +15842,65 @@ RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS=12:
 - prefix extension 보수화도 strict/boundary 저하가 있어 기본값 반영 근거가 없다.
 - 따라서 다음 개선은 recent-final 임계값 단독 변경보다, recent-final delta 후 품질 차단/queue 보류로 이어지는 생명주기 전이 자체를 확인해야 한다.
 
+### 2026-06-23 미종결 active stage와 다음 completed 후보 결합 실험 폐기
+
+가설:
+
+- `clean_low < 0.35` 케이스 중 `ko_log_open_clause_revision_market_average_20260620_001`는 active stage가 `이렇게 좀 말씀드릴 수 있으면 편할 텐데`처럼 종결표식 없는 clause로 먼저 확정되고, 다음 후보 `지역에 따라...`가 별도 final로 나뉘며 expected 문장과 어긋난다.
+- 따라서 “종결표식 없는 active stage + 바로 뒤 completed 후보”를 결합하면 일부 누락/분할 문제가 줄어들 수 있다고 봤다.
+
+실험 패치:
+
+- `dictation_transcript_logic`에 미종결 stage와 다음 completed 후보를 결합하는 helper를 추가했다.
+- `dictation_pipeline_loop`와 `sbd_lifecycle_replay`에서 같은 helper를 호출해 운영/replay 전이를 맞췄다.
+- trailing ellipsis, 반복 n-gram, CJK internal gap, low-value fragment 등은 결합 대상에서 제외했다.
+
+CUDA 결과:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260623-unterminated-merge-report.json
+
+baseline:
+  final_precision_avg=0.6163395419363498
+  final_recall_avg=0.534357277430485
+  final_f1_avg=0.550492743360324
+  final_boundary_f1_avg=0.13401379432590774
+  strict_final_f1_avg=0.7791216400087367
+  strict_final_boundary_f1_avg=0.4406875830262927
+  clean_low_0.35=10
+
+unterminated merge:
+  stage_unterminated_clause_merged=1965
+  final_precision_avg=0.5916310182059918
+  final_recall_avg=0.4996325879042831
+  final_f1_avg=0.5209456330051366
+  final_boundary_f1_avg=0.12752157447362364
+  strict_final_f1_avg=0.7538687566913373
+  strict_final_boundary_f1_avg=0.43246287762416796
+  clean_low_0.35=12
+```
+
+관측:
+
+- 일부 케이스는 크게 개선됐다.
+  - `ko_log_open_clause_revision_market_average_20260620_001`: `final_f1 0.0 -> 0.6667`
+  - `zh_log_missing_prison_restaurant_fragment_20260617_001`: `final_f1 0.25 -> 0.5714`
+- 하지만 265건의 case-level score가 바뀌었고, 큰 회귀가 다수 발생했다.
+  - `ko_log_draft_20260620_avc_whisper_log_002919`: `0.6667 -> 0.0`
+  - `ko_log_draft_20260620_avc_whisper_log_1_002695`: `0.6667 -> 0.0`
+  - `ko_log_short_delta_treasury_investor_fragment_20260618_001`: `0.8889 -> 0.2857`
+- 결합 metric이 1965회 발생해 패치 범위가 지나치게 넓었다.
+
+결론:
+
+- 미종결 active stage와 다음 completed 후보를 무조건 결합하는 규칙은 보편 원칙으로 부적합하다.
+- 개별 open-clause 케이스는 좋아지지만, 전체 recall, strict 지표, clean-low 수가 모두 나빠진다.
+- 해당 앱/replay 패치는 폐기했고 checked-in 기본 로직에는 반영하지 않는다.
+- 다음 검토는 결합 규칙이 아니라 “final 확정 전 현재 active stage가 같은 window에서 더 긴 supported revision으로 관측되는지”처럼 더 좁은 evidence 기반 전이로 제한해야 한다.
+
 ### 2026-06-23 벤치 케이스 정의 strata 추가
 
 문제:
