@@ -501,12 +501,12 @@ def summarize_clean_low_bottleneck_intersections(
             and not result.get("expected_quality_flags")
             and not result.get("case_context_flags")
             and not result.get("case_definition_flags")
-            and dict(result.get("input_evidence", {})).get("has_evidence")
+            and dict(result.get("input_evidence", {})).get("fully_supported")
         ]
         thresholds[f"{threshold:.2f}"] = _summarize_supported_low_threshold(low_results, threshold)
     return {
         "interpretation": (
-            "Clean low-score cases are supported_monotonic, have input evidence, and have no expected_quality_flags. "
+            "Clean low-score cases are supported_monotonic, have full input evidence, and have no expected_quality_flags. "
             "They also exclude unmodeled prefix context flags. "
             "They exclude case-definition review flags such as repeated expected groups. "
             "Prefer this subset for app logic changes; broader low-score groups can still be label or source review work."

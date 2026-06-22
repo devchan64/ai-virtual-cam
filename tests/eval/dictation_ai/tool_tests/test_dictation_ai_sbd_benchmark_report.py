@@ -620,6 +620,112 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(summary["partial_input_evidence_review"]["final_f1_avg"], 0.5)
         self.assertEqual(summary["weak_input_evidence_review"]["final_f1_avg"], 0.0)
 
+    def test_clean_low_excludes_partial_input_evidence_cases(self) -> None:
+        args = Namespace(
+            model="sat-3l-sm",
+            device="cuda",
+            compute_type="float16",
+            min_final_f1=0.0,
+            fail_on_regression=False,
+        )
+        partial_case = SbdCase(
+            id="partial-input-low",
+            language="en",
+            chunks=["The first expected sentence appears."],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=[
+                "The first expected sentence appears.",
+                "The second expected sentence is outside the replay window.",
+            ],
+            expected_staged="",
+            tags=("missing-final",),
+            sentence_finalize_age=3,
+        )
+        full_case = SbdCase(
+            id="full-input-low",
+            language="en",
+            chunks=[
+                "The first expected sentence appears. The second expected sentence appears too."
+            ],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=[
+                "The first expected sentence appears.",
+                "The second expected sentence appears too.",
+            ],
+            expected_staged="",
+            tags=("missing-final",),
+            sentence_finalize_age=3,
+        )
+        results = [
+            {
+                "id": "partial-input-low",
+                "language": "en",
+                "tags": ["missing-final"],
+                "expected_final": [
+                    "The first expected sentence appears.",
+                    "The second expected sentence is outside the replay window.",
+                ],
+                "chunks": [{"input": "The first expected sentence appears."}],
+                "initial_final": [],
+                "actual_final": ["Wrong sentence."],
+                "actual_pending": "",
+                "actual_staged": "",
+                "actual_staged_queue": [],
+                "final_score": _score(0.0, 0.0, 0.0),
+                "final_ordered_score": _score(0.0, 0.0, 0.0),
+                "final_boundary_score": _score(0.0, 0.0, 0.0),
+                "completed_last_score": _score(0.0, 0.0, 0.0),
+                "pending_exact": True,
+                "staged_exact": True,
+                "case_exact_match": False,
+                "metrics": {"stage_start": 1, "stage_candidate_quality_blocked": 1},
+            },
+            {
+                "id": "full-input-low",
+                "language": "en",
+                "tags": ["missing-final"],
+                "expected_final": [
+                    "The first expected sentence appears.",
+                    "The second expected sentence appears too.",
+                ],
+                "chunks": [
+                    {
+                        "input": "The first expected sentence appears. The second expected sentence appears too."
+                    }
+                ],
+                "initial_final": [],
+                "actual_final": ["Wrong sentence."],
+                "actual_pending": "",
+                "actual_staged": "",
+                "actual_staged_queue": [],
+                "final_score": _score(0.0, 0.0, 0.0),
+                "final_ordered_score": _score(0.0, 0.0, 0.0),
+                "final_boundary_score": _score(0.0, 0.0, 0.0),
+                "completed_last_score": _score(0.0, 0.0, 0.0),
+                "pending_exact": True,
+                "staged_exact": True,
+                "case_exact_match": False,
+                "metrics": {"stage_start": 1, "stage_candidate_quality_blocked": 1},
+            },
+        ]
+
+        report = build_benchmark_report(
+            args=args,
+            case_sources=["cases.jsonl"],
+            corpus_role="challenge-replay",
+            cases=[partial_case, full_case],
+            results=results,
+            metric_totals={"stage_start": 2, "stage_candidate_quality_blocked": 2},
+            elapsed_ms=1.0,
+        )
+
+        clean_low = report["clean_low_bottleneck_intersection_summary"]["thresholds"]["0.35"]
+        self.assertEqual(clean_low["case_count"], 1)
+        self.assertEqual(clean_low["lowest_cases"][0]["id"], "full-input-low")
+        self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 1)
+
     def test_context_strata_flags_unmodeled_prefix_context(self) -> None:
         args = Namespace(
             model="sat-3l-sm",

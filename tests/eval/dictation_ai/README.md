@@ -50,7 +50,8 @@ case 내부의 중복/포함 expected 문장, replay 입력 chunks에서 근거�
 기본 CUDA report의 `case_definition_action_summary`도 같은 목적의 감사 신호다. 이 요약은
 `initial_final` 보정, fragment expected 재작성, shifted-window 반복 그룹 정리, 수동 문장 경계 검토를
 분리해서 보여준다. 앱 로직 튜닝 근거는 먼저 `strict_logic_candidate_summary`와
-`clean_low_bottleneck_intersection_summary`를 본다.
+`clean_low_bottleneck_intersection_summary`를 본다. 두 요약은 모든 `expected_final`이 replay 입력에서
+확인되는 `fully_supported` 케이스를 기준으로 해석한다.
 
 ```text
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py audit-initial-final-context \

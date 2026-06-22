@@ -15729,6 +15729,97 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-23 clean low 입력 근거 기준 보수화
+
+목적:
+
+- 케이스 정의 감사를 보강한 뒤에도 `clean_low_bottleneck_intersection_summary`가 일부 expected만 입력에 있는 partial input evidence 케이스를 앱 로직 개선 후보로 포함할 수 있는지 확인했다.
+- 앱 로직 튜닝 대상은 모든 `expected_final`이 replay input에서 확인되는 케이스로 제한해야 한다.
+
+변경:
+
+- `clean_low_bottleneck_intersection_summary`의 입력 근거 조건을 `input_evidence.has_evidence`에서 `input_evidence.fully_supported`로 변경했다.
+- `strict_logic_candidate_summary`와 clean low가 같은 입력 근거 원칙을 쓰도록 맞췄다.
+- `tests/eval/dictation_ai/tool_tests/test_dictation_ai_sbd_benchmark_report.py`에 partial input evidence가 clean low에서 제외되는 계약 테스트를 추가했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report
+
+Ran 18 tests in 0.008s, OK
+```
+
+CUDA 벤치:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260623-clean-full-input-report.json
+```
+
+```text
+cases=1027
+finalized=4940
+stage_start=9078
+finalized_per_stage_start=0.544173
+final_f1_avg=0.550493
+final_boundary_f1_avg=0.134014
+```
+
+input evidence strata:
+
+```text
+full_input_evidence:
+  case_count=424
+  final_f1_avg=0.668232
+  final_boundary_f1_avg=0.230045
+
+partial_input_evidence_review:
+  case_count=599
+  final_f1_avg=0.464149
+  final_boundary_f1_avg=0.060256
+
+weak_input_evidence_review:
+  case_count=4
+```
+
+strict / clean low:
+
+```text
+strict_case_count=90
+strict_final_f1_avg=0.739859
+strict_boundary_f1_avg=0.393413
+
+clean_low < 0.35:
+  case_count=10
+  avg_final_f1=0.204579
+  avg_boundary_f1=0.087607
+  staged_residue_count=8
+  underfinal_count=2
+  overfinal_count=6
+
+clean_low < 0.50:
+  case_count=14
+  avg_final_f1=0.260991
+  avg_boundary_f1=0.135592
+
+clean_low < 0.65:
+  case_count=26
+  avg_final_f1=0.385139
+  avg_boundary_f1=0.162297
+```
+
+해석:
+
+- 전체 평균은 변하지 않는다. 이번 변경은 성능 개선이 아니라 앱 로직 튜닝 후보를 더 보수적으로 고르는 평가 기준 수정이다.
+- challenge corpus는 `full_input_evidence` 424건과 `partial_input_evidence_review` 599건으로 갈라진다. partial bucket은 F1과 boundary F1이 낮으므로 전체 평균을 앱 성능으로 해석하면 안 된다.
+- clean low 10건은 `fully_supported` 기준에서도 남으므로 단순 케이스 정의 오류로 제거할 수 없다.
+- 남은 clean low에는 staged residue, recent-final/delta trimming, duplicate suppression, revision deferral이 함께 나타난다. 다음 단계는 상수 조정보다 lifecycle trace를 케이스별로 남겨 active stage, queue, final 이동을 설명하는 것이다.
+
 ### 2026-06-23 케이스 정의 감사 기준 보강
 
 관측:
