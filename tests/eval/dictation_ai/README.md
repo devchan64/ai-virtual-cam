@@ -63,6 +63,9 @@ shifted-window 반복 그룹 정리, 수동 문장 경계 검토를 분리해서
 
 이 action에 걸린 case는 앱 로직 성능 저하로 해석하지 않는다. 로직 튜닝 후보는 action summary의
 `logic_tuning_candidate_count`와 clean/strict 요약을 기준으로 좁힌다.
+벤치 stdout의 `case_definition_review`, `logic_tuning_candidates`, `strict_logic_candidates`,
+`strict_final_f1_avg`는 전체 challenge 점수와 앱 로직 튜닝 후보 점수를 즉시 구분하기 위한 확인값이다.
+파라미터 변경이나 앱 로직 변경의 유효성은 전체 `final_f1_avg`보다 strict 후보 요약을 먼저 비교한다.
 
 ```text
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py audit-initial-final-context \

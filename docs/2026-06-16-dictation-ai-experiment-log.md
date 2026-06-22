@@ -15729,6 +15729,88 @@ OK
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
 
+### 2026-06-23 SBD challenge case 정의 오류 후보 감사와 stdout 분리
+
+목적:
+
+- 벤치 케이스의 `expected_final` 정의가 잘못되어 앱 로직 튜닝 지표를 오염시키는지 확인했다.
+- STT 자체 정확도는 실험 대상이 아니므로, 사람이 보정한 문장이나 replay 입력 밖 문장은 finalization 로직 실패로 계산하지 않는 기준을 재확인했다.
+
+감사 결과:
+
+```text
+case_count=1027
+expected_final_case_count=1023
+case_definition_review=961
+logic_tuning_candidates=62
+strict_logic_candidates=51
+```
+
+주요 정의 검토 유형:
+
+```text
+remove_or_recut_expected_outside_replay_input=599
+rewrite_expected_final_to_observed_stt_text=141
+rewrite_expected_final_to_final_sentence_boundary=113
+add_initial_final_or_recut_mid_stream_case=45
+extend_replay_tail_or_reclassify_staged_expectation=35
+deduplicate_or_justify_shifted_window_repeat=28
+```
+
+해석:
+
+- `remove_or_recut_expected_outside_replay_input`은 `expected_final` 일부가 replay chunks에 충분히 없으므로 앱 로직 실패로 보지 않는다.
+- `rewrite_expected_final_to_observed_stt_text`는 유사 unit coverage는 있지만 raw STT text로 관측되지 않은 expected다. STT 출력 이후 파이프라인 성능을 평가하려면 raw STT 관측 표현으로 다시 써야 한다.
+- 중간 스트림에서 시작한 케이스는 이미 확정됐어야 할 prefix를 `initial_final`에 넣거나 시작점을 조정해야 한다.
+- 같은 로그 구간의 shifted-window 반복은 distinct lifecycle failure가 있을 때만 유지한다.
+
+CUDA 검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260623-case-definition-stdout-report.json
+```
+
+```text
+cases=1027
+finalized=4940
+case_definition_review=961
+logic_tuning_candidates=62
+strict_logic_candidates=51
+final_f1_avg=0.550
+strict_final_f1_avg=0.814
+final_boundary_f1_avg=0.134
+```
+
+결론:
+
+- 현재 전체 `final_f1_avg`는 challenge case 정의 검토 후보가 대부분 섞인 값이다.
+- 앱 로직/파라미터 튜닝 근거는 전체 평균보다 `strict_logic_candidate_summary`와 `strict_final_f1_avg`를 먼저 본다.
+- 케이스 정의 오류 후보를 대량 삭제하기보다, 제거/재컷/raw STT 기준 expected 재작성/`initial_final` 보정 여부를 action별로 검토한다.
+
+반영:
+
+- 벤치 stdout에 `case_definition_review`, `logic_tuning_candidates`, `strict_logic_candidates`, `strict_final_f1_avg`를 추가했다.
+- `tests/eval/dictation_ai/README.md`에 stdout 지표 해석을 추가했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_initial_final_context_audit
+Ran 26 tests in 0.014s, OK
+
+./.venv/bin/python tests/eval/dictation_ai/cases/validate_sbd_case_files.py \
+  tests/eval/dictation_ai/sbd_cases \
+  --min-expected-final-cases 1000 \
+  --max-drafts 0
+case_count=1027, expected_final_case_count=1023
+```
+
 ### 2026-06-23 benchmark case definition 감사 기준 보강
 
 목적:

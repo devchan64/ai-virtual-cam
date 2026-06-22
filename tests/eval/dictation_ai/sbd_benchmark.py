@@ -214,16 +214,23 @@ def main() -> int:
     )
     summary = dict(report["summary"])
     evidence_protocol = dict(report.get("evidence_protocol", {}))
+    case_definition_actions = dict(report.get("case_definition_action_summary", {}))
+    strict_logic_summary = dict(report.get("strict_logic_candidate_summary", {}))
+    strict_summary = dict(strict_logic_summary.get("summary", {}))
     _write_report(args.output, report)
     print(
         "[dictation-ai-sbd-benchmark] "
         f"corpus_role={corpus_role} cases={len(results)} finalized={summary['finalized']} "
         f"claim_scope_key={evidence_protocol.get('claim_scope_key', '')} "
+        f"case_definition_review={case_definition_actions.get('review_case_count', 0)} "
+        f"logic_tuning_candidates={case_definition_actions.get('logic_tuning_candidate_count', 0)} "
+        f"strict_logic_candidates={strict_logic_summary.get('strict_case_count', 0)} "
         f"stage_start={summary['stage_start']} "
         f"finalized_per_stage_start={summary['finalized_per_stage_start']:.3f} "
         f"final_precision_avg={summary['final_precision_avg']:.3f} "
         f"final_recall_avg={summary['final_recall_avg']:.3f} "
         f"final_f1_avg={summary['final_f1_avg']:.3f} "
+        f"strict_final_f1_avg={float(strict_summary.get('final_f1_avg', 0.0)):.3f} "
         f"final_similarity_coverage_avg={summary['final_similarity_coverage_avg']:.3f} "
         f"final_boundary_f1_avg={summary['final_boundary_f1_avg']:.3f} "
         f"case_exact_match={summary['case_exact_match']} "
