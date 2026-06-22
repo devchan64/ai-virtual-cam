@@ -26301,3 +26301,51 @@ ko_log_mixed_fsd_chip_production_fragment_20260617_001
 - 현재 전체 `final_f1_avg`는 케이스 정의 감사 대상의 영향을 크게 받는다. 앱 로직 변경 근거로는 `strict_logic_candidates`와 clean low 후보를 우선한다.
 - 다음 케이스 정리는 대량 삭제가 아니라 언어별 shard에서 `repeated_expected_group`과 `expected outside replay input`을 먼저 재절단/제외하는 방식으로 진행한다.
 - 케이스 수집 기준은 “실제 STT 컨텍스트 window 입력에서 관측된 final 후보”를 기준으로 유지한다. 사람이 들은 원문 정답이나 raw STT 교정 문장을 expected로 넣지 않는다.
+
+### 2026-06-23 case file별 정의 감사 요약 추가
+
+목적:
+
+- 케이스 정의 문제가 어느 JSONL shard에 몰려 있는지 리포트에서 직접 확인한다.
+- 파일별 review 압력을 먼저 확인해, 앱 로직 튜닝 전에 recut/deduplication 대상을 좁힌다.
+
+반영:
+
+- `tests/eval/dictation_ai/benchmark/sbd_benchmark_report.py`에 `case_definition_file_summary`를 추가했다.
+- 각 shard별 `case_count`, `review_case_count`, `review_case_ratio`, `logic_tuning_candidate_count`, action/flag count, 저점 예시를 제공한다.
+- 이 요약은 케이스 자동 삭제 규칙이 아니다. 재절단/expected 재작성 우선순위를 보여주는 진단 지표다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report
+Ran 23 tests in 0.013s, OK
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py --output .tmp/eval/dictation-ai-sbd/current-20260623-case-file-summary-report.json
+corpus_role=challenge-replay
+cases=1027
+case_definition_review=979
+logic_tuning_candidates=44
+strict_logic_candidates=35
+final_f1_avg=0.551
+strict_final_f1_avg=0.942
+```
+
+파일별 상위 review 압력:
+
+```text
+reviewed-context-zh-6-20260621.jsonl: case_count=53, review=50, logic=3, review_ratio=0.943, final_f1_avg=0.667
+reviewed-context-zh-f.jsonl: case_count=38, review=36, logic=2, review_ratio=0.947, final_f1_avg=0.664
+reviewed-context-en-0.jsonl: case_count=30, review=30, logic=0, review_ratio=1.000, final_f1_avg=0.361
+reviewed-context-ko-3.jsonl: case_count=33, review=29, logic=4, review_ratio=0.879, final_f1_avg=0.586
+reviewed-context-en-9.jsonl: case_count=28, review=28, logic=0, review_ratio=1.000, final_f1_avg=0.393
+reviewed-context-en-b.jsonl: case_count=27, review=27, logic=0, review_ratio=1.000, final_f1_avg=0.381
+reviewed-context-en-a.jsonl: case_count=28, review=27, logic=0, review_ratio=0.964, final_f1_avg=0.466
+reviewed-context-en-c.jsonl: case_count=26, review=26, logic=0, review_ratio=1.000, final_f1_avg=0.452
+```
+
+해석:
+
+- 영어 draft shard는 `lowercase_or_connector_start`, `no_terminal_expected`, `repeated_expected_group`, `expected outside replay input`이 동시에 많아 현재 상태로는 앱 로직 튜닝 근거로 부적합하다.
+- `zh-6-20260621`, `zh-f`는 실제 로그 관측 케이스가 많지만, `many_expected_sentences`, 중간 stream 시작, expected/STT 표현 불일치가 섞여 있다. 유지할 케이스는 shard를 다시 잘라 expected를 관측 STT final 후보 기준으로 줄여야 한다.
+- clean low 후보와 strict 후보는 계속 보존한다. 반대로 review ratio가 높은 shard는 점수 개선 대상이 아니라 케이스 정의 정리 대상으로 본다.

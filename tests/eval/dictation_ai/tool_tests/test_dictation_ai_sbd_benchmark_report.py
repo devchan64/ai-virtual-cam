@@ -733,6 +733,7 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
                 "id": "partial-input-low",
                 "language": "en",
                 "tags": ["missing-final"],
+                "case_metadata": {"case_file": "cases/en-a.jsonl", "case_line": 1},
                 "expected_final": [
                     "The first expected sentence appears.",
                     "The second expected sentence is outside the replay window.",
@@ -756,6 +757,7 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
                 "id": "full-input-low",
                 "language": "en",
                 "tags": ["missing-final"],
+                "case_metadata": {"case_file": "cases/en-a.jsonl", "case_line": 2},
                 "expected_final": [
                     "The first expected sentence appears.",
                     "The second expected sentence appears too.",
@@ -805,6 +807,18 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
             ]["examples"][0]["id"],
             "partial-input-low",
         )
+        file_summary = report["case_definition_file_summary"]
+        self.assertEqual(file_summary["file_count"], 1)
+        self.assertEqual(file_summary["files_with_review_cases"], 1)
+        self.assertEqual(file_summary["top_files"][0]["case_file"], "cases/en-a.jsonl")
+        self.assertEqual(file_summary["top_files"][0]["case_count"], 2)
+        self.assertEqual(file_summary["top_files"][0]["review_case_count"], 1)
+        self.assertEqual(file_summary["top_files"][0]["logic_tuning_candidate_count"], 1)
+        self.assertEqual(
+            file_summary["top_files"][0]["action_counts"],
+            {"remove_or_recut_expected_outside_replay_input": 1},
+        )
+        self.assertEqual(file_summary["top_files"][0]["examples"][0]["id"], "partial-input-low")
 
     def test_context_strata_flags_unmodeled_prefix_context(self) -> None:
         args = Namespace(

@@ -1171,6 +1171,85 @@ def summarize_case_definition_action_items(results: list[dict[str, Any]]) -> dic
     }
 
 
+def summarize_case_definition_files(results: list[dict[str, Any]]) -> dict[str, Any]:
+    """Summarize case-definition review pressure by JSONL shard."""
+    by_file: dict[str, dict[str, Any]] = {}
+    for result in results:
+        metadata = dict(result.get("case_metadata", {}) or {})
+        case_file = str(metadata.get("case_file") or "unknown")
+        item = by_file.setdefault(
+            case_file,
+            {
+                "case_file": case_file,
+                "case_count": 0,
+                "review_case_count": 0,
+                "logic_tuning_candidate_count": 0,
+                "final_f1_total": 0.0,
+                "action_counts": Counter(),
+                "expected_quality_flag_counts": Counter(),
+                "case_definition_flag_counts": Counter(),
+                "language_counts": Counter(),
+                "examples": [],
+            },
+        )
+        item["case_count"] += 1
+        item["final_f1_total"] += float(dict(result.get("final_score", {})).get("f1", 0.0))
+        item["language_counts"][str(result.get("language") or "unknown")] += 1
+        actions = _case_review_actions(result)
+        if actions:
+            item["review_case_count"] += 1
+            item["action_counts"].update(actions)
+            item["expected_quality_flag_counts"].update(
+                str(flag) for flag in result.get("expected_quality_flags", []) or []
+            )
+            item["case_definition_flag_counts"].update(
+                str(flag) for flag in result.get("case_definition_flags", []) or []
+            )
+            item["examples"].append(_case_review_payload(result))
+        elif result.get("expected_final"):
+            item["logic_tuning_candidate_count"] += 1
+
+    file_items: list[dict[str, Any]] = []
+    for item in by_file.values():
+        examples = sorted(
+            item["examples"],
+            key=lambda example: (float(example.get("final_f1", 0.0)), str(example.get("id"))),
+        )[:CASE_EXEMPLAR_LIMIT]
+        file_items.append(
+            {
+                "case_file": item["case_file"],
+                "case_count": item["case_count"],
+                "review_case_count": item["review_case_count"],
+                "review_case_ratio": item["review_case_count"] / max(item["case_count"], 1),
+                "logic_tuning_candidate_count": item["logic_tuning_candidate_count"],
+                "final_f1_avg": item["final_f1_total"] / max(item["case_count"], 1),
+                "action_counts": dict(sorted(item["action_counts"].items())),
+                "expected_quality_flag_counts": dict(sorted(item["expected_quality_flag_counts"].items())),
+                "case_definition_flag_counts": dict(sorted(item["case_definition_flag_counts"].items())),
+                "language_counts": dict(sorted(item["language_counts"].items())),
+                "examples": examples,
+            }
+        )
+    file_items.sort(
+        key=lambda item: (
+            int(item["review_case_count"]),
+            float(item["review_case_ratio"]),
+            -float(item["final_f1_avg"]),
+            str(item["case_file"]),
+        ),
+        reverse=True,
+    )
+    return {
+        "interpretation": (
+            "Ranks JSONL shards by case-definition review pressure. "
+            "Use this to choose recut/deduplication targets before changing app logic."
+        ),
+        "file_count": len(file_items),
+        "files_with_review_cases": sum(1 for item in file_items if item["review_case_count"]),
+        "top_files": file_items[:CASE_EXEMPLAR_LIMIT],
+    }
+
+
 def _case_collection_kind(result: dict[str, Any]) -> str:
     case_id = str(result.get("id") or "")
     metadata = dict(result.get("case_metadata", {}) or {})
@@ -1632,6 +1711,7 @@ def build_benchmark_report(
     context_strata_summary = summarize_results_by_context_strata(results)
     case_definition_strata_summary = summarize_results_by_case_definition_strata(results)
     case_definition_action_summary = summarize_case_definition_action_items(results)
+    case_definition_file_summary = summarize_case_definition_files(results)
     collection_strata_summary = summarize_results_by_collection_strata(results)
     strict_logic_candidate_summary = summarize_strict_logic_candidate_results(cases, results)
     queue_residue_strata_summary = summarize_results_by_queue_residue_strata(results)
@@ -1727,6 +1807,7 @@ def build_benchmark_report(
         "context_strata_summary": context_strata_summary,
         "case_definition_strata_summary": case_definition_strata_summary,
         "case_definition_action_summary": case_definition_action_summary,
+        "case_definition_file_summary": case_definition_file_summary,
         "collection_strata_summary": collection_strata_summary,
         "strict_logic_candidate_summary": strict_logic_candidate_summary,
         "case_exemplar_summary": case_exemplar_summary,
