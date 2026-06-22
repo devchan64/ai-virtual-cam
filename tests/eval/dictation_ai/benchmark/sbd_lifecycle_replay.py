@@ -194,8 +194,9 @@ def _queue_staged_sentence(state: LifecycleState, candidate: str, forced: bool, 
             _stable_overlap_source(state),
         )
         if reset_age:
+            # Runtime parity: unstable revision of the same queued utterance is not a new segment.
             state.count("stage_queue_revision_token_sentence_deferred")
-            continue
+            return
         entry["sentence"] = preferred
         entry["confirmations"] = _next_revision_confirmation_count(
             queued_sentence,

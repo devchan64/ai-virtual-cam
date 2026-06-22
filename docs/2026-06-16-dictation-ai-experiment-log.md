@@ -15873,6 +15873,67 @@ hold1_preserve_0.40     final_f1=0.548 strict_n=50 strict_f1=0.805 strict_bounda
 - 다음 개선 후보는 파라미터 숫자 변경보다, recent-final delta trimming과 token-sentence revision queue가 같은 case에서 동시에 발생할 때 어떤 stage를 소비/보류할지에 대한 더 명확한 생명주기 원칙이다.
 - 다만 이번 결과상 “리비전 확인 기준 도달 즉시 확정” 또는 “짧은 CJK 문장 확정 지연/완화” 같은 단순 규칙은 폐기한다.
 
+### 2026-06-23 queued revision reset 후보의 독립 세그먼트 분리 억제
+
+목적:
+
+- strict 저점에서 `stage_queue_revision_token_sentence_deferred`, `stage_queue_revision`, `candidate_recent_final_delta_trimmed`, `candidate_duplicate_suppressed`가 같이 나타나는 패턴을 확인했다.
+- queued sentence와 새 candidate가 같은 발화의 revision인데 age reset이 필요한 경우, 기존 구현은 defer metric을 찍고도 루프를 계속해 새 queue entry로 append할 수 있었다.
+- 이 동작은 같은 발화의 불안정한 revision을 독립 세그먼트로 분리하여 overfinal과 queue 잔류를 동시에 만들 수 있으므로, reset이 필요한 queued revision은 기존 queued 후보를 유지하고 새 segment로 추가하지 않는 원칙을 실험했다.
+
+변경:
+
+- `src/app/dictation_node_sentence_candidate_commit_buffer.py`
+  - queued entry와 candidate가 revision 관계이고 `_should_reset_revision_age()`가 true이면 `stage_queue_revision_token_sentence_deferred`를 기록하고 enqueue를 종료한다.
+  - 같은 발화의 불안정한 revision을 새 queue segment로 분리하지 않는다.
+- `tests/eval/dictation_ai/benchmark/sbd_lifecycle_replay.py`
+  - runtime과 같은 replay 계약을 유지하도록 동일 규칙을 반영했다.
+
+CUDA 검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260623-queue-reset-defer-no-append-report.json
+```
+
+결과 비교:
+
+```text
+base      final_f1=0.5505 strict_n=51 strict_f1=0.8136 strict_boundary_f1=0.4396 lows=5/7/10 finalized=4940 stage_start=9078
+patched   final_f1=0.5508 strict_n=49 strict_f1=0.8207 strict_boundary_f1=0.4601 lows=4/7/10 finalized=5015 stage_start=9130
+```
+
+주요 metric 변화:
+
+```text
+stage_queue_revision_token_sentence_deferred 564 -> 447
+stage_queue_revision                         2006 -> 1759
+stage_queue_enqueue                          6841 -> 6625
+stage_queue_promote                          6041 -> 6028
+stage_age_quality_blocked                    2631 -> 2584
+candidate_duplicate_suppressed               14426 -> 14447
+candidate_recent_final_delta_trimmed         5482 -> 5721
+candidate_delta_trimmed                      5351 -> 5428
+```
+
+해석:
+
+- queued revision reset 후보를 새 segment로 append하지 않으면서 queue revision churn과 age quality block이 줄었다.
+- 전체 `final_f1_avg`, strict `final_f1_avg`, strict boundary F1이 모두 소폭 개선됐다.
+- 일부 개별 케이스는 악화되지만, 이번 변경은 문구/언어별 예외가 아니라 같은 발화 revision을 독립 세그먼트로 분리하지 않는 append-only lifecycle 원칙에 부합한다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report
+Ran 39 tests in 0.024s, OK
+```
+
 ### 2026-06-23 benchmark case definition 감사 기준 보강
 
 목적:

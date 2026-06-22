@@ -108,8 +108,9 @@ class SentenceCandidateCommitBufferNode:
                 stable_analysis.stable_overlap_source,
             )
             if reset_age:
+                # 같은 queued 발화의 불안정한 revision은 새 세그먼트로 분리하지 않는다.
                 count_metric("stage_queue_revision_token_sentence_deferred", 1)
-                continue
+                return
             entry["sentence"] = preferred
             entry["confirmations"] = _next_revision_confirmation_count(
                 queued_sentence,
