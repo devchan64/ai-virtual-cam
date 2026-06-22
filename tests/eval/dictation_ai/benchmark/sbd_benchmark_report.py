@@ -738,6 +738,7 @@ def _avg_score_f1(results: list[dict[str, Any]], key: str) -> float:
 
 
 def _low_score_case_payload(result: dict[str, Any], support_kind: str) -> dict[str, Any]:
+    metrics = dict(result.get("metrics", {}) or {})
     return {
         "id": result.get("id"),
         "language": result.get("language"),
@@ -752,6 +753,11 @@ def _low_score_case_payload(result: dict[str, Any], support_kind: str) -> dict[s
         "expected_quality_flags": list(result.get("expected_quality_flags", []) or []),
         "case_context_flags": list(result.get("case_context_flags", []) or []),
         "case_definition_flags": list(result.get("case_definition_flags", []) or []),
+        "lifecycle_metrics": {
+            metric: int(metrics.get(metric, 0))
+            for metric in SUPPORTED_LOW_BOTTLENECK_METRICS
+            if int(metrics.get(metric, 0)) > 0
+        },
         "expected_final_preview": _first_text_preview(result.get("expected_final")),
         "actual_final_preview": _first_text_preview(result.get("actual_final")),
         "actual_staged_preview": _text_preview(result.get("actual_staged")),
@@ -1229,6 +1235,17 @@ def summarize_strict_logic_candidate_results(cases: list[SbdCase], results: list
         "strict_case_count": len(strict),
         "summary": _summarize_result_group(strict),
         "collection_strata": summarize_results_by_collection_strata(strict),
+        "lowest_cases": [
+            _low_score_case_payload(result, "strict_logic_candidate")
+            for result in sorted(
+                strict,
+                key=lambda result: (
+                    float(dict(result.get("final_score", {})).get("f1", 0.0)),
+                    float(dict(result.get("final_boundary_score", {})).get("f1", 0.0)),
+                    str(result.get("id")),
+                ),
+            )[:CASE_EXEMPLAR_LIMIT]
+        ],
         "low_score_thresholds": low_by_threshold,
     }
 

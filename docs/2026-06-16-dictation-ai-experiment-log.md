@@ -94,6 +94,7 @@ strict_final_f1_avg=0.942
 - 하지만 전체 `final_precision_avg`가 `0.612 -> 0.587`, `final_f1_avg`가 `0.551 -> 0.541`로 하락하고 finalized 수가 `5015 -> 5279`로 증가해 과확정 위험이 커진다.
 - `later_completed_sentences`가 있는 경우에만 short no-end stage를 허용하는 구조적 완화도 `final_precision_avg=0.589`, `final_f1_avg=0.541`, `stage_start=10231`로 악화됐다.
 - 따라서 no-end 짧은 후보 완화는 현재 기본 로직으로 채택하지 않는다. 남은 한국어 케이스는 별도 원칙 없이 단일 케이스를 맞추기 위한 조정으로 보이면 앱 로직 변경 근거로 쓰지 않는다.
+- 후속 리포트 `current-20260623-strict-lowest-metrics-report.json`부터는 `strict_logic_candidate_summary.lowest_cases`에 개별 strict 저점과 `lifecycle_metrics`를 포함한다. 다음 앱 로직 변경은 이 목록에서 여러 케이스에 공통으로 반복되는 병목이 확인될 때만 시도한다.
 
 모델 선정 기준:
 

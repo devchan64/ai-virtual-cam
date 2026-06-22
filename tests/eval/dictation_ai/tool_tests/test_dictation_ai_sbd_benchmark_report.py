@@ -210,6 +210,11 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(strict_summary["strict_case_count"], 1)
         self.assertEqual(strict_summary["summary"]["final_f1_avg"], 1.0)
         self.assertEqual(strict_summary["collection_strata"]["manual_named_case"]["case_count"], 1)
+        self.assertEqual(strict_summary["lowest_cases"][0]["id"], "case-a")
+        self.assertEqual(
+            strict_summary["lowest_cases"][0]["lifecycle_metrics"],
+            {"pending_overrun": 1, "pending_quality_repeated_word_ngram": 1},
+        )
         self.assertEqual(report["cases"][0]["expected_quality_flags"], [])
         self.assertEqual(report["cases"][0]["case_context_flags"], [])
         self.assertEqual(report["cases"][0]["case_definition_flags"], [])
