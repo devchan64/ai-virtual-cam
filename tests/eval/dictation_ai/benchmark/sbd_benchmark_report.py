@@ -182,6 +182,7 @@ CASE_REVIEW_ACTION_FLAGS = (
     "remove_or_recut_expected_outside_replay_input",
     "rewrite_expected_final_to_observed_stt_text",
     "add_initial_final_or_recut_mid_stream_case",
+    "restore_source_log_or_recut_from_observed_log",
     "rewrite_expected_final_to_final_sentence_boundary",
     "extend_replay_tail_or_reclassify_staged_expectation",
     "deduplicate_or_justify_shifted_window_repeat",
@@ -1028,6 +1029,8 @@ def _case_primary_review_action(result: dict[str, Any]) -> str:
         return "rewrite_expected_final_to_observed_stt_text"
     if context_flags.intersection({"unmodeled_prefix_context", "actual_prefix_before_expected_final"}):
         return "add_initial_final_or_recut_mid_stream_case"
+    if "legacy_sample_without_source_trace" in definition_flags:
+        return "restore_source_log_or_recut_from_observed_log"
     if definition_flags.intersection({"duplicate_expected_sentence"}):
         return "rewrite_expected_final_to_final_sentence_boundary"
     if expected_quality:
@@ -1154,6 +1157,8 @@ def summarize_case_definition_action_items(results: list[dict[str, Any]]) -> dic
             "in replay chunks, rewrite_expected_final_to_observed_stt_text when expected labels have similar "
             "unit coverage but are not observed as raw STT text, add_initial_final_or_recut_mid_stream_case "
             "for mid-stream cases or actual finals that show missing prefix context, "
+            "restore_source_log_or_recut_from_observed_log when migrated legacy sample cases have no "
+            "traceable source_log/source_chunk, "
             "rewrite_expected_final_to_final_sentence_boundary for fragment-like "
             "expected_final labels, extend_replay_tail_or_reclassify_staged_expectation when expected final "
             "text is still staged at the end of the replay window, "
@@ -1424,11 +1429,22 @@ def _with_case_evidence_metadata(results: list[dict[str, Any]]) -> list[dict[str
             ] += 1
     for result in results:
         item = dict(result)
+        metadata = dict(item.get("case_metadata", {}) or {})
         expected_final = normalized_expected_by_id.get(id(result), [])
         item["expected_quality_flags"] = expected_quality_flags(expected_final)
         item["input_evidence"] = case_input_evidence(item)
         item["case_context_flags"] = case_context_flags(item)
         case_definition_flags: list[str] = []
+        review_source_file = str(metadata.get("review_source_file") or "").strip()
+        source_log = str(metadata.get("source_log") or "").strip()
+        source_chunk = metadata.get("source_chunk")
+        if (
+            expected_final
+            and not source_log
+            and source_chunk is None
+            and review_source_file.endswith("tests/eval/dictation_ai/sbd_text_cases.sample.jsonl")
+        ):
+            case_definition_flags.append("legacy_sample_without_source_trace")
         if len(expected_final) != len(set(expected_final)):
             case_definition_flags.append("duplicate_expected_sentence")
         has_nested_expected = any(

@@ -971,6 +971,76 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         )
         self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
 
+    def test_legacy_sample_without_source_trace_is_review_action(self) -> None:
+        args = Namespace(
+            model="sat-3l-sm",
+            device="cuda",
+            compute_type="float16",
+            min_final_f1=0.0,
+            fail_on_regression=False,
+        )
+        case = SbdCase(
+            id="legacy-sample-case",
+            language="ko",
+            chunks=["추적 가능한 문장입니다."],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=["추적 가능한 문장입니다."],
+            expected_staged="",
+            tags=("missing-final",),
+            metadata={
+                "case_file": "cases/ko-a.jsonl",
+                "case_line": 1,
+                "source_log": "",
+                "source_chunk": None,
+                "review_source_file": "tests/eval/dictation_ai/sbd_text_cases.sample.jsonl",
+            },
+            sentence_finalize_age=3,
+        )
+        results = [
+            {
+                "id": "legacy-sample-case",
+                "language": "ko",
+                "tags": ["missing-final"],
+                "case_metadata": dict(case.metadata or {}),
+                "expected_final": ["추적 가능한 문장입니다."],
+                "chunks": [{"input": "추적 가능한 문장입니다."}],
+                "actual_final": ["추적 가능한 문장입니다."],
+                "actual_pending": "",
+                "actual_staged": "",
+                "actual_staged_queue": [],
+                "final_score": _score(1.0, 1.0, 1.0, exact=True),
+                "final_ordered_score": _score(1.0, 1.0, 1.0, exact=True),
+                "final_boundary_score": _score(1.0, 1.0, 1.0, exact=True),
+                "completed_last_score": _score(1.0, 1.0, 1.0),
+                "pending_exact": True,
+                "staged_exact": True,
+                "case_exact_match": True,
+                "metrics": {"stage_start": 1, "finalized": 1},
+            }
+        ]
+
+        report = build_benchmark_report(
+            args=args,
+            case_sources=["cases.jsonl"],
+            corpus_role="challenge-replay",
+            cases=[case],
+            results=results,
+            metric_totals={"stage_start": 1, "finalized": 1},
+            elapsed_ms=1.0,
+        )
+
+        self.assertEqual(report["cases"][0]["case_definition_flags"], ["legacy_sample_without_source_trace"])
+        self.assertEqual(
+            report["case_definition_action_summary"]["action_counts"],
+            {"restore_source_log_or_recut_from_observed_log": 1},
+        )
+        self.assertEqual(report["case_definition_health_summary"]["strict_logic_candidate_count"], 0)
+        self.assertEqual(
+            report["case_definition_health_summary"]["recommendation"],
+            "case-definition-review-required",
+        )
+
     def test_context_strata_flags_fuzzy_unmodeled_prefix_context(self) -> None:
         args = Namespace(
             model="sat-3l-sm",

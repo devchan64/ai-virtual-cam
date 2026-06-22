@@ -26492,3 +26492,52 @@ manual_boundary_review=4
 - 현재 전체 challenge 평균은 케이스 정의 문제가 지배하므로 앱 로직 변경의 직접 근거로 쓰지 않는다.
 - 운영 로직 튜닝은 `strict_logic_candidates=35`와 clean low 후보에서 다시 시작한다.
 - review 비율이 높은 shard는 성능 개선 대상이 아니라 recut, expected_final 재작성, initial_final 보강, 중복 그룹 정리 대상으로 본다.
+
+### 2026-06-23 legacy sample traceability 감사 추가
+
+배경:
+
+- clean/strict 저점 일부가 `tests/eval/dictation_ai/sbd_text_cases.sample.jsonl`에서 이관된 케이스였다.
+- 이 케이스들은 `source_log`와 `source_chunk`가 비어 있어 현재 기준의 “앱 로그에서 추적 가능한 실제 STT window 결과”라는 벤치 정의를 충분히 만족하지 못한다.
+- 내용이 완전히 match되더라도 원본 로그 위치가 없으면 앱 로직 튜닝 후보로 쓰기 어렵다.
+
+변경:
+
+- `review_source_file=tests/eval/dictation_ai/sbd_text_cases.sample.jsonl`이고 `source_log/source_chunk`가 비어 있는 expected-final 케이스에 `legacy_sample_without_source_trace` 플래그를 부여한다.
+- 해당 케이스의 review action은 `restore_source_log_or_recut_from_observed_log`로 분류한다.
+- 이 분류는 케이스 삭제가 아니라, 원본 로그 위치를 복구하거나 현재 로그에서 다시 recut하기 전까지 앱 로직 튜닝 후보에서 제외하는 evidence 기준이다.
+
+CUDA 벤치:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --output .tmp/eval/dictation-ai-sbd/current-20260623-case-health-trace-report.json
+
+cases=1027
+expected_final_case_count=1023
+case_definition_review=1017
+case_definition_review_ratio=0.994
+logic_tuning_candidates=6
+strict_logic_candidates=5
+final_f1_avg=0.551
+strict_final_f1_avg=0.906
+```
+
+상위 review action 변화:
+
+```text
+remove_or_recut_expected_outside_replay_input=599
+rewrite_expected_final_to_observed_stt_text=141
+add_initial_final_or_recut_mid_stream_case=106
+restore_source_log_or_recut_from_observed_log=94
+rewrite_expected_final_to_final_sentence_boundary=44
+deduplicate_or_justify_shifted_window_repeat=25
+extend_replay_tail_or_reclassify_staged_expectation=6
+manual_boundary_review=2
+```
+
+판정:
+
+- 로직 튜닝 후보는 `44 -> 6`, strict 후보는 `35 -> 5`로 줄었다.
+- clean low threshold `0.65` 미만 후보는 0건이 되었다.
+- 현재 상태에서는 앱 로직을 추가로 완화할 근거가 부족하다. 다음 우선순위는 legacy sample의 원본 로그 복구/recut 또는 추적 가능한 앱 로그 케이스 추가다.
