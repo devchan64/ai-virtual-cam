@@ -131,6 +131,45 @@ strict_final_f1_avg=0.942
 - `REVISION_FALLBACK_COVERAGE_MIN=0.50`은 변경 케이스가 36건으로 많고 best/worst가 동시에 커져, 일반 원칙으로 채택하기 어렵다.
 - 따라서 revision similarity 기본값은 유지한다. 다음 앱 로직 변경은 단일 threshold 완화보다 queue/stage 생명주기에서 여러 strict 저점에 반복되는 구조적 병목이 확인될 때만 시도한다.
 
+### 2026-06-23 queue/stage 생명주기 축 sweep
+
+목적:
+
+- strict 저점에 `stage_candidate_quality_blocked`, `stage_age_quality_blocked`, `stage_replace_deferred`, `stage_queue_revision`이 반복되어 queue/stage 생명주기 파라미터를 비교했다.
+- 단일 케이스 개선보다 strict 후보 전체와 challenge replay 전체의 regression 여부를 우선했다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py run-sweep \
+  --include-baseline \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260623-queue-stage-axis \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260623-queue-stage-axis/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/20260623-queue-stage-axis/summary.md \
+  --param MAX_STAGED_SENTENCE_QUEUE=10 \
+  --param STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=4 \
+  --param STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=8 \
+  --param DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=1 \
+  --param DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=3
+```
+
+결과:
+
+| 축 | final_f1_delta | final_precision_delta | final_recall_delta | strict_final_f1_delta | 판정 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `MAX_STAGED_SENTENCE_QUEUE=10` | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 채택 안 함 |
+| `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=4` | -0.000672 | -0.000025 | -0.000974 | 0.000000 | 채택 안 함 |
+| `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=8` | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 채택 안 함 |
+| `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=1` | +0.000678 | +0.001296 | +0.000536 | -0.012269 | 채택 안 함 |
+| `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=3` | -0.000130 | -0.000325 | 0.000000 | 0.000000 | 채택 안 함 |
+
+해석:
+
+- `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=1`은 전체 평균만 보면 약간 개선되지만 strict 후보의 `final_f1_avg`와 boundary가 하락한다. 실패 replay에서 실제 로직 후보로 분리한 집합을 악화시키므로 기본값으로 채택하지 않는다.
+- `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=4`는 recall/f1이 하락하고, `8`은 기준과 동일하다.
+- queue 크기 10도 의미 있는 개선 없이 boundary regression 케이스만 생긴다.
+- 현재 queue/stage 상수 변경만으로는 일반화 가능한 개선 근거가 없다. 다음 개선은 새 threshold보다, `stage_candidate_quality_blocked`가 실제 완결 후보를 막는지와 case definition 문제인지 더 분리하는 방향이 우선이다.
+
 모델 선정 기준:
 
 | 흐름 | 선정 모델 | 탈락/보류 모델 | 선정 이유 |
