@@ -15289,6 +15289,247 @@ git diff --check
 OK
 ```
 
+### 2026-06-22 정제 corpus lifecycle 공통 파라미터 sweep
+
+목적:
+
+- terminal 없는 fragment 라벨 제거 후 1059건 corpus에서 보편 lifecycle 파라미터만 다시 확인한다.
+- 문구/언어별 예외가 아니라 조각 final 억제, delta suppressed stage 보존, queue stale 보존 기간 같은 공통 원칙 후보만 검토한다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py run-sweep \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/lifecycle-common-20260622 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/lifecycle-common-20260622/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/lifecycle-common-20260622/summary.md \
+  --include-baseline \
+  --param SHORT_NO_END_FRAGMENT_UNITS=4 \
+  --param SHORT_NO_END_FRAGMENT_UNITS=6 \
+  --param DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=1 \
+  --param DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=3 \
+  --param STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=4 \
+  --param STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=8
+```
+
+baseline:
+
+```text
+case_count=1059
+final_precision_avg=0.6026873618
+final_recall_avg=0.5151707992
+final_f1_avg=0.5331376183
+final_ordered_f1_avg=0.5106553804
+final_boundary_f1_avg=0.1309454850
+finalized_per_stage_start=0.5413127413
+```
+
+결과:
+
+```text
+SHORT_NO_END_FRAGMENT_UNITS=4:
+  final_precision_avg -0.0034177664
+  final_recall_avg +0.0024678867
+  final_f1_avg -0.0001746272
+  final_ordered_f1_avg -0.0000780516
+  final_boundary_f1_avg -0.0003011786
+  finalized_per_stage_start -0.0044261635
+
+SHORT_NO_END_FRAGMENT_UNITS=6:
+  final_precision_avg -0.0020262991
+  final_recall_avg -0.0073402754
+  final_f1_avg -0.0052986828
+  final_ordered_f1_avg -0.0057048438
+  final_boundary_f1_avg +0.0001967948
+  finalized_per_stage_start +0.0006437317
+
+DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=1:
+  final_precision_avg +0.0009881290
+  final_recall_avg +0.0000696974
+  final_f1_avg +0.0003287972
+  final_ordered_f1_avg +0.0003287972
+  final_boundary_f1_avg -0.0002832861
+  finalized_per_stage_start -0.0006708531
+
+DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=3:
+  final_precision_avg -0.0003576845
+  final_recall_avg -0.0001348982
+  final_f1_avg -0.0001999667
+  final_ordered_f1_avg -0.0001999667
+  final_boundary_f1_avg +0.0003147624
+  finalized_per_stage_start +0.0000505942
+
+STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=4:
+  final_precision_avg -0.0000786906
+  final_recall_avg -0.0010169245
+  final_f1_avg -0.0007050677
+  final_ordered_f1_avg -0.0003378449
+  final_boundary_f1_avg +0.0000230826
+  finalized_per_stage_start +0.0002664967
+
+STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=8:
+  all compared summary metrics 0
+```
+
+`DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=1` 상세:
+
+```text
+interpretation_flags:
+  overall-final-f1-up-boundary-down
+  language-final-f1-regression
+  key-tag-precision-regression
+  key-tag-boundary-regression
+  case-final-f1-regression
+  case-boundary-regression
+
+supported_monotonic final_f1 < 0.35:
+  case_count unchanged: 32
+  avg_final_f1 unchanged: 0.1784939019
+  avg_ordered_f1 unchanged: 0.1784939019
+  avg_boundary_f1 unchanged: 0.0363057082
+
+tag regressions:
+  duplicate-final final_f1_avg -0.0005352444
+  no-end-marker final_f1_avg -0.0009402056
+  no-end-marker precision -0.0005998884
+```
+
+판단:
+
+- `SHORT_NO_END_FRAGMENT_UNITS` 조정은 recall/precision 절충만 바꾸고 final/ordered/boundary를 함께 개선하지 못한다.
+- `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=8`은 현재 corpus에서 no-op이고, `4`는 recall/F1 하락이다.
+- `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=1`은 전체 final/ordered F1을 소폭 올리지만 boundary 하락과 tag/case regression이 있어 채택하지 않는다.
+- 현 시점의 공통 파라미터 축에서는 채택 가능한 개선값이 없다.
+- 다음 개선은 단순 threshold 변경이 아니라, `candidate_delta_trimmed + candidate_duplicate_suppressed`가 실제로 같은 발화의 중복 억제인지, 또는 staged/queue를 잘못 소비해 expected 문장을 잃는지 구분할 수 있는 lifecycle evidence 보강이 우선이다.
+
+### 2026-06-22 zero-support 케이스 정의 오류 감사
+
+목적:
+
+- 벤치 점수가 낮은 이유가 앱 로직이 아니라 expected_final 정의 오류인지 다시 확인한다.
+- 이전 zero-support 제거는 `expected_final`이 2개 이상인 케이스에 집중되어 있었으므로, 단일 expected 케이스에도 같은 기준을 적용한다.
+
+감사 기준:
+
+- 각 expected_final 문장을 입력 `chunks` 전체와 비교한다.
+- `_expected_sentence_support()` 기준 best similarity가 `0.0`이면 입력에 전혀 지지되지 않는 expected로 본다.
+- expected가 단일 문장이어도 이 기준을 동일하게 적용한다.
+
+감사 결과:
+
+```text
+before:
+  case_count=1059
+  zero_support_any_expected_count=6
+
+zero-support cases:
+  ko_log_draft_20260620_avc_whisper_log_002767
+  ko_log_draft_20260620_avc_whisper_log_002768
+  ko_log_draft_20260620_avc_whisper_log_002769
+  zh_log_draft_20260620_avc_whisper_log_11_001011
+  zh_log_draft_20260620_avc_whisper_log_11_001012
+  zh_log_draft_20260620_avc_whisper_log_11_001013
+```
+
+예시:
+
+```text
+ko expected:
+  이거를 우리가 끌고 가겠다.
+ko chunks:
+  이런 태세 전환도 필요하고 정부도 사실은 최근에...
+
+zh expected:
+  我靠在你的肩膀上，让我释放。
+zh chunks:
+  I never wanna ever leave your side...
+```
+
+조치:
+
+- 6건 모두 입력 chunk에 expected가 전혀 없으므로 수집/라벨 오류로 제거했다.
+
+검증:
+
+```text
+case_count=1053
+expected_final_case_count=1049
+draft_count=0
+corpus_role=challenge-replay
+language_counts:
+  en=383
+  ko=363
+  zh=307
+
+zero_support_any_expected_count=0
+
+./.venv/bin/python -m unittest \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_parameter_sweep \
+  tests.unit.test_dictation_pipeline_nodes
+Ran 69 tests in 0.014s, OK
+```
+
+CUDA 벤치:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --model sat-3l-sm \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-pruned-single-zero-support-report.json
+```
+
+직전 1059건 corpus 대비:
+
+```text
+case_count -6
+finalized 0
+stage_start 0
+finalized_per_stage_start +0.0000000000
+final_precision_avg +0.0034341160
+final_recall_avg +0.0029354461
+final_f1_avg +0.0030378212
+final_ordered_f1_avg +0.0029097173
+final_boundary_f1_avg +0.0007461281
+case_exact_match 0
+pending_exact_match -4
+staged_exact_match -6
+```
+
+저득점 분포:
+
+```text
+final_f1 < 0.35:
+  case_count=244
+  review_needed=195
+  single=17
+  supported_monotonic=32
+
+final_f1 < 0.50:
+  case_count=408
+  review_needed=330
+  single=18
+  supported_monotonic=60
+
+final_f1 < 0.65:
+  case_count=613
+  review_needed=502
+  single=19
+  supported_monotonic=92
+```
+
+판단:
+
+- 이번 지표 개선은 앱 로직 개선이 아니라 벤치 정의 오류 제거 효과다.
+- 단일 expected라도 입력에 전혀 지지되지 않으면 성능 근거로 쓰면 안 된다.
+- 이제 현재 case set에는 best similarity 0.0 expected가 남아 있지 않다.
+- 남은 `review_needed=714`는 부분 지지, 순서 역전, 긴 expected 묶음이 섞여 있으므로 자동 삭제하지 않는다.
+- 다음 케이스 감사는 `review_needed` 중 “expected 순서가 입력 관측 순서와 어긋난 케이스”와 “expected_final에 너무 많은 문장을 넣은 케이스”를 별도 기준으로 검토해야 한다.
+
 ### 2026-06-22 quality block 병목 재해석
 
 목적:
@@ -15487,6 +15728,439 @@ OK
 
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
+
+### 2026-06-22 벤치 케이스 정의 오류 추가 감사
+
+목적:
+
+- 정제된 `case_count=1044` corpus에 아직 앱 로직 문제가 아니라 케이스 정의 오류로 볼 수 있는 항목이 남아 있는지 확인한다.
+- 낮은 `final_f1` 자체는 삭제 근거가 아니므로, 입력 chunk와 `expected_final`의 지지 관계를 기준으로만 판단한다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  validate-cases tests/eval/dictation_ai/sbd_cases --max-drafts 0
+
+case_count=1044
+expected_final_case_count=1040
+draft_count=0
+language_counts:
+  en=383
+  ko=357
+  zh=304
+```
+
+입력 근거 감사:
+
+```text
+no_expected=4
+weak_no_evidence=21
+expected가 있는 weak_no_evidence=17
+coverage_max buckets:
+  lt_0.30=4
+  0.30..0.40=2
+  0.40..0.50=4
+  0.50..0.60=11
+  >=0.60=1023
+```
+
+해석:
+
+- `coverage_max < 0.30`에 남은 4건은 `expected_final=[]`인 negative/suppression 케이스다.
+  - `en_lifecycle_pending_001`
+  - `ko_log_mixed_asset_pumping_repeat_fragment_20260618_001`
+  - `ko_log_no_text_should_not_age_residual_reporter_20260619_001`
+  - `ko_log_no_text_stale_stage_suppression_residual_mic_20260620_001`
+- expected가 있는 케이스 중 `coverage_max < 0.30`은 더 이상 없다.
+- expected가 있는 weak input evidence 17건은 `coverage_max=0.312..0.571` 범위다. 입력 일부와 연결되므로 자동 삭제하지 않는다.
+- 이 17건은 점수 해석에서 `weak_input_evidence_review`로 분리하고, 논문/주장용 clean subset에서는 제외하는 것이 맞다.
+
+판단:
+
+- 이번 감사에서 추가 삭제할 케이스 정의 오류는 발견하지 못했다.
+- 이후 삭제는 `expected_final`이 입력 chunk 어느 곳에서도 0.30 미만으로만 지지되거나, 원 로그 확인 결과 사람이 잘못 라벨링한 근거가 확인될 때만 진행한다.
+- 낮은 F1이면서 `supported_monotonic + input_evidence.has_evidence + expected_quality_flags 없음`인 케이스는 케이스 정의 오류가 아니라 앱 lifecycle 개선 후보로 본다.
+
+### 2026-06-22 오른쪽 문맥 기반 staged final 규칙 검증
+
+목적:
+
+- clean low subset에서 pending overrun보다 `delta/recent-final trimming`, `duplicate suppression`, `revision token-sentence deferred`와 함께 staged residue가 반복됐다.
+- 이전 chunk부터 staged로 유지된 후보 뒤에 다른 candidate가 도착하면, 그 뒤 후보는 앞 후보의 오른쪽 문맥 역할을 할 수 있다.
+- 단, 같은 chunk에서 막 생성된 staged 후보까지 즉시 final하면 stale queue burst가 false final로 소비될 수 있으므로 보수 조건을 둔다.
+
+규칙:
+
+- active staged 후보가 이전 chunk부터 유지됐다.
+- candidate buffer에 뒤따르는 후보가 있다.
+- staged 후보가 종결 경계와 final 품질 게이트를 통과한다.
+- 뒤 후보가 staged 후보의 deferred revision extension이면 final하지 않는다.
+- 같은 chunk에서 생성/승격된 staged 후보는 이 규칙으로 즉시 final하지 않는다.
+
+구현:
+
+- `src/app/dictation_transcript_logic.py`
+  - `_should_finalize_with_right_context()` 추가
+- `src/app/dictation_pipeline_loop.py`
+  - `finalize_right_context_staged_sentences()` 추가
+  - `active_stage.deferredAgeChunk < chunks` 조건으로 같은 chunk 즉시 final을 차단
+- `tests/eval/dictation_ai/benchmark/sbd_lifecycle_replay.py`
+  - 운영 로직과 같은 replay 경로 추가
+- `tests/eval/dictation_ai/benchmark/sbd_benchmark_report.py`
+  - `stage_finalize_right_context` 관측 지표 추가
+
+채택 전 aggressive 시도:
+
+```text
+report=.tmp/eval/dictation-ai-sbd/current-20260622-right-context-finalize-report.json
+stage_finalize_right_context=1731
+final_f1_delta=+0.0077
+recall_delta=+0.0132
+precision_delta=-0.0014
+boundary_f1_delta=+0.0044
+```
+
+판단:
+
+- 전체 F1은 더 올랐지만, 같은 chunk에서 막 만들어진 조각이 즉시 final되는 퇴행이 있었다.
+- 예: 중국어 마사지/煲仔饭 계열에서 기존 `1.0` 또는 `0.909` 케이스가 과도한 조각 final로 크게 하락했다.
+- 따라서 aggressive 규칙은 폐기했다.
+
+채택한 conservative 결과:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --model sat-3l-sm \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-right-context-aged-report.json
+
+cases=1044
+finalized=4953
+stage_start=9099
+stage_finalize_right_context=258
+finalized_per_stage_start=0.5443455325
+final_precision_avg=0.6115715609
+final_recall_avg=0.5282103358
+final_f1_avg=0.5446897006
+final_ordered_f1_avg=0.5215392535
+final_boundary_f1_avg=0.1335557153
+case_exact_match=27
+pending_exact_match=638
+staged_exact_match=379
+```
+
+직전 정제 baseline 대비:
+
+```text
+finalized_delta=+48
+stage_start_delta=+38
+finalized_per_stage_start_delta=+0.0030145536
+final_precision_avg_delta=+0.0002248979
+final_recall_avg_delta=+0.0056376574
+final_f1_avg_delta=+0.0038920591
+final_ordered_f1_avg_delta=+0.0035468705
+final_boundary_f1_avg_delta=+0.0007288296
+case_exact_match_delta=+2
+staged_exact_match_delta=+11
+```
+
+언어별 변화:
+
+```text
+en:
+  final_f1_delta=+0.00351
+  ordered_f1_delta=+0.00369
+  precision_delta=+0.00311
+  recall_delta=+0.00429
+  boundary_f1_delta=-0.00021
+
+ko:
+  final_f1_delta=+0.00204
+  ordered_f1_delta=+0.00204
+  precision_delta=-0.00525
+  recall_delta=+0.00577
+  boundary_f1_delta=+0.00119
+
+zh:
+  final_f1_delta=+0.00655
+  ordered_f1_delta=+0.00513
+  precision_delta=+0.00302
+  recall_delta=+0.00718
+  boundary_f1_delta=+0.00137
+```
+
+판단:
+
+- conservative 규칙은 세 언어 모두 final/ordered F1을 올렸고, 전체 precision도 유지했다.
+- 개선 폭은 작지만 `case_count=1044` 전체 corpus에서 CUDA `sat + cuda + float16`로 검증된 일반 lifecycle 개선이다.
+- 효과는 “더 빨리 아무 staged나 확정”이 아니라, 이전 chunk부터 유지된 staged 후보가 오른쪽 문맥을 얻었을 때 생성순서대로 소비하는 것이다.
+- 같은 chunk 즉시 final 금지는 유지해야 한다.
+
+### 2026-06-22 weak input evidence 케이스 정의 오류 감사
+
+목적:
+
+- 받아쓰기 확정 성능 평가에서 앱 로직 문제가 아니라 수집/라벨 정의 오류에 가까운 케이스를 분리한다.
+- `expected_final`이 실제 STT window 입력에서 충분히 지지되지 않으면 finalization 성능 지표를 왜곡할 수 있으므로 제거 근거를 명확히 한다.
+
+기준:
+
+- `case_input_evidence.has_evidence == false`
+- `coverage_max < 0.30`
+- 이 기준은 expected 문장이 입력 chunk 어느 곳에서도 0.60 이상 지지되지 않고, 최대 연속 단위 coverage도 0.30 미만인 경우만 제거한다.
+- `coverage_max >= 0.30` 케이스는 STT drift 또는 부분 입력 가능성이 남아 있으므로 보수적으로 유지한다.
+
+제거:
+
+- `ko_log_draft_20260620_avc_whisper_log_002770`
+- `ko_log_draft_20260620_avc_whisper_log_002771`
+- `ko_log_draft_20260620_avc_whisper_log_1_002700`
+- `ko_log_draft_20260620_avc_whisper_log_1_002708`
+- `ko_log_draft_20260620_avc_whisper_log_1_002709`
+- `ko_log_draft_20260620_avc_whisper_log_1_002710`
+- `zh_log_draft_20260620_avc_whisper_log_11_000939`
+- `zh_log_draft_20260620_avc_whisper_log_11_000940`
+- `zh_log_draft_20260620_avc_whisper_log_11_000941`
+
+결과:
+
+```text
+case_count=1044
+expected_final_case_count=1040
+draft_count=0
+language_counts={'en': 383, 'ko': 357, 'zh': 304}
+weak_no_evidence_total=17
+coverage_max_lt_0.20=0
+coverage_max_lt_0.30=0
+coverage_max_lt_0.40=2
+coverage_max_lt_0.50=6
+coverage_max_lt_0.60=17
+```
+
+CUDA 벤치:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --model sat-3l-sm \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-pruned-weak-input-evidence-report.json
+
+cases=1044
+finalized=4905
+stage_start=9061
+finalized_per_stage_start=0.5413309789
+final_precision_avg=0.6113466630
+final_recall_avg=0.5225726785
+final_f1_avg=0.5407976415
+final_ordered_f1_avg=0.5179923830
+final_boundary_f1_avg=0.1328268857
+case_exact_match=25
+pending_exact_match=638
+staged_exact_match=368
+```
+
+직전 `current-20260622-pruned-single-zero-support-report.json` 대비:
+
+```text
+removed_cases=9
+finalized_delta=-2
+stage_start_delta=-4
+finalized_per_stage_start_delta=+0.0000182376
+final_precision_avg_delta=+0.0052251852
+final_recall_avg_delta=+0.0044664331
+final_f1_avg_delta=+0.0046222021
+final_ordered_f1_avg_delta=+0.0044272853
+final_boundary_f1_avg_delta=+0.0011352725
+case_exact_match_delta=0
+pending_exact_match_delta=-3
+staged_exact_match_delta=-9
+```
+
+판단:
+
+- 제거한 9개는 expected가 입력 chunk와 거의 연결되지 않아 누락/중복 확정 성능을 평가하는 정식 케이스로 보기 어렵다.
+- 남은 weak input evidence 케이스는 coverage가 0.30 이상이므로 자동 제거하지 않고, 필요 시 별도 리뷰 대상으로 유지한다.
+- 지표 상승은 앱 로직 개선이 아니라 벤치 정의 오류 제거 효과로 해석한다.
+
+### 2026-06-22 정제 corpus 기준 lifecycle 파라미터 sweep
+
+목적:
+
+- `case_count=1044`로 정제된 challenge replay corpus에서 일반화 가능한 파이프라인 상수 변경 후보를 재검토한다.
+- 단어/언어별 예외가 아니라 queue stale, delta 보류, 짧은 CJK confirmation, revision fallback coverage 같은 공통 생명주기 원칙만 비교한다.
+
+실행:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py run-sweep \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-1044-lifecycle-20260622 \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-1044-lifecycle-20260622/summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-1044-lifecycle-20260622/summary.md \
+  --include-baseline \
+  --param DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=1 \
+  --param DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=3 \
+  --param STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=4 \
+  --param STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=8 \
+  --param SHORT_CJK_CONFIRM_EXTRA_CHUNKS=0 \
+  --param SHORT_CJK_CONFIRM_EXTRA_CHUNKS=2 \
+  --param REVISION_FALLBACK_COVERAGE_MIN=0.50 \
+  --param REVISION_FALLBACK_COVERAGE_MIN=0.60
+```
+
+baseline:
+
+```text
+case_count=1044
+expected_final_case_count=1040
+runtime=sat + cuda + float16
+final_precision_avg=0.6113
+final_recall_avg=0.5226
+final_f1_avg=0.5408
+final_ordered_f1_avg=0.5180
+final_boundary_f1_avg=0.1328
+finalized_per_stage_start=0.5413
+```
+
+결과:
+
+```text
+DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=1
+  final_f1_delta=+0.0003
+  ordered_f1_delta=+0.0003
+  boundary_f1_delta=-0.0003
+  adoption_review=review-risk
+
+DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=3
+  final_f1_delta=-0.0002
+  ordered_f1_delta=-0.0002
+  boundary_f1_delta=+0.0003
+  adoption_review=review-risk
+
+STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=4
+  final_f1_delta=-0.0007
+  ordered_f1_delta=-0.0003
+  boundary_f1_delta=+0.0000
+  adoption_review=review-risk
+
+STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=8
+  final_f1_delta=+0.0000
+  ordered_f1_delta=+0.0000
+  boundary_f1_delta=+0.0000
+  adoption_review=no-risk-flag
+
+SHORT_CJK_CONFIRM_EXTRA_CHUNKS=0
+  final_f1_delta=-0.0180
+  ordered_f1_delta=-0.0166
+  precision_delta=-0.0379
+  boundary_f1_delta=-0.0076
+  finalized_per_stage_start_delta=+0.0428
+  adoption_review=review-risk
+
+SHORT_CJK_CONFIRM_EXTRA_CHUNKS=2
+  final_f1_delta=-0.0061
+  ordered_f1_delta=-0.0075
+  precision_delta=+0.0050
+  recall_delta=-0.0158
+  boundary_f1_delta=-0.0106
+  adoption_review=review-risk
+
+REVISION_FALLBACK_COVERAGE_MIN=0.50
+  final_f1_delta=-0.0013
+  ordered_f1_delta=-0.0018
+  boundary_f1_delta=-0.0002
+  adoption_review=review-risk
+
+REVISION_FALLBACK_COVERAGE_MIN=0.60
+  final_f1_delta=-0.0013
+  ordered_f1_delta=-0.0012
+  boundary_f1_delta=-0.0010
+  adoption_review=review-risk
+```
+
+판단:
+
+- 이번 sweep에서는 `src/app` 기본 상수로 반영할 후보가 없다.
+- `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=1`은 전체 F1이 아주 작게 오르지만 boundary 하락과 케이스별 큰 퇴행이 있어 채택하지 않는다.
+- `SHORT_CJK_CONFIRM_EXTRA_CHUNKS=0`은 짧은 문장을 빨리 final로 보내지만 precision과 boundary가 크게 하락한다. 짧은 문장 누락 문제를 confirmation 완화로 해결하는 방향은 중복/조각 확정을 악화시킨다.
+- `SHORT_CJK_CONFIRM_EXTRA_CHUNKS=2`는 precision은 조금 오르지만 recall, ordered F1, boundary가 하락한다. 현재 기본값 1이 더 균형적이다.
+- `REVISION_FALLBACK_COVERAGE_MIN`을 느슨하게 하거나 엄격하게 하는 단순 조정은 개선 근거가 없다.
+- 다음 개선 후보는 상수 변경보다 low-score 케이스의 정의 품질을 더 분리하고, `pending_overrun`/`stage_queue`가 실제 누락으로 이어지는 구조를 케이스 단위로 설명할 수 있는 지표를 보강하는 쪽이다.
+
+### 2026-06-22 clean low bottleneck 요약 보강
+
+목적:
+
+- 저득점 케이스 전체에는 `no_terminal_expected`, `lowercase_or_connector_start`, 부분 입력 근거 같은 케이스 정의 취약성이 섞여 있다.
+- 앱 로직 변경은 `expected_final`이 입력에서 monotonic하게 지지되고, 입력 근거가 있으며, expected quality flag가 없는 clean subset에서 먼저 판단해야 한다.
+- 기존 supported-low 교차 분석에 `pending_overrun` 계열이 빠져 있어 pending 병목의 실제 비중을 확인하기 어려웠다.
+
+변경:
+
+- `tests/eval/dictation_ai/benchmark/sbd_benchmark_report.py`
+  - `SUPPORTED_LOW_BOTTLENECK_METRICS`에 `pending_overrun`, `pending_quality_overrun_long_no_boundary`, `pending_quality_repeated_word_ngram`을 추가했다.
+  - `clean_low_bottleneck_intersection_summary`를 추가했다.
+  - clean 조건은 `supported_monotonic`, `input_evidence.has_evidence`, `expected_quality_flags 없음`이다.
+
+CUDA 벤치:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --model sat-3l-sm \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260622-clean-bottleneck-report.json
+
+cases=1044
+finalized=4905
+stage_start=9061
+finalized_per_stage_start=0.5413309789
+final_f1_avg=0.5407976415
+final_ordered_f1_avg=0.5179923830
+final_boundary_f1_avg=0.1328268857
+```
+
+clean low subset:
+
+```text
+threshold < 0.35:
+  case_count=10
+  avg_final_f1=0.2557
+  staged_residue_count=8
+  underfinal_count=1
+  overfinal_count=8
+  top_pair=candidate_delta_trimmed + candidate_duplicate_suppressed
+
+threshold < 0.50:
+  case_count=20
+  avg_final_f1=0.3060
+  staged_residue_count=17
+  underfinal_count=5
+  overfinal_count=12
+  top_pair=candidate_recent_final_delta_trimmed + candidate_duplicate_suppressed
+
+threshold < 0.65:
+  case_count=36
+  avg_final_f1=0.4060
+  staged_residue_count=31
+  underfinal_count=15
+  overfinal_count=14
+  top_pair=stage_revision_token_sentence_deferred + candidate_duplicate_suppressed
+```
+
+판단:
+
+- `pending_overrun`은 전체 저득점 분포에서는 평균 F1이 낮은 축이지만, clean low subset에서는 주도 병목이 아니다.
+- clean subset의 반복 병목은 pending보다 `delta/recent-final trimming`, `duplicate suppression`, `revision token-sentence deferred`가 같이 나타나는 구간이다.
+- 따라서 다음 앱 로직 개선 후보는 pending overrun 상수 조정보다, 최근 final과 새 후보의 delta trimming이 실제 신규 문장까지 과도하게 잘라내는지 판별하는 일반 기준을 찾아야 한다.
+- 이번 변경은 리포트/분석 지표 보강이며, 앱 실행 로직은 변경하지 않았다.
 
 ### 2026-06-22 저득점 케이스 수집/라벨 오염 가능성 분리
 

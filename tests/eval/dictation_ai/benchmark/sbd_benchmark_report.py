@@ -44,6 +44,7 @@ LIFECYCLE_BOTTLENECK_METRICS = (
     "stage_queue_revision_preempt_deferred_replaced_confirmed",
     "stage_queue_revision_preempt_deferred_terminal_tail_revision_split",
     "stage_finalize_deferred_for_queue_revision",
+    "stage_finalize_right_context",
     "stage_age_hold",
     "stage_age_tick",
     "stage_age_finalize",
@@ -160,11 +161,15 @@ LOW_SCORE_METRIC_PREFIXES = (
     "stage_",
 )
 SUPPORTED_LOW_BOTTLENECK_METRICS = (
+    "pending_overrun",
+    "pending_quality_overrun_long_no_boundary",
+    "pending_quality_repeated_word_ngram",
     "stage_candidate_quality_blocked",
     "stage_revision_token_sentence_deferred",
     "stage_age_quality_blocked",
     "stage_replace_deferred",
     "stage_finalize_deferred_for_queue_revision",
+    "stage_finalize_right_context",
     "stage_queue_revision",
     "candidate_recent_final_delta_trimmed",
     "candidate_delta_trimmed",
@@ -404,6 +409,35 @@ def summarize_supported_low_bottleneck_intersections(
         "interpretation": (
             "These are low-score cases whose expected_final sentences are supported by input chunks in monotonic order. "
             "Use them before changing app logic; review_needed cases may be collection or labeling issues."
+        ),
+        "metric_candidates": list(SUPPORTED_LOW_BOTTLENECK_METRICS),
+        "thresholds": thresholds,
+    }
+
+
+def summarize_clean_low_bottleneck_intersections(
+    cases: list[SbdCase],
+    results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Return low-score bottlenecks after excluding known case-definition review flags."""
+    support_by_id = {case.id: _expected_final_order_support_kind(case) for case in cases}
+    thresholds: dict[str, dict[str, Any]] = {}
+    for threshold in LOW_SCORE_THRESHOLDS:
+        low_results = [
+            result
+            for result in results
+            if support_by_id.get(str(result.get("id")), "unknown") == "supported_monotonic"
+            and result.get("expected_final")
+            and isinstance(result.get("final_score"), dict)
+            and float(dict(result.get("final_score", {})).get("f1", 0.0)) < threshold
+            and not result.get("expected_quality_flags")
+            and dict(result.get("input_evidence", {})).get("has_evidence")
+        ]
+        thresholds[f"{threshold:.2f}"] = _summarize_supported_low_threshold(low_results, threshold)
+    return {
+        "interpretation": (
+            "Clean low-score cases are supported_monotonic, have input evidence, and have no expected_quality_flags. "
+            "Prefer this subset for app logic changes; broader low-score groups can still be label or source review work."
         ),
         "metric_candidates": list(SUPPORTED_LOW_BOTTLENECK_METRICS),
         "thresholds": thresholds,
@@ -1115,6 +1149,7 @@ def build_benchmark_report(
     expected_order_support_result_summary = summarize_results_by_expected_order_support(cases, results)
     low_score_characteristics_summary = summarize_low_score_characteristics(cases, results)
     supported_low_bottleneck_intersection_summary = summarize_supported_low_bottleneck_intersections(cases, results)
+    clean_low_bottleneck_intersection_summary = summarize_clean_low_bottleneck_intersections(cases, results)
     expected_final_case_count = sum(1 for case in cases if case.expected_final)
     case_summary = {
         "case_count": len(results),
@@ -1190,6 +1225,7 @@ def build_benchmark_report(
         "expected_order_support_result_summary": expected_order_support_result_summary,
         "low_score_characteristics_summary": low_score_characteristics_summary,
         "supported_low_bottleneck_intersection_summary": supported_low_bottleneck_intersection_summary,
+        "clean_low_bottleneck_intersection_summary": clean_low_bottleneck_intersection_summary,
         "queue_residue_strata_summary": queue_residue_strata_summary,
         "evidence_strata_summary": evidence_strata_summary,
         "expected_quality_strata_summary": expected_quality_strata_summary,

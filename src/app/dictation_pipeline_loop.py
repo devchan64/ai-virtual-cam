@@ -46,6 +46,7 @@ from src.app.dictation_transcript_logic import (
     _should_defer_token_sentence_revision,
     _should_defer_unconfirmed_replacement,
     _should_finalize_before_replacement,
+    _should_finalize_with_right_context,
     _should_finalize_replaced_sentence,
     _should_preserve_revision_confirmation_from_internal_stability,
     _should_preserve_staged_output_when_delta_fragment,
@@ -832,6 +833,24 @@ def run_transcribe_loop(
             count_metric("stage_age_finalize")
             return finalize_staged_sentence(detected, "aged_forced" if active_stage.forced else "aged")
         return []
+    def finalize_right_context_staged_sentences(detected: str) -> list[tuple[int, str]]:
+        final_segments: list[tuple[int, str]] = []
+        while (
+            active_stage.sentence
+            and commit_buffer_node.queued_sentences()
+            and active_stage.deferredAgeChunk < chunks
+            and _should_finalize_with_right_context(
+                active_stage.sentence,
+                detected,
+                commit_buffer_node.queued_sentences(),
+            )
+        ):
+            count_metric("stage_finalize_right_context")
+            produced = finalize_staged_sentence(detected, "right_context")
+            if not produced:
+                break
+            final_segments.extend(produced)
+        return final_segments
     def suppress_stale_no_text_stage(detected: str) -> None:
         nonlocal no_text_stage_skip_chunks
         if not active_stage.sentence:
@@ -981,6 +1000,7 @@ def run_transcribe_loop(
                         if not pending_transcript_text:
                             pending_chunks = 0
                 if completed_sentences:
+                    final_segments.extend(finalize_right_context_staged_sentences(detected))
                     final_segments.extend(age_staged_sentence(detected, pending_transcript_text))
                 if pending_transcript_text:
                     count_segment_state("pending")

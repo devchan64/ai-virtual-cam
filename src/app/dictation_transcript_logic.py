@@ -1055,6 +1055,37 @@ def _should_finalize_before_replacement(
     return True
 
 
+def _should_finalize_with_right_context(
+    sentence: str,
+    language: str,
+    deferred_revision_sentences: tuple[str, ...] = (),
+) -> bool:
+    if not _normalized_text(sentence):
+        return False
+    if not deferred_revision_sentences:
+        return False
+    if _has_deferred_revision_extension(sentence, deferred_revision_sentences):
+        return False
+    if _sentence_end_count(sentence) <= 0:
+        return False
+    flags = set(_final_sentence_diagnostic_flags(sentence, language))
+    if flags.intersection(
+        {
+            "empty",
+            "spaced_cjk",
+            "cjk_repeated_ngram",
+            "repeated_word_ngram",
+            "latin_only_for_zh",
+            "short_no_end_fragment",
+            "trailing_ellipsis",
+        }
+    ):
+        return False
+    if _is_cjk_text(sentence) and flags.intersection({"short_cjk", "cjk_internal_gap"}):
+        return False
+    return True
+
+
 def _has_deferred_revision_extension(sentence: str, deferred_revision_sentences: tuple[str, ...]) -> bool:
     normalized_sentence = _normalized_text(sentence)
     sentence_words = _word_units(normalized_sentence)

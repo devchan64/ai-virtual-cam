@@ -35,6 +35,7 @@ from src.app.dictation_transcript_logic import (
     _should_defer_token_sentence_revision,
     _should_defer_unconfirmed_replacement,
     _should_finalize_before_replacement,
+    _should_finalize_with_right_context,
     _should_finalize_replaced_sentence,
     _should_preserve_revision_confirmation_from_internal_stability,
     _should_preserve_staged_output_when_delta_fragment,
@@ -879,6 +880,30 @@ def _age_staged_sentence(state: LifecycleState, language: str, sentence_finalize
     return _finalize_staged_sentence(state, language, "aged_forced" if state.staged_forced else "aged", chunk_index)
 
 
+def _finalize_right_context_staged_sentences(
+    state: LifecycleState,
+    language: str,
+    chunk_index: int,
+) -> list[str]:
+    produced: list[str] = []
+    while (
+        state.staged_sentence
+        and state.staged_queue
+        and state.staged_deferred_age_chunk < chunk_index
+        and _should_finalize_with_right_context(
+            state.staged_sentence,
+            language,
+            tuple(str(entry["sentence"]) for entry in state.staged_queue),
+        )
+    ):
+        state.count("stage_finalize_right_context")
+        finalized = _finalize_staged_sentence(state, language, "right_context", chunk_index)
+        if not finalized:
+            break
+        produced.extend(finalized)
+    return produced
+
+
 def _suppress_stale_no_text_stage(state: LifecycleState, chunk_index: int) -> None:
     if not state.staged_sentence:
         state.no_text_stage_skip_chunks = 0
@@ -966,6 +991,7 @@ def _run_lifecycle_case(case: SbdCase, detector: Any) -> dict[str, Any]:
                 if not state.pending_text:
                     state.pending_chunks = 0
         if completed:
+            produced.extend(_finalize_right_context_staged_sentences(state, case.language, chunk_index))
             produced.extend(_age_staged_sentence(state, case.language, case.sentence_finalize_age, chunk_index))
         if state.pending_text and completed:
             state.count("segment_state_pending")
