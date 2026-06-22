@@ -203,12 +203,15 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
             report["input_evidence_strata_summary"]["weak_input_evidence_review"]["case_count"],
             0,
         )
+        self.assertEqual(report["context_strata_summary"]["clean_context"]["case_count"], 1)
+        self.assertEqual(report["context_strata_summary"]["context_definition_review"]["case_count"], 0)
         self.assertEqual(report["collection_strata_summary"]["manual_named_case"]["case_count"], 1)
         strict_summary = report["strict_logic_candidate_summary"]
         self.assertEqual(strict_summary["strict_case_count"], 1)
         self.assertEqual(strict_summary["summary"]["final_f1_avg"], 1.0)
         self.assertEqual(strict_summary["collection_strata"]["manual_named_case"]["case_count"], 1)
         self.assertEqual(report["cases"][0]["expected_quality_flags"], [])
+        self.assertEqual(report["cases"][0]["case_context_flags"], [])
         self.assertTrue(report["cases"][0]["input_evidence"]["has_evidence"])
         self.assertTrue(report["cases"][0]["input_evidence"]["fully_supported"])
         self.assertEqual(report["cases"][0]["input_evidence"]["covered_count"], 2)
@@ -568,6 +571,69 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(summary["full_input_evidence"]["final_f1_avg"], 1.0)
         self.assertEqual(summary["partial_input_evidence_review"]["final_f1_avg"], 0.5)
         self.assertEqual(summary["weak_input_evidence_review"]["final_f1_avg"], 0.0)
+
+    def test_context_strata_flags_unmodeled_prefix_context(self) -> None:
+        args = Namespace(
+            model="sat-3l-sm",
+            device="cuda",
+            compute_type="float16",
+            min_final_f1=0.0,
+            fail_on_regression=False,
+        )
+        case = SbdCase(
+            id="prefix-context-case",
+            language="zh",
+            chunks=[
+                "前面的句子已经结束了。目标句子到了。",
+                "目标句子到了。第二句也到了。",
+            ],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=["目标句子到了。", "第二句也到了。"],
+            expected_staged="",
+            tags=("missing-final",),
+            sentence_finalize_age=3,
+        )
+        results = [
+            {
+                "id": "prefix-context-case",
+                "language": "zh",
+                "tags": ["missing-final"],
+                "expected_final": ["目标句子到了。", "第二句也到了。"],
+                "chunks": [
+                    {"input": "前面的句子已经结束了。目标句子到了。"},
+                    {"input": "目标句子到了。第二句也到了。"},
+                ],
+                "initial_final": [],
+                "actual_final": ["前面的句子已经结束了。", "目标句子到了。"],
+                "actual_pending": "",
+                "actual_staged": "第二句也到了。",
+                "actual_staged_queue": [],
+                "final_score": _score(0.5, 0.5, 0.5),
+                "final_ordered_score": _score(0.5, 0.5, 0.5),
+                "final_boundary_score": _score(0.5, 0.5, 0.5),
+                "completed_last_score": _score(0.0, 0.0, 0.0),
+                "pending_exact": True,
+                "staged_exact": False,
+                "case_exact_match": False,
+                "metrics": {"finalized": 2, "stage_start": 2},
+            }
+        ]
+
+        report = build_benchmark_report(
+            args=args,
+            case_sources=["cases.jsonl"],
+            corpus_role="challenge-replay",
+            cases=[case],
+            results=results,
+            metric_totals={"finalized": 2, "stage_start": 2},
+            elapsed_ms=1.0,
+        )
+
+        self.assertEqual(report["cases"][0]["case_context_flags"], ["unmodeled_prefix_context"])
+        self.assertEqual(report["context_strata_summary"]["context_definition_review"]["case_count"], 1)
+        self.assertEqual(report["context_strata_summary"]["clean_context"]["case_count"], 0)
+        self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
 
     def test_summarizes_evidence_strata_without_changing_scores(self) -> None:
         results = [

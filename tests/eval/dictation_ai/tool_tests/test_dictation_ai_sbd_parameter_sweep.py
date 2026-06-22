@@ -2104,6 +2104,14 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
                                 "final_boundary_f1_avg": 0.0,
                             },
                         },
+                        "context_strata_summary": {
+                            "clean_context": {"case_count": 90, "final_f1_avg": 0.50},
+                            "context_definition_review": {"case_count": 10, "final_f1_avg": 0.20},
+                        },
+                        "context_strata_deltas": {
+                            "clean_context": {"case_count": 0.0, "final_f1_avg": 0.0},
+                            "context_definition_review": {"case_count": 0.0, "final_f1_avg": 0.0},
+                        },
                         "case_exemplar_summary": {
                             "lifecycle_focus_top": [
                                 {
@@ -2362,6 +2370,14 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
                                 "final_boundary_f1_avg": -0.1,
                             },
                         },
+                        "context_strata_summary": {
+                            "clean_context": {"case_count": 91, "final_f1_avg": 0.58},
+                            "context_definition_review": {"case_count": 9, "final_f1_avg": 0.18},
+                        },
+                        "context_strata_deltas": {
+                            "clean_context": {"case_count": 1.0, "final_f1_avg": 0.08},
+                            "context_definition_review": {"case_count": -1.0, "final_f1_avg": -0.02},
+                        },
                         "case_exemplar_summary": {
                             "lifecycle_focus_top": [
                                 {
@@ -2465,6 +2481,12 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
         )
         self.assertIn("| baseline | 12 | 0.7600 | +0.0000 | 0.4000 | +0.0000 | 3 | +0.0000 |", markdown)
         self.assertIn("| sentence_confirm_chunks-1 | 12 | 0.7800 | +0.0200 | 0.3900 | -0.0100 | 2 | -1.0000 |", markdown)
+        self.assertIn(
+            "| label | clean_context_cases | clean_context_f1 | context_review_cases | context_review_f1 | context_review_cases_delta | context_review_f1_delta |",
+            markdown,
+        )
+        self.assertIn("| baseline | 90 | 0.5000 | 10 | 0.2000 | +0.0000 | +0.0000 |", markdown)
+        self.assertIn("| sentence_confirm_chunks-1 | 91 | 0.5800 | 9 | 0.1800 | -1.0000 | -0.0200 |", markdown)
         self.assertIn(
             "| sentence_confirm_chunks-1 | review-risk | overall-final-f1-up-precision-down, language-final-f1-regression, language-precision-regression |",
             markdown,

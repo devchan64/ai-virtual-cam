@@ -179,6 +179,7 @@ def _load_report_summary(job: SweepJob) -> dict[str, Any]:
         "evidence_strata_summary": report.get("evidence_strata_summary", {}),
         "expected_quality_strata_summary": report.get("expected_quality_strata_summary", {}),
         "input_evidence_strata_summary": report.get("input_evidence_strata_summary", {}),
+        "context_strata_summary": report.get("context_strata_summary", {}),
         "collection_strata_summary": report.get("collection_strata_summary", {}),
         "strict_logic_candidate_summary": report.get("strict_logic_candidate_summary", {}),
         "case_exemplar_summary": report.get("case_exemplar_summary", {}),

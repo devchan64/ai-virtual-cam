@@ -264,6 +264,7 @@ def attach_baseline_deltas(results: list[dict[str, Any]]) -> list[dict[str, Any]
     baseline_strata = dict(baseline.get("evidence_strata_summary", {}))
     baseline_expected_quality_strata = dict(baseline.get("expected_quality_strata_summary", {}))
     baseline_input_evidence_strata = dict(baseline.get("input_evidence_strata_summary", {}))
+    baseline_context_strata = dict(baseline.get("context_strata_summary", {}))
     baseline_collection_strata = dict(baseline.get("collection_strata_summary", {}))
     baseline_strict_logic = dict(baseline.get("strict_logic_candidate_summary", {}))
     baseline_strict_summary = dict(baseline_strict_logic.get("summary", {}))
@@ -332,6 +333,13 @@ def attach_baseline_deltas(results: list[dict[str, Any]]) -> list[dict[str, Any]
                 continue
             input_evidence_strata_deltas[stratum] = _numeric_deltas(stratum_summary, baseline_summary)
         item["input_evidence_strata_deltas"] = input_evidence_strata_deltas
+        context_strata_deltas: dict[str, dict[str, float]] = {}
+        for stratum, stratum_summary in dict(result.get("context_strata_summary", {})).items():
+            baseline_summary = baseline_context_strata.get(stratum, {})
+            if not isinstance(stratum_summary, dict) or not isinstance(baseline_summary, dict):
+                continue
+            context_strata_deltas[stratum] = _numeric_deltas(stratum_summary, baseline_summary)
+        item["context_strata_deltas"] = context_strata_deltas
         collection_strata_deltas: dict[str, dict[str, float]] = {}
         for stratum, stratum_summary in dict(result.get("collection_strata_summary", {})).items():
             baseline_summary = baseline_collection_strata.get(stratum, {})
@@ -489,6 +497,8 @@ def build_evidence_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
                 "expected_quality_strata_deltas": result.get("expected_quality_strata_deltas", {}),
                 "input_evidence_strata_summary": result.get("input_evidence_strata_summary", {}),
                 "input_evidence_strata_deltas": result.get("input_evidence_strata_deltas", {}),
+                "context_strata_summary": result.get("context_strata_summary", {}),
+                "context_strata_deltas": result.get("context_strata_deltas", {}),
                 "collection_strata_summary": result.get("collection_strata_summary", {}),
                 "collection_strata_deltas": result.get("collection_strata_deltas", {}),
                 "strict_logic_candidate_summary": result.get("strict_logic_candidate_summary", {}),
@@ -653,6 +663,29 @@ def _append_evidence_summary_markdown(lines: list[str], evidence_summary: dict[s
             f"{_format_markdown_delta(strict_summary_deltas.get('final_boundary_f1_avg'))} | "
             f"{_format_markdown_number(strict_low.get('case_count'))} | "
             f"{_format_markdown_delta(strict_low_deltas.get('case_count'))} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "| label | clean_context_cases | clean_context_f1 | context_review_cases | context_review_f1 | context_review_cases_delta | context_review_f1_delta |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for result in all_results:
+        context_strata = dict(result.get("context_strata_summary", {}))
+        clean_context = dict(context_strata.get("clean_context", {}))
+        context_review = dict(context_strata.get("context_definition_review", {}))
+        context_deltas = dict(result.get("context_strata_deltas", {}))
+        context_review_deltas = dict(context_deltas.get("context_definition_review", {}))
+        lines.append(
+            f"| {result.get('label', '')} | "
+            f"{_format_markdown_number(clean_context.get('case_count'))} | "
+            f"{_format_markdown_number(clean_context.get('final_f1_avg'))} | "
+            f"{_format_markdown_number(context_review.get('case_count'))} | "
+            f"{_format_markdown_number(context_review.get('final_f1_avg'))} | "
+            f"{_format_markdown_delta(context_review_deltas.get('case_count'))} | "
+            f"{_format_markdown_delta(context_review_deltas.get('final_f1_avg'))} |"
         )
 
     lines.extend(

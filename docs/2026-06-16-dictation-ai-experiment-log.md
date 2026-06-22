@@ -15907,6 +15907,105 @@ Ran 38 tests, OK
   --not-paper-evidence
 ```
 
+### 2026-06-23 unmodeled prefix context 케이스 진단
+
+문제:
+
+- `strict_logic_candidate`는 expected 문장이 입력 chunk에 있고 순서가 monotonic인지 확인하지만, chunk 앞부분에 이미 끝난 이전 문장이 들어 있는지까지 보지 않았다.
+- 실제 앱에서는 그 앞부분이 이미 final로 확정된 상태일 수 있다. 그런데 replay case에서 `initial_final`로 모델링하지 않으면, benchmark는 앞 context를 새 false final처럼 계산한다.
+- 이 경우 낮은 점수는 앱 로직 실패라기보다 replay case 정의가 불완전한 증상이다.
+
+예시:
+
+```text
+zh_log_missing_artist_portrait_fragment_20260617_001
+chunk[0]=我跟贺四豆...真的？站了。嗯。看到一件很有特色的店呢...
+expected_final[0]=看到一件很有特色的店呢。
+actual_final includes=我跟贺四豆..., 真的？, 站了。
+```
+
+해석:
+
+- `看到一件很有特色的店呢。` 앞에 종결된 context가 있다.
+- 이 prefix가 이미 확정된 상태였는지, 아니면 expected_final에 포함되어야 하는지 case 정의에서 결정되지 않았다.
+- 따라서 이 케이스는 앱 로직 튜닝 근거로 바로 쓰지 않고 context 정의 검토 대상으로 분리한다.
+
+반영:
+
+- `sbd_benchmark_report.py`에 `case_context_flags=["unmodeled_prefix_context"]` 진단을 추가했다.
+- 첫 expected 문장이 등장하기 전 같은 chunk에 종결부가 있는 prefix가 있고 `initial_final`이 비어 있으면 flag를 부여한다.
+- `strict_logic_candidate`는 이 flag가 있는 케이스를 제외한다.
+- `context_strata_summary`와 sweep markdown의 context 표를 추가해, 이후 파라미터 변화가 clean context에 작동하는지 별도로 본다.
+
+CUDA 결과:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260623-context-flags-report.json
+```
+
+전체 score는 이전 `current-20260623-case-strata-report.json`과 동일하다.
+
+```text
+finalized=4940
+stage_start=9078
+final_f1_avg=0.550492743360324
+final_ordered_f1_avg=0.5269590853705198
+final_boundary_f1_avg=0.13401379432590774
+```
+
+context 진단:
+
+```text
+case_context_flags=126
+language: en=83, zh=41, ko=2
+collection: reviewed_log_work_item=80, manual_log_case=46
+
+clean_context:
+  case_count=901
+  final_f1_avg=0.5535332353786532
+  final_boundary_f1_avg=0.14314341127901695
+
+context_definition_review:
+  case_count=126
+  final_f1_avg=0.5287508123403675
+```
+
+strict 후보 변화:
+
+```text
+strict_case_count: 144 -> 124
+strict final_f1_avg: 0.7660832223332223 -> 0.7791216400087367
+strict boundary_f1_avg: 0.3971291825458492 -> 0.4406875830262927
+strict low<0.35: 10 -> 10
+strict low<0.50: 19 -> 15
+strict low<0.65: 33 -> 28
+```
+
+결론:
+
+- 낮은 strict 점수 일부는 앱 로직보다 case replay context 모델링 문제였다.
+- 이후 앱 로직 변경은 `strict_logic_candidate`와 `clean_context`를 우선 기준으로 봐야 한다.
+- `unmodeled_prefix_context` 케이스는 삭제하지 않는다. 대신 `initial_final` 보강 또는 expected_final 재정의 검토 대상으로 둔다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_parameter_sweep
+Ran 53 tests, OK
+
+./.venv/bin/python -m py_compile \
+  tests/eval/dictation_ai/benchmark/sbd_benchmark_report.py \
+  tests/eval/dictation_ai/sweeps/run_sbd_parameter_sweep.py \
+  tests/eval/dictation_ai/sweeps/sbd_parameter_sweep_report.py \
+  tests/eval/dictation_ai/tool_tests/test_dictation_ai_sbd_benchmark_report.py \
+  tests/eval/dictation_ai/tool_tests/test_dictation_ai_sbd_parameter_sweep.py
+```
+
 ### 2026-06-23 challenge replay 입력 근거 없는 케이스 정리
 
 배경:

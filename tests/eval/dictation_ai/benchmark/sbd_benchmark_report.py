@@ -210,6 +210,67 @@ def _expected_sentence_support(sentence: str, chunks: list[str]) -> dict[str, An
     }
 
 
+def _find_word_subsequence(words: list[str], needle: list[str]) -> int:
+    if not words or not needle or len(needle) > len(words):
+        return -1
+    for index in range(0, len(words) - len(needle) + 1):
+        if words[index : index + len(needle)] == needle:
+            return index
+    return -1
+
+
+def _prefix_before_expected_sentence(chunk: str, sentence: str) -> str:
+    normalized_chunk = normalized_text(chunk)
+    normalized_sentence = normalized_text(sentence)
+    if not normalized_chunk or not normalized_sentence:
+        return ""
+    index = normalized_chunk.find(normalized_sentence)
+    if index >= 0:
+        return normalized_chunk[:index].strip()
+    chunk_words = _word_units(normalized_chunk)
+    sentence_words = _word_units(normalized_sentence)
+    start = _find_word_subsequence(chunk_words, sentence_words)
+    if start <= 0:
+        return ""
+    return "".join(chunk_words[:start]) if any(_is_cjk_word(word) for word in chunk_words) else " ".join(chunk_words[:start])
+
+
+def _is_cjk_word(word: str) -> bool:
+    return any("\u3400" <= ch <= "\u9fff" for ch in word)
+
+
+def _has_completed_prefix_context(prefix: str) -> bool:
+    normalized = normalized_text(prefix)
+    if not normalized:
+        return False
+    if not any(marker in normalized for marker in ".!?。？！"):
+        return False
+    return len(_word_units(normalized)) >= 3
+
+
+def case_context_flags(result: dict[str, Any]) -> list[str]:
+    expected_final = [str(sentence).strip() for sentence in result.get("expected_final", []) if str(sentence).strip()]
+    if not expected_final or result.get("initial_final"):
+        return []
+    chunks = [
+        str(chunk.get("input", "") if isinstance(chunk, dict) else chunk).strip()
+        for chunk in result.get("chunks", [])
+        if str(chunk.get("input", "") if isinstance(chunk, dict) else chunk).strip()
+    ]
+    if not chunks:
+        return []
+    first_support = _expected_sentence_support(expected_final[0], chunks)
+    if not first_support.get("supported"):
+        return []
+    chunk_index = int(first_support.get("chunk_index", -1))
+    if chunk_index < 0 or chunk_index >= len(chunks):
+        return []
+    prefix = _prefix_before_expected_sentence(chunks[chunk_index], expected_final[0])
+    if _has_completed_prefix_context(prefix):
+        return ["unmodeled_prefix_context"]
+    return []
+
+
 def _expected_final_order_support_kind(case: SbdCase) -> str:
     if len(case.expected_final) < 2:
         return "single"
@@ -814,6 +875,20 @@ def summarize_results_by_input_evidence_strata(results: list[dict[str, Any]]) ->
     }
 
 
+def summarize_results_by_context_strata(results: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    clean_context: list[dict[str, Any]] = []
+    context_review: list[dict[str, Any]] = []
+    for result in results:
+        if result.get("case_context_flags"):
+            context_review.append(result)
+        else:
+            clean_context.append(result)
+    return {
+        "clean_context": _summarize_result_group(clean_context),
+        "context_definition_review": _summarize_result_group(context_review),
+    }
+
+
 def _case_collection_kind(result: dict[str, Any]) -> str:
     case_id = str(result.get("id") or "")
     metadata = dict(result.get("case_metadata", {}) or {})
@@ -846,6 +921,8 @@ def _strict_logic_candidate(case: SbdCase, result: dict[str, Any]) -> bool:
         return False
     if not dict(result.get("input_evidence", {})).get("fully_supported"):
         return False
+    if result.get("case_context_flags"):
+        return False
     return True
 
 
@@ -867,7 +944,8 @@ def summarize_strict_logic_candidate_results(cases: list[SbdCase], results: list
         low_by_threshold[f"{threshold:.2f}"] = _summarize_supported_low_threshold(low, threshold)
     return {
         "interpretation": (
-            "Strict logic candidates are supported_monotonic, fully input-supported, and have no expected quality flags. "
+            "Strict logic candidates are supported_monotonic, fully input-supported, have no expected quality flags, "
+            "and do not have unmodeled prefix context flags. "
             "Use this subset before changing app logic; other challenge cases may still be valid diagnostics but need review context."
         ),
         "strict_case_count": len(strict),
@@ -912,6 +990,7 @@ def _with_case_evidence_metadata(results: list[dict[str, Any]]) -> list[dict[str
         ]
         item["expected_quality_flags"] = expected_quality_flags(expected_final)
         item["input_evidence"] = case_input_evidence(item)
+        item["case_context_flags"] = case_context_flags(item)
         enriched.append(item)
     return enriched
 
@@ -1203,6 +1282,7 @@ def build_benchmark_report(
     evidence_strata_summary = summarize_results_by_evidence_strata(results)
     expected_quality_strata_summary = summarize_results_by_expected_quality_strata(results)
     input_evidence_strata_summary = summarize_results_by_input_evidence_strata(results)
+    context_strata_summary = summarize_results_by_context_strata(results)
     collection_strata_summary = summarize_results_by_collection_strata(results)
     strict_logic_candidate_summary = summarize_strict_logic_candidate_results(cases, results)
     queue_residue_strata_summary = summarize_results_by_queue_residue_strata(results)
@@ -1295,6 +1375,7 @@ def build_benchmark_report(
         "evidence_strata_summary": evidence_strata_summary,
         "expected_quality_strata_summary": expected_quality_strata_summary,
         "input_evidence_strata_summary": input_evidence_strata_summary,
+        "context_strata_summary": context_strata_summary,
         "collection_strata_summary": collection_strata_summary,
         "strict_logic_candidate_summary": strict_logic_candidate_summary,
         "case_exemplar_summary": case_exemplar_summary,
