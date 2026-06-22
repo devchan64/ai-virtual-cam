@@ -26705,3 +26705,67 @@ en_log_no_end_delta_parabolic_antennas_20260620_001
 - 현재 확인된 “정의 오류 의심”의 가장 큰 축은 expected-final이 있으나 source trace가 없는 158개 케이스다.
 - 이 케이스는 사람이 관측한 증상일 수는 있지만, 현재 기준의 “앱 로그에서 재현 가능한 컨텍스트 윈도우 입력”이라는 벤치 정의를 만족하지 않는다.
 - 다음 정리 순서는 source trace를 복구할 수 있으면 복구하고, 복구할 수 없으면 현재 앱 로그에서 같은 증상을 recut하거나 성능 튜닝 후보에서 제외하는 것이다.
+
+### 2026-06-23 expected-final input support 검증 추가
+
+목적:
+
+- 벤치 케이스의 `expected_final`이 해당 replay `chunks` 안에 실제로 충분히 존재하는지 검증한다.
+- 입력에 없는 라벨은 앱 로직을 개선해도 맞출 수 없으므로, 받아쓰기 파이프라인 성능 튜닝 근거에서 먼저 분리한다.
+- 이 검증은 CUDA/SaT 성능 벤치가 아니라 케이스 정의 감사다.
+
+변경:
+
+- `validate-cases` summary에 `input_unsupported_case_count`, `input_unsupported_by_file`, `input_unsupported_examples`를 추가했다.
+- `--require-input-evidence` 옵션을 추가해 정리 완료 gate로 사용할 수 있게 했다.
+- 기준은 `expected_final` 각 문장이 replay input chunks에서 최소 input coverage를 만족하는지 여부다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_case_validator
+
+Ran 29 tests
+OK
+```
+
+현재 코퍼스 일반 검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases \
+  tests/eval/dictation_ai/sbd_cases \
+  --summary-output .tmp/eval/dictation-ai-sbd/case-validation-input-evidence-summary.json
+
+case_count=1027
+expected_final_case_count=1023
+input_unsupported_case_count=599
+```
+
+정리 완료 gate 확인:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases \
+  tests/eval/dictation_ai/sbd_cases \
+  --require-input-evidence
+
+error: reviewed-context-en-0.jsonl:2
+case 'en_log_draft_20260620_avc_whisper_log_000039'
+expected_final is not fully supported by replay chunks: covered=3/4 coverage_min=0.167
+```
+
+누락 수가 큰 파일:
+
+```text
+tests/eval/dictation_ai/sbd_cases/en/reviewed-context-en-2.jsonl: 23
+tests/eval/dictation_ai/sbd_cases/en/reviewed-context-en-a.jsonl: 21
+tests/eval/dictation_ai/sbd_cases/ko/reviewed-context-ko-3.jsonl: 20
+tests/eval/dictation_ai/sbd_cases/en/reviewed-context-en-7.jsonl: 19
+tests/eval/dictation_ai/sbd_cases/en/reviewed-context-en-b.jsonl: 19
+```
+
+판정:
+
+- `input_unsupported_case_count=599`는 이전 case-definition action의 `remove_or_recut_expected_outside_replay_input=599`와 일치한다.
+- 따라서 현재 낮은 전체 `final_f1_avg`의 큰 부분은 앱 로직 실패가 아니라 라벨/윈도우 정의 오류로 설명된다.
+- 이 599개는 삭제 규칙이 아니라 recut, expected-final 재작성, 또는 튜닝 후보 제외 대상으로 취급한다.
+- 앱 로직 최적화는 source trace와 input support를 만족하는 strict 후보를 늘린 뒤 CUDA/SaT 벤치로 판단해야 한다.

@@ -21,6 +21,7 @@ from tests.eval.dictation_ai.cases.sbd_case_paths import (
     summarize_representative_metadata,
     validate_representative_payload,
 )
+from tests.eval.dictation_ai.cases.sbd_input_evidence import case_input_evidence
 from tests.eval.dictation_ai.representative.validate_sbd_representative_review_packets import validate_review_packets
 
 
@@ -132,6 +133,7 @@ def validate_case_files(
     allow_drafts: bool = False,
     require_expected_final: bool = False,
     require_source_trace: bool = False,
+    require_input_evidence: bool = False,
     review_packets: Path | None = None,
     corpus_role_override: str | None = None,
 ) -> dict[str, object]:
@@ -156,6 +158,9 @@ def validate_case_files(
     missing_source_trace_case_count = 0
     missing_source_trace_by_file: Counter[str] = Counter()
     missing_source_trace_examples: list[dict[str, object]] = []
+    input_unsupported_case_count = 0
+    input_unsupported_by_file: Counter[str] = Counter()
+    input_unsupported_examples: list[dict[str, object]] = []
     sources: list[str] = []
     for path in _validated_case_paths(input_list):
         sources.append(str(path))
@@ -206,6 +211,32 @@ def validate_case_files(
                     raise ValueError(f"{path}:{line_no} case {case_id!r} has no expected_final")
                 if has_expected_final:
                     expected_final_case_count += 1
+                    input_evidence = case_input_evidence(payload)
+                    if not bool(input_evidence.get("fully_supported", False)):
+                        input_unsupported_case_count += 1
+                        input_unsupported_by_file[str(path)] += 1
+                        if len(input_unsupported_examples) < 8:
+                            input_unsupported_examples.append(
+                                {
+                                    "id": case_id,
+                                    "path": str(path),
+                                    "line_no": line_no,
+                                    "language": str(payload.get("language", "")).strip().lower() or "en",
+                                    "expected_count": int(input_evidence.get("expected_count", 0)),
+                                    "covered_count": int(input_evidence.get("covered_count", 0)),
+                                    "observed_count": int(input_evidence.get("observed_count", 0)),
+                                    "coverage_min": float(input_evidence.get("coverage_min", 0.0)),
+                                    "coverage_avg": float(input_evidence.get("coverage_avg", 0.0)),
+                                }
+                            )
+                        if require_input_evidence:
+                            raise ValueError(
+                                f"{path}:{line_no} case {case_id!r} expected_final is not fully supported "
+                                "by replay chunks: "
+                                f"covered={input_evidence.get('covered_count', 0)}/"
+                                f"{input_evidence.get('expected_count', 0)} "
+                                f"coverage_min={float(input_evidence.get('coverage_min', 0.0)):.3f}"
+                            )
                     source_log = str(payload.get("source_log", "")).strip()
                     has_source_chunk = payload.get("source_chunk") is not None
                     if source_log and has_source_chunk:
@@ -247,6 +278,9 @@ def validate_case_files(
         "missing_source_trace_case_count": missing_source_trace_case_count,
         "missing_source_trace_by_file": dict(sorted(missing_source_trace_by_file.items())),
         "missing_source_trace_examples": missing_source_trace_examples,
+        "input_unsupported_case_count": input_unsupported_case_count,
+        "input_unsupported_by_file": dict(sorted(input_unsupported_by_file.items())),
+        "input_unsupported_examples": input_unsupported_examples,
         "language_counts": dict(sorted(language_counts.items())),
         "tag_counts": dict(sorted(tag_counts.items())),
         "sources": sources,
@@ -300,6 +334,11 @@ def main() -> int:
         action="store_true",
         help="Fail when an expected_final case has no source_log/source_chunk trace metadata.",
     )
+    parser.add_argument(
+        "--require-input-evidence",
+        action="store_true",
+        help="Fail when expected_final is not fully supported by the case replay chunks.",
+    )
     parser.add_argument("--min-cases", type=int, default=None, help="Fail when loaded case count is below this value.")
     parser.add_argument(
         "--min-expected-final-cases",
@@ -329,6 +368,7 @@ def main() -> int:
             allow_drafts=args.allow_drafts,
             require_expected_final=args.require_expected_final,
             require_source_trace=args.require_source_trace,
+            require_input_evidence=args.require_input_evidence,
             review_packets=args.review_packets,
             corpus_role_override=args.corpus_role,
         )
