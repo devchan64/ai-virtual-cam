@@ -419,6 +419,8 @@ def run_transcribe_loop(
                     count_metric(f"stage_candidate_quality_{blocking_flag}_with_queue")
                 if not active_stage.sentence and not commit_buffer_node.queued_sentences():
                     count_metric(f"stage_candidate_quality_{blocking_flag}_without_blocker")
+                if blocking_flag == "short_no_end_fragment" and later_completed_sentences:
+                    count_metric("stage_candidate_quality_short_no_end_fragment_with_later_completed")
             active_stage_flags = set(_final_sentence_diagnostic_flags(active_stage.sentence, detected)) if active_stage.sentence else set()
             if (
                 "short_no_end_fragment" in candidate_quality_flags

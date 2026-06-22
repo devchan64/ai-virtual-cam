@@ -26231,3 +26231,73 @@ OK
 
 - `sat + cuda + float16` 벤치는 sandbox 내부에서 fail-fast로 중단됐다.
 - CPU/mock fallback은 성능 근거로 사용하지 않는다.
+
+### 2026-06-23 벤치 케이스 정의 감사
+
+목적:
+
+- 받아쓰기 확정 성능 튜닝 전에 낮은 점수가 앱 로직 병목인지, 케이스 정의/수집 오류인지 분리한다.
+- STT 정확도나 번역 품질이 아니라, 실제 STT 컨텍스트 window 입력에서 final-only 확정 문장이 의도대로 소비되는지를 본다.
+
+기준 리포트:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py --output .tmp/eval/dictation-ai-sbd/current-20260623-short-no-end-later-completed-metric-report.json
+
+case_count=1027
+case_definition_review=979
+logic_tuning_candidate_count=44
+strict_logic_candidates=35
+final_f1_avg=0.551
+strict_final_f1_avg=0.942
+```
+
+케이스 정의 감사 결과:
+
+```text
+remove_or_recut_expected_outside_replay_input=599
+rewrite_expected_final_to_observed_stt_text=141
+add_initial_final_or_recut_mid_stream_case=106
+rewrite_expected_final_to_final_sentence_boundary=77
+extend_replay_tail_or_reclassify_staged_expectation=27
+deduplicate_or_justify_shifted_window_repeat=25
+manual_boundary_review=4
+```
+
+주요 플래그:
+
+```text
+repeated_expected_group=680
+no_terminal_expected=444
+lowercase_or_connector_start=373
+many_expected_sentences=344
+nested_expected_sentence=6
+expected_final_omits_supported_actual_sentence=4
+duplicate_expected_sentence=3
+```
+
+해석:
+
+- `repeated_expected_group`가 680건으로 가장 크다. 같은 expected final 묶음이 여러 sliding-window shard에 반복 등록되어 한 로그 구간이 벤치 평균에 과대표집될 수 있다.
+- `remove_or_recut_expected_outside_replay_input` 599건은 expected final 일부가 replay chunk 입력에서 충분히 관측되지 않는 경우다. 이 항목은 앱 로직 튜닝 근거로 직접 쓰지 않고, 입력 window를 다시 자르거나 expected를 제거해야 한다.
+- `rewrite_expected_final_to_observed_stt_text` 141건은 expected가 의미상 맞더라도 실제 raw STT 문장 형태와 다르다. 이 실험은 raw STT 교정이 목표가 아니므로, 사람이 들은 정답 문장보다 관측된 STT 텍스트 기준 expected가 우선이다.
+- `add_initial_final_or_recut_mid_stream_case` 106건은 중간 stream에서 시작한 케이스로 보인다. 이미 이전에 확정됐어야 하는 prefix 문장을 `initial_final`로 넣거나 replay 시작점을 다시 잘라야 한다.
+- `extend_replay_tail_or_reclassify_staged_expectation` 27건은 기대 문장이 replay 종료 시점에 staged/pending으로 남아 있을 수 있는 항목이다. 확정 지연 검증용으로 유지하려면 tail을 늘려야 하고, 그렇지 않으면 final expectation에서 제외해야 한다.
+- `manual_boundary_review` 4건은 실제 actual final에 expected에서 빠진 완성 문장이 포함된 경우다. 자동 삭제보다 경계 기준을 사람이 다시 정해야 한다.
+
+clean low 후보:
+
+```text
+ko_log_mixed_money_function_fragment_20260618_001
+ko_log_open_clause_revision_market_average_20260620_001
+ko_log_pending_overrun_follow_acquire_giveup_fragment_20260618_001
+ko_log_draft_20260620_avc_whisper_log_002766
+ko_log_trailing_ellipsis_japan_bond_fragment_20260618_001
+ko_log_mixed_fsd_chip_production_fragment_20260617_001
+```
+
+결론:
+
+- 현재 전체 `final_f1_avg`는 케이스 정의 감사 대상의 영향을 크게 받는다. 앱 로직 변경 근거로는 `strict_logic_candidates`와 clean low 후보를 우선한다.
+- 다음 케이스 정리는 대량 삭제가 아니라 언어별 shard에서 `repeated_expected_group`과 `expected outside replay input`을 먼저 재절단/제외하는 방식으로 진행한다.
+- 케이스 수집 기준은 “실제 STT 컨텍스트 window 입력에서 관측된 final 후보”를 기준으로 유지한다. 사람이 들은 원문 정답이나 raw STT 교정 문장을 expected로 넣지 않는다.

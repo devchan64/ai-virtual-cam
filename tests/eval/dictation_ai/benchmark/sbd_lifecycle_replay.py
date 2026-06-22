@@ -537,6 +537,8 @@ def _stage_completed_sentence(
                 state.count(f"stage_candidate_quality_{blocking_flag}_with_queue")
             if not state.staged_sentence and not state.staged_queue:
                 state.count(f"stage_candidate_quality_{blocking_flag}_without_blocker")
+            if blocking_flag == "short_no_end_fragment" and later_completed_sentences:
+                state.count("stage_candidate_quality_short_no_end_fragment_with_later_completed")
         active_stage_flags = set(_final_sentence_diagnostic_flags(state.staged_sentence, language)) if state.staged_sentence else set()
         if (
             "short_no_end_fragment" in candidate_quality_flags
