@@ -29351,6 +29351,55 @@ SHORT_CJK_FINAL_UNITS=12:
 - `SHORT_CJK_FINAL_UNITS=12`는 precision과 strict F1은 소폭 올리지만 recall, 전체 F1, boundary F1, review count가 악화된다.
 - 짧은 fragment 품질 게이트를 더 강하거나 약하게 만드는 단일 임계값 변경은 현재 목표와 맞지 않는다. 다음 개선은 임계값 추가가 아니라 boundary granularity와 replay tail 정의를 분리해 해석하는 쪽이 맞다.
 
+## 2026-06-24 expected 정리 이후 active 57케이스 재검증
+
+목적:
+
+- `expected_final` 정의 오류 정리, replay-tail 재분류, shifted-window 중복 제거 이후 현재 active case 집합이 앱 로직 튜닝 근거로 쓸 수 있는지 재확인한다.
+- 같은 기준에서 `SHORT_NO_END_FRAGMENT_UNITS` 주변값을 다시 확인해, 짧은 no-end fragment 임계값이 아직 유효한 개선축인지 판단한다.
+
+검증:
+
+```text
+validation=.tmp/eval/dictation-ai-sbd/validate-active-cases-20260624-answer-expected-final-summary.json
+validation_result=case_count=57, expected_final_case_count=53, missing_source_trace_case_count=0, input_unobserved_case_count=0, stable_repeat_unsupported_case_count=0
+
+audit=.tmp/eval/dictation-ai-sbd/audit-current-20260624-continuation-summary.json
+audit_candidate_count=0
+audit_review_case_count=0
+audit_duplicate_expected_case_count=0
+audit_nested_expected_case_count=0
+audit_partial_input_evidence_case_count=0
+audit_repeated_expected_group_count=0
+
+cuda_current=.tmp/eval/dictation-ai-sbd/current-20260624-continuation-report.json
+cuda_current_result=case_count=57, case_definition_review=7, logic_tuning_candidates=46, strict_logic_candidates=37
+cuda_current_final=final_precision_avg=0.906, final_recall_avg=0.900, final_f1_avg=0.896, strict_final_f1_avg=0.951, final_boundary_f1_avg=0.581
+tuning_next_action=review_boundary_granularity
+clean_low_case_count_lt_0_65=0
+terminal_expected_residue_case_count=4
+missing_expected_without_terminal_residue_case_count=7
+
+short_no_end_sweep=.tmp/eval/dictation-ai-sbd/sweep-20260624-short-no-end-after-reclass-summary.json
+baseline=SHORT_NO_END_FRAGMENT_UNITS=5, final_f1_avg=0.895906, strict_final_f1_avg=0.951404, final_boundary_f1_avg=0.580966
+SHORT_NO_END_FRAGMENT_UNITS=4=final_f1_avg=0.893025, strict_final_f1_avg=0.928947, final_boundary_f1_avg=0.578040, adoption_review=review-risk
+SHORT_NO_END_FRAGMENT_UNITS=6=final_f1_avg=0.895906, strict_final_f1_avg=0.951404, final_boundary_f1_avg=0.580966, adoption_review=no-risk-flag
+```
+
+해석:
+
+- active case 57개는 source trace, input evidence, observed input evidence, stable-repeat evidence를 모두 통과한다. 자동 검출 가능한 `expected_final` 정의 오류는 현재 없다.
+- 남은 `case_definition_review=7`은 audit 오류가 아니라 replay 종료 시점, 경계 granularity, midstream recut 해석 문제다.
+- `SHORT_NO_END_FRAGMENT_UNITS=4`는 strict F1을 크게 낮추고, `6`은 final/strict/boundary 주요 지표를 개선하지 못한다. 따라서 기본값 `5`를 유지한다.
+- 최저점 케이스 중 일부는 expected 문장이 STT chunk 안에서 안정적으로 반복되지만, 앞쪽 sliding-window context가 붙은 pending/staged 후보로 남아 `repeated_word_ngram` 또는 no-end 품질 차단에 걸린다.
+- 이 문제를 overlap normalization/join으로 되돌리면 이미 폐기한 과거 설계로 회귀한다. 현재 기준의 다음 과제는 새 접합 규칙 추가가 아니라, SBD가 만든 긴 누적 후보에서 final 경계를 어떤 보편 원칙으로 회수할 수 있는지 별도 설계 근거를 세우는 것이다.
+
+결론:
+
+- 이번 반복에서는 앱 기본값 변경을 하지 않는다.
+- short no-end 단일 임계값은 현재 active challenge corpus에서 성능 개선축이 아니다.
+- 다음 앱 로직 후보는 `review_boundary_granularity` 문제를 직접 다루되, 케이스별 문구/언어별 예외나 overlap join 복원 없이 “완결 boundary 후보가 stable token-sentence로 3회 이상 관측됐는가”를 기준으로 검토해야 한다.
+
 ## 2026-06-24 confirmation 축 재검토
 
 목적:
