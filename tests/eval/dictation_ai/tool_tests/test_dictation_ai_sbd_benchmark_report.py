@@ -241,6 +241,11 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
             report["case_definition_health_summary"]["recommendation"],
             "app-logic-tuning-subset-usable",
         )
+        next_action = report["tuning_next_action_summary"]
+        self.assertEqual(next_action["priority"], "collect_more_cases")
+        self.assertEqual(next_action["health_recommendation"], "app-logic-tuning-subset-usable")
+        self.assertEqual(next_action["strict_logic_candidate_count"], 1)
+        self.assertEqual(next_action["clean_low_case_count_lt_0_65"], 0)
         source_trace = report["source_trace_strata_summary"]["strata"]
         self.assertEqual(source_trace["missing_source_trace"]["expected_final_case_count"], 1)
         self.assertEqual(source_trace["missing_source_trace"]["logic_tuning_candidate_count"], 1)
@@ -2510,6 +2515,8 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(report["cases"][0]["input_evidence"]["stable_candidate_count"], 1)
         self.assertEqual(report["cases"][0]["input_evidence"]["stable_repeat_count"], 1)
         self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
+        self.assertEqual(report["tuning_next_action_summary"]["priority"], "case_definition_cleanup")
+        self.assertEqual(report["tuning_next_action_summary"]["case_definition_cleanup_queue_count"], 1)
 
     def test_terminal_staged_expected_final_is_tail_review_action(self) -> None:
         args = Namespace(

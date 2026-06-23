@@ -2014,6 +2014,66 @@ def summarize_case_definition_health(
     }
 
 
+def summarize_tuning_next_action(
+    *,
+    case_definition_health_summary: dict[str, Any],
+    terminal_expected_residue_summary: dict[str, Any],
+    missing_expected_without_terminal_residue_summary: dict[str, Any],
+    missing_expected_split_coverage_summary: dict[str, Any],
+    boundary_granularity_summary: dict[str, Any],
+    clean_low_bottleneck_intersection_summary: dict[str, Any],
+    case_definition_cleanup_queue_summary: dict[str, Any],
+) -> dict[str, Any]:
+    """Provide one top-level interpretation for the next benchmark-driven action."""
+    cleanup_count = int(case_definition_cleanup_queue_summary.get("case_count", 0))
+    health_recommendation = str(case_definition_health_summary.get("recommendation", "unknown"))
+    strict_count = int(case_definition_health_summary.get("strict_logic_candidate_count", 0))
+    review_count = int(case_definition_health_summary.get("case_definition_review_count", 0))
+    terminal_residue_count = int(terminal_expected_residue_summary.get("case_count", 0))
+    missing_no_residue_count = int(missing_expected_without_terminal_residue_summary.get("case_count", 0))
+    split_coverage_count = int(missing_expected_split_coverage_summary.get("case_count", 0))
+    boundary_granularity_count = int(boundary_granularity_summary.get("boundary_granularity_case_count", 0))
+    low_thresholds = dict(clean_low_bottleneck_intersection_summary.get("thresholds", {}) or {})
+    clean_low_065 = int(dict(low_thresholds.get("0.65", {}) or {}).get("case_count", 0))
+    clean_low_050 = int(dict(low_thresholds.get("0.50", {}) or {}).get("case_count", 0))
+    if cleanup_count > 0:
+        priority = "case_definition_cleanup"
+        rationale = "expected_final cleanup queue is non-empty; fix labels/windows before app logic changes."
+    elif health_recommendation != "app-logic-tuning-subset-usable":
+        priority = "case_definition_review"
+        rationale = "case definition review ratio or strict candidate count is not healthy enough for app tuning."
+    elif clean_low_065 > 0:
+        priority = "inspect_clean_low_app_logic_candidates"
+        rationale = "strict, fully supported low-score cases remain; inspect common lifecycle metrics before code changes."
+    elif boundary_granularity_count > 0:
+        priority = "review_boundary_granularity"
+        rationale = "content is mostly recovered but final segment boundaries differ; avoid treating it as pure missing-final."
+    elif terminal_residue_count > missing_no_residue_count:
+        priority = "review_replay_tail_or_lifecycle_delay"
+        rationale = "more missing expected finals remain in terminal staged/queue/pending residue than disappear entirely."
+    else:
+        priority = "collect_more_cases"
+        rationale = "no clean low-score app-logic signal is strong enough; collect more reviewed app-log cases."
+    return {
+        "interpretation": (
+            "Single top-level routing hint for the next benchmark iteration. "
+            "This is not a pass/fail gate; use it to avoid tuning app logic from case-definition or replay-tail artifacts."
+        ),
+        "priority": priority,
+        "rationale": rationale,
+        "health_recommendation": health_recommendation,
+        "case_definition_review_count": review_count,
+        "strict_logic_candidate_count": strict_count,
+        "clean_low_case_count_lt_0_65": clean_low_065,
+        "clean_low_case_count_lt_0_50": clean_low_050,
+        "terminal_expected_residue_case_count": terminal_residue_count,
+        "missing_expected_without_terminal_residue_case_count": missing_no_residue_count,
+        "missing_expected_split_coverage_case_count": split_coverage_count,
+        "boundary_granularity_case_count": boundary_granularity_count,
+        "case_definition_cleanup_queue_count": cleanup_count,
+    }
+
+
 def summarize_results_by_queue_residue_strata(results: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Separate cases by residual staged queue severity."""
     no_queue: list[dict[str, Any]] = []
@@ -2754,6 +2814,15 @@ def build_benchmark_report(
     low_score_characteristics_summary = summarize_low_score_characteristics(cases, results)
     supported_low_bottleneck_intersection_summary = summarize_supported_low_bottleneck_intersections(cases, results)
     clean_low_bottleneck_intersection_summary = summarize_clean_low_bottleneck_intersections(cases, results)
+    tuning_next_action_summary = summarize_tuning_next_action(
+        case_definition_health_summary=case_definition_health_summary,
+        terminal_expected_residue_summary=terminal_expected_residue_summary,
+        missing_expected_without_terminal_residue_summary=missing_expected_without_terminal_residue_summary,
+        missing_expected_split_coverage_summary=missing_expected_split_coverage_summary,
+        boundary_granularity_summary=boundary_granularity_summary,
+        clean_low_bottleneck_intersection_summary=clean_low_bottleneck_intersection_summary,
+        case_definition_cleanup_queue_summary=case_definition_cleanup_queue_summary,
+    )
     expected_final_case_count = sum(1 for case in cases if case.expected_final)
     case_summary = {
         "case_count": len(results),
@@ -2835,6 +2904,7 @@ def build_benchmark_report(
         "low_score_characteristics_summary": low_score_characteristics_summary,
         "supported_low_bottleneck_intersection_summary": supported_low_bottleneck_intersection_summary,
         "clean_low_bottleneck_intersection_summary": clean_low_bottleneck_intersection_summary,
+        "tuning_next_action_summary": tuning_next_action_summary,
         "queue_residue_strata_summary": queue_residue_strata_summary,
         "evidence_strata_summary": evidence_strata_summary,
         "expected_quality_strata_summary": expected_quality_strata_summary,

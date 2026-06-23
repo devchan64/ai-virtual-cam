@@ -29407,3 +29407,38 @@ SHORT_CJK_CONFIRM_EXTRA_CHUNKS=1:
 - `SENTENCE_CONFIRM_CHUNKS=4`는 final 지연으로 recall과 boundary F1이 크게 하락한다.
 - `SHORT_CJK_CONFIRM_EXTRA_CHUNKS=1`은 언어별 예외를 되살리는 방향이고, 실제 지표도 누락이 커져 채택하지 않는다.
 - 따라서 현재 corpus에서는 "유사 token-sentence 3회 반복 관측" 원칙을 유지한다.
+
+## 2026-06-24 next-action summary 추가
+
+목적:
+
+- 최신 리포트는 `case_definition_health_summary`, `terminal_expected_residue_summary`, `boundary_granularity_summary`, `clean_low_bottleneck_intersection_summary`를 각각 제공하지만, 다음 작업 우선순위는 사람이 여러 섹션을 조합해야 했다.
+- 앱 로직을 조정해야 하는 케이스와 replay-tail/case-definition artifact를 더 명확히 분리하기 위해 `tuning_next_action_summary`를 추가했다.
+
+검증:
+
+```text
+tool_test=./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report
+tool_test_result=OK, 43 tests
+
+output=.tmp/eval/dictation-ai-sbd/current-20260624-next-action-summary-report.json
+final_f1_avg=0.861
+final_boundary_f1_avg=0.558
+case_definition_review=20
+
+tuning_next_action_summary.priority=inspect_clean_low_app_logic_candidates
+tuning_next_action_summary.health_recommendation=app-logic-tuning-subset-usable
+tuning_next_action_summary.clean_low_case_count_lt_0_65=1
+tuning_next_action_summary.clean_low_case_count_lt_0_50=0
+tuning_next_action_summary.terminal_expected_residue_case_count=16
+tuning_next_action_summary.missing_expected_without_terminal_residue_case_count=7
+tuning_next_action_summary.boundary_granularity_case_count=1
+tuning_next_action_summary.case_definition_cleanup_queue_count=0
+```
+
+해석:
+
+- 현재 reviewed challenge에는 직접 expected cleanup queue가 없다.
+- app-logic tuning subset은 사용 가능하지만, 0.65 미만 clean low-score 후보는 1건뿐이다.
+- missing-final처럼 보이는 항목 중 상당수는 terminal staged/queue/pending residue에 남아 있으므로 replay tail 또는 lifecycle delay로 분리해서 해석해야 한다.
+- 다음 앱 로직 변경은 clean low-score 1건의 공통 lifecycle metric을 먼저 좁힌 뒤 진행한다. aggregate F1만 보고 새 임계값을 추가하지 않는다.
