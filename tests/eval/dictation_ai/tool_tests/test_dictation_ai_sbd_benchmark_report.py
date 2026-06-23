@@ -6,6 +6,7 @@ from unittest.mock import patch
 from tests.eval.dictation_ai import sbd_benchmark
 from tests.eval.dictation_ai.benchmark.sbd_benchmark_report import (
     build_benchmark_report,
+    _strict_actionable_low_final_summary,
     summarize_case_exemplars,
     summarize_results_by_input_evidence_strata,
     summarize_results_by_expected_quality_strata,
@@ -219,6 +220,7 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
             report["input_evidence_strata_summary"]["weak_input_evidence_review"]["case_count"],
             0,
         )
+
         self.assertEqual(report["context_strata_summary"]["clean_context"]["case_count"], 1)
         self.assertEqual(report["context_strata_summary"]["context_definition_review"]["case_count"], 0)
         self.assertEqual(report["collection_strata_summary"]["manual_named_case"]["case_count"], 1)
@@ -292,6 +294,47 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
             report["lifecycle_bottleneck_summary"]["by_language"]["ko"]["expected_final_count"],
             2,
         )
+
+    def test_strict_low_summary_reports_stable_missing_block_kind(self) -> None:
+        result = {
+            "id": "case-a",
+            "language": "zh",
+            "tags": ["missing-final"],
+            "expected_final": ["第一句。", "第二句。"],
+            "actual_final": ["第一句。"],
+            "actual_staged": "",
+            "actual_staged_queue": [],
+            "actual_pending": "",
+            "final_score": _score(1.0, 0.5, 0.67),
+            "final_boundary_score": _score(1.0, 0.5, 0.67),
+            "input_evidence": {
+                "expected_sentence_evidence": [
+                    {
+                        "sentence": "第一句。",
+                        "stable_repeat_supported": True,
+                    },
+                    {
+                        "sentence": "第二句。",
+                        "stable_repeat_supported": True,
+                    },
+                ],
+            },
+            "metrics": {
+                "candidate_duplicate_suppressed_fragment_echo": 1,
+            },
+        }
+
+        summary = _strict_actionable_low_final_summary([result])
+
+        self.assertEqual(
+            summary["underfinal_stable_missing_block_kind_counts"],
+            {"stable_missing_after_fragment_echo_suppression": 1},
+        )
+        self.assertEqual(
+            summary["examples"][0]["underfinal_stable_missing_block_kind"],
+            "stable_missing_after_fragment_echo_suppression",
+        )
+        self.assertEqual(summary["examples"][0]["stable_missing_expected_preview"], "第二句。")
 
     def test_strict_mid_score_final_summary_keeps_medium_bottlenecks_visible(self) -> None:
         args = Namespace(

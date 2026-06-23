@@ -31624,3 +31624,52 @@ result:
 - `expected_final`이 있는 53건은 source trace, replay input, raw STT observation, stable repeat evidence를 모두 통과한다.
 - 4건은 final-only 번역 큐 대상이 아닌 lifecycle/no-speech 억제 케이스로 분리됐다.
 - 이 패치는 앱 로직 성능 개선이 아니라 벤치 라벨 해석 안정화다. 앱 로직 변경은 동일 원인군 strict 실패가 더 반복될 때 진행한다.
+
+## 2026-06-24 stable missing blocker 진단 추가
+
+목적:
+
+- `underfinal_missing_no_residue` 케이스에서 stable repeat 근거가 있는 expected 문장이 왜 final로 못 갔는지 분리한다.
+- 앱 로직 변경 전, 누락 원인이 최근 final 중복 억제인지 quality block인지 구분한다.
+
+변경:
+
+- strict low/mid summary에 `underfinal_stable_missing_block_kind_counts`를 추가했다.
+- 각 예시는 `underfinal_stable_missing_block_kind`와 `stable_missing_expected_preview`를 포함한다.
+- top-level `tuning_next_action_summary`에도 같은 집계를 노출한다.
+
+검증:
+
+```text
+tool_test=./.venv/bin/python -m unittest \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report
+
+result:
+  Ran 48 tests
+  OK
+```
+
+CUDA benchmark:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --model sat-3l-sm \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260624-stable-missing-block-report.json
+
+result:
+  final_f1_avg=0.913
+  strict_final_f1_avg=0.953
+  strict_actionable_low_underfinal_stable_missing_block_kind_counts:
+    stable_missing_after_compact_suppression=1
+    stable_missing_after_fragment_echo_suppression=1
+```
+
+해석:
+
+- 누락된 underfinal 2건은 모두 stable repeat 근거가 있었고, runtime 상에서는 최근 final 중복 억제 계열 뒤에 사라졌다.
+- 하지만 두 케이스가 각각 compact suppression과 fragment echo suppression으로 갈라져 아직 단일 앱 로직 변경 근거는 약하다.
+- 다음 수집은 `stable_missing_after_*_suppression`이 반복되는 케이스를 우선 모은다.
+- 현재 단계에서는 앱 로직을 바꾸지 않는다. 동일 blocker가 반복될 때 recent-final suppression 정책을 일반 원칙으로 재검토한다.

@@ -2259,6 +2259,56 @@ def _strict_underfinal_missing_kind_counts(results: list[dict[str, Any]]) -> dic
     return dict(sorted(counts.items()))
 
 
+def _stable_missing_expected_sentences(result: dict[str, Any]) -> list[str]:
+    missing = _missing_expected_sentences_without_terminal_residue(result)
+    if not missing:
+        return []
+    sentence_evidence = dict(result.get("input_evidence", {}) or {}).get("expected_sentence_evidence", [])
+    stable_by_sentence = {
+        normalized_text(str(item.get("sentence", ""))): bool(item.get("stable_repeat_supported", False))
+        for item in sentence_evidence
+        if isinstance(item, dict)
+    }
+    return [
+        sentence
+        for sentence in missing
+        if stable_by_sentence.get(normalized_text(sentence), False)
+    ]
+
+
+def _strict_underfinal_stable_missing_block_kind(result: dict[str, Any]) -> str:
+    if _strict_actionable_low_kind(result) != "underfinal_missing_no_residue":
+        return ""
+    if not _stable_missing_expected_sentences(result):
+        return "missing_expected_without_stable_repeat"
+    metrics = dict(result.get("metrics", {}) or {})
+    if int(metrics.get("candidate_duplicate_suppressed_fragment_echo", 0)) > 0:
+        return "stable_missing_after_fragment_echo_suppression"
+    if int(metrics.get("candidate_duplicate_suppressed_compact", 0)) > 0:
+        return "stable_missing_after_compact_suppression"
+    if int(metrics.get("candidate_duplicate_suppressed_exact", 0)) > 0:
+        return "stable_missing_after_exact_suppression"
+    if int(metrics.get("candidate_duplicate_suppressed", 0)) > 0:
+        return "stable_missing_after_duplicate_suppression"
+    if int(metrics.get("candidate_recent_final_delta_trimmed", 0)) > 0:
+        return "stable_missing_after_recent_final_delta_trim"
+    if (
+        int(metrics.get("stage_age_quality_blocked", 0)) > 0
+        or int(metrics.get("stage_candidate_quality_blocked", 0)) > 0
+    ):
+        return "stable_missing_after_quality_block"
+    return "stable_missing_without_recorded_blocker"
+
+
+def _strict_underfinal_stable_missing_block_kind_counts(results: list[dict[str, Any]]) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for result in results:
+        kind = _strict_underfinal_stable_missing_block_kind(result)
+        if kind:
+            counts[kind] += 1
+    return dict(sorted(counts.items()))
+
+
 def _strict_actionable_low_final_summary(strict_results: list[dict[str, Any]]) -> dict[str, Any]:
     boundary_sensitive_ids = {
         str(item.get("id"))
@@ -2281,6 +2331,7 @@ def _strict_actionable_low_final_summary(strict_results: list[dict[str, Any]]) -
         "overfinal_extra_kind_counts": _actual_extra_final_kind_counts(low_final),
         "overfinal_extra_stability_kind_counts": _actual_extra_final_stability_kind_counts(low_final),
         "underfinal_missing_kind_counts": _strict_underfinal_missing_kind_counts(low_final),
+        "underfinal_stable_missing_block_kind_counts": _strict_underfinal_stable_missing_block_kind_counts(low_final),
         "metric_presence": {
             metric: _summarize_supported_low_metric_presence(low_final, metric)
             for metric in SUPPORTED_LOW_BOTTLENECK_METRICS
@@ -2293,6 +2344,8 @@ def _strict_actionable_low_final_summary(strict_results: list[dict[str, Any]]) -
                 "overfinal_extra_kinds": _actual_extra_final_kinds(result),
                 "overfinal_extra_stability_kinds": _actual_extra_final_stability_kinds(result),
                 "underfinal_missing_kind": _strict_underfinal_missing_kind(result),
+                "underfinal_stable_missing_block_kind": _strict_underfinal_stable_missing_block_kind(result),
+                "stable_missing_expected_preview": _first_text_preview(_stable_missing_expected_sentences(result)),
             }
             for result in sorted(
                 low_final,
@@ -2338,6 +2391,7 @@ def _strict_mid_score_final_summary(strict_results: list[dict[str, Any]]) -> dic
         "overfinal_extra_kind_counts": _actual_extra_final_kind_counts(actionable_mid),
         "overfinal_extra_stability_kind_counts": _actual_extra_final_stability_kind_counts(actionable_mid),
         "underfinal_missing_kind_counts": _strict_underfinal_missing_kind_counts(actionable_mid),
+        "underfinal_stable_missing_block_kind_counts": _strict_underfinal_stable_missing_block_kind_counts(actionable_mid),
         "metric_presence": {
             metric: _summarize_supported_low_metric_presence(actionable_mid, metric)
             for metric in SUPPORTED_LOW_BOTTLENECK_METRICS
@@ -2350,6 +2404,8 @@ def _strict_mid_score_final_summary(strict_results: list[dict[str, Any]]) -> dic
                 "overfinal_extra_kinds": _actual_extra_final_kinds(result),
                 "overfinal_extra_stability_kinds": _actual_extra_final_stability_kinds(result),
                 "underfinal_missing_kind": _strict_underfinal_missing_kind(result),
+                "underfinal_stable_missing_block_kind": _strict_underfinal_stable_missing_block_kind(result),
+                "stable_missing_expected_preview": _first_text_preview(_stable_missing_expected_sentences(result)),
             }
             for result in sorted(
                 actionable_mid,
@@ -2697,6 +2753,9 @@ def summarize_tuning_next_action(
         "strict_actionable_low_underfinal_missing_kind_counts": dict(
             strict_actionable_low_summary.get("underfinal_missing_kind_counts", {}) or {}
         ),
+        "strict_actionable_low_underfinal_stable_missing_block_kind_counts": dict(
+            strict_actionable_low_summary.get("underfinal_stable_missing_block_kind_counts", {}) or {}
+        ),
         "strict_mid_score_final_case_count": strict_mid_score_count,
         "strict_mid_score_final_actionable_case_count": strict_mid_score_actionable_count,
         "strict_mid_score_issue_kind_counts": dict(strict_mid_score_summary.get("issue_kind_counts", {}) or {}),
@@ -2708,6 +2767,9 @@ def summarize_tuning_next_action(
         ),
         "strict_mid_score_underfinal_missing_kind_counts": dict(
             strict_mid_score_summary.get("underfinal_missing_kind_counts", {}) or {}
+        ),
+        "strict_mid_score_underfinal_stable_missing_block_kind_counts": dict(
+            strict_mid_score_summary.get("underfinal_stable_missing_block_kind_counts", {}) or {}
         ),
         "strict_boundary_sensitive_case_count": strict_boundary_sensitive_count,
         "clean_low_case_count_lt_0_65": clean_low_065,
