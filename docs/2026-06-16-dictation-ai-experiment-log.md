@@ -32145,3 +32145,48 @@ strict actionable low:
 - 점수는 이전 refined benchmark와 동일하므로 이번 변경은 관측 지표 추가로만 작동한다.
 - strict low 7건 중 5건에서 high stable internal evidence가 있는 chunk의 recent-final duplicate suppression이 관측됐다.
 - 다음 앱 로직 후보는 새 수치 튜닝보다 “recent-final suppression이 stable internal evidence가 강한 후보를 무조건 삭제해도 되는가”라는 일반 원칙 검증으로 좁힌다.
+
+## 2026-06-24 active core axis sweep
+
+목적:
+
+- expected_final 정의 정리 이후 active challenge replay는 `final_f1_avg=0.913`, `strict_final_f1_avg=0.953`까지 올라왔다.
+- 남은 낮은 점수 케이스는 `stage_revision`, `stage_queue`, `candidate_duplicate_suppressed`가 함께 나타나지만 precision 과다와 recall 부족이 섞여 있다.
+- 새 세부 분기를 만들기 전에, 이미 manifest에 있는 핵심 축인 confirmation 횟수와 recent-final compact echo 억제 임계값이 개선 근거를 갖는지 확인한다.
+
+명령:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py run-sweep \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --include-baseline \
+  --param SENTENCE_CONFIRM_CHUNKS=2 \
+  --param SENTENCE_CONFIRM_CHUNKS=4 \
+  --param RECENT_FINAL_COMPACT_SIMILARITY_MIN=0.88 \
+  --param RECENT_FINAL_COMPACT_SIMILARITY_MIN=0.92 \
+  --param RECENT_FINAL_COMPACT_COMMON_COVERAGE_MIN=0.88 \
+  --param RECENT_FINAL_COMPACT_MAX_EXTRA_RATIO=0.20 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-20260624-active-core-axis \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-20260624-active-core-axis-summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-20260624-active-core-axis-summary.md
+```
+
+결과:
+
+| variant | final_f1_avg | final_boundary_f1_avg | strict_final_f1_avg | 판단 |
+| --- | ---: | ---: | ---: | --- |
+| baseline | 0.9135 | 0.6044 | 0.9526 | 유지 |
+| `SENTENCE_CONFIRM_CHUNKS=2` | 0.8691 | 0.5624 | 0.9052 | 악화 |
+| `SENTENCE_CONFIRM_CHUNKS=4` | 0.8609 | 0.5256 | 0.9285 | 악화 |
+| `RECENT_FINAL_COMPACT_SIMILARITY_MIN=0.88` | 0.9076 | 0.5985 | 0.9439 | 악화 |
+| `RECENT_FINAL_COMPACT_SIMILARITY_MIN=0.92` | 0.9076 | 0.5985 | 0.9439 | 악화 |
+| `RECENT_FINAL_COMPACT_COMMON_COVERAGE_MIN=0.88` | 0.9135 | 0.6044 | 0.9526 | 동률 |
+| `RECENT_FINAL_COMPACT_MAX_EXTRA_RATIO=0.20` | 0.9135 | 0.6044 | 0.9526 | 동률 |
+
+해석:
+
+- confirmation 2회는 더 빠르게 final을 만들지만 precision, recall, strict F1을 모두 낮춘다. 현재 실패 집합에서는 “더 쉽게 확정”이 일반 개선 원칙이 아니다.
+- confirmation 4회는 recall과 boundary를 크게 낮춰 누락을 늘린다.
+- compact similarity 기준을 0.88 또는 0.92로 옮기면 한 한국어 케이스가 악화되고 전체/strict 점수도 하락한다.
+- compact common coverage와 max extra ratio 강화는 현재 case set에서 출력 점수를 바꾸지 않는다.
+- 이번 sweep은 앱 기본값 변경 근거가 아니다. 다음 개선 후보는 새 언어별/문구별 규칙이 아니라, stable repeated token-sentence와 recent-final suppression이 충돌하는 로그 케이스를 더 모아 구조적 조건을 검증하는 것이다.
