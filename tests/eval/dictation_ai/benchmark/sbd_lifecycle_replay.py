@@ -98,6 +98,14 @@ def _count_segment_state(state: LifecycleState, segment_state: str, amount: int 
     state.count(f"segment_state_{segment_state}", amount)
 
 
+def _count_recent_final_stable_internal_suppression(state: LifecycleState, prefix: str) -> None:
+    bucket = _revision_internal_stability_bucket(
+        _stable_internal_ratio(state),
+        _stable_internal_chars(state),
+    )
+    state.count(f"{prefix}_stable_internal_{bucket}")
+
+
 def _promote_next_staged_sentence(state: LifecycleState, chunk_index: int) -> None:
     if state.staged_sentence:
         return
@@ -147,6 +155,7 @@ def _promote_next_staged_sentence(state: LifecycleState, chunk_index: int) -> No
         state.staged_delta_suppressed_chunk_index = -1
         state.count("stage_queue_recent_final_suppressed")
         state.count(f"stage_queue_recent_final_suppressed_{recent_reason}")
+        _count_recent_final_stable_internal_suppression(state, "stage_queue_recent_final_suppressed")
         state.count("segment_state_suppressed")
         node = _commit_buffer_from_state(state)
 
@@ -300,6 +309,7 @@ def _stage_completed_sentence(
         state.count("candidate_duplicate_suppressed")
         if recent_source is not None:
             state.count(f"candidate_duplicate_suppressed_{recent_reason}")
+            _count_recent_final_stable_internal_suppression(state, "candidate_duplicate_suppressed")
         state.count("segment_state_suppressed")
         return []
     if _is_pending_prefix_mixed_candidate(candidate, state.pending_text):

@@ -101,6 +101,12 @@ def run_transcribe_loop(
         chunk_lifecycle_metrics[name] = chunk_lifecycle_metrics.get(name, 0) + amount
     def count_segment_state(state: str, amount: int = 1) -> None:
         count_metric(f"segment_state_{state}", amount)
+    def count_recent_final_stable_internal_suppression(prefix: str) -> None:
+        bucket = _revision_internal_stability_bucket(
+            stable_analysis.stable_internal_ratio,
+            stable_analysis.stable_internal_chars,
+        )
+        count_metric(f"{prefix}_stable_internal_{bucket}", 1)
     def is_repeated_hallucination(text: str) -> bool:
         normalized = " ".join(text.split())
         if not normalized:
@@ -149,6 +155,7 @@ def run_transcribe_loop(
                 count_metric("stage_queue_recent_final_delta_trimmed", 1)
                 break
             count_metric("stage_queue_recent_final_suppressed", 1)
+            count_recent_final_stable_internal_suppression("stage_queue_recent_final_suppressed")
             count_segment_state("suppressed", 1)
             worker._emit(
                 "status",
@@ -370,6 +377,8 @@ def run_transcribe_loop(
             count_metric("candidate_recent_final_delta_trimmed")
         if not candidate:
             count_metric("candidate_duplicate_suppressed")
+            if recent_source is not None:
+                count_recent_final_stable_internal_suppression("candidate_duplicate_suppressed")
             count_segment_state("suppressed")
             worker._emit("status", f"받아쓰기 AI 중복 문장 무시: chunk={chunks} text={sentence!r}", display=False)
             return []

@@ -32073,3 +32073,75 @@ HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_
 - 이는 오래된 queue 후보를 더 오래 살리는 방식이 challenge 평균에서는 미세한 recall 이득을 만들 수 있어도, strict subset에서는 stale/premature final 위험을 키운다는 뜻이다.
 - `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS`는 현재 refined case set에서 1-3 범위 변경 효과가 없다.
 - 이번 sweep은 앱 기본값 변경 근거가 아니다. 다음 앱 로직 후보는 새 세부 knob가 아니라, stable repeated token-sentence와 recent-final suppression의 충돌을 직접 관측하는 케이스를 더 모아 판단한다.
+
+## 2026-06-24 stable internal suppression metric 추가
+
+목적:
+
+- `stable_missing_after_compact_suppression`, `stable_missing_after_fragment_echo_suppression`이 관측되지만, 기존 metric은 recent-final suppression이 발생했다는 사실만 보여준다.
+- suppression 시점에 현재 chunk가 stable internal evidence를 갖고 있었는지 함께 기록해, “recent-final echo 억제가 stable repeated token-sentence를 지우는가”를 다음 실험에서 직접 확인할 수 있게 한다.
+
+변경:
+
+- 운영 loop와 SBD replay에 다음 metric을 추가했다.
+  - `candidate_duplicate_suppressed_stable_internal_high`
+  - `candidate_duplicate_suppressed_stable_internal_mid`
+  - `candidate_duplicate_suppressed_stable_internal_low`
+  - `stage_queue_recent_final_suppressed_stable_internal_high`
+  - `stage_queue_recent_final_suppressed_stable_internal_mid`
+  - `stage_queue_recent_final_suppressed_stable_internal_low`
+- 동작은 바꾸지 않고 metric만 추가했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle
+
+result:
+  Ran 67 tests
+  OK
+```
+
+CUDA benchmark:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output .tmp/eval/dictation-ai-sbd/current-20260624-stable-suppression-metrics-report.json
+
+result:
+  final_f1_avg=0.913
+  strict_final_f1_avg=0.953
+  final_boundary_f1_avg=0.604
+  expected_definition_cleanup=0
+  case_interpretation_review=6
+```
+
+새 metric 관측:
+
+```text
+summary:
+  candidate_duplicate_suppressed_stable_internal_high=157
+  candidate_duplicate_suppressed_stable_internal_mid=8
+  candidate_duplicate_suppressed_stable_internal_low=244
+  stage_queue_recent_final_suppressed_stable_internal_high=1
+  stage_queue_recent_final_suppressed_stable_internal_low=9
+
+strict actionable low:
+  candidate_duplicate_suppressed_stable_internal_high:
+    case_count=5 / 7
+    total_count=25
+    avg_final_f1=0.7467
+  candidate_duplicate_suppressed_stable_internal_low:
+    case_count=6 / 7
+    total_count=30
+    avg_final_f1=0.7556
+```
+
+해석:
+
+- 점수는 이전 refined benchmark와 동일하므로 이번 변경은 관측 지표 추가로만 작동한다.
+- strict low 7건 중 5건에서 high stable internal evidence가 있는 chunk의 recent-final duplicate suppression이 관측됐다.
+- 다음 앱 로직 후보는 새 수치 튜닝보다 “recent-final suppression이 stable internal evidence가 강한 후보를 무조건 삭제해도 되는가”라는 일반 원칙 검증으로 좁힌다.
