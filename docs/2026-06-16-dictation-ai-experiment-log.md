@@ -32362,3 +32362,86 @@ HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_
 - queue age를 2 이상으로 늘리면 recall은 오르지만 precision, strict final F1, boundary F1이 동시에 하락하고 review 대상이 증가했다.
 - 따라서 현재 evidence에서는 age reset과 queue age를 더 느슨하게 만드는 상수 변경을 기본값으로 채택하지 않는다.
 - 다음 개선은 상수 완화보다 strict low 케이스의 `overfinal_or_extra_final`과 `underfinal_missing_no_residue`를 더 분리해, 같은 issue kind가 반복되는지 확인한 뒤 앱 로직 preflight를 좁히는 쪽이 맞다.
+
+## 2026-06-24 targeted source collection recheck
+
+목적:
+
+- active challenge replay의 다음 권고가 `collect_more_same_issue_kind_cases`였으므로 최신 회전 로그에서 같은 원인군 후보 source를 다시 찾았다.
+- 목표는 앱 로직을 바로 완화하는 것이 아니라, `stage_replace_deferred`, `stage_queue_recent_final_suppressed`, `finalize_delta_suppressed_stage_retained` 같은 관측 metric이 높은 source를 골라 사람이 `expected_final`을 확정할 수 있는지 확인하는 것이다.
+
+명령:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py representative-sources .tmp/logs \
+  --summary-output .tmp/eval/dictation-ai-sbd/source-audit-current-20260624.json \
+  --compact
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py select-representative-sources \
+  .tmp/eval/dictation-ai-sbd/source-audit-current-20260624.json \
+  --priority-metric stage_replace_deferred_per_stt_raw \
+  --per-language 3 \
+  --allow-missing-runtime-metadata \
+  --allow-mixed-runtime \
+  --output .tmp/eval/dictation-ai-sbd/source-select-stage-replace-current.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/source-select-stage-replace-current.md
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py select-representative-sources \
+  .tmp/eval/dictation-ai-sbd/source-audit-current-20260624.json \
+  --priority-metric stage_queue_recent_final_suppressed_per_stt_raw \
+  --per-language 3 \
+  --allow-missing-runtime-metadata \
+  --allow-mixed-runtime \
+  --output .tmp/eval/dictation-ai-sbd/source-select-recent-final-suppressed-current.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/source-select-recent-final-suppressed-current.md
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py select-representative-sources \
+  .tmp/eval/dictation-ai-sbd/source-audit-current-20260624.json \
+  --priority-metric finalize_delta_suppressed_stage_retained_per_stt_raw \
+  --per-language 3 \
+  --allow-missing-runtime-metadata \
+  --allow-mixed-runtime \
+  --output .tmp/eval/dictation-ai-sbd/source-select-delta-retained-current.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/source-select-delta-retained-current.md
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py extract-review-packets \
+  .tmp/eval/dictation-ai-sbd/source-select-stage-replace-current.json \
+  --output .tmp/eval/dictation-ai-sbd/packets-stage-replace-current.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/packets-stage-replace-current.md
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py extract-review-packets \
+  .tmp/eval/dictation-ai-sbd/source-select-delta-retained-current.json \
+  --output .tmp/eval/dictation-ai-sbd/packets-delta-retained-current.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/packets-delta-retained-current.md
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py extract-representative-drafts \
+  .tmp/eval/dictation-ai-sbd/packets-stage-replace-current.json \
+  --jsonl-output .tmp/eval/dictation-ai-sbd/drafts-stage-replace-current.jsonl \
+  --summary-output .tmp/eval/dictation-ai-sbd/drafts-stage-replace-current-summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/drafts-stage-replace-current.md
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py extract-representative-drafts \
+  .tmp/eval/dictation-ai-sbd/packets-delta-retained-current.json \
+  --jsonl-output .tmp/eval/dictation-ai-sbd/drafts-delta-retained-current.jsonl \
+  --summary-output .tmp/eval/dictation-ai-sbd/drafts-delta-retained-current-summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/drafts-delta-retained-current.md
+```
+
+결과:
+
+- 최신 로그 범위: `2026-06-19 22:32:22` - `2026-06-23 22:33:05`
+- `stt_raw_line_count=97874`
+- `finalize_event_count=19870`
+- `stage_replace_deferred_count=70029`
+- `stage_queue_recent_final_suppressed_count=2946`
+- `finalize_delta_suppressed_stage_retained_count=5108`
+- priority source selection은 세 metric 모두 `zh` source 3개씩을 골랐다.
+- packet 추출 결과 `stage_replace_deferred` 3개, `finalize_delta_suppressed_stage_retained` 3개가 모두 human review 가능 상태였다.
+- draft 추출 결과 두 묶음 모두 `case_generation=manual_expected_final_required`였고, 자동 `expected_final`은 생성하지 않았다.
+
+해석:
+
+- 최신 로그에서도 targeted source는 충분하지만, 현재 도구가 만든 draft는 representative source 전체 10분 단위 window라 active challenge replay에 바로 넣기에는 넓다.
+- STT raw가 흔들리는 source도 포함되어 있어, 사람이 bounded window를 좁히고 `expected_final`을 직접 확정하기 전에는 앱 로직 튜닝 케이스로 승격하지 않는다.
+- 따라서 이번 단계에서는 benchmark case를 추가하지 않고, 동일 issue kind case 수집 후보 source만 확보했다.
+- 다음 유효한 진행은 `packets-*-current.md`의 bounded window 중 STT가 비교적 안정적인 구간을 사람이 확정해 `sbd_cases/{zh}/`에 작은 replay case로 승격하는 것이다.
