@@ -207,6 +207,89 @@ def _priority_window_suggestions(
     return suggestions
 
 
+def _events_inside_window(
+    events: list[dict[str, object]],
+    *,
+    started_at: str,
+    ended_at: str,
+) -> list[dict[str, object]]:
+    return [
+        event
+        for event in events
+        if _inside_source_window(str(event.get("timestamp", "")), started_at=started_at, ended_at=ended_at)
+    ]
+
+
+def _bounded_window_candidates(
+    *,
+    packet_id: object,
+    source_log: Path,
+    language: object,
+    priority_metric: object,
+    priority_lifecycle_kind: str | None,
+    suggestions: list[dict[str, object]],
+    events: dict[str, list[dict[str, object]]],
+    max_sample_per_kind: int,
+) -> list[dict[str, object]]:
+    candidates: list[dict[str, object]] = []
+    for index, suggestion in enumerate(suggestions, start=1):
+        started_at = str(suggestion.get("started_at", ""))
+        ended_at = str(suggestion.get("ended_at", ""))
+        window_events = {
+            kind: _events_inside_window(items, started_at=started_at, ended_at=ended_at)
+            for kind, items in events.items()
+        }
+        event_counts = {kind: len(items) for kind, items in window_events.items()}
+        priority_events = [
+            event
+            for event in window_events.get("lifecycle_events", [])
+            if priority_lifecycle_kind and event.get("kind") == priority_lifecycle_kind
+        ]
+        candidates.append(
+            {
+                "id": f"{packet_id}_window_{index:02d}",
+                "source_log": str(source_log),
+                "language": language,
+                "priority_metric": priority_metric,
+                "priority_lifecycle_kind": priority_lifecycle_kind,
+                "source_window_filter": {
+                    "applied": True,
+                    "started_at": started_at,
+                    "ended_at": ended_at,
+                },
+                "anchor": {
+                    "timestamp": suggestion.get("anchor_timestamp", ""),
+                    "line_number": suggestion.get("anchor_line_number", ""),
+                    "kind": suggestion.get("anchor_kind", ""),
+                    "chunk": suggestion.get("anchor_chunk", ""),
+                    "staged_tail": suggestion.get("anchor_staged_tail", ""),
+                    "candidate_tail": suggestion.get("anchor_candidate_tail", ""),
+                },
+                "event_counts": event_counts,
+                "raw_chunks_sample": _evenly_spaced(
+                    window_events.get("raw_chunks", []),
+                    max_sample_per_kind,
+                ),
+                "final_events_sample": _evenly_spaced(
+                    window_events.get("final_events", []),
+                    max_sample_per_kind,
+                ),
+                "transcript_events_sample": _evenly_spaced(
+                    window_events.get("transcripts", []),
+                    max_sample_per_kind,
+                ),
+                "priority_lifecycle_events_sample": _evenly_spaced(
+                    priority_events,
+                    max_sample_per_kind,
+                ),
+                "case_generation": False,
+                "expected_final_generated": False,
+                "review_status": "bounded_window_candidate_requires_human_expected_final",
+            }
+        )
+    return candidates
+
+
 def _inside_source_window(timestamp: str, *, started_at: str, ended_at: str) -> bool:
     if not started_at and not ended_at:
         return True
@@ -321,6 +404,7 @@ def build_review_packets(
     max_priority_window_suggestions: int,
     priority_window_before_seconds: int,
     priority_window_after_seconds: int,
+    max_bounded_window_event_samples: int,
     text_limit: int = 220,
 ) -> dict[str, object]:
     packets: list[dict[str, object]] = []
@@ -354,6 +438,16 @@ def build_review_packets(
             max_suggestions=max_priority_window_suggestions,
             before_seconds=priority_window_before_seconds,
             after_seconds=priority_window_after_seconds,
+        )
+        bounded_window_candidates = _bounded_window_candidates(
+            packet_id=source.get("id", ""),
+            source_log=source_log,
+            language=source.get("language", ""),
+            priority_metric=priority_metric,
+            priority_lifecycle_kind=priority_lifecycle_kind,
+            suggestions=priority_window_suggestions,
+            events=events,
+            max_sample_per_kind=max_bounded_window_event_samples,
         )
         packets.append(
             {
@@ -396,6 +490,7 @@ def build_review_packets(
                     max_lifecycle_events_per_source,
                 ),
                 "priority_window_suggestions": priority_window_suggestions,
+                "bounded_window_candidates": bounded_window_candidates,
                 "review_status": "orientation_only_requires_manual_window_selection_and_expected_final",
                 "case_generation": False,
                 "paper_evidence": False,
@@ -429,6 +524,7 @@ def build_review_packets(
             "max_priority_window_suggestions": max_priority_window_suggestions,
             "priority_window_before_seconds": priority_window_before_seconds,
             "priority_window_after_seconds": priority_window_after_seconds,
+            "max_bounded_window_event_samples": max_bounded_window_event_samples,
             "text_limit": text_limit,
         },
         "packet_count": len(packets),
@@ -570,6 +666,38 @@ def write_markdown_packets(payload: dict[str, object], path: Path) -> None:
                     )
                     + " |"
                 )
+        bounded_window_candidates = [
+            candidate
+            for candidate in list(packet.get("bounded_window_candidates", []))
+            if isinstance(candidate, dict)
+        ]
+        if bounded_window_candidates:
+            lines.extend(
+                [
+                    "",
+                    "| bounded_candidate | window | raw | final | transcript | priority_lifecycle | anchor |",
+                    "| --- | --- | ---: | ---: | ---: | ---: | --- |",
+                ]
+            )
+            for candidate in bounded_window_candidates[:8]:
+                counts = dict(candidate.get("event_counts", {}) or {})
+                window_filter = dict(candidate.get("source_window_filter", {}) or {})
+                anchor = dict(candidate.get("anchor", {}) or {})
+                lines.append(
+                    "| "
+                    + " | ".join(
+                        [
+                            str(candidate.get("id", "")),
+                            f"{window_filter.get('started_at', '')}..{window_filter.get('ended_at', '')}",
+                            str(counts.get("raw_chunks", 0)),
+                            str(counts.get("final_events", 0)),
+                            str(counts.get("transcripts", 0)),
+                            str(len(list(candidate.get("priority_lifecycle_events_sample", []) or []))),
+                            f"{anchor.get('timestamp', '')} #{anchor.get('line_number', '')}",
+                        ]
+                    )
+                    + " |"
+                )
         if priority_lifecycle_sample:
             lines.extend(
                 [
@@ -644,6 +772,7 @@ def main() -> int:
     parser.add_argument("--max-priority-window-suggestions", type=int, default=6)
     parser.add_argument("--priority-window-before-seconds", type=int, default=20)
     parser.add_argument("--priority-window-after-seconds", type=int, default=40)
+    parser.add_argument("--max-bounded-window-event-samples", type=int, default=8)
     parser.add_argument("--text-limit", type=int, default=220)
     args = parser.parse_args()
 
@@ -659,6 +788,7 @@ def main() -> int:
             max_priority_window_suggestions=args.max_priority_window_suggestions,
             priority_window_before_seconds=args.priority_window_before_seconds,
             priority_window_after_seconds=args.priority_window_after_seconds,
+            max_bounded_window_event_samples=args.max_bounded_window_event_samples,
             text_limit=args.text_limit,
         )
     except (OSError, json.JSONDecodeError, ValueError) as exc:

@@ -31436,3 +31436,50 @@ review_packet_result:
 
 - 다음 실제 케이스 추가는 suggested window 중 사람이 문장 확정 기대값을 명확히 작성할 수 있는 구간만 별도 JSONL case로 만든다.
 - 자동으로 transcript/final을 expected로 복사하지 않는다.
+
+## 2026-06-24 suggested window별 bounded candidate 생성
+
+목적:
+
+- `suggested_window_start/end`는 검토 시작점으로 충분하지만, 사람이 바로 case 후보를 평가하려면 해당 window 안의 raw/final/transcript/lifecycle 이벤트 수와 샘플이 함께 필요하다.
+- 자동 `expected_final` 작성 없이, suggested window별 bounded candidate를 만들어 사람이 case로 승격할 후보를 더 좁힐 수 있게 했다.
+
+시도:
+
+```text
+tool_test=./.venv/bin/python -m unittest \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_representative_review_packet_extractor \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_representative_case_draft_extractor \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_representative_source_selector \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_representative_source_audit
+tool_test_result=OK
+
+review_packet_command=./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py extract-review-packets \
+  .tmp/eval/dictation-ai-sbd/target-stage-replace-sources-20260624.json \
+  --output .tmp/eval/dictation-ai-sbd/target-stage-replace-packets-20260624.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/target-stage-replace-packets-20260624.md \
+  --max-priority-window-suggestions 6 \
+  --priority-window-before-seconds 20 \
+  --priority-window-after-seconds 40 \
+  --max-bounded-window-event-samples 8
+
+review_packet_result:
+  packet_count=3
+  ready_packet_count=3
+  bounded_window_candidates_per_packet=6
+  first_candidate_counts:
+    zh_representative_review_93439c3b1890_window_01 raw=41 final=17 transcript=49 lifecycle=182
+    zh_representative_review_274889ddb4af_window_01 raw=41 final=12 transcript=37 lifecycle=188
+    zh_representative_review_3f41ce64e812_window_01 raw=41 final=11 transcript=37 lifecycle=143
+```
+
+해석:
+
+- 각 bounded candidate는 사람이 검토할 60초 구간과 anchor lifecycle event를 함께 가진다.
+- `priority_lifecycle_events_sample`은 원인군 확인용 샘플이며, `expected_final`은 생성하지 않는다.
+- candidate의 raw/final/transcript 개수는 충분히 많으므로, 바로 benchmark case로 넣기보다 사람이 더 짧은 문장 단위로 자르는 검토가 필요하다.
+
+결론:
+
+- 다음 단계는 bounded candidate 중 대표적인 1~2개를 사람이 검토해 `expected_final`을 작성하고, 그 결과를 challenge/representative case로 승격할 수 있는지 확인하는 것이다.
+- 앱 로직 변경은 아직 하지 않는다. 동일 원인군의 사람이 확정한 케이스가 쌓인 뒤에 strict benchmark로 판단한다.
