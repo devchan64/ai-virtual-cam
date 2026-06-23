@@ -185,8 +185,10 @@ CJK_CONFIRM_PRESERVE_COVERAGE_MIN = 0.70
 # CJK prefix-growth revision은 앞 후보 전체가 다음 후보의 prefix로 유지되는
 # 경우다. 일반 revision equivalence의 길이 차이를 넓히면 unrelated 후보까지
 # 같은 문장으로 묶일 수 있으므로, 여기서는 confirmation reset 방지에만 별도
-# 완화 한계를 둔다.
-CJK_CONFIRM_PRESERVE_PREFIX_GROWTH_MAX_DELTA = 8
+# 완화 한계를 둔다. reviewed challenge replay에서는 16까지 넓혀야
+# 고유명사/브랜드명이 포함된 긴 prefix-growth 후보의 confirmation 근거가
+# 유지되면서 전체 final F1과 recall이 함께 개선됐다.
+CJK_CONFIRM_PRESERVE_PREFIX_GROWTH_MAX_DELTA = 16
 REVISION_TAIL_COMMON_RUN_MIN = 8
 REVISION_TAIL_BEST_J_MAX = 3
 REVISION_PREFIX_RUN_MIN = 5
@@ -626,6 +628,16 @@ def dictation_tuning_manifest() -> list[dict[str, int | float | str]]:
             max_value=10,
             scope="lifecycle",
             intent="drop a staged candidate after repeated broken-delta suppression so it cannot block later sentence candidates",
+        ),
+        _tuning_manifest_entry(
+            "CJK_CONFIRM_PRESERVE_PREFIX_GROWTH_MAX_DELTA",
+            default=CJK_CONFIRM_PRESERVE_PREFIX_GROWTH_MAX_DELTA,
+            current=cjk_confirm_preserve_prefix_growth_max_delta(),
+            value_type="int",
+            min_value=0,
+            max_value=40,
+            scope="revision-confirmation",
+            intent="preserve confirmation across CJK prefix-growth revisions without widening general revision equivalence",
         ),
         _tuning_manifest_entry(
             "RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS",

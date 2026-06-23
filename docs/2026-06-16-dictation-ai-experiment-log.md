@@ -29866,3 +29866,99 @@ case_boundary_f1=0.000000 -> 0.666667
 - final content F1은 유지하면서 boundary F1과 staged exact가 개선됐다.
 - 첫 token이 같은 단순 tail drop은 shifted-prefix revision이 아니므로, 더 긴 안정 후보를 유지하는 것이 현재 token-sentence lifecycle 원칙에 맞다.
 - 이 변경은 언어별 문구 규칙이 아니라 revision 구조 판정의 오분류를 좁히는 일반 조건이다.
+
+## 2026-06-24 short CJK final units 재검토 폐기
+
+목적:
+
+- `zh_log_draft_20260620_avc_whisper_log_11_000820`에서 짧은 CJK stage가 quality block으로 사라지는 흐름이 보여 `SHORT_CJK_FINAL_UNITS` 기준을 재검토했다.
+- 짧은 완결 문장 final 누락을 줄일 수 있는지 확인하되, false final 증가 여부를 전체 challenge replay로 본다.
+
+검증:
+
+```text
+sweep_output=.tmp/eval/dictation-ai-sbd/sweep-20260624-short-cjk-units-after-taildrop-summary.json
+
+baseline_final_f1_avg=0.866032
+baseline_strict_final_f1_avg=0.970000
+baseline_final_boundary_f1_avg=0.585569
+
+SHORT_CJK_FINAL_UNITS=6
+final_f1_avg=0.821
+strict_final_f1_avg=0.929
+final_boundary_f1_avg=0.522
+
+SHORT_CJK_FINAL_UNITS=8
+final_f1_avg=0.838
+strict_final_f1_avg=0.936
+final_boundary_f1_avg=0.545
+
+SHORT_CJK_FINAL_UNITS=12
+final_f1_avg=0.857
+strict_final_f1_avg=0.959
+final_boundary_f1_avg=0.566
+```
+
+해석:
+
+- 짧은 CJK 기준 완화/강화 모두 현재 baseline보다 나쁘다.
+- 짧은 문장 누락 하나를 직접 해결하는 방향처럼 보여도 전체 precision/F1이 크게 하락한다.
+- 따라서 `SHORT_CJK_FINAL_UNITS`는 변경하지 않는다.
+
+## 2026-06-24 CJK prefix-growth confirmation 보존 한계 16 채택
+
+목적:
+
+- 남은 저점 중 `zh_log_draft_20260620_avc_whisper_log_11_000886`은 `Martin King...旗舰店` 후보가 긴 prefix-growth revision으로 확장될 때 confirmation이 reset/defer되어 final까지 도달하지 못했다.
+- 일반 revision equivalence를 넓히지 않고, 앞 후보 전체가 다음 후보의 prefix로 유지되는 CJK prefix-growth 경로에서만 confirmation 보존 한계를 재검토했다.
+
+검증:
+
+```text
+baseline_output=.tmp/eval/dictation-ai-sbd/current-20260624-cjk-shifted-prefix-taildrop-guard-report.json
+baseline_final_precision_avg=0.913611
+baseline_final_recall_avg=0.839722
+baseline_final_f1_avg=0.866032
+baseline_strict_final_f1_avg=0.970000
+baseline_final_boundary_f1_avg=0.585569
+baseline_staged_exact_match=20
+
+candidate_12_output=.tmp/eval/dictation-ai-sbd/current-20260624-prefix-growth-12-report.json
+candidate_12_final_f1_avg=0.870
+candidate_12_strict_final_f1_avg=0.970
+candidate_12_final_boundary_f1_avg=0.590
+
+candidate_16_output=.tmp/eval/dictation-ai-sbd/current-20260624-prefix-growth-16-report.json
+candidate_16_final_precision_avg=0.916
+candidate_16_final_recall_avg=0.856
+candidate_16_final_f1_avg=0.877
+candidate_16_strict_final_f1_avg=0.972
+candidate_16_final_boundary_f1_avg=0.589
+
+default_16_output=.tmp/eval/dictation-ai-sbd/current-20260624-prefix-growth-default-16-report.json
+default_16_final_precision_avg=0.916
+default_16_final_recall_avg=0.856
+default_16_final_f1_avg=0.877
+default_16_strict_final_f1_avg=0.972
+default_16_final_boundary_f1_avg=0.589
+default_16_staged_exact_match=21
+```
+
+영향:
+
+```text
+CJK_CONFIRM_PRESERVE_PREFIX_GROWTH_MAX_DELTA=8 -> 16
+
+zh_log_missing_chongqing_baixiangju_ropeway_20260621_001
+final_f1=0.400000 -> 0.666667
+boundary_f1=0.400000 -> 0.666667
+
+zh_log_draft_20260620_avc_whisper_log_11_000953
+final_f1=0.800000 -> 1.000000
+```
+
+해석:
+
+- 12도 개선되지만 16부터 recall/final F1 개선 폭이 커지고 24와 주요 수치가 같았다. 따라서 최소 동일 개선 후보인 16을 기본값으로 채택한다.
+- 이 변경은 일반 CJK revision similarity를 느슨하게 하는 것이 아니라, prefix-growth revision에서 confirmation reset을 줄이는 구조적 완화다.
+- case definition review 수가 `20 -> 17`로 줄고 precision/recall/final F1이 함께 개선되어 현재 challenge replay 기준 채택 근거가 충분하다.
