@@ -254,6 +254,9 @@ EXPECTED_REVISION_VARIANT_MIN_COMMON_RUN = 8
 EXPECTED_CONTAINED_TOKEN_MIN_UNITS = 8
 EXPECTED_CONTAINED_TOKEN_MIN_COVERAGE = 0.80
 EXPECTED_SHORT_CONTAINED_TOKEN_MIN_UNITS = 5
+EXPECTED_SHORT_SUPPORTED_BY_LONGER_MIN_UNITS = 5
+EXPECTED_SHORT_SUPPORTED_BY_LONGER_MAX_UNITS = 8
+EXPECTED_SHORT_SUPPORTED_BY_LONGER_MIN_SIMILARITY = 0.80
 COMBINED_RESIDUE_MATCH_MIN_SIMILARITY = 0.70
 
 
@@ -309,6 +312,23 @@ def _expected_sentences_have_short_contained_token_units(left: str, right: str) 
         if longer[index : index + len(shorter)] == shorter:
             return True
     return False
+
+
+def _expected_short_sentence_supported_by_longer_sentence(left: str, right: str) -> bool:
+    left_words = _word_units(normalized_text(left))
+    right_words = _word_units(normalized_text(right))
+    if not left_words or not right_words:
+        return False
+    if len(left_words) == len(right_words):
+        return False
+    shorter, longer = (left, right) if len(left_words) < len(right_words) else (right, left)
+    shorter_len = min(len(left_words), len(right_words))
+    if (
+        shorter_len < EXPECTED_SHORT_SUPPORTED_BY_LONGER_MIN_UNITS
+        or shorter_len > EXPECTED_SHORT_SUPPORTED_BY_LONGER_MAX_UNITS
+    ):
+        return False
+    return _sentence_support_score(shorter, longer) >= EXPECTED_SHORT_SUPPORTED_BY_LONGER_MIN_SIMILARITY
 
 
 def _has_expected_app_quality_blocked_sentence(expected_final: list[str], language: str) -> bool:
@@ -1331,6 +1351,7 @@ def _case_primary_review_action(result: dict[str, Any]) -> str:
             "expected_revision_variant_group",
             "contained_expected_token_sentence",
             "short_contained_expected_token_sentence",
+            "short_expected_supported_by_longer_sentence",
             "expected_app_quality_blocked_sentence",
         }
     ):
@@ -2084,6 +2105,18 @@ def _with_case_evidence_metadata(results: list[dict[str, Any]]) -> list[dict[str
         )
         if has_short_contained_token_expected and not has_revision_variant_expected:
             case_definition_flags.append("short_contained_expected_token_sentence")
+        has_short_supported_by_longer_expected = any(
+            _expected_short_sentence_supported_by_longer_sentence(left, right)
+            for left_index, left in enumerate(expected_final)
+            for right_index, right in enumerate(expected_final)
+            if left_index < right_index and left and right and left != right and left not in right and right not in left
+        )
+        if (
+            has_short_supported_by_longer_expected
+            and not has_revision_variant_expected
+            and not has_short_contained_token_expected
+        ):
+            case_definition_flags.append("short_expected_supported_by_longer_sentence")
         language = str(item.get("language", "")).strip().lower()
         if _has_expected_app_quality_blocked_sentence(expected_final, language):
             case_definition_flags.append("expected_app_quality_blocked_sentence")

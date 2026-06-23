@@ -28784,3 +28784,45 @@ recent_window_12_strict_final_f1_avg=0.834
 - 네 sweep 모두 전체 F1, strict F1, boundary F1에 변화를 만들지 못했다.
 - 따라서 현재 정리된 challenge replay 기준에서는 delta suppressed stage 보존 기간과 recent transcript window가 주요 개선 레버가 아니다.
 - 앱 코드는 변경하지 않고 원복했다. 다음 후보는 상수 완화가 아니라, strict low-score의 terminal staged/queue residue와 pure loss를 더 분리해 실제 runtime에서 소비 가능한 문장인지 확인하는 방향이다.
+
+## 2026-06-24 short expected가 longer expected로 설명되는 케이스 분리
+
+목적:
+
+- strict 최저점 케이스를 다시 보니, `expected_final` 안에서 짧은 문장이 긴 expected 문장의 부분 발화로 설명되는 경우가 남아 있었다.
+- 이 경우 stable repeat count가 3 이상이어도, 같은 발화 구간을 두 개의 final expected로 중복 라벨링한 것일 수 있다.
+
+변경:
+
+- case definition 감사에 `short_expected_supported_by_longer_sentence` 플래그를 추가했다.
+- 짧은 expected가 5~8 token 단위이고, 긴 expected와의 token-sentence support가 0.80 이상이면 expected 경계 리뷰 대상으로 분류한다.
+- 이미 exact token 포함으로 잡힌 `short_contained_expected_token_sentence`와 중복 표기하지 않는다.
+
+CUDA/SaT 확인:
+
+```text
+baseline_output=.tmp/eval/dictation-ai-sbd/current-20260624-split-coverage-review-report.json
+baseline_case_definition_review=8
+baseline_logic_tuning_candidates=48
+baseline_strict_logic_candidates=39
+baseline_strict_final_f1_avg=0.834
+
+output=.tmp/eval/dictation-ai-sbd/current-20260624-short-supported-expected-review-report.json
+case_definition_review=9
+case_definition_review_ratio=0.161
+logic_tuning_candidates=47
+strict_logic_candidates=38
+strict_final_f1_avg=0.846
+final_precision_avg=0.887
+final_recall_avg=0.800
+final_f1_avg=0.825
+final_boundary_f1_avg=0.558
+
+case_definition_flag_counts.short_expected_supported_by_longer_sentence=1
+```
+
+해석:
+
+- `ko_log_draft_20260620_avc_whisper_log_002756`가 `short_expected_supported_by_longer_sentence`로 분리됐다.
+- 전체 성능은 변하지 않는다. 이 변경은 앱 로직 개선이 아니라, 앱 로직 튜닝 후보에서 중복 expected 경계 의심 케이스를 제외하는 리포트 개선이다.
+- “의미가 비슷한 문장이 3회 이상 반복되면 확정”이라는 기준은 필요하지만, expected 라벨 내부에서 짧은 부분 문장을 별도 final로 중복 등록하는 것을 정당화하지는 않는다.
