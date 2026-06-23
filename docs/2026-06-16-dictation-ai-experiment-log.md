@@ -30747,3 +30747,38 @@ staged_exact_match=24
 - confirmation이 1개 부족한 punctuated short CJK만 허용해도 false final 증가를 충분히 막지 못한다.
 - short CJK aged-final 완화는 이 수준의 구조 조건으로는 일반화할 수 없다. 앱 코드 패치는 원복하고 적용하지 않는다.
 - 다음 구조 실험은 short CJK 허용이 아니라, confirmed/revision/queue 소비 순서에서 이미 내용 회수는 되지만 boundary가 깨지는 케이스와 실제 content loss 케이스를 분리한 뒤 진행한다.
+
+## 2026-06-24 strict boundary-sensitive 분류
+
+목적:
+
+- 최신 routing은 `review_strict_boundary_sensitivity`로 바뀌었다.
+- strict 후보 중 final content와 order는 맞지만 exact boundary offset만 낮은 케이스가 11건이다.
+- 이 11건을 앱 로직 실패로 볼지, boundary metric/label 해석 문제로 볼지 분리하기 위해 expected/actual token 포함 관계를 분류했다.
+
+시도:
+
+```text
+report=.tmp/eval/dictation-ai-sbd/current-20260624-boundary-shift-kind-report.json
+cases=57
+strict_logic_candidates=38
+strict_actionable_low_final_case_count=7
+strict_boundary_sensitive_case_count=11
+final_f1_avg=0.913
+strict_final_f1_avg=0.953
+final_boundary_f1_avg=0.599
+
+boundary_shift_kind_counts:
+  actual_fragment_of_expected=4
+  high_overlap_revision=3
+  low_overlap=3
+  actual_contains_expected=1
+```
+
+해석:
+
+- `actual_fragment_of_expected`와 `actual_contains_expected`는 final content가 거의 보존됐지만 expected/actual의 boundary 범위가 서로 다르다.
+- `high_overlap_revision`은 STT 문장 표기와 revision 변형이 큰 경우다.
+- `low_overlap` 3건도 final content F1은 1.0이며, 실제 예시는 한국어 띄어쓰기/합성어 차이, 중국어 STT 어휘 변형, 라틴 suffix 표기 차이가 섞여 있다.
+- 따라서 현재 strict boundary-sensitive 11건은 앱의 append-only final lifecycle을 곧바로 바꿀 근거가 아니라, boundary metric sensitivity와 case boundary 해석을 먼저 분리해야 하는 신호다.
+- 다음 앱 로직 변경은 이 그룹 전체가 아니라, content F1이 실제로 낮은 `strict_actionable_low_final` 7건 중에서도 case-definition/replay-tail 영향이 없는 케이스로 제한한다.
