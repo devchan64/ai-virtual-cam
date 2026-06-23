@@ -29746,3 +29746,78 @@ final_boundary_f1_avg=0.558
 - `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=3`은 현재 corpus에서 변화가 없어 채택 근거가 없다.
 - `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=2`는 finalized 수를 늘리지만 precision과 strict F1이 하락한다. queue stale 후보 위험이 다시 커지므로 폐기한다.
 - 따라서 현재 저점은 단순 confirmation/queue 상수 변경으로 해결하지 않고, recent-final compact echo가 premature final과 만나는 조건을 더 구체적으로 추적해야 한다.
+
+## 2026-06-24 recent-final short extension sweep 폐기
+
+목적:
+
+- actionable 저점 일부에서 recent final보다 1~2 unit 긴 후보가 suffix 부족으로 echo 처리되는 흐름이 보였다.
+- `RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS`와 prefix 길이 조건만으로 개선 가능한지 확인한다.
+
+검증:
+
+```text
+sweep_output=.tmp/eval/dictation-ai-sbd/sweep-20260624-recent-final-short-extension-summary.json
+
+baseline_final_f1_avg=0.862698
+baseline_strict_final_f1_avg=0.964444
+baseline_final_boundary_f1_avg=0.564458
+
+RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS=1
+final_f1_avg=0.862698
+strict_final_f1_avg=0.964444
+final_boundary_f1_avg=0.564458
+
+RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS=2
+final_f1_avg=0.862698
+strict_final_f1_avg=0.964444
+final_boundary_f1_avg=0.564458
+
+RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS=10
+final_f1_avg=0.862698
+strict_final_f1_avg=0.964444
+final_boundary_f1_avg=0.564458
+```
+
+해석:
+
+- short extension 상수축은 현재 challenge replay에서 final 성능을 바꾸지 않는다.
+- 따라서 recent-final compact 병목은 짧은 suffix 회수 조건만의 문제가 아니다.
+- 다음 검토는 append-only final 계약상 이미 확정된 낮은 품질 final을 뒤의 stable expected로 대체하도록 기대한 케이스가 남아 있는지, 또는 확정 전 confirmation 보존/age reset에서 막을 수 있는 일반 원칙이 있는지 분리해서 본다.
+
+## 2026-06-24 stable short final expected 누락 케이스 수정
+
+목적:
+
+- `zh_log_draft_20260620_avc_whisper_log_11_000826`에서 실제 final `哦，还有泡菜，还有葱。`가 expected에 없었지만, 입력 chunk에서 4회 관측되고 종결부호가 있는 짧은 완결 문장이었다.
+- 짧은 문장도 final-only 번역 대상이라는 현재 계약에 맞춰 expected_final에 추가한다.
+
+검증:
+
+```text
+case_file=tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-6.jsonl
+case_id=zh_log_draft_20260620_avc_whisper_log_11_000826
+added_expected_final=哦，还有泡菜，还有葱。
+
+validate_cases=.tmp/eval/dictation-ai-sbd/validate-active-cases-20260624-after-000826-summary.json
+input_unobserved_case_count=0
+stable_repeat_unsupported_case_count=0
+
+before_output=.tmp/eval/dictation-ai-sbd/current-20260624-recent-final-delta-reason-report.json
+before_final_f1_avg=0.862698
+before_strict_final_f1_avg=0.964444
+before_final_boundary_f1_avg=0.564458
+before_strict_actionable_low_final.case_count=4
+
+after_output=.tmp/eval/dictation-ai-sbd/current-20260624-after-000826-expected-report.json
+after_final_f1_avg=0.866
+after_strict_final_f1_avg=0.970
+after_final_boundary_f1_avg=0.574
+after_strict_actionable_low_final.case_count=3
+```
+
+해석:
+
+- 이 변경은 앱 로직 개선이 아니라 benchmark label 정화다.
+- actionable 저점 일부는 아직 앱 로직 후보지만, 적어도 이번 케이스는 “stable repeated short final을 expected에서 누락한” 정의 문제였다.
+- 다음 분석에서는 남은 3건에 집중한다. 특히 expected가 이미 확정된 유사 final의 revision을 요구하는지, 또는 확정 전에 방지 가능한 premature final인지 분리해야 한다.
