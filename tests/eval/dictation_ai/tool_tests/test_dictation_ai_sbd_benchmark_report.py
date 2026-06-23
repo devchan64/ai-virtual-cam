@@ -774,6 +774,78 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(report["case_definition_action_summary"]["action_counts"], {"manual_boundary_review": 1})
         self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
 
+    def test_strict_summary_separates_boundary_metric_sensitivity(self) -> None:
+        args = Namespace(
+            model="sat-3l-sm",
+            device="cuda",
+            compute_type="float16",
+            min_final_f1=0.0,
+            fail_on_regression=False,
+        )
+        case = SbdCase(
+            id="case-boundary-sensitive",
+            language="ko",
+            chunks=[
+                "실제 문장입니다.",
+                "실제 문장입니다.",
+                "실제 문장입니다.",
+            ],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=["실제 문장입니다."],
+            expected_staged="",
+            tags=("missing-final",),
+            sentence_finalize_age=3,
+        )
+        results = [
+            {
+                "id": "case-boundary-sensitive",
+                "language": "ko",
+                "tags": ["missing-final"],
+                "expected_final": ["실제 문장입니다."],
+                "chunks": [
+                    {"input": "실제 문장입니다."},
+                    {"input": "실제 문장입니다."},
+                    {"input": "실제 문장입니다."},
+                ],
+                "actual_final": ["앞부분 실제 문장입니다."],
+                "actual_pending": "",
+                "actual_staged": "",
+                "actual_staged_queue": [],
+                "final_score": _score(1.0, 1.0, 1.0),
+                "final_ordered_score": _score(1.0, 1.0, 1.0),
+                "final_boundary_score": _score(0.0, 0.0, 0.0),
+                "completed_last_score": _score(1.0, 1.0, 1.0),
+                "pending_exact": True,
+                "staged_exact": True,
+                "case_exact_match": False,
+                "metrics": {"finalized": 1, "stage_start": 1},
+                "expected_quality_flags": [],
+                "input_evidence": {
+                    "fully_supported": True,
+                    "stable_repeat_fully_supported": True,
+                },
+                "case_context_flags": [],
+                "case_definition_flags": [],
+            }
+        ]
+
+        report = build_benchmark_report(
+            args=args,
+            case_sources=["cases.jsonl"],
+            corpus_role="challenge-replay",
+            cases=[case],
+            results=results,
+            metric_totals={"finalized": 1, "stage_start": 1},
+            elapsed_ms=1.0,
+        )
+
+        strict_summary = report["strict_logic_candidate_summary"]
+        self.assertEqual(strict_summary["strict_case_count"], 1)
+        sensitivity = strict_summary["boundary_metric_sensitivity"]
+        self.assertEqual(sensitivity["case_count"], 1)
+        self.assertEqual(sensitivity["examples"][0]["id"], "case-boundary-sensitive")
+
     def test_report_summarizes_low_score_review_needed_cases(self) -> None:
         args = Namespace(
             model="sat-3l-sm",

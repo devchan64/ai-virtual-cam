@@ -1922,6 +1922,46 @@ def _strict_logic_candidate(case: SbdCase, result: dict[str, Any]) -> bool:
     return True
 
 
+def _strict_boundary_metric_sensitivity_summary(strict_results: list[dict[str, Any]]) -> dict[str, Any]:
+    sensitive = []
+    for result in strict_results:
+        final_score = dict(result.get("final_score", {}))
+        ordered_score = dict(result.get("final_ordered_score", final_score))
+        boundary_score = dict(result.get("final_boundary_score", {}))
+        final_f1 = float(final_score.get("f1", 0.0))
+        ordered_f1 = float(ordered_score.get("f1", final_f1))
+        boundary_f1 = float(boundary_score.get("f1", 0.0))
+        if final_f1 < BOUNDARY_ZERO_HIGH_FINAL_F1:
+            continue
+        if ordered_f1 < BOUNDARY_ZERO_HIGH_FINAL_F1:
+            continue
+        if boundary_f1 > BOUNDARY_GRANULARITY_MAX_BOUNDARY_F1:
+            continue
+        payload = _boundary_zero_high_final_payload(result)
+        payload["expected_final_count"] = len(result.get("expected_final", []) or [])
+        payload["actual_final_count"] = len(result.get("actual_final", []) or [])
+        sensitive.append(payload)
+    return {
+        "interpretation": (
+            "Strict logic candidates whose final sentence content and order match well but exact boundary "
+            "offset F1 is low. Treat these as metric sensitivity or label-boundary review before changing "
+            "the app lifecycle logic."
+        ),
+        "min_final_f1": BOUNDARY_ZERO_HIGH_FINAL_F1,
+        "min_ordered_f1": BOUNDARY_ZERO_HIGH_FINAL_F1,
+        "max_boundary_f1": BOUNDARY_GRANULARITY_MAX_BOUNDARY_F1,
+        "case_count": len(sensitive),
+        "examples": sorted(
+            sensitive,
+            key=lambda item: (
+                float(item.get("final_boundary_f1", 0.0)),
+                -float(item.get("final_f1", 0.0)),
+                str(item.get("id", "")),
+            ),
+        )[:CASE_EXEMPLAR_LIMIT],
+    }
+
+
 def summarize_strict_logic_candidate_results(cases: list[SbdCase], results: list[dict[str, Any]]) -> dict[str, Any]:
     cases_by_id = {case.id: case for case in cases}
     strict = [
@@ -1948,6 +1988,7 @@ def summarize_strict_logic_candidate_results(cases: list[SbdCase], results: list
         "strict_case_count": len(strict),
         "strict_case_ids": [str(result.get("id")) for result in strict],
         "summary": _summarize_result_group(strict),
+        "boundary_metric_sensitivity": _strict_boundary_metric_sensitivity_summary(strict),
         "collection_strata": summarize_results_by_collection_strata(strict),
         "metric_presence": {
             metric: _summarize_supported_low_metric_presence(strict, metric)

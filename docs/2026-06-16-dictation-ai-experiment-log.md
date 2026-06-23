@@ -29570,3 +29570,28 @@ targeted_patch_case_definition_review=21
 - near-confirmed short CJK에만 한 chunk 기회를 주는 좁은 패치도 baseline보다 나빴다.
 - 이 문제는 개별 케이스에서는 그럴듯하지만 보편 정책으로 채택할 수 없다. short CJK 품질 block 완화는 현재 폐기한다.
 - 관련 코드 변경은 반영하지 않았다.
+
+## 2026-06-24 strict boundary metric sensitivity 요약 추가
+
+목적:
+
+- strict logic 후보 안에서도 final sentence content/order는 잘 맞지만 exact boundary offset만 낮은 케이스가 있다.
+- 이 케이스를 앱 lifecycle 실패로 오해하면 불필요한 문장 병합/분할 규칙을 추가하게 되므로, `strict_logic_candidate_summary` 안에 별도 `boundary_metric_sensitivity`를 추가했다.
+
+검증:
+
+```text
+tool_test=./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report
+tool_test_result=OK, 44 tests
+
+cuda_output=.tmp/eval/dictation-ai-sbd/current-20260624-strict-boundary-sensitivity-report.json
+final_f1_avg=0.862698
+strict_final_f1_avg=0.964444
+final_boundary_f1_avg=0.564458
+strict_boundary_metric_sensitivity.case_count=9
+```
+
+해석:
+
+- strict 후보 30건 중 9건은 final/ordered F1이 0.95 이상이지만 boundary F1이 0.5 이하인 metric sensitivity 또는 label-boundary 검토 대상이다.
+- 이 요약은 성능 점수를 바꾸지 않고, 다음 튜닝 대상을 앱 로직 후보와 boundary metric 민감도 후보로 분리한다.
