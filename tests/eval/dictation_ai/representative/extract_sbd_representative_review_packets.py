@@ -14,7 +14,9 @@ REQUIRED_REVIEW_EVENT_KINDS = ("raw_chunks", "transcripts", "final_events", "per
 
 TIMESTAMP_RE = re.compile(r"^\[(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]")
 STT_RAW_RE = re.compile(r"Dictation AI stt_raw: \[(?P<language>[a-z]{2}) raw\] (?P<text>.*)$")
-TRANSCRIPT_RE = re.compile(r"Dictation AI transcript: \[(?P<language>[a-z]{2})\] (?P<text>.*)$")
+TRANSCRIPT_RE = re.compile(
+    r"Dictation AI transcript: \[(?P<language>[a-z]{2})(?:#(?P<segment_id>\d+))?\] (?P<text>.*)$"
+)
 FINAL_RE = re.compile(r"받아쓰기 AI 문장 확정: (?P<payload>.*)$")
 PERFORMANCE_RE = re.compile(r"받아쓰기 AI 성능: (?P<payload>.*)$")
 KV_RE = re.compile(r"(?P<key>[A-Za-z_]+)=(?P<value>[^\s,]+)")
@@ -169,14 +171,16 @@ def _collect_source_events(
 
             transcript_match = TRANSCRIPT_RE.search(line)
             if transcript_match:
-                transcripts.append(
-                    {
-                        "timestamp": timestamp,
-                        "line_number": line_number,
-                        "language": transcript_match.group("language"),
-                        "text": _trim_text(transcript_match.group("text"), limit=text_limit),
-                    }
-                )
+                record = {
+                    "timestamp": timestamp,
+                    "line_number": line_number,
+                    "language": transcript_match.group("language"),
+                    "text": _trim_text(transcript_match.group("text"), limit=text_limit),
+                }
+                segment_id = transcript_match.group("segment_id")
+                if segment_id:
+                    record["segment_id"] = segment_id
+                transcripts.append(record)
                 continue
 
             final_event = _parse_final_event(line, text_limit=text_limit)
@@ -260,6 +264,10 @@ def build_review_packets(
                 },
                 "sampling_unit": source.get("sampling_unit", ""),
                 "sampling_rule": source.get("sampling_rule", ""),
+                "priority_metric": source.get("priority_metric"),
+                "priority_rank": source.get("priority_rank"),
+                "priority_ratio": source.get("priority_ratio"),
+                "priority_marker_count": source.get("priority_marker_count"),
                 "runtime_candidates": _source_record_runtime(source),
                 "event_counts": event_counts,
                 "review_readiness": readiness,
@@ -356,6 +364,7 @@ def write_markdown_packets(payload: dict[str, object], path: Path) -> None:
                 f"- source_range: `{packet.get('source_started_at')}` - `{packet.get('source_ended_at')}`",
                 f"- sampling_unit: `{packet.get('sampling_unit')}`",
                 f"- sampling_rule: `{packet.get('sampling_rule')}`",
+                f"- priority: metric=`{packet.get('priority_metric')}` rank=`{packet.get('priority_rank')}` ratio=`{packet.get('priority_ratio')}` count=`{packet.get('priority_marker_count')}`",
                 f"- runtime_candidates: `{runtime_candidates}`",
                 f"- source_window_filter: `{source_window_filter}`",
                 f"- event_counts: `{packet.get('event_counts')}`",

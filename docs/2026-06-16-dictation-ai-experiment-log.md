@@ -31301,3 +31301,53 @@ selected_sources:
 
 - 다음 케이스 수집은 `target-stage-replace-sources-20260624.md`의 상위 로그부터 확인한다.
 - priority manifest는 앱 로직 변경 근거가 아니라 동일 원인군 수집 대상을 좁히는 단계로만 사용한다.
+
+## 2026-06-24 priority source review packet/draft 보존 보강
+
+목적:
+
+- priority source manifest에서 뽑은 후보가 review packet과 draft 단계로 넘어갈 때 왜 선택됐는지 사라지면, 사람이 검토할 때 원인군 추적이 어려워진다.
+- 현재 transcript 출력은 `[ko#1]`처럼 gutter 번호가 붙을 수 있으므로, review packet extractor가 `[ko]`만 처리하면 transcript event를 놓칠 수 있다.
+
+시도:
+
+```text
+tool_test=./.venv/bin/python -m unittest \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_representative_review_packet_extractor \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_representative_case_draft_extractor
+tool_test_result=OK
+
+review_packet_command=./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py extract-review-packets \
+  .tmp/eval/dictation-ai-sbd/target-stage-replace-sources-20260624.json \
+  --output .tmp/eval/dictation-ai-sbd/target-stage-replace-packets-20260624.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/target-stage-replace-packets-20260624.md
+
+review_packet_result:
+  packet_count=3
+  ready_packet_count=3
+  missing_source_logs=0
+  packet_readiness_blockers=0
+
+draft_command=./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py extract-representative-drafts \
+  .tmp/eval/dictation-ai-sbd/target-stage-replace-packets-20260624.json \
+  --jsonl-output .tmp/eval/dictation-ai-sbd/target-stage-replace-drafts-20260624.jsonl \
+  --summary-output .tmp/eval/dictation-ai-sbd/target-stage-replace-drafts-20260624.summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/target-stage-replace-drafts-20260624.md
+
+draft_result:
+  draft_count=3
+  expected_final_generated=false
+  case_generation=manual_expected_final_required
+  priority_metric=stage_replace_deferred_per_stt_raw
+```
+
+해석:
+
+- priority metric/rank/ratio/count가 source manifest에서 review packet과 draft까지 유지된다.
+- numbered transcript marker(`[lang#segment]`)도 review packet transcript event로 읽을 수 있다.
+- 생성된 draft는 `expected_final=[]` 상태이며, 사람이 확정 문장을 작성하기 전에는 benchmark 입력이나 논문 근거가 아니다.
+
+결론:
+
+- 동일 원인군 수집 흐름은 `source audit -> priority source manifest -> review packet -> manual draft`까지 이어진다.
+- 다음 단계는 draft 전체를 자동 승격하는 것이 아니라, 상위 source에서 짧은 bounded window를 사람이 골라 `expected_final`을 작성하는 것이다.

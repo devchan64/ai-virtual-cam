@@ -18,7 +18,7 @@ class DictationAiSbdRepresentativeReviewPacketExtractorTest(unittest.TestCase):
                         "[2026-06-20 10:00:00] [avc] Dictation AI stt_raw: [ko raw] 첫번째 raw window",
                         "[2026-06-20 10:00:01] [avc] 받아쓰기 AI 성능: chunk=1 step=1.0s window=10.0s text_chars=16 audio_rms=0.01",
                         "[2026-06-20 10:00:02] [avc] 받아쓰기 AI 문장 확정: chunk=1 reason=age output_chars=8 text='첫 문장입니다.' staged_tail=''",
-                        "[2026-06-20 10:00:03] [avc] Dictation AI transcript: [ko] 첫 문장입니다.",
+                        "[2026-06-20 10:00:03] [avc] Dictation AI transcript: [ko#7] 첫 문장입니다.",
                     ]
                 ),
                 encoding="utf-8",
@@ -44,6 +44,10 @@ class DictationAiSbdRepresentativeReviewPacketExtractorTest(unittest.TestCase):
                         "window_seconds_candidates": {"10.0": 1},
                         "step_seconds_candidates": {"1.0": 1},
                         "sentence_finalize_age_candidates": {"3": 1},
+                        "priority_metric": "stage_replace_deferred_per_stt_raw",
+                        "priority_rank": 0,
+                        "priority_ratio": 2.5,
+                        "priority_marker_count": 25,
                     }
                 ],
             }
@@ -69,11 +73,16 @@ class DictationAiSbdRepresentativeReviewPacketExtractorTest(unittest.TestCase):
         self.assertEqual(packet["event_counts"]["final_events"], 1)
         self.assertEqual(packet["event_counts"]["transcripts"], 1)
         self.assertEqual(packet["event_counts"]["performance_events"], 1)
+        self.assertEqual(packet["priority_metric"], "stage_replace_deferred_per_stt_raw")
+        self.assertEqual(packet["priority_rank"], 0)
+        self.assertEqual(packet["priority_ratio"], 2.5)
+        self.assertEqual(packet["priority_marker_count"], 25)
         self.assertEqual(
             packet["review_readiness"],
             {"ready_for_human_review": True, "missing_event_kinds": []},
         )
         self.assertEqual(packet["final_events_sample"][0]["text"], "첫 문장입니다.")
+        self.assertEqual(packet["transcript_events_sample"][0]["segment_id"], "7")
         self.assertEqual(packet["performance_events_sample"][0]["chunk"], "1")
 
     def test_extracts_only_events_inside_selected_source_window(self) -> None:
@@ -153,6 +162,10 @@ class DictationAiSbdRepresentativeReviewPacketExtractorTest(unittest.TestCase):
                         },
                         "sampling_unit": "session-window",
                         "sampling_rule": "session-hash-v1:seed=test:per_language=1",
+                        "priority_metric": "stage_replace_deferred_per_stt_raw",
+                        "priority_rank": 1,
+                        "priority_ratio": 1.5,
+                        "priority_marker_count": 15,
                         "runtime_candidates": {
                             "stt_backend_candidates": {"faster-whisper": 1},
                             "stt_model_candidates": {"large-v3": 1},
@@ -199,6 +212,7 @@ class DictationAiSbdRepresentativeReviewPacketExtractorTest(unittest.TestCase):
         self.assertIn("## Review Checklist", markdown)
         self.assertIn("Write `expected_final` by human review", markdown)
         self.assertIn("- runtime_candidates:", markdown)
+        self.assertIn("priority: metric=`stage_replace_deferred_per_stt_raw` rank=`1`", markdown)
         self.assertIn("faster-whisper", markdown)
         self.assertIn("- source_window_filter:", markdown)
         self.assertIn("'applied': True", markdown)

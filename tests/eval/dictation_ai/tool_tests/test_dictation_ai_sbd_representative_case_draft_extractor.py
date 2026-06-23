@@ -25,6 +25,10 @@ class DictationAiSbdRepresentativeCaseDraftExtractorTest(unittest.TestCase):
                     },
                     "sampling_unit": "session-window",
                     "sampling_rule": "session-hash-v1:test",
+                    "priority_metric": "stage_replace_deferred_per_stt_raw",
+                    "priority_rank": 0,
+                    "priority_ratio": 2.5,
+                    "priority_marker_count": 25,
                     "runtime_candidates": {
                         "stt_backend_candidates": {"faster-whisper": 2},
                         "stt_model_candidates": {"large-v3": 2},
@@ -64,6 +68,10 @@ class DictationAiSbdRepresentativeCaseDraftExtractorTest(unittest.TestCase):
         draft = drafts_payload["drafts"][0]
         self.assertEqual(draft["id"], "ko_representative_review_abc_draft")
         self.assertEqual(draft["corpus_role"], "representative")
+        self.assertEqual(draft["priority_metric"], "stage_replace_deferred_per_stt_raw")
+        self.assertEqual(draft["priority_rank"], 0)
+        self.assertEqual(draft["priority_ratio"], 2.5)
+        self.assertEqual(draft["priority_marker_count"], 25)
         self.assertEqual(draft["window_seconds"], 10.0)
         self.assertEqual(draft["sentence_finalize_age"], 3)
         self.assertEqual(
@@ -87,6 +95,7 @@ class DictationAiSbdRepresentativeCaseDraftExtractorTest(unittest.TestCase):
 
         self.assertEqual(record["expected_final"], [])
         self.assertIn("expected_final_generated: `false`", markdown)
+        self.assertIn("priority: metric=`stage_replace_deferred_per_stt_raw` rank=`0`", markdown)
         self.assertIn("## Human Review Steps", markdown)
         self.assertIn("Remove `draft_expected_final_required` before promotion.", markdown)
         self.assertIn("Template fields to edit:", markdown)
