@@ -130,6 +130,7 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
                 "case_count": 1,
                 "corpus_role": "challenge-replay",
                 "expected_final_case_count": 1,
+                "expected_no_final_case_count": 0,
                 "draft_count": 0,
             },
         )

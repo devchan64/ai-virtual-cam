@@ -178,6 +178,8 @@ class DictationAiSbdCaseLoaderTest(unittest.TestCase):
                 "language": "en",
                 "chunks": ["Hello world."],
                 "expected_final": [],
+                "expected_no_final": True,
+                "expected_no_final_reason": "pending-only case",
                 "expected_pending": "Hello world.",
                 "sentence_finalize_age": 3,
                 "tags": ["unit"],
@@ -188,6 +190,25 @@ class DictationAiSbdCaseLoaderTest(unittest.TestCase):
 
         self.assertEqual(cases[0].expected_final, [])
         self.assertEqual(cases[0].expected_pending, "Hello world.")
+        self.assertEqual(cases[0].metadata["expected_no_final"], True)
+        self.assertEqual(cases[0].metadata["expected_no_final_reason"], "pending-only case")
+
+    def test_rejects_unmarked_cases_without_expected_final(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "cases.jsonl"
+            payload = {
+                "id": "empty-expected-final",
+                "language": "en",
+                "chunks": ["Hello world."],
+                "expected_final": [],
+                "expected_pending": "Hello world.",
+                "sentence_finalize_age": 3,
+                "tags": ["unit"],
+            }
+            path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "not marked expected_no_final"):
+                load_cases([path])
 
     def test_loads_initial_final_context_for_mid_stream_replay(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

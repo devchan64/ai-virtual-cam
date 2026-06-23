@@ -31559,3 +31559,68 @@ bounded window 복잡도:
 - 현재 active challenge case의 `expected_final` 정의 오류는 자동 감사 기준에서 정리된 상태다.
 - 다음 케이스 추가는 priority source 전체나 60초 window가 아니라, 15초 수준의 작은 bounded candidate에서 사람이 확인한 문장만 등록한다.
 - 이 단계는 케이스 수집/정의 품질 개선이며 앱 로직 변경 근거는 아직 아니다.
+
+## 2026-06-24 no-final 케이스 명시와 expected_final 검증 계약 정리
+
+목적:
+
+- `expected_final: []`가 "정답 라벨 누락"인지 "final이 없어야 하는 케이스"인지 모호한 상태를 제거한다.
+- finalization 성능 케이스는 `expected_final`을 요구하고, pending/no-speech/audio residual 억제 케이스는 `expected_no_final=true`로 명시한다.
+
+변경:
+
+- 4개 빈 `expected_final` 케이스에 `expected_no_final=true`와 이유를 추가했다.
+- benchmark loader는 `expected_final`이 비어 있고 `expected_no_final`도 없는 케이스를 거부한다.
+- validator와 benchmark report는 `expected_no_final_case_count`와 `unmarked_no_expected_final_case_count`를 집계한다.
+
+검증:
+
+```text
+validate_command=./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases \
+  tests/eval/dictation_ai/sbd_cases \
+  --require-expected-final \
+  --require-source-trace \
+  --require-input-evidence \
+  --require-observed-input-evidence \
+  --require-stable-repeat-evidence \
+  --max-drafts 0
+
+validation_result:
+  case_count=57
+  expected_final_case_count=53
+  expected_no_final_case_count=4
+  unmarked_no_expected_final_case_count=0
+  draft_count=0
+  input_unsupported_case_count=0
+  input_unobserved_case_count=0
+  stable_repeat_unsupported_case_count=0
+  missing_source_trace_case_count=0
+```
+
+CUDA benchmark:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --model sat-3l-sm \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260624-expected-no-final-marked-report.json
+
+result:
+  case_count=57
+  expected_final_case_count=53
+  expected_no_final_case_count=4
+  final_f1_avg=0.913
+  strict_final_f1_avg=0.953
+  expected_definition_cleanup=0
+  case_interpretation_review=6
+  tuning_next_action=collect_more_same_issue_kind_cases
+```
+
+해석:
+
+- 현재 active challenge replay에는 모호한 빈 `expected_final` 케이스가 없다.
+- `expected_final`이 있는 53건은 source trace, replay input, raw STT observation, stable repeat evidence를 모두 통과한다.
+- 4건은 final-only 번역 큐 대상이 아닌 lifecycle/no-speech 억제 케이스로 분리됐다.
+- 이 패치는 앱 로직 성능 개선이 아니라 벤치 라벨 해석 안정화다. 앱 로직 변경은 동일 원인군 strict 실패가 더 반복될 때 진행한다.

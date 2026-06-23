@@ -80,6 +80,8 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
         self.assertEqual(summary["case_count"], 1)
         self.assertEqual(summary["draft_count"], 0)
         self.assertEqual(summary["expected_final_case_count"], 1)
+        self.assertEqual(summary["expected_no_final_case_count"], 0)
+        self.assertEqual(summary["unmarked_no_expected_final_case_count"], 0)
         self.assertEqual(summary["source_trace_case_count"], 0)
         self.assertEqual(summary["missing_source_trace_case_count"], 1)
         self.assertEqual(summary["missing_source_trace_by_file"], {str(path): 1})
@@ -103,6 +105,79 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
         self.assertEqual(summary["input_unobserved_examples"], [])
         self.assertEqual(summary["language_counts"], {"ko": 1})
         self.assertEqual(summary["tag_counts"], {"missing-final": 1})
+
+    def test_reports_expected_no_final_cases_separately(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "cases.jsonl"
+            self._write_payload(
+                path,
+                {
+                    "id": "case-a",
+                    "language": "ko",
+                    "chunks": ["잔류 문장입니다.", "", ""],
+                    "expected_final": [],
+                    "expected_no_final": True,
+                    "expected_no_final_reason": "no-speech stale residual",
+                    "tags": ["no-speech"],
+                },
+            )
+
+            summary = validate_case_files([path], require_expected_final=True)
+
+        self.assertEqual(summary["case_count"], 1)
+        self.assertEqual(summary["expected_final_case_count"], 0)
+        self.assertEqual(summary["expected_no_final_case_count"], 1)
+        self.assertEqual(summary["unmarked_no_expected_final_case_count"], 0)
+
+    def test_reports_unmarked_no_expected_final_cases(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "cases.jsonl"
+            self._write_payload(
+                path,
+                {
+                    "id": "case-a",
+                    "language": "ko",
+                    "chunks": ["아직 pending입니다."],
+                    "expected_final": [],
+                    "tags": ["pending-tail"],
+                },
+            )
+
+            summary = validate_case_files([path])
+            with self.assertRaisesRegex(ValueError, "has no expected_final"):
+                validate_case_files([path], require_expected_final=True)
+
+        self.assertEqual(summary["expected_no_final_case_count"], 0)
+        self.assertEqual(summary["unmarked_no_expected_final_case_count"], 1)
+        self.assertEqual(
+            summary["unmarked_no_expected_final_examples"],
+            [
+                {
+                    "id": "case-a",
+                    "path": str(path),
+                    "line_no": 1,
+                    "language": "ko",
+                }
+            ],
+        )
+
+    def test_rejects_expected_no_final_with_expected_final(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "cases.jsonl"
+            self._write_payload(
+                path,
+                {
+                    "id": "case-a",
+                    "language": "ko",
+                    "chunks": ["안녕하세요."],
+                    "expected_final": ["안녕하세요."],
+                    "expected_no_final": True,
+                    "tags": ["missing-final"],
+                },
+            )
+
+            with self.assertRaisesRegex(ValueError, "cannot set expected_no_final"):
+                validate_case_files([path])
 
     def test_reports_expected_final_without_input_support(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

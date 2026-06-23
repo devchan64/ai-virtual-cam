@@ -62,6 +62,12 @@ def _load_case_file(path: Path, *, corpus_role: str) -> list[SbdCase]:
                 validate_representative_payload(payload, path=path, line_no=line_no, case_id=case_id)
                 if not any(str(item).strip() for item in payload.get("expected_final", [])):
                     raise ValueError(f"{path}:{line_no} representative case {case_id!r} has no expected_final")
+            elif not any(str(item).strip() for item in payload.get("expected_final", [])) and not bool(
+                payload.get("expected_no_final", False)
+            ):
+                raise ValueError(
+                    f"{path}:{line_no} case {case_id!r} has no expected_final and is not marked expected_no_final"
+                )
             if corpus_role == "representative":
                 metadata = representative_metadata_record(payload)
             else:
@@ -75,6 +81,8 @@ def _load_case_file(path: Path, *, corpus_role: str) -> list[SbdCase]:
                     "review_source_file": str(payload.get("review_source_file", "")).strip(),
                     "review_case_group": str(payload.get("review_case_group", "")).strip(),
                     "fingerprint": str(payload.get("fingerprint", "")).strip(),
+                    "expected_no_final": bool(payload.get("expected_no_final", False)),
+                    "expected_no_final_reason": str(payload.get("expected_no_final_reason", "")).strip(),
                 }
             cases.append(
                 SbdCase(

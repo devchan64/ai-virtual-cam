@@ -3472,10 +3472,14 @@ def build_benchmark_report(
         case_definition_cleanup_queue_summary=case_definition_cleanup_queue_summary,
     )
     expected_final_case_count = sum(1 for case in cases if case.expected_final)
+    expected_no_final_case_count = sum(
+        1 for case in cases if bool((case.metadata or {}).get("expected_no_final", False))
+    )
     case_summary = {
         "case_count": len(results),
         "corpus_role": corpus_role,
         "expected_final_case_count": expected_final_case_count,
+        "expected_no_final_case_count": expected_no_final_case_count,
         "draft_count": 0,
     }
     if corpus_role == "representative":

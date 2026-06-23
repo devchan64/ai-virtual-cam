@@ -156,6 +156,9 @@ def validate_case_files(
     draft_count = 0
     case_count = 0
     expected_final_case_count = 0
+    expected_no_final_case_count = 0
+    unmarked_no_expected_final_case_count = 0
+    unmarked_no_expected_final_examples: list[dict[str, object]] = []
     source_trace_case_count = 0
     missing_source_trace_case_count = 0
     missing_source_trace_by_file: Counter[str] = Counter()
@@ -216,7 +219,25 @@ def validate_case_files(
                             "Fill expected_final and remove draft_expected_final_required before registering it."
                         )
                 elif (require_expected_final or corpus_role == "representative") and not has_expected_final:
-                    raise ValueError(f"{path}:{line_no} case {case_id!r} has no expected_final")
+                    if not bool(payload.get("expected_no_final", False)):
+                        raise ValueError(f"{path}:{line_no} case {case_id!r} has no expected_final")
+                if bool(payload.get("expected_no_final", False)):
+                    if has_expected_final:
+                        raise ValueError(
+                            f"{path}:{line_no} case {case_id!r} cannot set expected_no_final with expected_final"
+                        )
+                    expected_no_final_case_count += 1
+                elif not has_expected_final:
+                    unmarked_no_expected_final_case_count += 1
+                    if len(unmarked_no_expected_final_examples) < 8:
+                        unmarked_no_expected_final_examples.append(
+                            {
+                                "id": case_id,
+                                "path": str(path),
+                                "line_no": line_no,
+                                "language": str(payload.get("language", "")).strip().lower() or "en",
+                            }
+                        )
                 if has_expected_final:
                     expected_final_case_count += 1
                     input_evidence = case_input_evidence(payload)
@@ -342,6 +363,9 @@ def validate_case_files(
         "corpus_role": corpus_role,
         "draft_count": draft_count,
         "expected_final_case_count": expected_final_case_count,
+        "expected_no_final_case_count": expected_no_final_case_count,
+        "unmarked_no_expected_final_case_count": unmarked_no_expected_final_case_count,
+        "unmarked_no_expected_final_examples": unmarked_no_expected_final_examples,
         "source_trace_case_count": source_trace_case_count,
         "missing_source_trace_case_count": missing_source_trace_case_count,
         "missing_source_trace_by_file": dict(sorted(missing_source_trace_by_file.items())),
