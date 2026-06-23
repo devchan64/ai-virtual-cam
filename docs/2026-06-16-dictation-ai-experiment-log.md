@@ -29707,3 +29707,42 @@ boundary_f1_delta=0.0000
 - fragment echo 상수축은 현재 저점 개선에 영향을 주지 않는다.
 - 남은 공통 병목은 `compact` recent-final echo가 가장 강하다. 다만 compact는 중복 확정 억제의 핵심 안전장치이므로 바로 완화하지 않는다.
 - 다음 검토는 premature final로 등록된 recent final이 이후 더 안정된 token-sentence 후보를 compact echo로 차단하는 조건을 케이스 단위로 추적하고, 동일 token-sentence의 정정인지 실제 중복인지 구분할 일반 기준이 있는지 확인하는 것이다.
+
+## 2026-06-24 confirmation/queue premature final 완화 sweep 폐기
+
+목적:
+
+- recent-final compact 병목이 premature final 이후의 정정 후보 억제로 보이는지 확인하기 위해, 확정을 더 보수적으로 만드는 기존 lifecycle 파라미터를 비교했다.
+- 별도 앱 로직을 추가하기 전에 현재 manifest 파라미터만으로 개선 가능한지 확인한다.
+
+검증:
+
+```text
+sweep_output=.tmp/eval/dictation-ai-sbd/sweep-20260624-confirm-queue-premature-final-summary.json
+
+baseline_final_f1_avg=0.862698
+baseline_strict_final_f1_avg=0.964444
+baseline_final_boundary_f1_avg=0.564458
+
+SENTENCE_CONFIRM_CHUNKS=4
+final_f1_avg=0.834
+strict_final_f1_avg=0.931
+final_boundary_f1_avg=0.502
+
+DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=3
+final_f1_avg=0.862698
+strict_final_f1_avg=0.964444
+final_boundary_f1_avg=0.564458
+
+STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=2
+final_f1_avg=0.860
+strict_final_f1_avg=0.946
+final_boundary_f1_avg=0.558
+```
+
+해석:
+
+- `SENTENCE_CONFIRM_CHUNKS=4`는 premature final을 줄일 수는 있지만 recall, final F1, strict F1, boundary F1을 모두 악화시켜 폐기한다.
+- `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=3`은 현재 corpus에서 변화가 없어 채택 근거가 없다.
+- `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=2`는 finalized 수를 늘리지만 precision과 strict F1이 하락한다. queue stale 후보 위험이 다시 커지므로 폐기한다.
+- 따라서 현재 저점은 단순 confirmation/queue 상수 변경으로 해결하지 않고, recent-final compact echo가 premature final과 만나는 조건을 더 구체적으로 추적해야 한다.
