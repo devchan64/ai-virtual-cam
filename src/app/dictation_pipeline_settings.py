@@ -70,6 +70,9 @@ MAX_RECENT_SHORT_TEXT_REPEATS = 2
 RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS = 8
 RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS = 3
 RECENT_FINAL_TAIL_ANCHOR_MIN_UNITS = 8
+RECENT_FINAL_COMPACT_SIMILARITY_MIN = 0.82
+RECENT_FINAL_COMPACT_COMMON_COVERAGE_MIN = 0.78
+RECENT_FINAL_COMPACT_MAX_EXTRA_RATIO = 0.35
 
 # recent final의 일부 조각이 다음 window에서 짧은 prefix/noise와 함께 다시
 # 등장하는 경우는 새 문장보다 echo일 가능성이 높다. 아래 값은 후보의
@@ -338,6 +341,21 @@ def recent_final_tail_anchor_min_units() -> int:
     return _dictation_env_int("RECENT_FINAL_TAIL_ANCHOR_MIN_UNITS", RECENT_FINAL_TAIL_ANCHOR_MIN_UNITS)
 
 
+def recent_final_compact_similarity_min() -> float:
+    return _dictation_env_float("RECENT_FINAL_COMPACT_SIMILARITY_MIN", RECENT_FINAL_COMPACT_SIMILARITY_MIN)
+
+
+def recent_final_compact_common_coverage_min() -> float:
+    return _dictation_env_float(
+        "RECENT_FINAL_COMPACT_COMMON_COVERAGE_MIN",
+        RECENT_FINAL_COMPACT_COMMON_COVERAGE_MIN,
+    )
+
+
+def recent_final_compact_max_extra_ratio() -> float:
+    return _dictation_env_float("RECENT_FINAL_COMPACT_MAX_EXTRA_RATIO", RECENT_FINAL_COMPACT_MAX_EXTRA_RATIO)
+
+
 def recent_final_fragment_echo_min_units() -> int:
     return _dictation_env_int("RECENT_FINAL_FRAGMENT_ECHO_MIN_UNITS", RECENT_FINAL_FRAGMENT_ECHO_MIN_UNITS)
 
@@ -431,6 +449,9 @@ def dictation_pipeline_policy() -> dict[str, object]:
         "recent_final_extension_min_prefix_units": recent_final_extension_min_prefix_units(),
         "recent_final_extension_min_suffix_units": recent_final_extension_min_suffix_units(),
         "recent_final_tail_anchor_min_units": recent_final_tail_anchor_min_units(),
+        "recent_final_compact_similarity_min": recent_final_compact_similarity_min(),
+        "recent_final_compact_common_coverage_min": recent_final_compact_common_coverage_min(),
+        "recent_final_compact_max_extra_ratio": recent_final_compact_max_extra_ratio(),
         "recent_final_fragment_echo_min_units": recent_final_fragment_echo_min_units(),
         "recent_final_fragment_echo_coverage_min": recent_final_fragment_echo_coverage_min(),
         "recent_final_fragment_echo_max_unmatched_units": recent_final_fragment_echo_max_unmatched_units(),
@@ -668,6 +689,36 @@ def dictation_tuning_manifest() -> list[dict[str, int | float | str]]:
             max_value=16,
             scope="duplicate-suppression",
             intent="trim a candidate prefix as a recent-final tail echo only when the shared tail anchor is long enough",
+        ),
+        _tuning_manifest_entry(
+            "RECENT_FINAL_COMPACT_SIMILARITY_MIN",
+            default=RECENT_FINAL_COMPACT_SIMILARITY_MIN,
+            current=recent_final_compact_similarity_min(),
+            value_type="float",
+            min_value=0.50,
+            max_value=0.98,
+            scope="duplicate-suppression",
+            intent="suppress a whitespace-insensitive recent-final echo only when the compact token-sentence similarity is high enough",
+        ),
+        _tuning_manifest_entry(
+            "RECENT_FINAL_COMPACT_COMMON_COVERAGE_MIN",
+            default=RECENT_FINAL_COMPACT_COMMON_COVERAGE_MIN,
+            current=recent_final_compact_common_coverage_min(),
+            value_type="float",
+            min_value=0.50,
+            max_value=0.98,
+            scope="duplicate-suppression",
+            intent="require a compact common run to cover enough of the shorter sentence before treating it as echo",
+        ),
+        _tuning_manifest_entry(
+            "RECENT_FINAL_COMPACT_MAX_EXTRA_RATIO",
+            default=RECENT_FINAL_COMPACT_MAX_EXTRA_RATIO,
+            current=recent_final_compact_max_extra_ratio(),
+            value_type="float",
+            min_value=0.10,
+            max_value=0.80,
+            scope="duplicate-suppression",
+            intent="bound how much unmatched compact text can remain when a common run explains a recent-final echo",
         ),
         _tuning_manifest_entry(
             "RECENT_FINAL_FRAGMENT_ECHO_MIN_UNITS",

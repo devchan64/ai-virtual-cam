@@ -30,6 +30,9 @@ from src.app.dictation_pipeline_settings import (
     revision_similarity_policy as _revision_similarity_policy,
     revision_tail_best_j_max as _revision_tail_best_j_max,
     revision_tail_common_run_min as _revision_tail_common_run_min,
+    recent_final_compact_common_coverage_min as _recent_final_compact_common_coverage_min,
+    recent_final_compact_max_extra_ratio as _recent_final_compact_max_extra_ratio,
+    recent_final_compact_similarity_min as _recent_final_compact_similarity_min,
     recent_final_extension_min_prefix_units as _recent_final_extension_min_prefix_units,
     recent_final_extension_min_suffix_units as _recent_final_extension_min_suffix_units,
     recent_final_fragment_echo_coverage_min as _recent_final_fragment_echo_coverage_min,
@@ -1210,9 +1213,11 @@ def _compact_recent_final_delta(candidate_words: list[str], recent_words: list[s
     max_block = max((block.size for block in matcher.get_matching_blocks()), default=0)
     shorter = min(len(candidate_key), len(recent_key))
     longer = max(len(candidate_key), len(recent_key))
-    if ratio >= 0.82:
+    if ratio >= _recent_final_compact_similarity_min():
         return ""
-    if max_block / max(shorter, 1) >= 0.78 and (longer - max_block) <= max(6, int(longer * 0.35)):
+    if max_block / max(shorter, 1) >= _recent_final_compact_common_coverage_min() and (
+        longer - max_block
+    ) <= max(6, int(longer * _recent_final_compact_max_extra_ratio())):
         return ""
     return None
 

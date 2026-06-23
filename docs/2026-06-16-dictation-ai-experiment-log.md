@@ -31895,3 +31895,80 @@ HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_
 - `SHORT_CJK_CONFIRM_EXTRA_CHUNKS=0`, `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=0`은 현재 baseline과 동일하므로 기본값 변경 근거가 없다.
 - 현재 strict low underfinal은 `stable_missing_after_compact_suppression=2`, `stable_missing_after_fragment_echo_suppression=1`로 recent-final suppression 계열에 남아 있다.
 - compact suppression은 현재 별도 tuning manifest 축이 아니며, 바로 threshold knob를 추가하면 세부 규칙이 늘어 목표의 일반성이 떨어질 수 있다. 동일 blocker 케이스를 더 수집한 뒤, “recent final echo 억제가 stable repeated token-sentence를 삭제하지 않아야 한다”는 일반 원칙으로 다룬다.
+
+## 2026-06-24 compact recent-final suppression 설정 이관 및 sweep
+
+목적:
+
+- `stable_missing_after_compact_suppression`이 strict underfinal blocker로 관측되어, compact recent-final echo 억제 임계값을 CUDA sweep 가능한 설정으로 이관한다.
+- 기본값은 기존 hardcoded 값과 동일하게 유지하고, 더 보수적인 suppression이 누락/중복 균형을 개선하는지 확인한다.
+
+변경:
+
+- `RECENT_FINAL_COMPACT_SIMILARITY_MIN=0.82`
+- `RECENT_FINAL_COMPACT_COMMON_COVERAGE_MIN=0.78`
+- `RECENT_FINAL_COMPACT_MAX_EXTRA_RATIO=0.35`
+- 위 값들을 `dictation_pipeline_settings.py`의 tuning manifest에 추가했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_case_validator
+
+result:
+  Ran 87 tests
+  OK
+```
+
+CUDA 기본값 확인:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output .tmp/eval/dictation-ai-sbd/current-20260624-compact-settings-report.json
+
+result:
+  final_f1_avg=0.910
+  strict_final_f1_avg=0.947
+  expected_definition_cleanup=0
+  case_interpretation_review=6
+  logic_tuning_candidates=47
+  strict_logic_candidates=38
+```
+
+CUDA sweep:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py run-sweep \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --include-baseline \
+  --param RECENT_FINAL_COMPACT_SIMILARITY_MIN=0.86 \
+  --param RECENT_FINAL_COMPACT_SIMILARITY_MIN=0.90 \
+  --param RECENT_FINAL_COMPACT_COMMON_COVERAGE_MIN=0.84 \
+  --param RECENT_FINAL_COMPACT_COMMON_COVERAGE_MIN=0.90 \
+  --param RECENT_FINAL_COMPACT_MAX_EXTRA_RATIO=0.25 \
+  --param RECENT_FINAL_COMPACT_MAX_EXTRA_RATIO=0.15 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-20260624-compact-recent-final \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-20260624-compact-recent-final-summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-20260624-compact-recent-final-summary.md
+```
+
+결과:
+
+| variant | final_f1_avg | final_boundary_f1_avg | strict_final_f1_avg | 판단 |
+| --- | ---: | ---: | ---: | --- |
+| baseline | 0.9099 | 0.5950 | 0.9474 | 유지 |
+| `RECENT_FINAL_COMPACT_SIMILARITY_MIN=0.86` | 0.9099 | 0.5950 | 0.9474 | baseline과 동일 |
+| `RECENT_FINAL_COMPACT_SIMILARITY_MIN=0.90` | 0.9041 | 0.5892 | 0.9386 | 악화 |
+| `RECENT_FINAL_COMPACT_COMMON_COVERAGE_MIN=0.84` | 0.9099 | 0.5950 | 0.9474 | baseline과 동일 |
+| `RECENT_FINAL_COMPACT_COMMON_COVERAGE_MIN=0.90` | 0.9099 | 0.5950 | 0.9474 | baseline과 동일 |
+| `RECENT_FINAL_COMPACT_MAX_EXTRA_RATIO=0.25` | 0.9099 | 0.5950 | 0.9474 | baseline과 동일 |
+| `RECENT_FINAL_COMPACT_MAX_EXTRA_RATIO=0.15` | 0.9099 | 0.5950 | 0.9474 | baseline과 동일 |
+
+해석:
+
+- compact suppression을 더 보수적으로 만드는 단일 파라미터 변경은 현재 clean challenge replay에서 성능 개선을 만들지 못했다.
+- `RECENT_FINAL_COMPACT_SIMILARITY_MIN=0.90`은 precision과 strict F1을 낮춰 기본값 채택 근거가 없다.
+- 앱 기본값은 유지한다. 다만 compact suppression 임계값을 manifest로 이관했기 때문에, 이후 동일 blocker 케이스가 더 수집되면 같은 축에서 재검증할 수 있다.
