@@ -28501,3 +28501,38 @@ stage_confirmed_before_age_queue=1
 
 - 해당 metric은 low final F1 후보가 아니라 ordered gap 케이스 `zh_log_draft_20260620_avc_whisper_log_11_000866`에서 관측됐다.
 - 따라서 현재 다음 튜닝 후보는 단순 누락 개선보다 final 순서/경계 granularity 해석 문제로 분리해서 보는 편이 적절하다.
+
+## 2026-06-24 terminal expected residue 리포트 추가
+
+목적:
+
+- 낮은 점수 케이스 중에는 expected final 문장이 실제로 사라진 것이 아니라 replay 종료 시점에 `actual_staged`, `actual_staged_queue`, `actual_pending`에 남아 있는 경우가 있다.
+- 이 그룹은 "확정 누락"으로만 보면 앱 로직을 과하게 완화할 수 있으므로, 문장이 완전히 소실된 케이스와 terminal residue 케이스를 분리해 해석한다.
+
+변경:
+
+- benchmark report에 `terminal_expected_residue_summary`를 추가했다.
+- actual final로 매칭되지 않은 expected 문장이 terminal residue와 `FINAL_SENTENCE_MATCH_MIN_SIMILARITY` 이상으로 매칭되는지 계산한다.
+- 이 요약은 점수 계산을 바꾸지 않고, replay-tail lifecycle 증거를 별도로 보여준다.
+
+CUDA/SaT 확인:
+
+```text
+output=.tmp/eval/dictation-ai-sbd/current-20260624-terminal-residue-report.json
+cases=60 finalized=131
+final_precision_avg=0.887
+final_recall_avg=0.790
+final_f1_avg=0.818
+final_boundary_f1_avg=0.551
+terminal_expected_residue.case_count=21
+terminal_expected_residue.matched_missing_expected_total=21
+```
+
+해석:
+
+- 21건은 expected final이 actual final에는 없지만 terminal staged/queue/pending 후보에는 남아 있었다.
+- 대표적으로 `zh_log_bbq_pork_grilling_queue_revision_final_defer_20260621_001`, `zh_log_draft_20260620_avc_whisper_log_11_000823`, `ko_log_draft_20260620_avc_whisper_log_1_002660` 등이 해당한다.
+- 이 결과는 다음 개선 후보를 두 갈래로 나누게 한다.
+  - terminal residue 그룹: 확정 속도/queue promotion/age 정책을 보수적으로 검토한다.
+  - no-residue 누락 그룹: 실제 문장 소실 또는 suppress/delta trim 문제로 검토한다.
+- 따라서 현재 단계에서 파라미터를 단순 완화하기보다, terminal residue 비율을 관측하면서 확정 지연과 조기 확정 사이의 trade-off를 따로 평가하는 것이 맞다.

@@ -44,19 +44,34 @@ LIFECYCLE_BOTTLENECK_METRICS = (
     "stage_queue_revision_preempt_deferred_next_completed",
     "stage_queue_revision_preempt_deferred_replaced_confirmed",
     "stage_queue_revision_preempt_deferred_terminal_tail_revision_split",
+    "stage_queue_promote",
+    "stage_queue_drop_oldest",
+    "stage_queue_stale_promote_suppressed",
+    "stage_queue_recent_final_suppressed",
+    "stage_queue_recent_final_delta_trimmed",
     "stage_finalize_deferred_for_queue_revision",
     "stage_finalize_right_context",
+    "stage_finalize_before_replace",
     "stage_age_hold",
     "stage_age_tick",
     "stage_age_finalize",
     "stage_age_quality_blocked",
+    "stage_age_no_text_skipped",
     "stage_confirmed_before_age_queue",
+    "stage_confirmed_before_deferred_revision",
+    "stage_confirm_deferred_later_extension",
     "stage_confirmed_before_prefix_drop_revision",
+    "stage_revision",
+    "stage_revision_changed",
+    "stage_revision_age_reset",
+    "stage_revision_token_sentence_deferred",
+    "stage_revision_terminal_tail_split",
     "stage_revision_internal_stability_high",
     "stage_revision_internal_stability_mid",
     "stage_revision_internal_stability_low",
     "stage_revision_confirmation_preserved_internal",
     "stage_revision_confirmation_reset",
+    "stage_revision_candidate_quality_blocked",
     "stage_queue_quality_suppressed",
     "stage_candidate_quality_blocked",
     "stage_candidate_quality_no_end_marker",
@@ -74,6 +89,9 @@ LIFECYCLE_BOTTLENECK_METRICS = (
     "stage_candidate_quality_trailing_ellipsis_without_blocker",
     "stage_blocked_short_no_end_aged_active_stage",
     "stage_blocked_short_no_end_active_stage_quality_suppressed",
+    "stage_no_text_stale_suppressed",
+    "stage_replace_deferred_same_chunk",
+    "stage_replaced_unconfirmed",
     "final_quality_no_end_marker",
     "pending_overrun",
     "pending_overrun_reason_long_no_boundary",
@@ -84,7 +102,16 @@ LIFECYCLE_BOTTLENECK_METRICS = (
     "candidate_delta_trimmed_cjk",
     "candidate_recent_final_delta_trimmed",
     "candidate_duplicate_suppressed",
+    "candidate_pending_prefix_mixed_suppressed",
+    "candidate_prior_pending_prefix_trimmed",
+    "candidate_prior_pending_recent_final_mixed_suppressed",
+    "finalize_attempt",
     "finalize_delta_fragment_preserved",
+    "finalize_delta_suppressed",
+    "finalize_delta_suppressed_stage_dropped",
+    "finalize_delta_suppressed_stage_retained",
+    "finalize_duplicate_suppressed",
+    "finalize_recent_delta_trimmed",
     "finalize_recent_echo_suppressed",
 )
 DEFERRED_REPLACEMENT_REASONS = frozenset(
@@ -119,17 +146,24 @@ LIFECYCLE_FOCUS_TAG_MARKERS = (
 CASE_EXEMPLAR_METRICS = (
     "stage_queue_revision",
     "stage_queue_revision_token_sentence_deferred",
+    "stage_queue_promote",
+    "stage_queue_recent_final_suppressed",
     "stage_finalize_deferred_for_queue_revision",
     "stage_revision_internal_stability_high",
     "stage_revision_internal_stability_mid",
     "stage_revision_internal_stability_low",
     "stage_revision_confirmation_preserved_internal",
     "stage_revision_confirmation_reset",
+    "stage_revision_age_reset",
+    "stage_revision_token_sentence_deferred",
     "stage_queue_quality_suppressed",
     "stage_replace_deferred",
+    "stage_replace_deferred_same_chunk",
     "stage_age_hold",
     "stage_age_quality_blocked",
     "stage_confirmed_before_age_queue",
+    "stage_confirmed_before_deferred_revision",
+    "stage_confirm_deferred_later_extension",
     "stage_confirmed_before_prefix_drop_revision",
     "stage_candidate_quality_blocked",
     "stage_candidate_quality_no_end_marker",
@@ -154,6 +188,9 @@ CASE_EXEMPLAR_METRICS = (
     "candidate_delta_trimmed_cjk",
     "candidate_recent_final_delta_trimmed",
     "candidate_duplicate_suppressed",
+    "candidate_pending_prefix_mixed_suppressed",
+    "candidate_prior_pending_prefix_trimmed",
+    "candidate_prior_pending_recent_final_mixed_suppressed",
     "finalize_delta_fragment_preserved",
     "finalize_recent_echo_suppressed",
 )
@@ -177,13 +214,18 @@ SUPPORTED_LOW_BOTTLENECK_METRICS = (
     "pending_quality_repeated_word_ngram",
     "stage_candidate_quality_blocked",
     "stage_revision_token_sentence_deferred",
+    "stage_revision_age_reset",
     "stage_age_quality_blocked",
     "stage_confirmed_before_age_queue",
+    "stage_confirmed_before_deferred_revision",
+    "stage_confirm_deferred_later_extension",
     "stage_confirmed_before_prefix_drop_revision",
     "stage_replace_deferred",
+    "stage_replace_deferred_same_chunk",
     "stage_finalize_deferred_for_queue_revision",
     "stage_finalize_right_context",
     "stage_queue_revision",
+    "stage_queue_promote",
     "candidate_recent_final_delta_trimmed",
     "candidate_delta_trimmed",
     "candidate_duplicate_suppressed",
@@ -2043,6 +2085,98 @@ def _first_text_preview(values: Any) -> str:
     return ""
 
 
+def _best_sentence_similarity(sentence: str, candidates: list[str]) -> float:
+    if not sentence or not candidates:
+        return 0.0
+    return max((_sentence_support_score(sentence, candidate) for candidate in candidates), default=0.0)
+
+
+def _terminal_residue_texts(result: dict[str, Any]) -> list[str]:
+    residues: list[str] = []
+    staged = str(result.get("actual_staged") or "").strip()
+    if staged:
+        residues.append(staged)
+    for item in result.get("actual_staged_queue", []) or []:
+        text = str(item or "").strip()
+        if text:
+            residues.append(text)
+    pending = str(result.get("actual_pending") or "").strip()
+    if pending:
+        residues.append(pending)
+    return residues
+
+
+def _terminal_expected_residue_payload(result: dict[str, Any]) -> dict[str, Any] | None:
+    expected_final = [str(sentence).strip() for sentence in result.get("expected_final", []) or [] if str(sentence).strip()]
+    if not expected_final:
+        return None
+    actual_final = [str(sentence).strip() for sentence in result.get("actual_final", []) or [] if str(sentence).strip()]
+    residues = _terminal_residue_texts(result)
+    if not residues:
+        return None
+    missing_matches: list[dict[str, Any]] = []
+    for sentence in expected_final:
+        if _best_sentence_similarity(sentence, actual_final) >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY:
+            continue
+        residue_score = _best_sentence_similarity(sentence, residues)
+        if residue_score < FINAL_SENTENCE_MATCH_MIN_SIMILARITY:
+            continue
+        missing_matches.append(
+            {
+                "expected": _text_preview(sentence),
+                "best_residue_similarity": residue_score,
+            }
+        )
+    if not missing_matches:
+        return None
+    final_score = dict(result.get("final_score", {}))
+    boundary_score = dict(result.get("final_boundary_score", {}))
+    metrics = dict(result.get("metrics", {}))
+    return {
+        "id": result.get("id"),
+        "language": result.get("language"),
+        "tags": list(result.get("tags", [])),
+        "final_f1": float(final_score.get("f1", 0.0)),
+        "final_boundary_f1": float(boundary_score.get("f1", 0.0)),
+        "expected_final_count": len(expected_final),
+        "actual_final_count": len(actual_final),
+        "terminal_residue_count": len(residues),
+        "matched_missing_expected_count": len(missing_matches),
+        "stage_age_quality_blocked": int(metrics.get("stage_age_quality_blocked", 0)),
+        "stage_queue_promote": int(metrics.get("stage_queue_promote", 0)),
+        "stage_revision_token_sentence_deferred": int(metrics.get("stage_revision_token_sentence_deferred", 0)),
+        "expected_residue_matches": missing_matches[:3],
+        "actual_staged_preview": _text_preview(result.get("actual_staged")),
+        "actual_staged_queue_preview": _first_text_preview(result.get("actual_staged_queue")),
+        "actual_pending_preview": _text_preview(result.get("actual_pending")),
+    }
+
+
+def summarize_terminal_expected_residue(results: list[dict[str, Any]]) -> dict[str, Any]:
+    payloads = [
+        payload
+        for result in results
+        if (payload := _terminal_expected_residue_payload(result)) is not None
+    ]
+    payloads.sort(
+        key=lambda item: (
+            int(item["matched_missing_expected_count"]),
+            int(item["terminal_residue_count"]),
+            -float(item["final_f1"]),
+        ),
+        reverse=True,
+    )
+    return {
+        "interpretation": (
+            "Expected finals matched only by terminal staged/queue/pending residue are replay-tail lifecycle "
+            "evidence. Treat them separately from cases where the expected sentence disappeared entirely."
+        ),
+        "case_count": len(payloads),
+        "matched_missing_expected_total": sum(int(item["matched_missing_expected_count"]) for item in payloads),
+        "top_cases": payloads[:8],
+    }
+
+
 def _case_exemplar_score(result: dict[str, Any]) -> float:
     metrics = dict(result.get("metrics", {}))
     final_score = dict(result.get("final_score", {}))
@@ -2370,6 +2504,7 @@ def build_benchmark_report(
     case_exemplar_summary = summarize_case_exemplars(results)
     lifecycle_bottleneck_summary = summarize_lifecycle_bottlenecks(results, metric_totals)
     staged_queue_residue_summary = summarize_staged_queue_residue(results)
+    terminal_expected_residue_summary = summarize_terminal_expected_residue(results)
     ordered_final_gap_summary = summarize_ordered_final_gap(results)
     boundary_zero_high_final_summary = summarize_boundary_zero_high_final_cases(results)
     boundary_granularity_summary = summarize_boundary_granularity_cases(results)
@@ -2448,6 +2583,7 @@ def build_benchmark_report(
         },
         "lifecycle_bottleneck_summary": lifecycle_bottleneck_summary,
         "staged_queue_residue_summary": staged_queue_residue_summary,
+        "terminal_expected_residue_summary": terminal_expected_residue_summary,
         "ordered_final_gap_summary": ordered_final_gap_summary,
         "boundary_zero_high_final_summary": boundary_zero_high_final_summary,
         "boundary_granularity_summary": boundary_granularity_summary,
