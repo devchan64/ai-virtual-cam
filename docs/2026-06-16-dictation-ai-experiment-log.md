@@ -28826,3 +28826,46 @@ case_definition_flag_counts.short_expected_supported_by_longer_sentence=1
 - `ko_log_draft_20260620_avc_whisper_log_002756`가 `short_expected_supported_by_longer_sentence`로 분리됐다.
 - 전체 성능은 변하지 않는다. 이 변경은 앱 로직 개선이 아니라, 앱 로직 튜닝 후보에서 중복 expected 경계 의심 케이스를 제외하는 리포트 개선이다.
 - “의미가 비슷한 문장이 3회 이상 반복되면 확정”이라는 기준은 필요하지만, expected 라벨 내부에서 짧은 부분 문장을 별도 final로 중복 등록하는 것을 정당화하지는 않는다.
+
+## 2026-06-24 stable actual이 expected_final에서 누락된 케이스 분리
+
+목적:
+
+- strict 저점 케이스 중 실제 final이 `expected_final`에 없지만, 입력 STT chunk에서 안정 후보로 반복 관측되는 경우가 있었다.
+- 이 경우 앱이 과확정했다고 단정하기 어렵고, `expected_final`이 안정 반복 후보를 누락했을 가능성이 크다.
+
+변경:
+
+- case definition 감사에 `expected_final_omits_stable_actual_sentence` 플래그를 추가했다.
+- 실제 final이 `expected_final`과 충분히 맞지 않지만, `stable_candidate_examples`의 누락 후보와 token-sentence support 0.70 이상으로 맞으면 expected 정의 리뷰 대상으로 분류한다.
+- 빈 문장, spaced CJK, 반복 n-gram처럼 앱 품질상 확정하면 안 되는 안정 후보는 제외한다.
+
+CUDA/SaT 확인:
+
+```text
+baseline_output=.tmp/eval/dictation-ai-sbd/current-20260624-short-supported-expected-review-report.json
+baseline_case_definition_review=9
+baseline_logic_tuning_candidates=47
+baseline_strict_logic_candidates=38
+baseline_strict_final_f1_avg=0.846
+
+output=.tmp/eval/dictation-ai-sbd/current-20260624-omitted-stable-actual-review-report.json
+case_definition_review=10
+case_definition_review_ratio=0.179
+logic_tuning_candidates=46
+strict_logic_candidates=37
+strict_final_f1_avg=0.851
+final_precision_avg=0.887
+final_recall_avg=0.800
+final_f1_avg=0.825
+final_boundary_f1_avg=0.558
+
+case_definition_flag_counts.expected_final_omits_stable_actual_sentence=2
+case_definition_flag_counts.short_expected_supported_by_longer_sentence=1
+```
+
+해석:
+
+- `ko_log_draft_20260620_avc_whisper_log_002902`, `zh_log_premature_luohansi_final_prefix_fragment_20260621_001`가 안정 후보 기반 expected 누락 의심으로 분리됐다.
+- 전체 성능은 변하지 않는다. 이 변경은 앱 로직 개선이 아니라, expected 정의 오류 가능성이 있는 케이스를 strict 앱 튜닝 후보에서 제외하는 리포트 개선이다.
+- 현재 남은 `case_definition_review=10`은 모두 고쳤다는 뜻이 아니라, 앱 로직 후보와 케이스 정의 후보를 더 엄격히 나누기 위한 다음 리뷰 대상이다.

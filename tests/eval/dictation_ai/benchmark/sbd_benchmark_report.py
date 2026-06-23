@@ -257,6 +257,7 @@ EXPECTED_SHORT_CONTAINED_TOKEN_MIN_UNITS = 5
 EXPECTED_SHORT_SUPPORTED_BY_LONGER_MIN_UNITS = 5
 EXPECTED_SHORT_SUPPORTED_BY_LONGER_MAX_UNITS = 8
 EXPECTED_SHORT_SUPPORTED_BY_LONGER_MIN_SIMILARITY = 0.80
+OMITTED_STABLE_ACTUAL_MIN_SIMILARITY = 0.70
 COMBINED_RESIDUE_MATCH_MIN_SIMILARITY = 0.70
 
 
@@ -524,6 +525,38 @@ def _has_supported_actual_final_omitted_from_expected(result: dict[str, Any]) ->
         )
         if input_support >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY:
             return True
+    return False
+
+
+def _has_actual_final_supported_by_omitted_stable_candidate(result: dict[str, Any]) -> bool:
+    expected_final = [
+        str(sentence).strip()
+        for sentence in result.get("expected_final", []) or []
+        if str(sentence).strip()
+    ]
+    actual_final = [
+        str(sentence).strip()
+        for sentence in result.get("actual_final", []) or []
+        if str(sentence).strip()
+    ]
+    stable_examples = [
+        str(candidate.get("text", "")).strip()
+        for candidate in dict(result.get("input_evidence", {}) or {}).get("stable_candidate_examples", []) or []
+        if str(candidate.get("text", "")).strip()
+    ]
+    if not expected_final or not actual_final or not stable_examples:
+        return False
+    for stable in stable_examples:
+        if max((_sentence_support_score(stable, expected) for expected in expected_final), default=0.0) >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY:
+            continue
+        stable_flags = set(_final_sentence_diagnostic_flags(stable, str(result.get("language") or "")))
+        if stable_flags.intersection({"empty", "spaced_cjk", "cjk_repeated_ngram", "repeated_word_ngram"}):
+            continue
+        for actual in actual_final:
+            if max((_sentence_support_score(actual, expected) for expected in expected_final), default=0.0) >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY:
+                continue
+            if _sentence_support_score(stable, actual) >= OMITTED_STABLE_ACTUAL_MIN_SIMILARITY:
+                return True
     return False
 
 
@@ -1364,6 +1397,8 @@ def _case_primary_review_action(result: dict[str, Any]) -> str:
         return "deduplicate_or_justify_shifted_window_repeat"
     if "expected_final_omits_supported_actual_sentence" in definition_flags:
         return "manual_boundary_review"
+    if "expected_final_omits_stable_actual_sentence" in definition_flags:
+        return "manual_boundary_review"
     if _has_expected_final_staged_residue(result) and not _expected_final_matches_stable_repeat_evidence(result):
         return "extend_replay_tail_or_reclassify_staged_expectation"
     if _missing_expected_split_coverage_payload(result) is not None:
@@ -2143,6 +2178,13 @@ def _with_case_evidence_metadata(results: list[dict[str, Any]]) -> list[dict[str
             and _has_supported_actual_final_omitted_from_expected(item)
         ):
             case_definition_flags.append("expected_final_omits_supported_actual_sentence")
+        if (
+            not case_definition_flags
+            and not item["expected_quality_flags"]
+            and not item["case_context_flags"]
+            and _has_actual_final_supported_by_omitted_stable_candidate(item)
+        ):
+            case_definition_flags.append("expected_final_omits_stable_actual_sentence")
         item["case_definition_flags"] = case_definition_flags
         enriched.append(item)
     return enriched
