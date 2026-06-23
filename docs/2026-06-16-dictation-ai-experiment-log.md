@@ -29168,3 +29168,58 @@ final_boundary_f1_avg=0.552
 - 최신 기준에서 `rewrite_expected_final_to_stable_repeated_candidate`, `recut_or_relabel_stable_candidate_mismatch`, `rewrite_expected_final_to_observed_stt_text` 계열은 0건이다.
 - 따라서 현재 남은 22건은 명백한 expected 문장 rewrite 대상이라기보다 replay tail 확장, mid-stream initial_final 복원, 또는 boundary 수동 검토 대상으로 본다.
 - 이후 "expected_final 정의 오류를 전부 고쳤는가"는 `review_cases` 전체 목록을 기준으로 action을 하나씩 닫아 검증한다.
+
+## 2026-06-24 recent-final extension delta sweep
+
+목적:
+
+- strict 저점 케이스 2건에서 early final 이후 suffix fragment가 생성되는 흐름을 확인했다.
+- 이미 final로 나간 prefix 뒤의 suffix만 새 후보로 회수하는 recent-final extension delta가 fragment final을 만드는지 검증한다.
+
+기준:
+
+```text
+baseline_output=.tmp/eval/dictation-ai-sbd/current-20260624-review-cases-list-report.json
+baseline_final_precision_avg=0.897
+baseline_final_recall_avg=0.843
+baseline_final_f1_avg=0.858
+baseline_strict_final_f1_avg=0.943
+baseline_final_boundary_f1_avg=0.552
+baseline_case_definition_review=22
+```
+
+단일 변수 sweep:
+
+```text
+confirm_4_output=.tmp/eval/dictation-ai-sbd/current-20260624-confirm-4-review-cases-report.json
+confirm_4_final_precision_avg=0.896
+confirm_4_final_recall_avg=0.831
+confirm_4_final_f1_avg=0.849
+confirm_4_strict_final_f1_avg=0.938
+confirm_4_final_boundary_f1_avg=0.510
+confirm_4_case_definition_review=19
+
+disable_recent_final_extension_output=.tmp/eval/dictation-ai-sbd/current-20260624-disable-recent-final-extension-report.json
+disable_recent_final_extension_final_precision_avg=0.897
+disable_recent_final_extension_final_recall_avg=0.844
+disable_recent_final_extension_final_f1_avg=0.860
+disable_recent_final_extension_strict_final_f1_avg=0.954
+disable_recent_final_extension_final_boundary_f1_avg=0.546
+disable_recent_final_extension_case_definition_review=23
+
+recent_final_extension_suffix_8_output=.tmp/eval/dictation-ai-sbd/current-20260624-recent-final-extension-suffix-8-report.json
+recent_final_extension_suffix_8_final_precision_avg=0.892
+recent_final_extension_suffix_8_final_recall_avg=0.839
+recent_final_extension_suffix_8_final_f1_avg=0.854
+recent_final_extension_suffix_8_strict_final_f1_avg=0.954
+recent_final_extension_suffix_8_final_boundary_f1_avg=0.547
+recent_final_extension_suffix_8_case_definition_review=23
+```
+
+해석:
+
+- confirmation 4는 전체 F1, strict F1, boundary F1을 모두 낮춰 채택하지 않는다.
+- recent-final extension 전체 비활성화는 final F1과 strict F1을 소폭 올리지만 boundary F1을 낮추고 case_definition_review를 늘린다.
+- suffix 최소 길이 8도 strict F1은 올리지만 전체 precision/recall/F1과 boundary F1을 낮춘다.
+- 따라서 recent-final extension delta를 전역적으로 끄거나 단순 길이 임계값만 올리는 방식은 일반 원칙으로 채택하지 않는다.
+- 다음 개선은 recent-final extension 자체보다, early final이 append-only 이후 fragment를 만들기 전에 active staged 확정/보류 판단을 더 잘 설명하는 구조적 신호를 찾는 방향이 맞다.
