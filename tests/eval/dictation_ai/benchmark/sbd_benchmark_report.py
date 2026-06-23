@@ -1980,6 +1980,11 @@ def _strict_actionable_low_final_summary(strict_results: list[dict[str, Any]]) -
         ),
         "max_final_f1": BOUNDARY_ZERO_HIGH_FINAL_F1,
         "case_count": len(low_final),
+        "metric_presence": {
+            metric: _summarize_supported_low_metric_presence(low_final, metric)
+            for metric in SUPPORTED_LOW_BOTTLENECK_METRICS
+            if any(int(dict(result.get("metrics", {})).get(metric, 0)) > 0 for result in low_final)
+        },
         "examples": [
             _low_score_case_payload(result, "strict_actionable_low_final")
             for result in sorted(

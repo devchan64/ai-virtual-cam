@@ -351,6 +351,10 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(strict_summary["strict_case_ids"], ["single-supported"])
         self.assertEqual(strict_summary["actionable_low_final"]["case_count"], 1)
         self.assertEqual(strict_summary["actionable_low_final"]["examples"][0]["id"], "single-supported")
+        self.assertEqual(
+            strict_summary["actionable_low_final"]["metric_presence"]["stage_candidate_quality_blocked"]["case_count"],
+            1,
+        )
         self.assertEqual(strict_summary["metric_presence"]["stage_candidate_quality_blocked"]["case_count"], 1)
         self.assertEqual(strict_summary["lowest_cases"][0]["id"], "single-supported")
         self.assertEqual(

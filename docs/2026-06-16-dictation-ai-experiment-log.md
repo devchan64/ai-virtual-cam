@@ -29620,3 +29620,40 @@ strict_actionable_low_final.case_count=4
 
 - strict 후보 30건 중 boundary 민감도 9건을 분리하면 실제 final content 저점 후보는 4건이다.
 - 이 4건은 다음 앱 로직 분석 후보지만, short CJK hold 실험처럼 일부 케이스 개선이 전체 악화로 이어질 수 있으므로 공통 lifecycle metric을 먼저 비교해야 한다.
+
+## 2026-06-24 strict actionable 저점 공통 metric 요약 추가
+
+목적:
+
+- strict actionable 저점 4건에 대해 어떤 lifecycle metric이 공통으로 반복되는지 report에서 직접 확인한다.
+- 다음 앱 로직 변경을 단일 케이스 증상이나 단일 threshold 감각이 아니라, 여러 저점 케이스에 함께 나타나는 병목 근거에서 출발하게 한다.
+
+검증:
+
+```text
+tool_test=./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report
+tool_test_result=OK, 44 tests
+
+py_compile=./.venv/bin/python -m py_compile tests/eval/dictation_ai/benchmark/sbd_benchmark_report.py tests/eval/dictation_ai/tool_tests/test_dictation_ai_sbd_benchmark_report.py
+py_compile_result=OK
+
+cuda_output=.tmp/eval/dictation-ai-sbd/current-20260624-actionable-metric-presence-report.json
+final_f1_avg=0.862698
+strict_final_f1_avg=0.964444
+final_boundary_f1_avg=0.564458
+strict_actionable_low_final.case_count=4
+```
+
+strict actionable 저점 4건 공통 metric:
+
+```text
+stage_age_quality_blocked.case_count=4 total_count=7
+candidate_recent_final_delta_trimmed.case_count=4 total_count=15
+candidate_delta_trimmed.case_count=4 total_count=21
+candidate_duplicate_suppressed.case_count=4 total_count=37
+```
+
+해석:
+
+- 남은 strict actionable 저점은 `stage_age_quality_blocked`만의 문제가 아니라 delta trimming, recent-final trimming, duplicate suppression이 동시에 반복되는 복합 병목이다.
+- 따라서 다음 앱 로직 변경은 하나의 상수를 느슨하게 만드는 방식보다, 확정 직전 후보가 final history와 비교되는 과정에서 실제 새 문장/부분 중복/잔여 suffix가 어떻게 분기되는지 추적한 뒤 최소 원칙을 찾아야 한다.
