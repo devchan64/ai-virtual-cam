@@ -31972,3 +31972,61 @@ HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_
 - compact suppression을 더 보수적으로 만드는 단일 파라미터 변경은 현재 clean challenge replay에서 성능 개선을 만들지 못했다.
 - `RECENT_FINAL_COMPACT_SIMILARITY_MIN=0.90`은 precision과 strict F1을 낮춰 기본값 채택 근거가 없다.
 - 앱 기본값은 유지한다. 다만 compact suppression 임계값을 manifest로 이관했기 때문에, 이후 동일 blocker 케이스가 더 수집되면 같은 축에서 재검증할 수 있다.
+
+## 2026-06-24 expected_final prefix fragment 정리
+
+목적:
+
+- strict low 케이스 중 앱 로직 후보로 보기 전에 expected_final 자체가 “3회 이상 반복된 유사 token-sentence final” 원칙에 맞는지 재검토한다.
+- prefix fragment 또는 후속 chunk에서 변동되는 연결부가 final 기대값으로 들어간 케이스를 정리한다.
+
+수정:
+
+- `zh_log_flower_bird_cup_stale_short_stage_20260621_001`
+  - `花田。`은 `花田鸟笼。`의 prefix fragment로 반복된 것으로 보고 `expected_final`에서 제거했다.
+- `zh_log_bbq_pork_grilling_queue_revision_final_defer_20260621_001`
+  - `朋友...包这个，不，猪肉也蛮好吃的。`를 하나의 final 기대값으로 두지 않고, 안정 반복되는 `朋友...包这个。`까지만 final 기대값으로 정리했다.
+  - `不/不过猪肉也蛮好吃的` 계열은 후속 chunk에서 변동되는 연결부라 앱 로직 튜닝 근거에서 분리한다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases \
+  tests/eval/dictation_ai/sbd_cases \
+  --require-expected-final \
+  --require-input-evidence \
+  --require-observed-input-evidence \
+  --require-stable-repeat-evidence \
+  --require-source-trace
+
+result:
+  case_count=57
+  expected_final_case_count=53
+  input_unsupported_case_count=0
+  input_unobserved_case_count=0
+  stable_repeat_unsupported_case_count=0
+  missing_source_trace_case_count=0
+```
+
+CUDA benchmark:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output .tmp/eval/dictation-ai-sbd/current-20260624-expected-refine-report.json
+
+result:
+  final_f1_avg=0.913
+  strict_final_f1_avg=0.953
+  final_boundary_f1_avg=0.604
+  expected_definition_cleanup=0
+  case_interpretation_review=6
+  logic_tuning_candidates=47
+  strict_logic_candidates=38
+```
+
+해석:
+
+- 이전 clean report의 `final_f1_avg=0.910`, `strict_final_f1_avg=0.947`, `final_boundary_f1_avg=0.595` 대비 라벨 정리만으로 각각 0.913, 0.953, 0.604로 개선됐다.
+- 이는 앱 로직 개선이 아니라 케이스 정의 정렬 효과다.
+- 남은 strict actionable low는 7건이며 `overfinal_or_extra_final=3`, `underfinal_missing_no_residue=3`, `short_fragment_sensitive=1`로 여전히 혼재한다. 앱 기본값 변경은 보류하고, 같은 원인군을 추가 수집하거나 케이스 정의를 더 검토한다.
