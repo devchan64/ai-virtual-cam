@@ -29821,3 +29821,48 @@ after_strict_actionable_low_final.case_count=3
 - 이 변경은 앱 로직 개선이 아니라 benchmark label 정화다.
 - actionable 저점 일부는 아직 앱 로직 후보지만, 적어도 이번 케이스는 “stable repeated short final을 expected에서 누락한” 정의 문제였다.
 - 다음 분석에서는 남은 3건에 집중한다. 특히 expected가 이미 확정된 유사 final의 revision을 요구하는지, 또는 확정 전에 방지 가능한 premature final인지 분리해야 한다.
+
+## 2026-06-24 CJK shifted-prefix tail-drop guard 적용
+
+목적:
+
+- `zh_log_draft_20260620_avc_whisper_log_11_000820`에서 `我的里面还有小熊猫，小浣熊，加一些豆芽菜。`가 다음 window의 `...豆芽。`로 revision되며 짧은 후보가 final 확정됐다.
+- 원인은 `_is_cjk_shifted_prefix_dangling_tail_revision`이 첫 token이 같은 단순 tail drop도 shifted prefix revision으로 분류한 것이다.
+- shifted prefix는 앞부분이 실제로 이동한 경우에만 적용되어야 하므로, 첫 token이 같으면 이 경로를 사용하지 않게 했다.
+
+검증:
+
+```text
+unit_test=./.venv/bin/python -m unittest tests.unit.test_dictation_pipeline_nodes.DictationPipelineNodeTest.test_cjk_revision_keeps_longer_tail_when_prefix_is_same tests.unit.test_dictation_pipeline_nodes.DictationPipelineNodeTest.test_mixed_latin_cjk_prefix_growth_keeps_longer_revision
+unit_test_result=OK, 2 tests
+
+eval_helper_test=./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle.DictationAiSbdLifecycleTest.test_shifted_cjk_revision_drops_single_dangling_tail
+eval_helper_test_result=OK, 1 test
+
+before_output=.tmp/eval/dictation-ai-sbd/current-20260624-after-000826-expected-report.json
+before_final_f1_avg=0.866032
+before_strict_final_f1_avg=0.970000
+before_final_boundary_f1_avg=0.574458
+before_staged_exact_match=18
+
+after_output=.tmp/eval/dictation-ai-sbd/current-20260624-cjk-shifted-prefix-taildrop-guard-report.json
+after_final_f1_avg=0.866032
+after_strict_final_f1_avg=0.970000
+after_final_boundary_f1_avg=0.585569
+after_staged_exact_match=20
+```
+
+영향:
+
+```text
+zh_log_draft_20260620_avc_whisper_log_11_000820
+before_final=我的里面还有小熊猫，小浣熊，加一些豆芽。
+after_final=我的里面还有小熊猫，小浣熊，加一些豆芽菜。
+case_boundary_f1=0.000000 -> 0.666667
+```
+
+해석:
+
+- final content F1은 유지하면서 boundary F1과 staged exact가 개선됐다.
+- 첫 token이 같은 단순 tail drop은 shifted-prefix revision이 아니므로, 더 긴 안정 후보를 유지하는 것이 현재 token-sentence lifecycle 원칙에 맞다.
+- 이 변경은 언어별 문구 규칙이 아니라 revision 구조 판정의 오분류를 좁히는 일반 조건이다.

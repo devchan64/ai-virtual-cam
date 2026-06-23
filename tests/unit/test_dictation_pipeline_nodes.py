@@ -298,6 +298,14 @@ class DictationPipelineNodeTest(unittest.TestCase):
             "我们最后一天想说来圣水洞这边晃晃，因为妹妹想要买的东西在圣水洞这边的Beaker有，然后呢。",
         )
 
+    def test_cjk_revision_keeps_longer_tail_when_prefix_is_same(self) -> None:
+        preferred = _prefer_sentence_revision(
+            "我的里面还有小熊猫，小浣熊，加一些豆芽菜。",
+            "我的里面还有小熊猫，小浣熊，加一些豆芽。",
+        )
+
+        self.assertEqual(preferred, "我的里面还有小熊猫，小浣熊，加一些豆芽菜。")
+
     def test_hypothesis_candidate_node_preserves_boundary_contract(self) -> None:
         detector = FakeBoundaryDetector()
         node = SttHypothesisToSentenceCandidateNode(lambda language: detector)

@@ -1740,6 +1740,8 @@ def _is_cjk_shifted_prefix_dangling_tail_revision(left: str, right: str) -> bool
     right_words = _word_units(normalized_right)
     if len(left_words) < 8 or len(left_words) != len(right_words) + 1:
         return False
+    if left_words[0] == right_words[0]:
+        return False
     if left_words[1:-1] != right_words[1:]:
         return False
     return len(left_words[1:-1]) >= 6
