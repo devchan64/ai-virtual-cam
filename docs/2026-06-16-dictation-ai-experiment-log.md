@@ -27722,3 +27722,48 @@ strict_final_f1_avg=0.8695652173913043 -> 0.8695652173913043
 - 이 변경은 앱 로직 성능 개선이 아니라 잘못 정의된 expected final 정리다.
 - 같은 expected 묶음이 다른 sliding-window 케이스에도 있어 `repeated_expected_group` 검토 대상에는 남는다.
 - 따라서 다음 정리 후보는 동일 expected 그룹을 deduplicate하거나 각 window가 서로 다른 lifecycle failure를 갖는지 확인하는 것이다.
+
+### 2026-06-23 한국어 SMIC trailing ellipsis expected 정리
+
+대상:
+
+- `ko_log_draft_20260620_avc_whisper_log_002902`
+- `ko_log_draft_20260620_avc_whisper_log_002903`
+
+판단:
+
+- 두 케이스 모두 `근데 이제 SMIC가 이런...`으로 관측된 trailing ellipsis fragment를 `근데 이제 SMIC가 이런.` final expected로 등록하고 있었다.
+- 반복 관측 횟수는 충분하지만, raw STT에서 미완 fragment로 표시된 후보를 final-only 번역 대상 문장으로 기대하면 앱 로직의 확정 성능 평가와 라벨 품질 평가가 섞인다.
+- 따라서 해당 fragment는 삭제하지 않고 replay 입력에는 유지하되, `expected_final`에서는 제외했다.
+
+CUDA/SaT 확인:
+
+```text
+before:
+final_f1_avg=0.628141213271209
+strict_logic_candidates=23
+strict_final_f1_avg=0.8695652173913043
+
+after:
+final_f1_avg=0.6286280681884436
+strict_logic_candidates=23
+strict_final_f1_avg=0.8913043478260869
+```
+
+케이스별:
+
+```text
+ko_log_draft_20260620_avc_whisper_log_002902:
+expected 2 -> 1
+final_f1 0.5 -> 0.6666666666666666
+
+ko_log_draft_20260620_avc_whisper_log_002903:
+expected 2 -> 1
+final_f1 0.6666666666666666 -> 1.0
+```
+
+해석:
+
+- `002903`은 라벨 정리로 통과 상태가 됐다.
+- `002902`는 expected fragment를 제거해도 false-positive splice final이 남으므로 앱 lifecycle 후보로 계속 유지한다.
+- recent-final tail splice를 token common-run만으로 억제하려는 시도는 현재 근거가 약하다. `002902`의 false final은 STT 표기 차이 때문에 recent-final과의 최장 common run이 4 unit에 불과해, 이 조건으로 앱 로직을 추가하면 일반성이 떨어진다.
