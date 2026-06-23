@@ -1641,6 +1641,34 @@ def _strip_prior_pending_prefix_revision(staged_sentence: str, candidate: str, p
     return _with_candidate_terminal(suffix, normalized_candidate)
 
 
+def _strip_prior_pending_prefix_from_final(candidate: str, prior_pending_text: str) -> str:
+    normalized_candidate = _normalized_text(candidate)
+    normalized_pending = _normalized_text(prior_pending_text)
+    if not normalized_candidate or not normalized_pending:
+        return normalized_candidate
+    if _boundary_sentence_end_count(normalized_pending) > 0:
+        return normalized_candidate
+    if _boundary_sentence_end_count(normalized_candidate) <= 0:
+        return normalized_candidate
+    candidate_words = _word_units(normalized_candidate)
+    pending_words = _word_units(normalized_pending)
+    if not candidate_words or not pending_words:
+        return normalized_candidate
+    if len(pending_words) >= len(candidate_words):
+        return normalized_candidate
+    if candidate_words[: len(pending_words)] != pending_words:
+        return normalized_candidate
+    suffix = normalized_candidate[len(normalized_pending) :].strip() if normalized_candidate.startswith(normalized_pending) else ""
+    if not suffix:
+        suffix_words = candidate_words[len(pending_words) :]
+        suffix = _cjk_delta_from_words(suffix_words) if _has_cjk_words(candidate_words) else _sentence_delta_from_words(suffix_words)
+    if not suffix or _boundary_sentence_end_count(suffix) <= 0:
+        return normalized_candidate
+    if not _should_stage_boundary_candidate(suffix, "zh" if _is_cjk_text(suffix) else ""):
+        return normalized_candidate
+    return _with_candidate_terminal(suffix, normalized_candidate)
+
+
 def _is_short_staged_suffix_repeat(staged_sentence: str, pending_text: str) -> bool:
     staged_words = _word_units(staged_sentence)
     pending_words = _word_units(pending_text)

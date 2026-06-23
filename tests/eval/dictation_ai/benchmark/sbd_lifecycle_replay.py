@@ -45,6 +45,7 @@ from src.app.dictation_transcript_logic import (
     _should_split_terminal_tail_revision,
     _should_stage_boundary_candidate,
     _should_suppress_delta_final,
+    _strip_prior_pending_prefix_from_final,
     _strip_prior_pending_prefix_revision,
     _word_units,
 )
@@ -837,6 +838,10 @@ def _stage_completed_sentence(
         return []
     if allow_same_chunk_suffix_replacement:
         state.count("stage_replace_same_chunk_suffix_allowed")
+        stripped_stage = _strip_prior_pending_prefix_from_final(state.staged_sentence, prior_pending_text)
+        if stripped_stage != state.staged_sentence:
+            state.staged_sentence = stripped_stage
+            state.count("stage_replace_same_chunk_prior_pending_prefix_stripped")
     if _should_finalize_replaced_sentence(
         state.staged_sentence,
         candidate,

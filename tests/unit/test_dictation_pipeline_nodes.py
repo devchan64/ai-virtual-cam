@@ -36,6 +36,7 @@ from src.app.dictation_pipeline_settings import (
 )
 from src.app.dictation_transcript_logic import (
     _prefer_sentence_revision,
+    _strip_prior_pending_prefix_from_final,
     _strip_prior_pending_prefix_revision,
     _should_translate_final_sentence,
 )
@@ -321,6 +322,22 @@ class DictationPipelineNodeTest(unittest.TestCase):
         )
 
         self.assertEqual(candidate, "원래 삼성이 2등을 했을 거라고 다들 예측했는데 미세한 차이로 SMIC가 2등을 했어요.")
+
+    def test_prior_pending_prefix_strips_final_surface_prefix(self) -> None:
+        final = _strip_prior_pending_prefix_from_final(
+            "매출액만 보면 근데 이제 뭐 수익률이나 원래 삼성이 2등을 했을 거라고 다들 예측했는데 미세한 차이로 SMIC가 2등을 했어요.",
+            "매출액만 보면 근데 이제 뭐 수익률이나",
+        )
+
+        self.assertEqual(final, "원래 삼성이 2등을 했을 거라고 다들 예측했는데 미세한 차이로 SMIC가 2등을 했어요.")
+
+    def test_prior_pending_prefix_does_not_strip_unfinished_final_suffix(self) -> None:
+        final = _strip_prior_pending_prefix_from_final(
+            "I went to the store",
+            "I went to",
+        )
+
+        self.assertEqual(final, "I went to the store")
 
     def test_cjk_revision_keeps_longer_tail_when_prefix_is_same(self) -> None:
         preferred = _prefer_sentence_revision(

@@ -29425,6 +29425,13 @@ patched_result=case_count=57, finalized=131, case_definition_review=6, strict_lo
 patched_final=final_precision_avg=0.924, final_recall_avg=0.918, final_f1_avg=0.913, strict_final_f1_avg=0.953, final_boundary_f1_avg=0.581
 changed_case_count=1
 improved_case=ko_log_draft_20260620_avc_whisper_log_002879, final_f1=0.000->1.000
+
+boundary_patch=.tmp/eval/dictation-ai-sbd/current-20260624-prior-pending-final-prefix-strip-report.json
+boundary_patch_result=case_count=57, finalized=131, case_definition_review=6, strict_logic_candidates=38
+boundary_patch_final=final_precision_avg=0.924, final_recall_avg=0.918, final_f1_avg=0.913, strict_final_f1_avg=0.953, final_boundary_f1_avg=0.599
+boundary_patch_strict_boundary=0.645->0.671
+boundary_changed_case_count=1
+boundary_improved_case=ko_log_draft_20260620_avc_whisper_log_002879, final_boundary_f1=0.000->1.000
 ```
 
 해석:
@@ -29432,7 +29439,8 @@ improved_case=ko_log_draft_20260620_avc_whisper_log_002879, final_f1=0.000->1.00
 - 이번 변경은 케이스별 문구 규칙이 아니라, `pending prefix가 반복 ngram을 가진 장기 누적 상태`이고 completed 후보가 그 prefix를 그대로 포함하며 새 종결부호를 추가한 경우에만 작동한다.
 - 정상적인 짧은 continuation은 strip하지 않도록 테스트로 고정했다.
 - final F1/precision/recall은 함께 개선됐고, strict final F1도 소폭 개선됐다.
-- boundary F1은 개선되지 않았다. 따라서 이 패치는 boundary granularity 문제의 해결책이 아니라, 반복 pending prefix가 확정 후보 소비를 막는 lifecycle stall을 줄이는 보수 개선으로 해석한다.
+- 같은 경로에서 final 직전 staged 문장의 prior pending prefix만 제거하면 final F1은 유지하면서 boundary F1이 개선된다. 이때도 expected나 케이스별 문구를 보지 않고, prior pending이 종결부호 없는 prefix이고 suffix가 stage 가능한 종결문일 때만 동작한다.
+- boundary granularity 전체 문제는 아직 남아 있지만, 이번 패치는 반복 pending prefix로 인해 final 앞에 context가 붙는 하위 유형을 줄인다.
 - suffix 후보 자체를 final로 보내는 변형도 확인했지만 `final_f1_avg=0.896`, `strict_final_f1_avg=0.926`, `final_boundary_f1_avg=0.563`으로 악화되어 폐기했다.
 
 ## 2026-06-24 confirmation 축 재검토

@@ -58,6 +58,7 @@ from src.app.dictation_transcript_logic import (
     _should_suppress_delta_final,
     _should_translate_final_sentence,
     _stable_window_text,
+    _strip_prior_pending_prefix_from_final,
     _strip_prior_pending_prefix_revision,
 )
 from src.app.transcript_revision import (
@@ -757,6 +758,10 @@ def run_transcribe_loop(
             return []
         if allow_same_chunk_suffix_replacement:
             count_metric("stage_replace_same_chunk_suffix_allowed")
+            stripped_stage = _strip_prior_pending_prefix_from_final(active_stage.sentence, prior_pending_text)
+            if stripped_stage != active_stage.sentence:
+                active_stage.sentence = stripped_stage
+                count_metric("stage_replace_same_chunk_prior_pending_prefix_stripped")
         worker._emit(
             "status",
             "받아쓰기 AI stage 교체: "
