@@ -32030,3 +32030,46 @@ result:
 - 이전 clean report의 `final_f1_avg=0.910`, `strict_final_f1_avg=0.947`, `final_boundary_f1_avg=0.595` 대비 라벨 정리만으로 각각 0.913, 0.953, 0.604로 개선됐다.
 - 이는 앱 로직 개선이 아니라 케이스 정의 정렬 효과다.
 - 남은 strict actionable low는 7건이며 `overfinal_or_extra_final=3`, `underfinal_missing_no_residue=3`, `short_fragment_sensitive=1`로 여전히 혼재한다. 앱 기본값 변경은 보류하고, 같은 원인군을 추가 수집하거나 케이스 정의를 더 검토한다.
+
+## 2026-06-24 refined case set lifecycle sweep
+
+목적:
+
+- expected_final prefix fragment 정리 이후에도 남은 strict low 케이스에서 `stage_age_quality_blocked`가 자주 관측된다.
+- 품질 게이트 자체에 새 세부 knob를 추가하기 전에, 이미 manifest에 있는 lifecycle 축이 같은 병목을 완화하는지 확인한다.
+
+명령:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py run-sweep \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --include-baseline \
+  --param STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=1 \
+  --param STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=2 \
+  --param STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=3 \
+  --param DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=1 \
+  --param DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=2 \
+  --param DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=3 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-20260624-lifecycle-refined-cases \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-20260624-lifecycle-refined-cases-summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-20260624-lifecycle-refined-cases-summary.md
+```
+
+결과:
+
+| variant | final_f1_avg | final_boundary_f1_avg | finalized_per_stage_start | strict_final_f1_avg | 판단 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| baseline | 0.9135 | 0.6044 | 0.4411 | 0.9526 | 유지 |
+| `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=1` | 0.9135 | 0.6044 | 0.4411 | 0.9526 | baseline과 동일 |
+| `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=2` | 0.9138 | 0.5977 | 0.4355 | 0.9378 | strict 악화 |
+| `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=3` | 0.9138 | 0.5977 | 0.4355 | 0.9378 | strict 악화 |
+| `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=1` | 0.9135 | 0.6044 | 0.4411 | 0.9526 | baseline과 동일 |
+| `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=2` | 0.9135 | 0.6044 | 0.4411 | 0.9526 | baseline과 동일 |
+| `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=3` | 0.9135 | 0.6044 | 0.4411 | 0.9526 | baseline과 동일 |
+
+해석:
+
+- queue promotion age를 늘리면 raw `final_f1_avg`는 0.0003 수준으로 상승하지만, strict F1과 boundary F1이 하락한다.
+- 이는 오래된 queue 후보를 더 오래 살리는 방식이 challenge 평균에서는 미세한 recall 이득을 만들 수 있어도, strict subset에서는 stale/premature final 위험을 키운다는 뜻이다.
+- `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS`는 현재 refined case set에서 1-3 범위 변경 효과가 없다.
+- 이번 sweep은 앱 기본값 변경 근거가 아니다. 다음 앱 로직 후보는 새 세부 knob가 아니라, stable repeated token-sentence와 recent-final suppression의 충돌을 직접 관측하는 케이스를 더 모아 판단한다.
