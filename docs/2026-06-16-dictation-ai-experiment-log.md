@@ -27679,3 +27679,46 @@ final_f1_avg=0.6278166433263859
 - 전체 final 지표는 변하지 않았다.
 - strict 후보에서 케이스 정의 오류 1건이 제거되어 앱 로직 튜닝 후보가 더 좁아졌다.
 - 새 플래그는 62건을 찾지만, 대부분은 기존 case-definition review에 이미 포함되어 있었다. 따라서 이번 변경은 성능 개선이 아니라 벤치 해석 정확도 개선이다.
+
+### 2026-06-23 한국어 suffix revision expected 정리
+
+대상:
+
+- `ko_log_draft_20260620_avc_whisper_log_1_002627`
+
+판단:
+
+- 기존 `expected_final`은 같은 발화의 prefix 포함 문장과 suffix revision 문장을 둘 다 final 기대값으로 두고 있었다.
+- final은 append-only이고 같은 token-sentence revision 계열은 하나의 final로 소비되어야 하므로, suffix revision을 별도 expected final에서 제거했다.
+- 입력 chunk 기준으로 긴 문장은 6회 stable 반복 관측되어 case 근거가 유지된다.
+
+CUDA/SaT 확인:
+
+```text
+before case:
+expected=2
+actual=1
+final_f1=0.6666666666666666
+case_definition_flags=["contained_expected_token_sentence"]
+
+after case:
+expected=1
+actual=1
+final_f1=1.0
+case_definition_flags=["repeated_expected_group"]
+```
+
+전체 challenge replay:
+
+```text
+before final_f1_avg=0.6278166433263859
+after  final_f1_avg=0.628141213271209
+strict_logic_candidates=23 -> 23
+strict_final_f1_avg=0.8695652173913043 -> 0.8695652173913043
+```
+
+해석:
+
+- 이 변경은 앱 로직 성능 개선이 아니라 잘못 정의된 expected final 정리다.
+- 같은 expected 묶음이 다른 sliding-window 케이스에도 있어 `repeated_expected_group` 검토 대상에는 남는다.
+- 따라서 다음 정리 후보는 동일 expected 그룹을 deduplicate하거나 각 window가 서로 다른 lifecycle failure를 갖는지 확인하는 것이다.
