@@ -30253,3 +30253,54 @@ cuda_report_review_actions=extend_replay_tail_or_reclassify_staged_expectation:4
 - CUDA 리포트의 남은 7건은 입력/라벨 결함이 아니라 replay 종료 시점, 문장 경계 granularity, mid-stream recut 해석 문제다.
 - 따라서 이 7건을 근거로 confirmation, short CJK, queue age 같은 앱 로직 상수를 조정하지 않는다.
 - 다음 앱 로직 변경은 strict logic subset 또는 logic_tuning_candidate subset에서 동일 지표가 반복적으로 낮게 나올 때만 시도한다.
+
+## 2026-06-24 case-definition cleanup과 interpretation review 분리
+
+목적:
+
+- 벤치 리포트의 `case_definition_review`가 expected label 오류와 replay-tail/boundary 해석 리뷰를 함께 세고 있어, `expected_final`이 아직 잘못 정의된 것처럼 보이는 문제를 줄인다.
+- 실제 expected label/window cleanup 대상과 해석 리뷰 대상을 분리해 앱 로직 튜닝 근거를 더 보수적으로 읽는다.
+
+변경:
+
+```text
+commit=2c8be50 test: 벤치 케이스 리뷰 분류 분리
+report=.tmp/eval/dictation-ai-sbd/current-20260624-review-split-cli-report.json
+validation=.tmp/eval/dictation-ai-sbd/validate-20260624-review-split-cli-summary.json
+test=./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report
+```
+
+CUDA 벤치:
+
+```text
+case_count=57
+case_definition_review=6
+case_definition_cleanup=0
+case_interpretation_review=6
+logic_tuning_candidates=47
+strict_logic_candidates=38
+final_precision_avg=0.924
+final_recall_avg=0.918
+final_f1_avg=0.913
+strict_final_f1_avg=0.953
+final_boundary_f1_avg=0.599
+clean_low_case_count_lt_0.65=0
+```
+
+해석:
+
+- active challenge 57건 기준으로 자동 검증 가능한 `expected_final` 정의 cleanup 대상은 0건이다.
+- 남은 6건은 `extend_replay_tail_or_reclassify_staged_expectation`, `manual_boundary_review`, `add_initial_final_or_recut_mid_stream_case`로 분류된다.
+- 이들은 expected 문장이 입력에 없거나 3회 반복 근거가 없다는 뜻이 아니라, replay 종료 위치, mid-stream initial context, boundary granularity 해석 문제다.
+- 따라서 이 6건을 근거로 새 앱 로직 임계값을 추가하지 않는다.
+
+추가 확인:
+
+- `zh_log_draft_20260620_avc_whisper_log_11_000950`의 `还选了一个酱。` 같은 중복 final은 recent final tail echo처럼 보이지만, token LCS가 3/6 수준이다.
+- 이를 억제하려면 짧은 CJK 후보에 대해 매우 느슨한 tail-subsequence 규칙이 필요하다.
+- 이 규칙은 실제 반복 발화를 오검출할 위험이 커서 현재 핵심 원칙에 맞지 않는다.
+
+결론:
+
+- 현재 CUDA 리포트는 앱 로직을 더 완화할 근거보다, boundary granularity/replay-tail 해석을 분리해야 한다는 근거가 강하다.
+- 다음 앱 로직 변경은 clean low-score 후보가 다시 나타나거나, strict logic subset에서 같은 lifecycle metric 조합이 반복될 때만 시도한다.
