@@ -28737,3 +28737,50 @@ missing_expected_split_coverage.split_coverage_total=3
 - 전체 성능은 변하지 않는다. 이 변경은 앱 로직 개선이 아니라, 앱 로직 튜닝 후보를 더 엄격하게 분리하는 리포트 개선이다.
 - split coverage 3건을 strict 후보에서 제외하자 strict subset F1이 0.816에서 0.834로 상승했다.
 - 다음 앱 로직 개선 후보는 split coverage와 terminal residue를 제외한 pure loss 후보 위주로 봐야 한다.
+
+## 2026-06-24 delta/recent final 관련 상수 sweep 무효 확인
+
+목적:
+
+- strict low-score 후보에서 `candidate_delta_trimmed`, `candidate_recent_final_delta_trimmed`, `stage_age_quality_blocked`, `stage_revision_token_sentence_deferred`가 반복된다.
+- delta suppression 보존 기간과 recent final 참조 window가 이 병목의 주원인인지 확인했다.
+
+시도:
+
+- `AVC_DICTATION_DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=0`
+- `AVC_DICTATION_DELTA_SUPPRESSED_STAGE_MAX_CHUNKS=4`
+- 임시 패치 `RECENT_TRANSCRIPT_WINDOW=4`
+- 임시 패치 `RECENT_TRANSCRIPT_WINDOW=12`
+
+CUDA/SaT 확인:
+
+```text
+baseline_output=.tmp/eval/dictation-ai-sbd/current-20260624-split-coverage-review-report.json
+baseline_final_precision_avg=0.887
+baseline_final_recall_avg=0.800
+baseline_final_f1_avg=0.825
+baseline_strict_final_f1_avg=0.834
+baseline_final_boundary_f1_avg=0.558
+
+delta_suppressed_stage_0_output=.tmp/eval/dictation-ai-sbd/current-20260624-delta-suppressed-stage-0-report.json
+delta_suppressed_stage_0_final_f1_avg=0.825
+delta_suppressed_stage_0_strict_final_f1_avg=0.834
+
+delta_suppressed_stage_4_output=.tmp/eval/dictation-ai-sbd/current-20260624-delta-suppressed-stage-4-report.json
+delta_suppressed_stage_4_final_f1_avg=0.825
+delta_suppressed_stage_4_strict_final_f1_avg=0.834
+
+recent_window_4_output=.tmp/eval/dictation-ai-sbd/current-20260624-recent-window-4-report.json
+recent_window_4_final_f1_avg=0.825
+recent_window_4_strict_final_f1_avg=0.834
+
+recent_window_12_output=.tmp/eval/dictation-ai-sbd/current-20260624-recent-window-12-report.json
+recent_window_12_final_f1_avg=0.825
+recent_window_12_strict_final_f1_avg=0.834
+```
+
+해석:
+
+- 네 sweep 모두 전체 F1, strict F1, boundary F1에 변화를 만들지 못했다.
+- 따라서 현재 정리된 challenge replay 기준에서는 delta suppressed stage 보존 기간과 recent transcript window가 주요 개선 레버가 아니다.
+- 앱 코드는 변경하지 않고 원복했다. 다음 후보는 상수 완화가 아니라, strict low-score의 terminal staged/queue residue와 pure loss를 더 분리해 실제 runtime에서 소비 가능한 문장인지 확인하는 방향이다.
