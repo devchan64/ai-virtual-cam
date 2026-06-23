@@ -2283,6 +2283,7 @@ def summarize_case_definition_health(
 def summarize_tuning_next_action(
     *,
     case_definition_health_summary: dict[str, Any],
+    strict_logic_candidate_summary: dict[str, Any],
     terminal_expected_residue_summary: dict[str, Any],
     missing_expected_without_terminal_residue_summary: dict[str, Any],
     missing_expected_split_coverage_summary: dict[str, Any],
@@ -2311,6 +2312,12 @@ def summarize_tuning_next_action(
     missing_no_residue_count = int(missing_expected_without_terminal_residue_summary.get("case_count", 0))
     split_coverage_count = int(missing_expected_split_coverage_summary.get("case_count", 0))
     boundary_granularity_count = int(boundary_granularity_summary.get("boundary_granularity_case_count", 0))
+    strict_actionable_low_count = int(
+        dict(strict_logic_candidate_summary.get("actionable_low_final", {}) or {}).get("case_count", 0)
+    )
+    strict_boundary_sensitive_count = int(
+        dict(strict_logic_candidate_summary.get("boundary_metric_sensitivity", {}) or {}).get("case_count", 0)
+    )
     low_thresholds = dict(clean_low_bottleneck_intersection_summary.get("thresholds", {}) or {})
     clean_low_065 = int(dict(low_thresholds.get("0.65", {}) or {}).get("case_count", 0))
     clean_low_050 = int(dict(low_thresholds.get("0.50", {}) or {}).get("case_count", 0))
@@ -2323,6 +2330,9 @@ def summarize_tuning_next_action(
     elif clean_low_065 > 0:
         priority = "inspect_clean_low_app_logic_candidates"
         rationale = "strict, fully supported low-score cases remain; inspect common lifecycle metrics before code changes."
+    elif strict_boundary_sensitive_count > strict_actionable_low_count and strict_boundary_sensitive_count > 0:
+        priority = "review_strict_boundary_sensitivity"
+        rationale = "more strict candidates preserve content but differ in final boundaries than lose final content."
     elif boundary_granularity_count > 0:
         priority = "review_boundary_granularity"
         rationale = "content is mostly recovered but final segment boundaries differ; avoid treating it as pure missing-final."
@@ -2346,6 +2356,8 @@ def summarize_tuning_next_action(
         "case_definition_cleanup_count": definition_cleanup_count,
         "case_interpretation_review_count": interpretation_review_count,
         "strict_logic_candidate_count": strict_count,
+        "strict_actionable_low_final_case_count": strict_actionable_low_count,
+        "strict_boundary_sensitive_case_count": strict_boundary_sensitive_count,
         "clean_low_case_count_lt_0_65": clean_low_065,
         "clean_low_case_count_lt_0_50": clean_low_050,
         "terminal_expected_residue_case_count": terminal_residue_count,
@@ -3099,6 +3111,7 @@ def build_benchmark_report(
     clean_low_bottleneck_intersection_summary = summarize_clean_low_bottleneck_intersections(cases, results)
     tuning_next_action_summary = summarize_tuning_next_action(
         case_definition_health_summary=case_definition_health_summary,
+        strict_logic_candidate_summary=strict_logic_candidate_summary,
         terminal_expected_residue_summary=terminal_expected_residue_summary,
         missing_expected_without_terminal_residue_summary=missing_expected_without_terminal_residue_summary,
         missing_expected_split_coverage_summary=missing_expected_split_coverage_summary,
