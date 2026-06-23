@@ -27871,3 +27871,63 @@ strict_final_f1_avg=0.8361904761904762
 - strict 후보에서 `final_quality_no_end_marker`가 `6 -> 11`, `finalize_reason_aged`가 `4 -> 8`, `stage_finalize_before_replace`가 `0 -> 8`로 늘었다. 즉 confirmation 지연이 no-end false final을 구조적으로 줄이지 못하고, aged/next-completed 소비 경로를 늘렸다.
 - 전체 평균의 미세 개선은 challenge corpus의 라벨/난이도 분포 효과로 보고, 앱 로직 기본값으로 채택하지 않는다.
 - 실험용 설정도 checked-in 운영 설정으로 남기지 않는다. 다음 후보는 no-end 전역 지연이 아니라 recent-final splice, revision reset, active/queue 소비 순서 같은 더 직접적인 lifecycle 신호에서 찾아야 한다.
+
+### 2026-06-23 recent-final no-end suffix echo 억제 채택
+
+배경:
+
+- strict 저점 케이스 중 일부는 문장부호 없는 후보가 이미 확정된 final의 suffix를 다시 따라오며 extra final로 확정되는 형태였다.
+- no-end 후보 전체를 늦추는 전역 confirmation 정책은 strict F1을 악화시켰으므로, 더 좁은 중복 억제 신호가 필요했다.
+- 채택한 원칙은 언어별 문구 규칙이 아니라, recent final 메모리에 남아 있는 확정 문장의 tail과 no-end 후보의 tail이 함께 닿고 후보 전체가 recent final suffix로 설명될 때만 echo로 suppress하는 것이다.
+
+실험:
+
+```text
+baseline:
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --model sat-3l-sm --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260623-repeat-evidence-or-report.json
+
+recent-final no-end suffix echo:
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --model sat-3l-sm --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260623-no-end-suffix-echo-report.json
+```
+
+CUDA/SaT 비교:
+
+```text
+baseline:
+finalized=4689
+stage_start=9009
+finalized_per_stage_start=0.5204795204795205
+final_precision_avg=0.6192229179836273
+final_recall_avg=0.6853140474655618
+final_f1_avg=0.6286280681884436
+final_boundary_f1_avg=0.17872001143824437
+strict_logic_candidates=23
+strict_final_f1_avg=0.8913043478260869
+strict_final_boundary_f1_avg=0.7043478260869565
+
+recent-final no-end suffix echo:
+finalized=4683
+stage_start=8997
+finalized_per_stage_start=0.5205068356118706
+final_precision_avg=0.6213163941277363
+final_recall_avg=0.6851517624931502
+final_f1_avg=0.6297617446385757
+final_boundary_f1_avg=0.179603305359513
+strict_logic_candidates=21
+strict_final_f1_avg=0.8999999999999999
+strict_final_boundary_f1_avg=0.7333333333333334
+```
+
+판정:
+
+- 전체 `final_f1_avg`는 `+0.00113`, `final_boundary_f1_avg`는 `+0.00088` 상승했고 recall 하락은 `-0.00016`으로 작다.
+- strict 후보는 `final_precision_avg=0.8913 -> 0.9127`, `strict_final_f1_avg=0.8913 -> 0.9000`, `strict_final_boundary_f1_avg=0.7043 -> 0.7333`으로 개선됐다.
+- `final_quality_no_end_marker=513 -> 503`, `candidate_duplicate_suppressed=13711 -> 13826`, `candidate_recent_final_delta_trimmed=5095 -> 5204`로 의도한 중복 억제 경로가 증가했다.
+- 케이스 expected_final을 임의로 늘려 strict 점수를 올리는 것은 채택하지 않았다. `ko_log_draft_20260620_avc_whisper_log_1_002743`에 no-end 후보를 추가하는 실험은 validator의 `stable_repeat_unsupported`로 잡혀 되돌렸다.
+- 기본값으로 채택하되, 다음 반복에서는 remaining strict 저점의 queue/stage blockage와 expected_final 정의 약한 케이스를 분리해서 본다.

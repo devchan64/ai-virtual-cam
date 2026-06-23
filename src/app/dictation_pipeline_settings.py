@@ -79,6 +79,13 @@ RECENT_FINAL_FRAGMENT_ECHO_COVERAGE_MIN = 0.60
 RECENT_FINAL_FRAGMENT_ECHO_MAX_UNMATCHED_UNITS = 4
 RECENT_FINAL_FRAGMENT_ECHO_MAX_LENGTH_RATIO = 0.45
 
+# 종결부호 없는 후보가 recent final의 끝부분을 다시 반복하면 새 문장보다
+# sliding-window echo일 가능성이 높다. suffix가 양쪽 끝에 닿고 후보 전체가
+# recent final suffix로 충분히 설명될 때만 억제한다.
+RECENT_FINAL_NO_END_SUFFIX_ECHO_MIN_UNITS = 5
+RECENT_FINAL_NO_END_SUFFIX_ECHO_SIMILARITY_MIN = 0.55
+RECENT_FINAL_NO_END_SUFFIX_ECHO_COVERAGE_MIN = 0.35
+
 # MAX_STAGED_SENTENCE_QUEUE는 현재 active staged 문장을 아직 소비할 수 없을
 # 때 생성순서 후보를 보존한다. 값을 키우면 SBD 출력이 몰릴 때 final 누락은
 # 줄 수 있지만 stale 후보 churn은 늘어난다.
@@ -349,6 +356,27 @@ def recent_final_fragment_echo_max_length_ratio() -> float:
     )
 
 
+def recent_final_no_end_suffix_echo_min_units() -> int:
+    return _dictation_env_int(
+        "RECENT_FINAL_NO_END_SUFFIX_ECHO_MIN_UNITS",
+        RECENT_FINAL_NO_END_SUFFIX_ECHO_MIN_UNITS,
+    )
+
+
+def recent_final_no_end_suffix_echo_similarity_min() -> float:
+    return _dictation_env_float(
+        "RECENT_FINAL_NO_END_SUFFIX_ECHO_SIMILARITY_MIN",
+        RECENT_FINAL_NO_END_SUFFIX_ECHO_SIMILARITY_MIN,
+    )
+
+
+def recent_final_no_end_suffix_echo_coverage_min() -> float:
+    return _dictation_env_float(
+        "RECENT_FINAL_NO_END_SUFFIX_ECHO_COVERAGE_MIN",
+        RECENT_FINAL_NO_END_SUFFIX_ECHO_COVERAGE_MIN,
+    )
+
+
 def sentence_confirm_chunks() -> int:
     return max(1, _dictation_env_int("SENTENCE_CONFIRM_CHUNKS", SENTENCE_CONFIRM_CHUNKS))
 
@@ -403,6 +431,9 @@ def dictation_pipeline_policy() -> dict[str, object]:
         "recent_final_fragment_echo_coverage_min": recent_final_fragment_echo_coverage_min(),
         "recent_final_fragment_echo_max_unmatched_units": recent_final_fragment_echo_max_unmatched_units(),
         "recent_final_fragment_echo_max_length_ratio": recent_final_fragment_echo_max_length_ratio(),
+        "recent_final_no_end_suffix_echo_min_units": recent_final_no_end_suffix_echo_min_units(),
+        "recent_final_no_end_suffix_echo_similarity_min": recent_final_no_end_suffix_echo_similarity_min(),
+        "recent_final_no_end_suffix_echo_coverage_min": recent_final_no_end_suffix_echo_coverage_min(),
         "segment_high_no_speech_override_languages": sorted(SEGMENT_HIGH_NO_SPEECH_OVERRIDE_LANGUAGES),
         "min_segment_avg_logprob": MIN_SEGMENT_AVG_LOGPROB,
         "max_segment_no_speech_prob": MAX_SEGMENT_NO_SPEECH_PROB,
@@ -663,6 +694,36 @@ def dictation_tuning_manifest() -> list[dict[str, int | float | str]]:
             max_value=0.95,
             scope="duplicate-suppression",
             intent="apply fragment echo suppression only to candidates substantially shorter than the recent final",
+        ),
+        _tuning_manifest_entry(
+            "RECENT_FINAL_NO_END_SUFFIX_ECHO_MIN_UNITS",
+            default=RECENT_FINAL_NO_END_SUFFIX_ECHO_MIN_UNITS,
+            current=recent_final_no_end_suffix_echo_min_units(),
+            value_type="int",
+            min_value=2,
+            max_value=20,
+            scope="duplicate-suppression",
+            intent="suppress a no-end candidate only when its tail shares enough token-sentence units with a recent final tail",
+        ),
+        _tuning_manifest_entry(
+            "RECENT_FINAL_NO_END_SUFFIX_ECHO_SIMILARITY_MIN",
+            default=RECENT_FINAL_NO_END_SUFFIX_ECHO_SIMILARITY_MIN,
+            current=recent_final_no_end_suffix_echo_similarity_min(),
+            value_type="float",
+            min_value=0.30,
+            max_value=0.95,
+            scope="duplicate-suppression",
+            intent="require the no-end candidate to be similar to a same-length recent-final suffix before suppressing it",
+        ),
+        _tuning_manifest_entry(
+            "RECENT_FINAL_NO_END_SUFFIX_ECHO_COVERAGE_MIN",
+            default=RECENT_FINAL_NO_END_SUFFIX_ECHO_COVERAGE_MIN,
+            current=recent_final_no_end_suffix_echo_coverage_min(),
+            value_type="float",
+            min_value=0.10,
+            max_value=0.95,
+            scope="duplicate-suppression",
+            intent="require enough of the no-end candidate to be covered by the shared final-tail run",
         ),
         _tuning_manifest_entry(
             "SENTENCE_CONFIRM_CHUNKS",

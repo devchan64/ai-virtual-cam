@@ -36,6 +36,9 @@ from src.app.dictation_pipeline_settings import (
     recent_final_fragment_echo_max_length_ratio as _recent_final_fragment_echo_max_length_ratio,
     recent_final_fragment_echo_max_unmatched_units as _recent_final_fragment_echo_max_unmatched_units,
     recent_final_fragment_echo_min_units as _recent_final_fragment_echo_min_units,
+    recent_final_no_end_suffix_echo_coverage_min as _recent_final_no_end_suffix_echo_coverage_min,
+    recent_final_no_end_suffix_echo_min_units as _recent_final_no_end_suffix_echo_min_units,
+    recent_final_no_end_suffix_echo_similarity_min as _recent_final_no_end_suffix_echo_similarity_min,
     recent_final_tail_anchor_min_units as _recent_final_tail_anchor_min_units,
     sentence_confirm_chunks as _sentence_confirm_chunks,
     sentence_confirm_max_age_chunks as _sentence_confirm_max_age_chunks,
@@ -1216,6 +1219,13 @@ def _recent_final_sentence_delta(candidate: str, recent_sentence: str, language:
     fuzzy_suffix_delta = _recent_final_fuzzy_suffix_echo_delta(candidate_words, recent_words)
     if fuzzy_suffix_delta is not None:
         return fuzzy_suffix_delta
+    no_end_suffix_delta = _recent_final_no_end_suffix_echo_delta(
+        normalized_candidate,
+        candidate_words,
+        recent_words,
+    )
+    if no_end_suffix_delta is not None:
+        return no_end_suffix_delta
     if min(len(candidate_words), len(recent_words)) < 8:
         suffix_delta = _recent_final_suffix_delta(candidate_words, recent_words)
         if suffix_delta is not None:
@@ -1420,6 +1430,48 @@ def _recent_final_fuzzy_suffix_echo_delta(candidate_words: list[str], recent_wor
             continue
         return ""
     return None
+
+
+def _recent_final_no_end_suffix_echo_delta(
+    normalized_candidate: str,
+    candidate_words: list[str],
+    recent_words: list[str],
+) -> str | None:
+    if _boundary_sentence_end_count(normalized_candidate) > 0:
+        return None
+    if len(candidate_words) >= len(recent_words):
+        return None
+    min_units = _recent_final_no_end_suffix_echo_min_units()
+    if len(candidate_words) < min_units or len(recent_words) < min_units + 2:
+        return None
+    matcher = SequenceMatcher(None, recent_words, candidate_words, autojunk=False)
+    best_suffix_block = None
+    for block in matcher.get_matching_blocks():
+        if block.size < min_units:
+            continue
+        recent_end_gap = len(recent_words) - (block.a + block.size)
+        candidate_end_gap = len(candidate_words) - (block.b + block.size)
+        if recent_end_gap > 1 or candidate_end_gap > 1:
+            continue
+        if best_suffix_block is None or block.size > best_suffix_block.size:
+            best_suffix_block = block
+    if best_suffix_block is None:
+        return None
+    coverage = best_suffix_block.size / max(len(candidate_words), 1)
+    if coverage < _recent_final_no_end_suffix_echo_coverage_min():
+        return None
+    expected_start = max(0, len(recent_words) - len(candidate_words))
+    best_ratio = 0.0
+    for start in range(
+        max(0, expected_start - 3),
+        min(len(recent_words) - len(candidate_words), expected_start + 3) + 1,
+    ):
+        recent_slice = recent_words[start : start + len(candidate_words)]
+        ratio = SequenceMatcher(None, recent_slice, candidate_words, autojunk=False).ratio()
+        best_ratio = max(best_ratio, ratio)
+    if best_ratio < _recent_final_no_end_suffix_echo_similarity_min():
+        return None
+    return ""
 
 
 def _recent_final_short_tail_echo_delta(candidate_words: list[str], recent_words: list[str]) -> str | None:
