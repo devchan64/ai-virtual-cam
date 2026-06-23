@@ -32190,3 +32190,37 @@ HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_
 - compact similarity 기준을 0.88 또는 0.92로 옮기면 한 한국어 케이스가 악화되고 전체/strict 점수도 하락한다.
 - compact common coverage와 max extra ratio 강화는 현재 case set에서 출력 점수를 바꾸지 않는다.
 - 이번 sweep은 앱 기본값 변경 근거가 아니다. 다음 개선 후보는 새 언어별/문구별 규칙이 아니라, stable repeated token-sentence와 recent-final suppression이 충돌하는 로그 케이스를 더 모아 구조적 조건을 검증하는 것이다.
+
+## 2026-06-24 stable internal echo override preflight
+
+목적:
+
+- 직전 metric 추가에서 strict low 일부가 `candidate_duplicate_suppressed_stable_internal_high`와 겹치는 것을 확인했다.
+- 따라서 compact/fragment recent-final echo로 후보가 완전히 삭제될 때, 현재 window 내부 안정성이 high이고 후보가 완성 문장 형태이면 suppression을 우회하는 실험 축을 임시로 넣어 검증했다.
+
+명령:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py run-sweep \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --include-baseline \
+  --param RECENT_FINAL_STABLE_INTERNAL_ECHO_OVERRIDE=0 \
+  --param RECENT_FINAL_STABLE_INTERNAL_ECHO_OVERRIDE=1 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-20260624-stable-echo-override \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-20260624-stable-echo-override-summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-20260624-stable-echo-override-summary.md
+```
+
+결과:
+
+| variant | final_f1_avg | final_boundary_f1_avg | strict_final_f1_avg | 판단 |
+| --- | ---: | ---: | ---: | --- |
+| baseline | 0.9135 | 0.6044 | 0.9526 | 유지 |
+| `RECENT_FINAL_STABLE_INTERNAL_ECHO_OVERRIDE=0` | 0.9135 | 0.6044 | 0.9526 | baseline과 동일 |
+| `RECENT_FINAL_STABLE_INTERNAL_ECHO_OVERRIDE=1` | 0.9135 | 0.6044 | 0.9526 | baseline과 동일 |
+
+해석:
+
+- 현재 active challenge replay에서는 이 override가 실제 출력 차이를 만들지 않았다.
+- stable internal high와 duplicate suppression이 함께 관측된다는 사실만으로는 suppression 우회 조건을 일반 원칙으로 채택할 근거가 부족하다.
+- 임시 실험 코드는 제거하고, default/manifest에는 새 knob를 남기지 않는다.
