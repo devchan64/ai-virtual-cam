@@ -1962,6 +1962,38 @@ def _strict_boundary_metric_sensitivity_summary(strict_results: list[dict[str, A
     }
 
 
+def _strict_actionable_low_final_summary(strict_results: list[dict[str, Any]]) -> dict[str, Any]:
+    boundary_sensitive_ids = {
+        str(item.get("id"))
+        for item in _strict_boundary_metric_sensitivity_summary(strict_results).get("examples", [])
+    }
+    low_final = [
+        result
+        for result in strict_results
+        if str(result.get("id")) not in boundary_sensitive_ids
+        and float(dict(result.get("final_score", {})).get("f1", 0.0)) < BOUNDARY_ZERO_HIGH_FINAL_F1
+    ]
+    return {
+        "interpretation": (
+            "Strict cases whose final content F1 is still low after excluding boundary metric sensitivity. "
+            "These are the preferred next app-lifecycle inspection candidates."
+        ),
+        "max_final_f1": BOUNDARY_ZERO_HIGH_FINAL_F1,
+        "case_count": len(low_final),
+        "examples": [
+            _low_score_case_payload(result, "strict_actionable_low_final")
+            for result in sorted(
+                low_final,
+                key=lambda result: (
+                    float(dict(result.get("final_score", {})).get("f1", 0.0)),
+                    float(dict(result.get("final_boundary_score", {})).get("f1", 0.0)),
+                    str(result.get("id")),
+                ),
+            )[:CASE_EXEMPLAR_LIMIT]
+        ],
+    }
+
+
 def summarize_strict_logic_candidate_results(cases: list[SbdCase], results: list[dict[str, Any]]) -> dict[str, Any]:
     cases_by_id = {case.id: case for case in cases}
     strict = [
@@ -1989,6 +2021,7 @@ def summarize_strict_logic_candidate_results(cases: list[SbdCase], results: list
         "strict_case_ids": [str(result.get("id")) for result in strict],
         "summary": _summarize_result_group(strict),
         "boundary_metric_sensitivity": _strict_boundary_metric_sensitivity_summary(strict),
+        "actionable_low_final": _strict_actionable_low_final_summary(strict),
         "collection_strata": summarize_results_by_collection_strata(strict),
         "metric_presence": {
             metric: _summarize_supported_low_metric_presence(strict, metric)

@@ -349,6 +349,8 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         strict_summary = report["strict_logic_candidate_summary"]
         self.assertEqual(strict_summary["strict_case_count"], 1)
         self.assertEqual(strict_summary["strict_case_ids"], ["single-supported"])
+        self.assertEqual(strict_summary["actionable_low_final"]["case_count"], 1)
+        self.assertEqual(strict_summary["actionable_low_final"]["examples"][0]["id"], "single-supported")
         self.assertEqual(strict_summary["metric_presence"]["stage_candidate_quality_blocked"]["case_count"], 1)
         self.assertEqual(strict_summary["lowest_cases"][0]["id"], "single-supported")
         self.assertEqual(
@@ -845,6 +847,7 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         sensitivity = strict_summary["boundary_metric_sensitivity"]
         self.assertEqual(sensitivity["case_count"], 1)
         self.assertEqual(sensitivity["examples"][0]["id"], "case-boundary-sensitive")
+        self.assertEqual(strict_summary["actionable_low_final"]["case_count"], 0)
 
     def test_report_summarizes_low_score_review_needed_cases(self) -> None:
         args = Namespace(

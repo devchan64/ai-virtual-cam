@@ -29595,3 +29595,28 @@ strict_boundary_metric_sensitivity.case_count=9
 
 - strict 후보 30건 중 9건은 final/ordered F1이 0.95 이상이지만 boundary F1이 0.5 이하인 metric sensitivity 또는 label-boundary 검토 대상이다.
 - 이 요약은 성능 점수를 바꾸지 않고, 다음 튜닝 대상을 앱 로직 후보와 boundary metric 민감도 후보로 분리한다.
+
+## 2026-06-24 strict actionable low final 요약 추가
+
+목적:
+
+- strict 후보에서 boundary metric sensitivity를 제외한 뒤에도 final content F1이 낮은 케이스만 다음 앱 lifecycle 검토 후보로 좁힌다.
+- 전체 challenge 평균이나 boundary 민감도 케이스를 따라가며 세부 규칙을 늘리지 않도록, report가 직접 다음 검사 대상을 보여주게 한다.
+
+검증:
+
+```text
+tool_test=./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report
+tool_test_result=OK, 44 tests
+
+cuda_output=.tmp/eval/dictation-ai-sbd/current-20260624-strict-actionable-low-final-report.json
+final_f1_avg=0.862698
+strict_final_f1_avg=0.964444
+strict_boundary_metric_sensitivity.case_count=9
+strict_actionable_low_final.case_count=4
+```
+
+해석:
+
+- strict 후보 30건 중 boundary 민감도 9건을 분리하면 실제 final content 저점 후보는 4건이다.
+- 이 4건은 다음 앱 로직 분석 후보지만, short CJK hold 실험처럼 일부 케이스 개선이 전체 악화로 이어질 수 있으므로 공통 lifecycle metric을 먼저 비교해야 한다.
