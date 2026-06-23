@@ -598,6 +598,7 @@ def _has_omitted_stable_candidate(result: dict[str, Any]) -> bool:
         for sentence in result.get("actual_final", []) or []
         if str(sentence).strip()
     ]
+    expected_staged = str(result.get("expected_staged") or "").strip()
     stable_candidates = [
         str(candidate.get("text", "")).strip()
         for candidate in case_stable_sentence_candidates(result)
@@ -607,6 +608,7 @@ def _has_omitted_stable_candidate(result: dict[str, Any]) -> bool:
         return False
     expected_units = [
         *expected_final,
+        *([expected_staged] if expected_staged else []),
         *[
             normalized_text(left) + normalized_text(right)
             for left, right in zip(expected_final, expected_final[1:], strict=False)
@@ -1581,6 +1583,7 @@ def _case_review_payload(result: dict[str, Any]) -> dict[str, Any]:
         "stable_candidate_ordered_alignment": _stable_candidate_ordered_alignment(result),
         "initial_final": list(result.get("initial_final", []) or []),
         "expected_final": list(result.get("expected_final", []) or []),
+        "expected_staged": str(result.get("expected_staged") or ""),
         "actual_final": list(result.get("actual_final", []) or []),
         "input_evidence": dict(result.get("input_evidence", {}) or {}),
         "stable_candidates": case_stable_sentence_candidates(result),

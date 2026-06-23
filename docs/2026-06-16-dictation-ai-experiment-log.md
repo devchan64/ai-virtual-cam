@@ -31719,3 +31719,66 @@ result:
 - 이전의 `expected_definition_cleanup=0`은 “형식/기본 근거 오류 없음”에 가까웠고, “반복 stable 후보가 expected에서 빠진 경우까지 전부 정리됨”을 의미하지 않았다.
 - 새 기준에서는 10건이 cleanup 후보로 드러났다. 이들은 `expected_final`을 수정하거나 replay window/context를 재검토하기 전까지 앱 로직 성능 개선 근거에서 제외한다.
 - 따라서 현재 답은 “전부 고친 상태”가 아니라 “검증 기준을 보강했고, 남은 cleanup 후보 10건을 식별한 상태”다.
+
+## 2026-06-24 expected_staged 반영 및 SMIC fragment 케이스 정리
+
+목적:
+
+- stable 후보가 `expected_final`에는 없지만 `expected_staged`로 명시된 경우를 `expected_final` 누락으로 잘못 분류하지 않는다.
+- `review_note`에는 미완 trailing fragment를 final에서 제외했다고 기록했지만 `expected_staged`가 비어 있던 한국어 SMIC 케이스 2건을 정리한다.
+
+변경:
+
+- omitted stable candidate 진단에서 `expected_staged`와 인접 expected boundary merge를 설명 가능한 후보로 인정했다.
+- case review payload에 `expected_staged`를 포함했다.
+- `ko_log_draft_20260620_avc_whisper_log_002902`, `ko_log_draft_20260620_avc_whisper_log_002903`의 `expected_staged`를 `근데 이제 SMIC가 이런.`으로 명시했다.
+
+검증:
+
+```text
+case_validate=./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases \
+  tests/eval/dictation_ai/sbd_cases \
+  --require-expected-final \
+  --require-source-trace \
+  --require-input-evidence \
+  --require-observed-input-evidence \
+  --require-stable-repeat-evidence \
+  --max-drafts 0
+
+result:
+  case_count=57
+  expected_final_case_count=53
+  expected_no_final_case_count=4
+  input_unsupported_case_count=0
+  input_unobserved_case_count=0
+  stable_repeat_unsupported_case_count=0
+
+tool_test=./.venv/bin/python -m unittest \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_case_validator
+
+result:
+  Ran 87 tests
+  OK
+```
+
+CUDA benchmark:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output .tmp/eval/dictation-ai-sbd/current-20260624-expected-stable-omission-case-cleanup-report.json
+
+result:
+  final_f1_avg=0.913
+  strict_final_f1_avg=0.951
+  expected_definition_cleanup=1
+  case_interpretation_review=6
+  logic_tuning_candidates=46
+```
+
+해석:
+
+- cleanup 후보 10건 중 7건은 이미 `expected_staged`로 명시된 tail 후보였고, 한국어 2건은 staged 명시 누락이었다.
+- 남은 1건은 `zh_log_promo_bbq_short_token_sentence_echo_20260621_001`이다. actual final은 expected final과 일치하지만 입력 stable 후보에 짧은 감탄/반복/잡음 후보가 함께 있어 자동 라벨 수정하지 않는다.
+- 이 상태에서 앱 로직 튜닝은 `expected_definition_cleanup=1`을 제외한 logic tuning candidate를 기준으로 해석한다.
