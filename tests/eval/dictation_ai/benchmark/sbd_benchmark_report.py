@@ -2105,6 +2105,47 @@ def _strict_actionable_low_kind_counts(results: list[dict[str, Any]]) -> dict[st
     return dict(sorted(Counter(_strict_actionable_low_kind(result) for result in results).items()))
 
 
+def _actual_extra_final_kinds(result: dict[str, Any]) -> list[str]:
+    expected = [str(item).strip() for item in result.get("expected_final", []) or [] if str(item).strip()]
+    actual = [str(item).strip() for item in result.get("actual_final", []) or [] if str(item).strip()]
+    if len(actual) <= len(expected) or not expected:
+        return []
+    unmatched_actual = set(range(len(actual)))
+    for expected_sentence in expected:
+        if not unmatched_actual:
+            break
+        best_index = max(
+            unmatched_actual,
+            key=lambda index: _sentence_support_score(actual[index], expected_sentence),
+        )
+        if _sentence_support_score(actual[best_index], expected_sentence) >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY:
+            unmatched_actual.remove(best_index)
+    kinds: list[str] = []
+    for index in sorted(unmatched_actual):
+        sentence = actual[index]
+        best_expected = max(expected, key=lambda expected_sentence: _sentence_support_score(sentence, expected_sentence))
+        best_score = _sentence_support_score(sentence, best_expected)
+        if normalized_text(sentence) == normalized_text(best_expected):
+            kinds.append("actual_matches_expected")
+        elif _expected_short_sentence_supported_by_longer_sentence(sentence, best_expected):
+            kinds.append("actual_fragment_of_expected")
+        elif _expected_sentences_are_revision_variants(sentence, best_expected):
+            kinds.append("actual_revision_of_expected")
+        elif best_score >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY:
+            kinds.append("actual_near_expected_boundary_shift")
+        else:
+            kinds.append("actual_unexpected_or_later_context")
+    return kinds
+
+
+def _actual_extra_final_kind_counts(results: list[dict[str, Any]]) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for result in results:
+        if _strict_actionable_low_kind(result) == "overfinal_or_extra_final":
+            counts.update(_actual_extra_final_kinds(result))
+    return dict(sorted(counts.items()))
+
+
 def _strict_actionable_low_final_summary(strict_results: list[dict[str, Any]]) -> dict[str, Any]:
     boundary_sensitive_ids = {
         str(item.get("id"))
@@ -2124,6 +2165,7 @@ def _strict_actionable_low_final_summary(strict_results: list[dict[str, Any]]) -
         "max_final_f1": BOUNDARY_ZERO_HIGH_FINAL_F1,
         "case_count": len(low_final),
         "issue_kind_counts": _strict_actionable_low_kind_counts(low_final),
+        "overfinal_extra_kind_counts": _actual_extra_final_kind_counts(low_final),
         "metric_presence": {
             metric: _summarize_supported_low_metric_presence(low_final, metric)
             for metric in SUPPORTED_LOW_BOTTLENECK_METRICS
@@ -2133,6 +2175,7 @@ def _strict_actionable_low_final_summary(strict_results: list[dict[str, Any]]) -
             {
                 **_low_score_case_payload(result, "strict_actionable_low_final"),
                 "issue_kind": _strict_actionable_low_kind(result),
+                "overfinal_extra_kinds": _actual_extra_final_kinds(result),
             }
             for result in sorted(
                 low_final,

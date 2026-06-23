@@ -30826,3 +30826,44 @@ strict_actionable_low_final.issue_kind_counts:
 - 현재 수치만으로는 앱 로직을 넓게 완화할 근거가 부족하다.
 - 다음 개선은 전체 short fragment 허용이 아니라, `overfinal_or_extra_final`과 `underfinal_missing_no_residue`를 분리한 뒤 각각의 공통 lifecycle 원인이 확인될 때만 보수적으로 진행한다.
 - 리포트에 `issue_kind_counts`를 추가해 이후 CUDA 벤치 결과에서 낮은 F1의 성격을 먼저 확인하도록 했다.
+
+## 2026-06-24 over-final extra-only 세부 분류
+
+목적:
+
+- `strict_actionable_low_final` 중 `overfinal_or_extra_final=3`이 실제 fragment echo인지, expected와 다른 후속 문맥이 먼저 final로 나간 것인지 분리했다.
+- expected와 매칭되는 actual final은 먼저 제거하고, 남은 extra final만 분류했다.
+
+시도:
+
+```text
+report=.tmp/eval/dictation-ai-sbd/current-20260624-overfinal-extra-only-report.json
+cases=57
+strict_logic_candidates=38
+strict_actionable_low_final_case_count=7
+final_f1_avg=0.913
+strict_final_f1_avg=0.953
+final_boundary_f1_avg=0.599
+
+strict_actionable_low_final.issue_kind_counts:
+  overfinal_or_extra_final=3
+  underfinal_missing_no_residue=2
+  short_fragment_sensitive=1
+  underfinal_boundary_or_revision=1
+
+strict_actionable_low_final.overfinal_extra_kind_counts:
+  actual_unexpected_or_later_context=3
+  actual_revision_of_expected=1
+```
+
+해석:
+
+- over-final 3건의 extra final은 단순 recent-final fragment echo로만 설명되지 않는다.
+- `actual_unexpected_or_later_context`가 3건으로, 다음 문맥 또는 replay tail 문장이 expected 범위보다 먼저 final로 나간 경우가 섞여 있다.
+- `actual_revision_of_expected` 1건은 expected와 actual boundary/revision 차이가 섞인 케이스다.
+
+결론:
+
+- over-final 그룹은 “짧은 fragment final만 더 억제”하는 단일 앱 패치 근거가 아니다.
+- suppress/trim 계열 metric은 under-final과 over-final 양쪽에서 동시에 나타나므로, recent-final echo 억제를 더 강하게 하거나 약하게 하는 전역 변경은 현재 근거로는 위험하다.
+- 다음 앱 패치 후보는 extra final이 아닌 `underfinal_missing_no_residue` 2건에서 공통 lifecycle 원인이 반복되는지 더 확인한 뒤 판단한다.
