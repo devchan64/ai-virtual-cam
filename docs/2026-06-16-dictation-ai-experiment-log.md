@@ -30020,3 +30020,34 @@ candidate_final_boundary_f1_avg=0.536
 - CJK aged final 전체에 confirmation 2를 요구하면 premature final은 일부 줄 수 있지만 recall과 boundary F1이 크게 하락한다.
 - 전역 age-final 강화는 현재 challenge replay에서 보편 개선이 아니므로 폐기한다.
 - 남은 저점은 단일 age 조건보다 revision/queue 소비 순서 또는 케이스 구간 정의를 더 좁혀 분석한다.
+
+## 2026-06-24 short CJK confirmation 2 실험 폐기
+
+목적:
+
+- `zh_log_draft_20260620_avc_whisper_log_11_000820`에서 종결부호 있는 짧은 CJK stage가 2회 관측된 뒤 confirmation 3회에 못 미쳐 quality block되는 흐름이 있었다.
+- `SHORT_CJK_FINAL_UNITS` 전체 변경이나 age-final 조건 변경 대신, 종결부호 있는 short CJK stage의 confirmation 요구치만 3에서 2로 낮추는 좁은 후보를 검증했다.
+
+검증:
+
+```text
+baseline_output=.tmp/eval/dictation-ai-sbd/current-20260624-prefix-growth-default-16-report.json
+baseline_final_precision_avg=0.916389
+baseline_final_recall_avg=0.856389
+baseline_final_f1_avg=0.877143
+baseline_strict_final_f1_avg=0.972
+baseline_final_boundary_f1_avg=0.588902
+
+candidate_output=.tmp/eval/dictation-ai-sbd/current-20260624-short-cjk-confirm2-report.json
+candidate_final_precision_avg=0.871
+candidate_final_recall_avg=0.863
+candidate_final_f1_avg=0.856
+candidate_strict_final_f1_avg=0.958
+candidate_final_boundary_f1_avg=0.541
+```
+
+해석:
+
+- recall은 조금 오르지만 precision, final F1, strict F1, boundary F1이 모두 크게 악화된다.
+- 짧은 CJK 문장의 confirmation 요구치를 낮추는 방식은 false final을 늘리므로 폐기한다.
+- 짧은 문장 final 누락은 case-specific하게 보이더라도, 현재 corpus에서는 보편 개선 축이 아니다.
