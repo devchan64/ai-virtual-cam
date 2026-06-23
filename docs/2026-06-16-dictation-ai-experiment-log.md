@@ -30077,3 +30077,35 @@ cuda_benchmark_result=case_definition_flags=0, final_f1_avg=0.874, strict_final_
 - lifecycle replay 도구 테스트는 helper 계약, metric counter, replay plumbing 검증으로 제한한다.
 - 특정 로그 실패/성능 튜닝 기대값은 `tests/eval/dictation_ai/sbd_cases/{language}/` 케이스와 CUDA 벤치 리포트에서 관리한다.
 - expected_final은 STT window 입력에서 관측된 독립 stable sentence를 기준으로 두며, 긴 stable sentence 내부에 포함되는 짧은 조각을 별도 expected로 중복 등록하지 않는다.
+
+## 2026-06-24 expected 정의 정리 후 튜닝 후보 재분류
+
+기준 리포트:
+
+```text
+report=.tmp/eval/dictation-ai-sbd/current-20260624-after-expected-definition-cleanup-report.json
+case_count=60
+case_definition_flags=0
+case_definition_review_count=16
+logic_tuning_candidate_count=40
+strict_logic_candidate_count=32
+summary_final_f1_avg=0.874
+summary_final_boundary_f1_avg=0.579
+strict_final_f1_avg=0.967
+strict_final_boundary_f1_avg=0.656
+tuning_next_action=review_boundary_granularity
+top_review_actions=extend_replay_tail_or_reclassify_staged_expectation:13, manual_boundary_review:2, add_initial_final_or_recut_mid_stream_case:1
+```
+
+해석:
+
+- `case_definition_flags=0`이므로 현재 자동 검출 가능한 expected_final 정의 오류는 제거된 상태다.
+- 남은 `case_definition_review_count=16`은 expected 문장이 입력에 없다는 의미가 아니라, replay tail이 짧아 마지막 staged를 final로 볼 수 없는 케이스 또는 boundary granularity 해석이 필요한 케이스다.
+- strict logic 후보 32건은 `final_f1_avg=0.967`로 높다. 이 subset만 보면 즉시 앱 로직을 바꿀 강한 근거는 부족하다.
+- 전체 `final_boundary_f1_avg=0.579`는 내용 누락보다는 final 문장의 경계가 expected와 다른 문제가 크게 반영된다.
+
+결론:
+
+- 이번 반복에서는 `src/app` 로직 변경을 보류한다.
+- 다음 개선은 로직 상수 완화가 아니라 케이스 window/tail 정의와 boundary granularity 평가 기준을 먼저 분리해야 한다.
+- short CJK final, confirmation 완화, queue age 완화처럼 이미 CUDA sweep에서 악화 또는 무효로 확인된 축은 다시 앱 기본값으로 승격하지 않는다.
