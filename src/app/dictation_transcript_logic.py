@@ -1849,6 +1849,7 @@ def _prefer_sentence_revision(left: str, right: str) -> str:
             and left_words[: len(right_words)] == right_words
             and 2 <= len(left_words) - len(right_words) <= 8
             and _boundary_sentence_end_count(right) > 0
+            and not ("mixed_latin_zh" in left_flags and "mixed_latin_zh" in right_flags)
         ):
             return _normalized_text(right)
     if _share_stable_numeric_sequence(left_words, right_words):

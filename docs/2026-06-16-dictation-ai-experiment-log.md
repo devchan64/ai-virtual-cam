@@ -29442,3 +29442,55 @@ tuning_next_action_summary.case_definition_cleanup_queue_count=0
 - app-logic tuning subset은 사용 가능하지만, 0.65 미만 clean low-score 후보는 1건뿐이다.
 - missing-final처럼 보이는 항목 중 상당수는 terminal staged/queue/pending residue에 남아 있으므로 replay tail 또는 lifecycle delay로 분리해서 해석해야 한다.
 - 다음 앱 로직 변경은 clean low-score 1건의 공통 lifecycle metric을 먼저 좁힌 뒤 진행한다. aggregate F1만 보고 새 임계값을 추가하지 않는다.
+
+## 2026-06-24 mixed Latin prefix revision 선호 보정
+
+목적:
+
+- `tuning_next_action_summary`가 지목한 clean low-score 1건은 중국어 문장 안의 Latin 고유명사 구간에서 prefix-growth revision이 짧은 후보로 되돌아가며 final이 쪼개지는 패턴이었다.
+- 예: `...Beaker有，然后呢。`가 `...Beaker有。`로 축소되고, `...Martin King的旗舰店...`이 `...Martin King。` / `的旗舰店...`로 분리된다.
+- 언어별 문구 규칙이 아니라, 같은 mixed-script token-sentence revision에서 동일한 종결 수준이면 더 긴 prefix-growth 후보를 보존하는 방향으로 `_prefer_sentence_revision`의 비대칭을 줄인다.
+
+검증:
+
+```text
+unit=./.venv/bin/python -m unittest tests.unit.test_dictation_pipeline_nodes
+unit_result=OK, 18 tests
+
+baseline_output=.tmp/eval/dictation-ai-sbd/current-20260624-next-action-summary-report.json
+baseline_final_precision_avg=0.905278
+baseline_final_recall_avg=0.839722
+baseline_final_f1_avg=0.861111
+baseline_final_boundary_f1_avg=0.558108
+baseline_strict_final_f1_avg=0.961270
+baseline_strict_final_boundary_f1_avg=0.653413
+baseline_tuning_next_action=inspect_clean_low_app_logic_candidates
+baseline_clean_low_case_count_lt_0_65=1
+
+patched_output=.tmp/eval/dictation-ai-sbd/current-20260624-mixed-latin-prefix-prefer-report.json
+rerun_output=.tmp/eval/dictation-ai-sbd/current-20260624-mixed-latin-prefix-prefer-rerun-report.json
+patched_final_precision_avg=0.908056
+patched_final_recall_avg=0.839722
+patched_final_f1_avg=0.862698
+patched_final_boundary_f1_avg=0.564458
+patched_strict_final_f1_avg=0.964444
+patched_strict_final_boundary_f1_avg=0.666111
+patched_tuning_next_action=review_boundary_granularity
+patched_clean_low_case_count_lt_0_65=0
+```
+
+케이스 변화:
+
+```text
+case=zh_log_draft_20260620_avc_whisper_log_11_000886
+final_f1=0.571429 -> 0.666667
+final_boundary_f1=0.285714 -> 0.666667
+actual_final_count=4 -> 3
+```
+
+해석:
+
+- clean low-score 후보가 1건에서 0건으로 줄었다.
+- 전체 precision, final F1, boundary F1, strict final F1이 함께 상승했고 recall은 유지됐다.
+- 남은 우선순위는 app logic 저점이 아니라 boundary granularity 검토로 바뀌었다.
+- 이 변경은 observed phrase를 직접 다루지 않고, mixed-script token-sentence prefix-growth revision에서 더 긴 후보를 보존하는 일반 생명주기 원칙이다.

@@ -35,6 +35,7 @@ from src.app.dictation_pipeline_settings import (
     dictation_tuning_protocol,
 )
 from src.app.dictation_transcript_logic import (
+    _prefer_sentence_revision,
     _should_translate_final_sentence,
 )
 from src.app.sentence_boundary import SentenceBoundaryResult
@@ -284,6 +285,17 @@ class DictationPipelineNodeTest(unittest.TestCase):
                 "一二三四五六七八一二三四五六七八一二三四五六七八一二三四五六七八一二三四五六七八。",
                 "zh",
             )
+        )
+
+    def test_mixed_latin_cjk_prefix_growth_keeps_longer_revision(self) -> None:
+        preferred = _prefer_sentence_revision(
+            "我们最后一天想说来圣水洞这边晃晃，因为妹妹想要买的东西在圣水洞这边的Beaker有，然后呢。",
+            "我们最后一天想说来圣水洞这边晃晃，因为妹妹想要买的东西在圣水洞这边的Beaker有。",
+        )
+
+        self.assertEqual(
+            preferred,
+            "我们最后一天想说来圣水洞这边晃晃，因为妹妹想要买的东西在圣水洞这边的Beaker有，然后呢。",
         )
 
     def test_hypothesis_candidate_node_preserves_boundary_contract(self) -> None:
