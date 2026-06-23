@@ -27767,3 +27767,50 @@ final_f1 0.6666666666666666 -> 1.0
 - `002903`은 라벨 정리로 통과 상태가 됐다.
 - `002902`는 expected fragment를 제거해도 false-positive splice final이 남으므로 앱 lifecycle 후보로 계속 유지한다.
 - recent-final tail splice를 token common-run만으로 억제하려는 시도는 현재 근거가 약하다. `002902`의 false final은 STT 표기 차이 때문에 recent-final과의 최장 common run이 4 unit에 불과해, 이 조건으로 앱 로직을 추가하면 일반성이 떨어진다.
+
+### 2026-06-23 no-end fragment 전역 강화 실험 기각
+
+배경:
+
+- 남은 strict 저점에서 false-positive final 다수가 `no_end_marker`를 갖고 있었다.
+- 다만 strict 후보 안에도 no-end final이 전체 케이스 F1 1.0을 기록하는 사례가 있어, 전역 차단은 정상 확정까지 줄일 위험이 있었다.
+
+실험:
+
+```text
+AVC_DICTATION_SHORT_NO_END_FRAGMENT_UNITS=32
+```
+
+CUDA/SaT 비교:
+
+```text
+baseline:
+finalized=4689
+stage_start=9009
+finalized_per_stage_start=0.520
+final_precision_avg=0.619
+final_recall_avg=0.685
+final_f1_avg=0.629
+strict_logic_candidates=23
+strict_final_f1_avg=0.891
+case_exact_match=27
+staged_exact_match=350
+
+short_no_end_fragment_units=32:
+finalized=4302
+stage_start=7399
+finalized_per_stage_start=0.581
+final_precision_avg=0.618
+final_recall_avg=0.637
+final_f1_avg=0.608
+strict_logic_candidates=21
+strict_final_f1_avg=0.879
+case_exact_match=32
+staged_exact_match=455
+```
+
+판정:
+
+- no-end 후보를 전역적으로 더 많이 품질 차단하면 finalized와 stage_start는 줄지만 recall과 전체 F1이 크게 하락한다.
+- strict F1도 하락하므로 기본값 변경으로 채택하지 않는다.
+- 다음 앱 로직 후보는 no-end 전역 차단이 아니라, false-positive splice final을 구분할 수 있는 더 좁은 lifecycle 신호가 있어야 한다.
