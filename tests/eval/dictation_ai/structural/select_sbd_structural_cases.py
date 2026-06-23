@@ -29,6 +29,13 @@ EXPECTED_QUALITY_MODES = ("exclude", "include", "only")
 INPUT_EVIDENCE_MODES = ("require", "include", "weak-only")
 CASE_DEFINITION_MODES = ("clean", "include", "review-only")
 SOURCE_TRACE_MODES = ("require", "include", "missing-only")
+ISSUE_KIND_MODES = (
+    "all",
+    "boundary_granularity_only",
+    "overfinal_or_extra_final",
+    "revision_text_mismatch",
+    "underfinal_missing",
+)
 
 
 def _load_report(path: Path) -> dict[str, Any]:
@@ -185,6 +192,14 @@ def _filter_source_trace_cases(cases: list[dict[str, Any]], *, mode: str) -> lis
     return filtered
 
 
+def _filter_issue_kind_cases(cases: list[dict[str, Any]], *, issue_kind: str) -> list[dict[str, Any]]:
+    if issue_kind not in ISSUE_KIND_MODES:
+        raise ValueError(f"unsupported issue kind: {issue_kind!r}")
+    if issue_kind == "all":
+        return cases
+    return [case for case in cases if _structural_issue_kind(case) == issue_kind]
+
+
 def _append_unique(
     selected: list[dict[str, Any]],
     seen: set[str],
@@ -217,12 +232,14 @@ def select_structural_cases(
     input_evidence_mode: str = "require",
     case_definition_mode: str = "clean",
     source_trace_mode: str = "require",
+    issue_kind: str = "all",
 ) -> list[dict[str, Any]]:
     cases = _report_cases(report, path=Path("<memory>"))
     cases = _filter_case_definition_cases(cases, mode=case_definition_mode)
     cases = _filter_source_trace_cases(cases, mode=source_trace_mode)
     cases = _filter_expected_quality_cases(cases, mode=expected_quality_mode)
     cases = _filter_input_evidence_cases(cases, mode=input_evidence_mode)
+    cases = _filter_issue_kind_cases(cases, issue_kind=issue_kind)
     by_id = {_case_id(case): case for case in cases if _case_id(case)}
     selected: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -324,6 +341,7 @@ def render_markdown(
     input_evidence_mode: str = "require",
     case_definition_mode: str = "clean",
     source_trace_mode: str = "require",
+    issue_kind: str = "all",
 ) -> str:
     issue_counts: dict[str, int] = {}
     for case in cases:
@@ -338,6 +356,7 @@ def render_markdown(
         f"- input_evidence_mode: {input_evidence_mode}",
         f"- case_definition_mode: {case_definition_mode}",
         f"- source_trace_mode: {source_trace_mode}",
+        f"- issue_kind_filter: {issue_kind}",
         f"- min_input_evidence_coverage: {MIN_INPUT_EVIDENCE_COVERAGE:.2f}",
         "- corpus_role: exploratory",
         "- paper_evidence: false",
@@ -411,6 +430,12 @@ def main() -> int:
         default="require",
         help="How to handle cases without source_log/source_chunk trace metadata. Default requires traceability.",
     )
+    parser.add_argument(
+        "--issue-kind",
+        choices=ISSUE_KIND_MODES,
+        default="all",
+        help="Optional structural issue kind filter for collecting same-kind preflight cases.",
+    )
     parser.add_argument("--case-output", type=Path, default=None)
     parser.add_argument("--markdown-output", type=Path, default=None)
     args = parser.parse_args()
@@ -426,6 +451,7 @@ def main() -> int:
             input_evidence_mode=args.input_evidence,
             case_definition_mode=args.case_definition,
             source_trace_mode=args.source_trace,
+            issue_kind=args.issue_kind,
         )
         if args.case_output is not None:
             write_case_jsonl(cases, args.case_output)
@@ -439,6 +465,7 @@ def main() -> int:
                     input_evidence_mode=args.input_evidence,
                     case_definition_mode=args.case_definition,
                     source_trace_mode=args.source_trace,
+                    issue_kind=args.issue_kind,
                 ),
                 encoding="utf-8",
             )
@@ -450,6 +477,7 @@ def main() -> int:
             {
                 "source_report": str(args.report),
                 "selected_case_count": len(cases),
+                "issue_kind_filter": args.issue_kind,
                 "case_ids": [_case_id(case) for case in cases],
             },
             ensure_ascii=False,

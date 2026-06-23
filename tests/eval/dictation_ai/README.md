@@ -81,6 +81,9 @@ action 예시의 전체 후보를 기준으로 재작성/재단 여부를 판단
 케이스 추가를 먼저 한다. strict low subset의 상위 issue kind가 충분히 반복되지 않으면, 한 케이스를 고치기
 위한 세부 분기가 전체 precision/boundary를 악화시킬 수 있다.
 `select-structural-cases` Markdown의 `issue_kind_counts`는 이 판단을 빠르게 보기 위한 요약이다.
+특정 issue kind를 더 모아 볼 때는 `select-structural-cases --issue-kind underfinal_missing`처럼 실행한다.
+이 출력은 같은 종류의 병목만 모은 exploratory preflight이며, 전체 challenge replay나 앱 기본값 채택 근거로
+해석하려면 다시 전체 `sat + cuda + float16` benchmark를 실행해야 한다.
 `boundary_granularity_only`가 많으면 라벨 boundary 또는 scoring 해석을 먼저 보고, `underfinal_missing`이나
 `overfinal_or_extra_final`이 같은 lifecycle metric과 함께 반복될 때만 앱 로직 preflight로 좁힌다.
 `stable_candidate_shape_counts`는 stable 후보와 `expected_final`의 문장 수 관계를 보여준다.

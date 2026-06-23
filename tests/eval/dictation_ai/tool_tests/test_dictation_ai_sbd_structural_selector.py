@@ -91,6 +91,29 @@ class DictationAiSbdStructuralSelectorTest(unittest.TestCase):
         self.assertEqual(issue_kinds["overfinal"], "overfinal_or_extra_final")
         self.assertEqual(issue_kinds["boundary"], "boundary_granularity_only")
 
+    def test_filters_by_structural_issue_kind(self) -> None:
+        underfinal = _case("underfinal", queue_len=8, boundary_f1=0.8, queue_revision=80, replace_deferred=80)
+        underfinal["actual_final"] = ["First sentence.", "Second sentence."]
+        underfinal["final_score"] = {"f1": 0.8}
+        overfinal = _case("overfinal", queue_len=7, boundary_f1=0.8, queue_revision=70, replace_deferred=70)
+        overfinal["actual_final"] = ["First sentence.", "Second sentence.", "Third sentence.", "Fourth sentence."]
+        overfinal["final_score"] = {"f1": 0.8}
+        boundary = _case("boundary", queue_len=6, boundary_f1=0.0, queue_revision=60, replace_deferred=60)
+        boundary["final_score"] = {"f1": 1.0}
+        report = {"cases": [underfinal, overfinal, boundary]}
+
+        selected = select_structural_cases(report, limit=3, issue_kind="underfinal_missing")
+        markdown = render_markdown(
+            selected,
+            source_report="report.json",
+            issue_kind="underfinal_missing",
+        )
+
+        self.assertEqual([case["id"] for case in selected], ["underfinal"])
+        self.assertEqual(selected[0]["structural_issue_kind"], "underfinal_missing")
+        self.assertIn("- issue_kind_filter: underfinal_missing", markdown)
+        self.assertIn('- issue_kind_counts: {"underfinal_missing": 1}', markdown)
+
     def test_excludes_expected_quality_review_candidates_by_default(self) -> None:
         quality_case = _case("quality-review", queue_len=8, boundary_f1=0.0, queue_revision=80, replace_deferred=80)
         quality_case["expected_final"] = ["and then unfinished"]
