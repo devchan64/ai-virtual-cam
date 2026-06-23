@@ -536,6 +536,16 @@ def run_transcribe_loop(
                         f"candidate_tail={_diagnostic_tail(preferred)}",
                         display=False,
                     )
+                    if _should_confirm_staged_sentence(
+                        active_stage.sentence,
+                        active_stage.confirmations,
+                        active_stage.forced,
+                    ):
+                        count_metric("stage_confirmed_before_deferred_revision")
+                        return finalize_staged_sentence(
+                            detected,
+                            "confirmed_forced" if active_stage.forced else "confirmed",
+                        )
                     if _should_finalize_before_replacement(
                         active_stage.sentence,
                         detected,
@@ -808,6 +818,13 @@ def run_transcribe_loop(
         count_metric("stage_age_tick")
         max_age = _sentence_max_age_chunks(active_stage.forced, sentence_finalize_age)
         if active_stage.age >= max_age:
+            if _should_confirm_staged_sentence(
+                active_stage.sentence,
+                active_stage.confirmations,
+                active_stage.forced,
+            ):
+                count_metric("stage_confirmed_before_age_queue")
+                return finalize_staged_sentence(detected, "confirmed_forced" if active_stage.forced else "confirmed")
             if not _should_finalize_before_replacement(
                 active_stage.sentence,
                 detected,

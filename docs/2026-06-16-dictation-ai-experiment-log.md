@@ -28254,3 +28254,44 @@ strict_final_f1_avg=0.879
 - active corpus의 source trace와 replay input evidence 문제는 0으로 정리됐다.
 - CUDA report에는 `extend_replay_tail_or_reclassify_staged_expectation` 성격의 보조 review 27건이 남지만, 별도 audit action item은 0건이며 report recommendation은 `app-logic-tuning-subset-usable`로 바뀌었다.
 - 다음 앱 로직 변경은 active 전체 평균이 아니라 `logic_tuning_candidates=29`, `strict_logic_candidates=24`, 특히 `stage_age_quality_blocked`, `stage_replace_deferred`, `candidate_duplicate_suppressed`가 겹치는 낮은 점수 케이스를 근거로 판단한다.
+
+## 2026-06-23 confirmed staged final 우선 소비 패치
+
+목적:
+
+- confirmed staged sentence가 deferred revision/queue 존재 때문에 aged final 경로에서 막힌 뒤 quality block으로 폐기되는 누락을 줄인다.
+- 세부 언어 규칙이 아니라 append-only lifecycle 원칙을 적용한다. 확인 횟수를 채운 staged sentence는 뒤에 온 revision 후보보다 먼저 final로 소비한다.
+
+변경:
+
+- `stage_revision_token_sentence_deferred` 경로에서 active staged가 이미 confirmation 기준을 채웠으면 `stage_confirmed_before_deferred_revision`으로 final 처리한다.
+- no-new-text aging 경로에서 queue 때문에 `_should_finalize_before_replacement`가 막히기 전에 confirmed staged를 `stage_confirmed_before_age_queue`로 final 처리한다.
+- 운영 루프와 SBD lifecycle replay에 같은 규칙을 적용했다.
+
+CUDA/SaT 비교:
+
+```text
+base:
+output=.tmp/eval/dictation-ai-sbd/current-20260623-case-definition-review-queue-report.json
+finalized=131
+stage_start=372
+final_precision_avg=0.8847222222222223
+final_recall_avg=0.7866666666666667
+final_f1_avg=0.8139814814814815
+strict_final_f1_avg=0.8791666666666668
+
+patched:
+output=.tmp/eval/dictation-ai-sbd/current-20260623-confirmed-before-deferred-report.json
+finalized=132
+stage_start=371
+final_precision_avg=0.8847222222222223
+final_recall_avg=0.7899999999999999
+final_f1_avg=0.8158333333333334
+strict_final_f1_avg=0.8791666666666668
+```
+
+영향:
+
+- `zh_log_draft_20260620_avc_whisper_log_11_000866`에서 누락됐던 `是我的错觉吗？`가 final에 추가되어 case `final_f1`이 `0.888888888888889`에서 `1.0`으로 올랐다.
+- 전체 recall과 `final_f1_avg`는 소폭 상승했고 precision 하락은 없었다.
+- strict 저점 후보는 그대로이므로 이 패치는 핵심 병목 전체 해결이 아니라 confirmed stage 폐기 방지에 대한 보수적 개선으로 본다.
