@@ -240,6 +240,7 @@ def _bounded_window_candidates(
             for kind, items in events.items()
         }
         event_counts = {kind: len(items) for kind, items in window_events.items()}
+        review_complexity = _bounded_window_review_complexity(event_counts)
         priority_events = [
             event
             for event in window_events.get("lifecycle_events", [])
@@ -266,6 +267,7 @@ def _bounded_window_candidates(
                     "candidate_tail": suggestion.get("anchor_candidate_tail", ""),
                 },
                 "event_counts": event_counts,
+                "review_complexity": review_complexity,
                 "raw_chunks_sample": _evenly_spaced(
                     window_events.get("raw_chunks", []),
                     max_sample_per_kind,
@@ -288,6 +290,32 @@ def _bounded_window_candidates(
             }
         )
     return candidates
+
+
+def _bounded_window_review_complexity(event_counts: dict[str, int]) -> dict[str, object]:
+    raw_count = int(event_counts.get("raw_chunks", 0))
+    final_count = int(event_counts.get("final_events", 0))
+    transcript_count = int(event_counts.get("transcripts", 0))
+    priority_lifecycle_count = int(event_counts.get("lifecycle_events", 0))
+    score = raw_count + transcript_count + (final_count * 2) + min(priority_lifecycle_count, 30)
+    if raw_count <= 12 and final_count <= 4 and transcript_count <= 12:
+        level = "small"
+        recommendation = "candidate_window_is_reviewable"
+    elif raw_count <= 25 and final_count <= 8 and transcript_count <= 25:
+        level = "medium"
+        recommendation = "reviewable_but_may_need_sentence_level_recut"
+    else:
+        level = "large"
+        recommendation = "narrow_window_before_case_promotion"
+    return {
+        "level": level,
+        "score": score,
+        "recommendation": recommendation,
+        "raw_chunks": raw_count,
+        "final_events": final_count,
+        "transcripts": transcript_count,
+        "lifecycle_events": priority_lifecycle_count,
+    }
 
 
 def _inside_source_window(timestamp: str, *, started_at: str, ended_at: str) -> bool:
@@ -681,6 +709,7 @@ def write_markdown_packets(payload: dict[str, object], path: Path) -> None:
             )
             for candidate in bounded_window_candidates[:8]:
                 counts = dict(candidate.get("event_counts", {}) or {})
+                complexity = dict(candidate.get("review_complexity", {}) or {})
                 window_filter = dict(candidate.get("source_window_filter", {}) or {})
                 anchor = dict(candidate.get("anchor", {}) or {})
                 lines.append(
@@ -693,7 +722,7 @@ def write_markdown_packets(payload: dict[str, object], path: Path) -> None:
                             str(counts.get("final_events", 0)),
                             str(counts.get("transcripts", 0)),
                             str(len(list(candidate.get("priority_lifecycle_events_sample", []) or []))),
-                            f"{anchor.get('timestamp', '')} #{anchor.get('line_number', '')}",
+                            f"{anchor.get('timestamp', '')} #{anchor.get('line_number', '')} {complexity.get('level', '')}",
                         ]
                     )
                     + " |"

@@ -31483,3 +31483,79 @@ review_packet_result:
 
 - 다음 단계는 bounded candidate 중 대표적인 1~2개를 사람이 검토해 `expected_final`을 작성하고, 그 결과를 challenge/representative case로 승격할 수 있는지 확인하는 것이다.
 - 앱 로직 변경은 아직 하지 않는다. 동일 원인군의 사람이 확정한 케이스가 쌓인 뒤에 strict benchmark로 판단한다.
+
+## 2026-06-24 expected_final 검증과 bounded window 복잡도 표시
+
+목적:
+
+- "expected_final 정의 문제가 모두 고쳐졌는가"를 현재 active challenge replay case 기준으로 다시 확인한다.
+- priority source에서 만든 bounded candidate가 사람이 바로 `expected_final`을 쓰기에 충분히 작은지 표시한다.
+
+검증:
+
+```text
+validate_command=./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases \
+  tests/eval/dictation_ai/sbd_cases \
+  --require-input-evidence \
+  --require-observed-input-evidence \
+  --require-stable-repeat-evidence \
+  --max-drafts 0
+
+validation_result:
+  case_count=57
+  expected_final_case_count=53
+  draft_count=0
+  input_unsupported_case_count=0
+  input_unobserved_case_count=0
+  stable_repeat_unsupported_case_count=0
+  missing_source_trace_case_count=0
+
+audit_command=./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py audit-initial-final-context \
+  tests/eval/dictation_ai/sbd_cases \
+  --summary-output /tmp/sbd-case-definition-audit.json \
+  --action-output /tmp/sbd-case-definition-actions.json
+
+audit_result:
+  candidate_count=0
+  case_definition_action_summary.review_case_count=0
+  case_definition_review.duplicate_expected_case_count=0
+  case_definition_review.nested_expected_case_count=0
+  case_definition_review.repeated_expected_group_count=0
+  case_definition_review.weak_input_evidence_case_count=0
+  case_definition_review.partial_input_evidence_case_count=0
+  case_definition_review.unobserved_stt_text_case_count=0
+```
+
+해석:
+
+- active `sbd_cases` 57건 중 finalization case 53건은 현재 정의한 최소 근거를 모두 통과한다.
+- 즉시 수정해야 하는 `expected_final` cleanup 대상은 현재 자동 감사 기준에서 0건이다.
+- 이 결론은 정식 등록된 active challenge case에 한정한다. `.tmp`의 review packet, draft, source 후보는 사람이 `expected_final`을 확정하기 전까지 benchmark evidence가 아니다.
+
+bounded window 복잡도:
+
+```text
+60s_window_result:
+  command_window=before 20s, after 40s
+  packet_count=3
+  ready_packet_count=3
+  bounded_candidate_complexity: large=16, medium=2, small=0
+
+15s_window_result:
+  command_window=before 5s, after 10s
+  packet_count=3
+  ready_packet_count=3
+  bounded_candidate_complexity: medium=13, small=5
+```
+
+해석:
+
+- 60초 suggested window는 raw/final/transcript/lifecycle 이벤트가 많아 바로 case 승격하기에는 크다.
+- 15초 window는 `small` 후보가 생기고 대부분 `medium`으로 줄어 사람이 문장 단위 `expected_final`을 검토하기에 더 적합하다.
+- 복잡도 표시는 자동 승격 기준이 아니라 검토 우선순위 표시다. `expected_final`은 여전히 사람이 source window를 보고 작성해야 한다.
+
+결론:
+
+- 현재 active challenge case의 `expected_final` 정의 오류는 자동 감사 기준에서 정리된 상태다.
+- 다음 케이스 추가는 priority source 전체나 60초 window가 아니라, 15초 수준의 작은 bounded candidate에서 사람이 확인한 문장만 등록한다.
+- 이 단계는 케이스 수집/정의 품질 개선이며 앱 로직 변경 근거는 아직 아니다.

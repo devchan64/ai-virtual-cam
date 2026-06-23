@@ -126,6 +126,18 @@ class DictationAiSbdRepresentativeReviewPacketExtractorTest(unittest.TestCase):
         self.assertEqual(candidate["event_counts"]["raw_chunks"], 1)
         self.assertEqual(candidate["event_counts"]["final_events"], 1)
         self.assertEqual(candidate["event_counts"]["transcripts"], 1)
+        self.assertEqual(
+            candidate["review_complexity"],
+            {
+                "level": "small",
+                "score": 5,
+                "recommendation": "candidate_window_is_reviewable",
+                "raw_chunks": 1,
+                "final_events": 1,
+                "transcripts": 1,
+                "lifecycle_events": 1,
+            },
+        )
         self.assertEqual(candidate["priority_lifecycle_events_sample"][0]["kind"], "stage_replace_deferred")
         self.assertFalse(candidate["case_generation"])
         self.assertFalse(candidate["expected_final_generated"])
@@ -303,6 +315,11 @@ class DictationAiSbdRepresentativeReviewPacketExtractorTest(unittest.TestCase):
                                     "transcripts": 1,
                                     "lifecycle_events": 1,
                                 },
+                                "review_complexity": {
+                                    "level": "small",
+                                    "score": 5,
+                                    "recommendation": "candidate_window_is_reviewable",
+                                },
                                 "priority_lifecycle_events_sample": [
                                     {
                                         "kind": "stage_replace_deferred",
@@ -336,7 +353,7 @@ class DictationAiSbdRepresentativeReviewPacketExtractorTest(unittest.TestCase):
         )
         self.assertIn("| bounded_candidate | window | raw | final | transcript | priority_lifecycle | anchor |", markdown)
         self.assertIn(
-            "| ko_representative_review_abc_window_01 | 2026-06-20 09:59:52..2026-06-20 10:00:22 | 1 | 1 | 1 | 1 | 2026-06-20 10:00:02 #3 |",
+            "| ko_representative_review_abc_window_01 | 2026-06-20 09:59:52..2026-06-20 10:00:22 | 1 | 1 | 1 | 1 | 2026-06-20 10:00:02 #3 small |",
             markdown,
         )
         self.assertIn("| performance_timestamp | line | chunk | window | stability |", markdown)
