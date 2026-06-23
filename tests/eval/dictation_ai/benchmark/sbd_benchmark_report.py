@@ -2225,6 +2225,53 @@ def summarize_terminal_expected_residue(results: list[dict[str, Any]]) -> dict[s
     }
 
 
+def _combined_output_texts(result: dict[str, Any]) -> list[str]:
+    texts = [str(sentence).strip() for sentence in result.get("actual_final", []) or [] if str(sentence).strip()]
+    texts.extend(_terminal_residue_texts(result))
+    return texts
+
+
+def _combined_output_coverage(sentence: str, output_texts: list[str]) -> dict[str, float]:
+    sentence_units = _word_units(normalized_text(sentence))
+    output_units = _word_units(normalized_text(" ".join(output_texts)))
+    if not sentence_units or not output_units:
+        return {"total_coverage": 0.0, "common_run_coverage": 0.0, "ratio": 0.0}
+    matcher = SequenceMatcher(None, sentence_units, output_units, autojunk=False)
+    blocks = matcher.get_matching_blocks()
+    return {
+        "total_coverage": sum(block.size for block in blocks) / max(len(sentence_units), 1),
+        "common_run_coverage": max((block.size for block in blocks), default=0) / max(len(sentence_units), 1),
+        "ratio": matcher.ratio(),
+    }
+
+
+def _missing_expected_split_coverage_payload(result: dict[str, Any]) -> dict[str, Any] | None:
+    missing_payload = _missing_expected_without_terminal_residue_payload(result)
+    if missing_payload is None:
+        return None
+    outputs = _combined_output_texts(result)
+    split_matches: list[dict[str, Any]] = []
+    for missing in missing_payload.get("missing_expected", []):
+        expected = str(missing.get("expected", "")).strip()
+        coverage = _combined_output_coverage(expected, outputs)
+        if coverage["total_coverage"] < 0.85:
+            continue
+        split_matches.append(
+            {
+                "expected": _text_preview(expected),
+                "combined_total_coverage": coverage["total_coverage"],
+                "combined_common_run_coverage": coverage["common_run_coverage"],
+                "combined_ratio": coverage["ratio"],
+            }
+        )
+    if not split_matches:
+        return None
+    payload = dict(missing_payload)
+    payload["split_coverage_count"] = len(split_matches)
+    payload["split_coverage_matches"] = split_matches[:3]
+    return payload
+
+
 def summarize_missing_expected_without_terminal_residue(results: list[dict[str, Any]]) -> dict[str, Any]:
     payloads = [
         payload
@@ -2258,6 +2305,31 @@ def summarize_missing_expected_without_terminal_residue(results: list[dict[str, 
         "case_count": len(payloads),
         "missing_expected_total": sum(int(item["missing_expected_count"]) for item in payloads),
         "metric_totals": metric_totals,
+        "top_cases": payloads[:8],
+    }
+
+
+def summarize_missing_expected_split_coverage(results: list[dict[str, Any]]) -> dict[str, Any]:
+    payloads = [
+        payload
+        for result in results
+        if (payload := _missing_expected_split_coverage_payload(result)) is not None
+    ]
+    payloads.sort(
+        key=lambda item: (
+            int(item["split_coverage_count"]),
+            -float(item["final_f1"]),
+            int(item["stage_age_quality_blocked"]),
+        ),
+        reverse=True,
+    )
+    return {
+        "interpretation": (
+            "No-residue missing expected sentences whose tokens are covered by combined actual final and "
+            "terminal residue are boundary granularity or split-final candidates, not pure content loss."
+        ),
+        "case_count": len(payloads),
+        "split_coverage_total": sum(int(item["split_coverage_count"]) for item in payloads),
         "top_cases": payloads[:8],
     }
 
@@ -2591,6 +2663,7 @@ def build_benchmark_report(
     staged_queue_residue_summary = summarize_staged_queue_residue(results)
     terminal_expected_residue_summary = summarize_terminal_expected_residue(results)
     missing_expected_without_terminal_residue_summary = summarize_missing_expected_without_terminal_residue(results)
+    missing_expected_split_coverage_summary = summarize_missing_expected_split_coverage(results)
     ordered_final_gap_summary = summarize_ordered_final_gap(results)
     boundary_zero_high_final_summary = summarize_boundary_zero_high_final_cases(results)
     boundary_granularity_summary = summarize_boundary_granularity_cases(results)
@@ -2671,6 +2744,7 @@ def build_benchmark_report(
         "staged_queue_residue_summary": staged_queue_residue_summary,
         "terminal_expected_residue_summary": terminal_expected_residue_summary,
         "missing_expected_without_terminal_residue_summary": missing_expected_without_terminal_residue_summary,
+        "missing_expected_split_coverage_summary": missing_expected_split_coverage_summary,
         "ordered_final_gap_summary": ordered_final_gap_summary,
         "boundary_zero_high_final_summary": boundary_zero_high_final_summary,
         "boundary_granularity_summary": boundary_granularity_summary,

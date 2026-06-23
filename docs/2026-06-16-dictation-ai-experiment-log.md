@@ -28579,3 +28579,37 @@ missing_expected_without_terminal_residue.metric_totals.candidate_recent_final_d
 - no-residue 상위 후보는 `zh_log_promo_bbq_short_token_sentence_echo_20260621_001`, `ko_log_draft_20260620_avc_whisper_log_002756`, `zh_log_missing_winter_shopping_hat_queue_head_stall_20260621_001` 등이다.
 - 공통 신호는 quality block + queue promotion + token-sentence deferred + delta trim 조합이다.
 - 다음 앱 로직 검토는 이 10건을 중심으로 하되, terminal residue 그룹까지 같이 개선하는 단순 age 완화는 premature final 위험이 있으므로 보류한다.
+
+## 2026-06-24 split coverage 후보 분리
+
+목적:
+
+- no-residue 소실 후보 중 일부는 expected 문장이 실제로 사라진 것이 아니라 여러 actual final/staged/pending 조각으로 나뉘어 출력된 경우다.
+- 이 경우는 content loss가 아니라 boundary granularity 또는 split-final 문제로 분리해야 한다.
+
+변경:
+
+- benchmark report에 `missing_expected_split_coverage_summary`를 추가했다.
+- no-residue expected 문장이 개별 actual final 또는 terminal residue와는 threshold 미만으로 매칭되지만, actual final + terminal residue 전체를 이어 보면 token coverage가 0.85 이상인 경우를 split coverage 후보로 분류한다.
+
+CUDA/SaT 확인:
+
+```text
+output=.tmp/eval/dictation-ai-sbd/current-20260624-split-coverage-report.json
+cases=60 finalized=131
+final_precision_avg=0.887
+final_recall_avg=0.790
+final_f1_avg=0.818
+final_boundary_f1_avg=0.551
+
+missing_expected_without_terminal_residue.case_count=10
+missing_expected_without_terminal_residue.missing_expected_total=14
+missing_expected_split_coverage.case_count=3
+missing_expected_split_coverage.split_coverage_total=3
+```
+
+해석:
+
+- `zh_log_delayed_fleece_sweatpants_snow_mountain_queue_20260621_001`, `zh_log_missing_korea_day3_itinerary_connector_final_20260621_001`, `ko_log_draft_20260620_avc_whisper_log_002962`는 순수 소실보다 split-final/boundary granularity 후보로 본다.
+- 따라서 순수 content loss 후보는 10건/14문장보다 작으며, 현재 리포트 기준으로는 7건/11문장 수준으로 좁혀진다.
+- 다음 앱 로직 후보는 split coverage 그룹과 pure loss 그룹을 분리해서 봐야 한다. 전자는 boundary coalescing 또는 final scoring 해석 문제이고, 후자는 quality block/delta trim으로 실제 후보가 사라지는 문제일 가능성이 높다.

@@ -16,6 +16,7 @@ from tests.eval.dictation_ai.benchmark.sbd_benchmark_report import (
     summarize_results_by_tag,
     summarize_staged_queue_residue,
     summarize_missing_expected_without_terminal_residue,
+    summarize_missing_expected_split_coverage,
     summarize_terminal_expected_residue,
 )
 from tests.eval.dictation_ai.cases.sbd_case_loader import SbdCase
@@ -248,6 +249,7 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(report["staged_queue_residue_summary"]["active_staged_residue_case_count"], 0)
         self.assertEqual(report["terminal_expected_residue_summary"]["case_count"], 0)
         self.assertEqual(report["missing_expected_without_terminal_residue_summary"]["case_count"], 0)
+        self.assertEqual(report["missing_expected_split_coverage_summary"]["case_count"], 0)
         self.assertEqual(report["lifecycle_bottleneck_summary"]["metrics"]["stage_start"], 2)
         self.assertEqual(report["lifecycle_bottleneck_summary"]["metrics"]["stage_age_hold"], 2)
         self.assertEqual(report["lifecycle_bottleneck_summary"]["metrics"]["pending_overrun"], 1)
@@ -428,6 +430,31 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(top["id"], "case-missing-without-residue")
         self.assertEqual(top["missing_expected_count"], 1)
         self.assertEqual(top["missing_expected"][0]["expected"], "소실된 문장입니다.")
+
+    def test_report_summarizes_missing_expected_covered_by_split_output(self) -> None:
+        result = {
+            "id": "case-split-covered",
+            "language": "ko",
+            "tags": ["missing-final", "stage-queue"],
+            "expected_final": ["긴 문장이 앞부분과 가운데 내용과 뒷부분으로 나뉘어서 출력됩니다."],
+            "actual_final": ["긴 문장이 앞부분과"],
+            "actual_pending": "",
+            "actual_staged": "가운데 내용과",
+            "actual_staged_queue": ["뒷부분으로 나뉘어서 출력됩니다."],
+            "final_score": _score(0.0, 0.0, 0.0),
+            "final_boundary_score": _score(0.0, 0.0, 0.0),
+            "metrics": {"stage_age_quality_blocked": 1},
+        }
+
+        summary = summarize_missing_expected_split_coverage([result])
+
+        self.assertEqual(summary["case_count"], 1)
+        self.assertEqual(summary["split_coverage_total"], 1)
+        top = summary["top_cases"][0]
+        self.assertEqual(top["id"], "case-split-covered")
+        self.assertEqual(top["split_coverage_count"], 1)
+        self.assertEqual(top["split_coverage_matches"][0]["expected"], "긴 문장이 앞부분과 가운데 내용과 뒷부분으로 나뉘어서 출력됩니다.")
+        self.assertEqual(top["split_coverage_matches"][0]["combined_total_coverage"], 1.0)
 
     def test_report_marks_boundary_zero_high_final_as_metric_sensitivity(self) -> None:
         args = Namespace(
