@@ -1489,6 +1489,76 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         )
         self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
 
+    def test_contained_token_expected_sentences_are_case_definition_review(self) -> None:
+        args = Namespace(
+            model="sat-3l-sm",
+            device="cuda",
+            compute_type="float16",
+            min_final_f1=0.0,
+            fail_on_regression=False,
+        )
+        case = SbdCase(
+            id="contained-token-expected",
+            language="ko",
+            chunks=[
+                "있을 것 같고 그래서 이런 쪽에 대해서는 정부나 아니면 이런 산업의 협회 혹은 학계에서도 좀 열심히 더 적극 참여를 해서 이 기반을 한번 더 만들어 줄 필요가 있다고 생각합니다.",
+                "그래서 이런 쪽에 대해서는 정부나 아니면 이런 산업의 협회 혹은 학계에서도 좀 열심히 더 적극 참여를 해서 이 기반을 한 번 더 만들어 줄 필요가 있다고 생각합니다.",
+                "쪽에 대해서는 정부나 아니면 이런 산업의 협회 혹은 학계에서도 좀 열심히 더 적극 참여를 해서 이 기반을 한번 더 만들어 줄 필요가 있다고 생각합니다.",
+                "산업협회 혹은 학계에서도 좀 열심히 더 적극 참여를 해서 이 기반을 한 번 더 만들어 줄 필요가 있다고 생각합니다.",
+                "혹은 학계에서도 좀 열심히 더 적극 참여를 해서 이 기반을 한 번 더 만들어 줄 필요가 있다고 생각합니다.",
+                "열심히 더 적극 참여를 해서 이 기반을 한번 더 만들어 줄 필요가 있다고 생각합니다.",
+            ],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=[
+                "있을 것 같고 그래서 이런 쪽에 대해서는 정부나 아니면 이런 산업의 협회 혹은 학계에서도 좀 열심히 더 적극 참여를 해서 이 기반을 한번 더 만들어 줄 필요가 있다고 생각합니다.",
+                "산업협회 혹은 학계에서도 좀 열심히 더 적극 참여를 해서 이 기반을 한 번 더 만들어 줄 필요가 있다고 생각합니다.",
+            ],
+            expected_staged="",
+            tags=("missing-final",),
+            sentence_finalize_age=3,
+        )
+        results = [
+            {
+                "id": "contained-token-expected",
+                "language": "ko",
+                "tags": ["missing-final"],
+                "expected_final": case.expected_final,
+                "chunks": [{"input": chunk} for chunk in case.chunks],
+                "actual_final": [
+                    "있을 것 같고 그래서 이런 쪽에 대해서는 정부나 아니면 이런 산업의 협회 혹은 학계에서도 좀 열심히 더 적극 참여를 해서 이 기반을 한번 더 만들어 줄 필요가 있다고 생각합니다."
+                ],
+                "actual_pending": "",
+                "actual_staged": "",
+                "actual_staged_queue": [],
+                "final_score": _score(1.0, 0.5, 0.6666666667),
+                "final_ordered_score": _score(1.0, 0.5, 0.6666666667),
+                "final_boundary_score": _score(1.0, 0.5, 0.6666666667),
+                "completed_last_score": _score(1.0, 0.5, 0.6666666667),
+                "pending_exact": True,
+                "staged_exact": True,
+                "case_exact_match": False,
+                "metrics": {"finalized": 1, "stage_start": 1},
+            }
+        ]
+
+        report = build_benchmark_report(
+            args=args,
+            case_sources=["cases.jsonl"],
+            corpus_role="challenge-replay",
+            cases=[case],
+            results=results,
+            metric_totals={"finalized": 1, "stage_start": 1},
+            elapsed_ms=1.0,
+        )
+
+        self.assertEqual(report["cases"][0]["case_definition_flags"], ["contained_expected_token_sentence"])
+        self.assertEqual(
+            report["case_definition_action_summary"]["action_counts"],
+            {"rewrite_expected_final_to_final_sentence_boundary": 1},
+        )
+        self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
+
     def test_punctuation_only_final_mismatch_is_boundary_review(self) -> None:
         args = Namespace(
             model="sat-3l-sm",

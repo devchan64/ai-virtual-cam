@@ -80,6 +80,10 @@ stable 문장 일부를 빠뜨렸거나 boundary가 과하게 합쳐졌는지 �
 revision 후보가 둘 이상 들어간 경우다. final은 append-only로 한 revision 계열을 한 번만 소비하므로,
 이 플래그가 붙은 케이스는 앱 로직 튜닝 근거에서 제외하고 final sentence boundary 또는 expected 수를
 다시 검토한다.
+`contained_expected_token_sentence`는 한 `expected_final` 문장의 token units 대부분이 다른
+`expected_final` 문장 안에서 같은 순서로 설명되는 경우다. STT 표기 차이 때문에 문자열 포함으로는
+잡히지 않아도 append-only final 기준에서는 같은 발화의 suffix revision일 수 있으므로, 이 플래그가
+붙은 케이스도 앱 로직 튜닝 근거에서 제외하고 expected 수를 다시 검토한다.
 `punctuation_only_final_mismatch`는 expected와 actual final의 token-sentence는 같지만 종결부호만
 다른 경우다. 받아쓰기 확정 성능 후보가 아니라 boundary 표기/라벨 검토 대상으로 본다.
 expected 문장이 active staged와 staged queue의 연속 잔여를 합쳤을 때만 설명되는 경우는

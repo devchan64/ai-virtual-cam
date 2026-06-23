@@ -203,6 +203,8 @@ STABLE_CANDIDATE_ORDERED_REVIEW_MIN_SIMILARITY = 0.60
 EXPECTED_REVISION_VARIANT_MIN_SIMILARITY = 0.55
 EXPECTED_REVISION_VARIANT_MIN_COVERAGE = 0.55
 EXPECTED_REVISION_VARIANT_MIN_COMMON_RUN = 8
+EXPECTED_CONTAINED_TOKEN_MIN_UNITS = 8
+EXPECTED_CONTAINED_TOKEN_MIN_COVERAGE = 0.80
 COMBINED_RESIDUE_MATCH_MIN_SIMILARITY = 0.70
 
 
@@ -231,6 +233,19 @@ def _expected_sentences_are_revision_variants(left: str, right: str) -> bool:
         and coverage >= EXPECTED_REVISION_VARIANT_MIN_COVERAGE
         and matcher.ratio() >= EXPECTED_REVISION_VARIANT_MIN_SIMILARITY
     )
+
+
+def _expected_sentences_have_contained_token_units(left: str, right: str) -> bool:
+    left_words = _word_units(normalized_text(left))
+    right_words = _word_units(normalized_text(right))
+    if not left_words or not right_words:
+        return False
+    shorter_len = min(len(left_words), len(right_words))
+    if shorter_len < EXPECTED_CONTAINED_TOKEN_MIN_UNITS:
+        return False
+    matcher = SequenceMatcher(None, left_words, right_words, autojunk=False)
+    matched_units = sum(block.size for block in matcher.get_matching_blocks())
+    return matched_units / max(shorter_len, 1) >= EXPECTED_CONTAINED_TOKEN_MIN_COVERAGE
 
 
 def _punctuation_only_final_mismatch(result: dict[str, Any]) -> bool:
@@ -1239,7 +1254,9 @@ def _case_primary_review_action(result: dict[str, Any]) -> str:
         return "add_initial_final_or_recut_mid_stream_case"
     if "legacy_sample_without_source_trace" in definition_flags:
         return "restore_source_log_or_recut_from_observed_log"
-    if definition_flags.intersection({"duplicate_expected_sentence", "expected_revision_variant_group"}):
+    if definition_flags.intersection(
+        {"duplicate_expected_sentence", "expected_revision_variant_group", "contained_expected_token_sentence"}
+    ):
         return "rewrite_expected_final_to_final_sentence_boundary"
     if "punctuation_only_final_mismatch" in definition_flags:
         return "manual_boundary_review"
@@ -1961,6 +1978,14 @@ def _with_case_evidence_metadata(results: list[dict[str, Any]]) -> list[dict[str
         )
         if has_revision_variant_expected:
             case_definition_flags.append("expected_revision_variant_group")
+        has_contained_token_expected = any(
+            _expected_sentences_have_contained_token_units(left, right)
+            for left_index, left in enumerate(expected_final)
+            for right_index, right in enumerate(expected_final)
+            if left_index < right_index and left and right and left != right and left not in right and right not in left
+        )
+        if has_contained_token_expected and not has_revision_variant_expected:
+            case_definition_flags.append("contained_expected_token_sentence")
         if _punctuation_only_final_mismatch(item):
             case_definition_flags.append("punctuation_only_final_mismatch")
         if expected_final:

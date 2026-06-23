@@ -27641,3 +27641,41 @@ changed cases=24 improved=10 worse=8 same_f1_changed=6
 - 전체 평균 개선 폭은 작지만 strict 후보 지표가 개선됐고, prefix 파괴 대표 케이스가 회복됐다.
 - finalized/stage_start 감소는 짧은 tail anchor trimming을 덜 적용한 결과로 해석한다.
 - 중복 억제보다 신규 문장 prefix 보존을 우선하는 보수적 수정으로 채택한다.
+
+### 2026-06-23 contained token-sentence expected 감사 보강
+
+배경:
+
+- strict logic 후보에 `ko_log_draft_20260620_avc_whisper_log_1_002627`가 남아 있었다.
+- 이 케이스의 `expected_final` 두 문장은 독립 문장이라기보다 같은 발화의 prefix/suffix revision이다.
+- 기존 `nested_expected_sentence`는 문자열 포함만 보므로 `산업의 협회`/`산업협회`, `한번`/`한 번` 같은 STT 표기 차이가 있으면 같은 token-sentence 계열을 놓쳤다.
+
+변경:
+
+- `contained_expected_token_sentence` case-definition flag를 추가했다.
+- 두 `expected_final` 문장 중 짧은 쪽의 token units 80% 이상이 긴 쪽과 같은 순서로 설명되고, 짧은 쪽이 8 units 이상이면 final sentence boundary 재검토 대상으로 분류한다.
+- 이는 앱 확정 로직이 아니라, append-only final 기대값에 같은 발화의 suffix revision을 중복 등록하지 않기 위한 벤치 감사 기준이다.
+
+CUDA/SaT 확인:
+
+```text
+before:
+case_definition_review=994
+logic_tuning_candidates=29
+strict_logic_candidates=24
+strict_final_f1_avg=0.8611111111111112
+final_f1_avg=0.6278166433263859
+
+after:
+case_definition_review=995
+logic_tuning_candidates=28
+strict_logic_candidates=23
+strict_final_f1_avg=0.8695652173913043
+final_f1_avg=0.6278166433263859
+```
+
+판정:
+
+- 전체 final 지표는 변하지 않았다.
+- strict 후보에서 케이스 정의 오류 1건이 제거되어 앱 로직 튜닝 후보가 더 좁아졌다.
+- 새 플래그는 62건을 찾지만, 대부분은 기존 case-definition review에 이미 포함되어 있었다. 따라서 이번 변경은 성능 개선이 아니라 벤치 해석 정확도 개선이다.
