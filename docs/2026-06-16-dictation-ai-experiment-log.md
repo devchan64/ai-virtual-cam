@@ -29989,3 +29989,34 @@ candidate_final_boundary_f1_avg=0.588902
 - 현재 reviewed challenge replay에서는 주요 지표 변화가 없다.
 - 전체 성능 개선 근거가 없으므로 앱 로직에는 반영하지 않는다.
 - 짧은 CJK 문장 누락은 단순 age-final 조건보다 stage/revision 흐름 또는 케이스 기대값 정의와 함께 계속 분리해서 본다.
+
+## 2026-06-24 CJK aged final 최소 confirmation 2 실험 폐기
+
+목적:
+
+- `zh_log_draft_20260620_avc_whisper_log_11_000886`에서 입력 관측 2회 수준의 CJK 후보가 aged final로 확정되어 expected와 어긋나는 흐름이 있었다.
+- CJK aged final에 최소 confirmation 2를 요구하면 premature final을 줄일 수 있는지 확인했다.
+
+검증:
+
+```text
+baseline_output=.tmp/eval/dictation-ai-sbd/current-20260624-prefix-growth-default-16-report.json
+baseline_final_precision_avg=0.916389
+baseline_final_recall_avg=0.856389
+baseline_final_f1_avg=0.877143
+baseline_strict_final_f1_avg=0.972
+baseline_final_boundary_f1_avg=0.588902
+
+candidate_output=.tmp/eval/dictation-ai-sbd/current-20260624-cjk-aged-min-confirm2-report.json
+candidate_final_precision_avg=0.909
+candidate_final_recall_avg=0.836
+candidate_final_f1_avg=0.862
+candidate_strict_final_f1_avg=0.966
+candidate_final_boundary_f1_avg=0.536
+```
+
+해석:
+
+- CJK aged final 전체에 confirmation 2를 요구하면 premature final은 일부 줄 수 있지만 recall과 boundary F1이 크게 하락한다.
+- 전역 age-final 강화는 현재 challenge replay에서 보편 개선이 아니므로 폐기한다.
+- 남은 저점은 단일 age 조건보다 revision/queue 소비 순서 또는 케이스 구간 정의를 더 좁혀 분석한다.
