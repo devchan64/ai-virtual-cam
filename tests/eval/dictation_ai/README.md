@@ -8,6 +8,7 @@
 | --- | --- | --- |
 | Benchmark core | `sbd_benchmark.py`, `benchmark/` | 단일 실행 엔트리, 실제 `sat + cuda + float16` SBD replay 실행과 report/runtime contract 생성 |
 | Case corpus | `cases/`, `sbd_cases/`, `sbd_representative_cases/` | challenge/representative/structural case 로딩, 검증, 해석 계약 |
+| Case review queue | `sbd_case_review_queue/` | active challenge replay에서 제외한 expected_final 정의 재검토 대기열 |
 | Parameter sweep/evidence | `sweeps/` | 파라미터 sweep 실행, complete evidence report 검증, 논문 표준 summary 생성 |
 | Paper audit | `paper/` | 논문 claim scope, 수치, reference, readiness gate 검증 |
 | Representative workflow | `representative/` | 운영 로그에서 representative 후보를 뽑고 사람이 검토한 case로 승격 |
@@ -22,6 +23,7 @@
 - `tool_tests/`는 평가 도구의 계약 테스트만 둔다. 앱 코드 품질관리 유닛테스트는 `tests/unit/`에 둔다.
 - benchmark 성능 근거는 `tool_tests` 통과가 아니라 `sbd_benchmark.py`를 실제 `sat + cuda + float16`로 실행한 report만 사용한다.
 - challenge replay, representative replay, structural preflight 결과를 같은 표로 합치지 않는다. corpus role과 evidence protocol이 다르면 별도 해석한다.
+- `sbd_case_review_queue/`는 기본 benchmark 입력이 아니다. 여기에 있는 케이스는 `expected_final`, replay window, `initial_final`, source trace를 고친 뒤에만 `sbd_cases/`로 되돌린다.
 - structural preflight는 앱 lifecycle 병목을 보기 위한 도구이므로 `expected_final` 정의 품질 review 후보와 replay 입력 근거가 일부만 있거나 약한 후보를 기본적으로 제외한다. case 정의 문제를 일부러 보려면 `--expected-quality include` 또는 `only`, 입력 근거 문제를 보려면 `--input-evidence include` 또는 `weak-only`를 명시한다.
 
 ## 단일 엔트리

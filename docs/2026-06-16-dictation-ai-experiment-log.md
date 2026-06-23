@@ -27931,3 +27931,100 @@ strict_final_boundary_f1_avg=0.7333333333333334
 - `final_quality_no_end_marker=513 -> 503`, `candidate_duplicate_suppressed=13711 -> 13826`, `candidate_recent_final_delta_trimmed=5095 -> 5204`로 의도한 중복 억제 경로가 증가했다.
 - 케이스 expected_final을 임의로 늘려 strict 점수를 올리는 것은 채택하지 않았다. `ko_log_draft_20260620_avc_whisper_log_1_002743`에 no-end 후보를 추가하는 실험은 validator의 `stable_repeat_unsupported`로 잡혀 되돌렸다.
 - 기본값으로 채택하되, 다음 반복에서는 remaining strict 저점의 queue/stage blockage와 expected_final 정의 약한 케이스를 분리해서 본다.
+
+## 2026-06-23 expected_final 정의 약한 케이스 review queue 분리
+
+목적:
+
+- 앱 로직 튜닝 근거와 case label/window 정의 문제를 분리한다.
+- `expected_final`이 replay chunks에서 충분히 설명되지 않거나, raw STT 반복 후보와 맞지 않는 케이스를 active challenge replay에서 제외한다.
+- 삭제하지 않고 재작성/리컷 대기열로 보존해 사람이 근거를 확인한 뒤 다시 승격할 수 있게 한다.
+
+조치:
+
+- `tests/eval/dictation_ai/sbd_case_review_queue/expected-final-definition-review.jsonl`에 15건을 보존했다.
+- 각 record에 `_review_queue` 메타데이터를 추가했다.
+- 원래 active 파일/라인, 제외 이유, 입력 근거 요약을 함께 기록했다.
+- `sbd_case_review_queue/README.md`에 이 디렉터리가 benchmark 입력이 아니라 expected/window 재검토 대기열임을 명시했다.
+
+validator 변화:
+
+```text
+정리 전:
+case_count=1027
+expected_final_case_count=1023
+input_unsupported_case_count=9
+stable_repeat_unsupported_case_count=7
+input_unobserved_case_count=45
+missing_source_trace_case_count=158
+
+1차 분리 후:
+case_count=1013
+expected_final_case_count=1009
+input_unsupported_case_count=1
+stable_repeat_unsupported_case_count=0
+input_unobserved_case_count=36
+missing_source_trace_case_count=152
+
+최종 분리 후:
+case_count=1012
+expected_final_case_count=1008
+input_unsupported_case_count=0
+stable_repeat_unsupported_case_count=0
+input_unobserved_case_count=35
+missing_source_trace_case_count=152
+```
+
+판정:
+
+- `input_unsupported`와 `stable_repeat_unsupported`는 active case에서 0으로 정리됐다.
+- 아직 `input_unobserved=35`, `missing_source_trace=152`는 남아 있다.
+- 이 값은 곧바로 앱 로직 실패로 해석하지 않고, 다음 반복에서 expected 재작성/리컷/유지 가능 여부를 분류한다.
+
+CUDA/SaT 벤치:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --model sat-3l-sm --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260623-review-queue-cleaned-report.json
+```
+
+```text
+before:
+case_count=1027
+finalized=4683
+stage_start=8997
+finalized_per_stage_start=0.5205068356118706
+final_precision_avg=0.6213163941277363
+final_recall_avg=0.6851517624931502
+final_f1_avg=0.6297617446385757
+final_boundary_f1_avg=0.179603305359513
+strict_logic_candidates=21
+strict_final_f1_avg=0.8999999999999999
+strict_final_boundary_f1_avg=0.7333333333333334
+case_definition_review_count=997
+logic_tuning_candidate_count=26
+
+after:
+case_count=1012
+finalized=4614
+stage_start=8827
+finalized_per_stage_start=0.5227143990030588
+final_precision_avg=0.6219537087148238
+final_recall_avg=0.6877725890123175
+final_f1_avg=0.6313902856456678
+final_boundary_f1_avg=0.1804208774086494
+strict_logic_candidates=21
+strict_final_f1_avg=0.8999999999999999
+strict_final_boundary_f1_avg=0.7333333333333334
+case_definition_review_count=982
+logic_tuning_candidate_count=26
+```
+
+해석:
+
+- 전체 `final_f1_avg`는 `+0.00163`, `final_boundary_f1_avg`는 `+0.00082` 상승했다.
+- strict logic 후보 수와 strict 점수는 변하지 않았다.
+- 따라서 이번 변경은 앱 로직 성능 개선이 아니라, active challenge replay에서 라벨/window 오염을 줄인 데이터 정리로 본다.
+- 다음 개선 후보는 남은 `input_unobserved=35`의 expected 재작성 가능 여부와 strict 저점 `zh_log_missing_winter_shopping_hat_queue_head_stall_20260621_001`의 queue/stage blockage다.
