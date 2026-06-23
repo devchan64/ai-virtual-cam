@@ -29082,3 +29082,57 @@ terminal_expected_residue_summary.matched_missing_expected_total=16
 - 전체 F1은 변하지 않는다. 변경은 앱 로직이 아니라 벤치 해석 분리다.
 - strict 후보에서 replay-tail residue를 제거하면 strict F1이 0.871에서 0.943으로 오른다.
 - 이후 앱 로직 개선은 terminal residue가 아닌 strict 후보 29건을 기준으로 보아야 한다.
+
+## 2026-06-24 terminal residue 제외 후 strict 후보 sweep
+
+목적:
+
+- terminal residue를 분리한 뒤 남은 strict 후보 29건에서 실제 앱 기본값 개선 여지가 있는지 확인한다.
+- 저점 2건은 `stage_revision_token_sentence_deferred`, `stage_age_quality_blocked`, `stage_replace_deferred`, `stage_queue_promote`, `candidate_duplicate_suppressed`가 공통으로 나타났다.
+
+기준:
+
+```text
+baseline_output=.tmp/eval/dictation-ai-sbd/current-20260624-terminal-residue-review-report.json
+baseline_case_definition_review=22
+baseline_logic_tuning_candidates=34
+baseline_strict_logic_candidates=29
+baseline_final_precision_avg=0.897
+baseline_final_recall_avg=0.843
+baseline_final_f1_avg=0.858
+baseline_strict_final_f1_avg=0.943
+baseline_final_boundary_f1_avg=0.552
+```
+
+단일 변수 sweep:
+
+```text
+queue_size_10_output=.tmp/eval/dictation-ai-sbd/current-20260624-queue-size-10-terminal-residue-report.json
+queue_size_10_final_f1_avg=0.858
+queue_size_10_strict_final_f1_avg=0.943
+queue_size_10_final_boundary_f1_avg=0.552
+
+queue_promotion_age_3_output=.tmp/eval/dictation-ai-sbd/current-20260624-queue-promotion-age-3-terminal-residue-report.json
+queue_promotion_age_3_final_f1_avg=0.858
+queue_promotion_age_3_strict_final_f1_avg=0.943
+queue_promotion_age_3_final_boundary_f1_avg=0.552
+
+cjk_revision_ratio_074_output=.tmp/eval/dictation-ai-sbd/current-20260624-cjk-revision-ratio-074-terminal-residue-report.json
+cjk_revision_ratio_074_final_precision_avg=0.891
+cjk_revision_ratio_074_final_recall_avg=0.843
+cjk_revision_ratio_074_final_f1_avg=0.855
+cjk_revision_ratio_074_strict_final_f1_avg=0.936
+cjk_revision_ratio_074_final_boundary_f1_avg=0.548
+
+fragment_echo_coverage_075_output=.tmp/eval/dictation-ai-sbd/current-20260624-fragment-echo-coverage-075-terminal-residue-report.json
+fragment_echo_coverage_075_final_f1_avg=0.858
+fragment_echo_coverage_075_strict_final_f1_avg=0.943
+fragment_echo_coverage_075_final_boundary_f1_avg=0.552
+```
+
+해석:
+
+- queue size, queue promotion age, recent-final fragment echo coverage 조정은 현재 reviewed challenge에서 지표 변화를 만들지 못했다.
+- CJK revision ratio 완화는 finalized 수를 1개 늘렸지만 precision, 전체 F1, strict F1, boundary F1을 모두 낮췄다.
+- 따라서 이번 sweep에서는 추가 앱 기본값 변경을 채택하지 않는다.
+- 다음 개선은 상수 sweep보다 strict 저점 2건의 boundary granularity/over-final 원인을 케이스 단위로 추적해 일반 원칙이 있는지 확인하는 방향이 맞다.
