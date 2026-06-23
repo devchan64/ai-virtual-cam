@@ -31391,3 +31391,48 @@ review_packet_result:
 
 - 다음 수집 작업은 packet 전체를 읽는 대신 `priority_lifecycle_timestamp` 주변의 raw/final/transcript 흐름을 확인해 bounded case 후보를 고른다.
 - 이 단계에서도 앱 로직 변경은 하지 않는다. 동일 패턴의 사람이 확정한 케이스가 충분히 쌓인 뒤에만 일반 규칙을 검토한다.
+
+## 2026-06-24 priority bounded window 제안 추가
+
+목적:
+
+- priority lifecycle event는 긴 로그 안에 흩어져 있으므로, 사람이 매번 시작/끝 시간을 계산하면 케이스 수집 비용이 높다.
+- 자동 승격 없이도 priority event 주변의 짧은 검토 window를 제안하면, `expected_final`을 사람이 작성할 bounded case 후보를 더 빠르게 고를 수 있다.
+
+시도:
+
+```text
+tool_test=./.venv/bin/python -m unittest \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_representative_review_packet_extractor \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_representative_case_draft_extractor \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_representative_source_selector \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_representative_source_audit
+tool_test_result=OK
+
+review_packet_command=./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py extract-review-packets \
+  .tmp/eval/dictation-ai-sbd/target-stage-replace-sources-20260624.json \
+  --output .tmp/eval/dictation-ai-sbd/target-stage-replace-packets-20260624.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/target-stage-replace-packets-20260624.md \
+  --max-priority-window-suggestions 6 \
+  --priority-window-before-seconds 20 \
+  --priority-window-after-seconds 40
+
+review_packet_result:
+  packet_count=3
+  ready_packet_count=3
+  priority_window_suggestions_per_packet=6
+  first_suggestions:
+    .tmp/logs/avc-whisper.log.60 2026-06-20 18:39:49..18:40:49 anchor=18:40:09
+    .tmp/logs/avc-whisper.log.57 2026-06-20 19:13:11..19:14:11 anchor=19:13:31
+    .tmp/logs/avc-whisper.log.32 2026-06-21 15:03:20..15:04:20 anchor=15:03:40
+```
+
+해석:
+
+- review packet markdown에 `suggested_window_start/end` 테이블이 추가되어, priority event 주변 60초 검토 구간을 바로 확인할 수 있다.
+- draft에는 여전히 `expected_final=[]`만 남는다. suggested window는 사람이 case를 자르기 위한 안내이며, benchmark 입력이나 논문 근거가 아니다.
+
+결론:
+
+- 다음 실제 케이스 추가는 suggested window 중 사람이 문장 확정 기대값을 명확히 작성할 수 있는 구간만 별도 JSONL case로 만든다.
+- 자동으로 transcript/final을 expected로 복사하지 않는다.

@@ -6,6 +6,7 @@ import ast
 import json
 import re
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 
 
@@ -30,6 +31,7 @@ PRIORITY_METRIC_TO_LIFECYCLE_KIND = {
 }
 
 TIMESTAMP_RE = re.compile(r"^\[(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]")
+TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
 STT_RAW_RE = re.compile(r"Dictation AI stt_raw: \[(?P<language>[a-z]{2}) raw\] (?P<text>.*)$")
 TRANSCRIPT_RE = re.compile(
     r"Dictation AI transcript: \[(?P<language>[a-z]{2})(?:#(?P<segment_id>\d+))?\] (?P<text>.*)$"
@@ -42,6 +44,14 @@ KV_RE = re.compile(r"(?P<key>[A-Za-z_]+)=(?P<value>[^\s,]+)")
 def _timestamp(line: str) -> str:
     match = TIMESTAMP_RE.search(line)
     return match.group("timestamp") if match else ""
+
+
+def _offset_timestamp(timestamp: str, *, seconds: int) -> str:
+    try:
+        parsed = datetime.strptime(timestamp, TIMESTAMP_FORMAT)
+    except ValueError:
+        return timestamp
+    return (parsed + timedelta(seconds=seconds)).strftime(TIMESTAMP_FORMAT)
 
 
 def _trim_text(text: str, *, limit: int) -> str:
@@ -170,6 +180,33 @@ def _parse_lifecycle_event(line: str, *, text_limit: int) -> dict[str, object] |
     return record
 
 
+def _priority_window_suggestions(
+    priority_lifecycle_events: list[dict[str, object]],
+    *,
+    max_suggestions: int,
+    before_seconds: int,
+    after_seconds: int,
+) -> list[dict[str, object]]:
+    suggestions: list[dict[str, object]] = []
+    for event in _evenly_spaced(priority_lifecycle_events, max_suggestions):
+        timestamp = str(event.get("timestamp", ""))
+        if not timestamp:
+            continue
+        suggestions.append(
+            {
+                "started_at": _offset_timestamp(timestamp, seconds=-before_seconds),
+                "ended_at": _offset_timestamp(timestamp, seconds=after_seconds),
+                "anchor_timestamp": timestamp,
+                "anchor_line_number": event.get("line_number", ""),
+                "anchor_kind": event.get("kind", ""),
+                "anchor_chunk": event.get("chunk", ""),
+                "anchor_staged_tail": event.get("staged_tail", ""),
+                "anchor_candidate_tail": event.get("candidate_tail", ""),
+            }
+        )
+    return suggestions
+
+
 def _inside_source_window(timestamp: str, *, started_at: str, ended_at: str) -> bool:
     if not started_at and not ended_at:
         return True
@@ -281,6 +318,9 @@ def build_review_packets(
     max_finals_per_source: int,
     max_performance_events_per_source: int,
     max_lifecycle_events_per_source: int,
+    max_priority_window_suggestions: int,
+    priority_window_before_seconds: int,
+    priority_window_after_seconds: int,
     text_limit: int = 220,
 ) -> dict[str, object]:
     packets: list[dict[str, object]] = []
@@ -309,6 +349,12 @@ def build_review_packets(
             for event in events["lifecycle_events"]
             if priority_lifecycle_kind and event.get("kind") == priority_lifecycle_kind
         ]
+        priority_window_suggestions = _priority_window_suggestions(
+            priority_lifecycle_events,
+            max_suggestions=max_priority_window_suggestions,
+            before_seconds=priority_window_before_seconds,
+            after_seconds=priority_window_after_seconds,
+        )
         packets.append(
             {
                 "id": source.get("id", ""),
@@ -349,6 +395,7 @@ def build_review_packets(
                     priority_lifecycle_events,
                     max_lifecycle_events_per_source,
                 ),
+                "priority_window_suggestions": priority_window_suggestions,
                 "review_status": "orientation_only_requires_manual_window_selection_and_expected_final",
                 "case_generation": False,
                 "paper_evidence": False,
@@ -379,6 +426,9 @@ def build_review_packets(
             "max_finals_per_source": max_finals_per_source,
             "max_performance_events_per_source": max_performance_events_per_source,
             "max_lifecycle_events_per_source": max_lifecycle_events_per_source,
+            "max_priority_window_suggestions": max_priority_window_suggestions,
+            "priority_window_before_seconds": priority_window_before_seconds,
+            "priority_window_after_seconds": priority_window_after_seconds,
             "text_limit": text_limit,
         },
         "packet_count": len(packets),
@@ -488,6 +538,38 @@ def write_markdown_packets(payload: dict[str, object], path: Path) -> None:
             for event in list(packet.get("priority_lifecycle_events_sample", []))
             if isinstance(event, dict)
         ]
+        priority_window_suggestions = [
+            suggestion
+            for suggestion in list(packet.get("priority_window_suggestions", []))
+            if isinstance(suggestion, dict)
+        ]
+        if priority_window_suggestions:
+            lines.extend(
+                [
+                    "",
+                    "| suggested_window_start | suggested_window_end | anchor | line | kind | chunk | staged_tail | candidate_tail |",
+                    "| --- | --- | --- | ---: | --- | ---: | --- | --- |",
+                ]
+            )
+            for suggestion in priority_window_suggestions[:8]:
+                staged_tail = str(suggestion.get("anchor_staged_tail", "")).replace("|", "\\|")
+                candidate_tail = str(suggestion.get("anchor_candidate_tail", "")).replace("|", "\\|")
+                lines.append(
+                    "| "
+                    + " | ".join(
+                        [
+                            str(suggestion.get("started_at", "")),
+                            str(suggestion.get("ended_at", "")),
+                            str(suggestion.get("anchor_timestamp", "")),
+                            str(suggestion.get("anchor_line_number", "")),
+                            str(suggestion.get("anchor_kind", "")),
+                            str(suggestion.get("anchor_chunk", "")),
+                            staged_tail,
+                            candidate_tail,
+                        ]
+                    )
+                    + " |"
+                )
         if priority_lifecycle_sample:
             lines.extend(
                 [
@@ -559,6 +641,9 @@ def main() -> int:
     parser.add_argument("--max-finals-per-source", type=int, default=60)
     parser.add_argument("--max-performance-events-per-source", type=int, default=30)
     parser.add_argument("--max-lifecycle-events-per-source", type=int, default=40)
+    parser.add_argument("--max-priority-window-suggestions", type=int, default=6)
+    parser.add_argument("--priority-window-before-seconds", type=int, default=20)
+    parser.add_argument("--priority-window-after-seconds", type=int, default=40)
     parser.add_argument("--text-limit", type=int, default=220)
     args = parser.parse_args()
 
@@ -571,6 +656,9 @@ def main() -> int:
             max_finals_per_source=args.max_finals_per_source,
             max_performance_events_per_source=args.max_performance_events_per_source,
             max_lifecycle_events_per_source=args.max_lifecycle_events_per_source,
+            max_priority_window_suggestions=args.max_priority_window_suggestions,
+            priority_window_before_seconds=args.priority_window_before_seconds,
+            priority_window_after_seconds=args.priority_window_after_seconds,
             text_limit=args.text_limit,
         )
     except (OSError, json.JSONDecodeError, ValueError) as exc:

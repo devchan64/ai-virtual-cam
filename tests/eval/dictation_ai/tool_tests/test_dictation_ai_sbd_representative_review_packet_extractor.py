@@ -64,6 +64,9 @@ class DictationAiSbdRepresentativeReviewPacketExtractorTest(unittest.TestCase):
                 max_finals_per_source=10,
                 max_performance_events_per_source=10,
                 max_lifecycle_events_per_source=10,
+                max_priority_window_suggestions=2,
+                priority_window_before_seconds=10,
+                priority_window_after_seconds=20,
             )
 
         self.assertEqual(payload["packet_count"], 1)
@@ -96,6 +99,19 @@ class DictationAiSbdRepresentativeReviewPacketExtractorTest(unittest.TestCase):
         self.assertEqual(packet["lifecycle_events_sample"][0]["staged_tail"], "이전 후보")
         self.assertEqual(packet["lifecycle_events_sample"][0]["candidate_tail"], "새 후보")
         self.assertEqual(packet["priority_lifecycle_events_sample"][0]["kind"], "stage_replace_deferred")
+        self.assertEqual(
+            packet["priority_window_suggestions"][0],
+            {
+                "started_at": "2026-06-20 09:59:51",
+                "ended_at": "2026-06-20 10:00:21",
+                "anchor_timestamp": "2026-06-20 10:00:01",
+                "anchor_line_number": 3,
+                "anchor_kind": "stage_replace_deferred",
+                "anchor_chunk": "1",
+                "anchor_staged_tail": "이전 후보",
+                "anchor_candidate_tail": "새 후보",
+            },
+        )
 
     def test_extracts_only_events_inside_selected_source_window(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -138,6 +154,9 @@ class DictationAiSbdRepresentativeReviewPacketExtractorTest(unittest.TestCase):
                 max_finals_per_source=10,
                 max_performance_events_per_source=10,
                 max_lifecycle_events_per_source=10,
+                max_priority_window_suggestions=2,
+                priority_window_before_seconds=10,
+                priority_window_after_seconds=20,
             )
 
         packet = payload["packets"][0]
@@ -240,6 +259,18 @@ class DictationAiSbdRepresentativeReviewPacketExtractorTest(unittest.TestCase):
                                 "candidate_tail": "새 후보",
                             }
                         ],
+                        "priority_window_suggestions": [
+                            {
+                                "started_at": "2026-06-20 09:59:52",
+                                "ended_at": "2026-06-20 10:00:22",
+                                "anchor_timestamp": "2026-06-20 10:00:02",
+                                "anchor_line_number": 3,
+                                "anchor_kind": "stage_replace_deferred",
+                                "anchor_chunk": "1",
+                                "anchor_staged_tail": "이전 후보",
+                                "anchor_candidate_tail": "새 후보",
+                            }
+                        ],
                     }
                 ],
             }
@@ -255,6 +286,11 @@ class DictationAiSbdRepresentativeReviewPacketExtractorTest(unittest.TestCase):
         self.assertIn("faster-whisper", markdown)
         self.assertIn("- source_window_filter:", markdown)
         self.assertIn("'applied': True", markdown)
+        self.assertIn("| suggested_window_start | suggested_window_end | anchor | line | kind |", markdown)
+        self.assertIn(
+            "| 2026-06-20 09:59:52 | 2026-06-20 10:00:22 | 2026-06-20 10:00:02 | 3 | stage_replace_deferred | 1 | 이전 후보 | 새 후보 |",
+            markdown,
+        )
         self.assertIn("| performance_timestamp | line | chunk | window | stability |", markdown)
         self.assertIn("| 2026-06-20 10:00:01 | 2 | 1 | 10.0s | 0.8 | 0.7 | 0.6 | 0.5 |", markdown)
         self.assertIn("| priority_lifecycle_timestamp | line | kind | chunk | staged_age |", markdown)
@@ -286,6 +322,9 @@ class DictationAiSbdRepresentativeReviewPacketExtractorTest(unittest.TestCase):
                 max_finals_per_source=3,
                 max_performance_events_per_source=3,
                 max_lifecycle_events_per_source=3,
+                max_priority_window_suggestions=2,
+                priority_window_before_seconds=10,
+                priority_window_after_seconds=20,
             )
 
         texts = [event["text"] for event in payload["packets"][0]["raw_chunks_sample"]]
@@ -310,6 +349,9 @@ class DictationAiSbdRepresentativeReviewPacketExtractorTest(unittest.TestCase):
             max_finals_per_source=1,
             max_performance_events_per_source=1,
             max_lifecycle_events_per_source=1,
+            max_priority_window_suggestions=1,
+            priority_window_before_seconds=10,
+            priority_window_after_seconds=20,
         )
 
         self.assertEqual(payload["packet_count"], 0)
