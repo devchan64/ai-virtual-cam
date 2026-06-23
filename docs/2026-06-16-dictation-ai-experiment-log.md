@@ -258,6 +258,46 @@ stage_start=8775
 - `3`은 strict final F1이 가장 높지만 전체 final F1과 recall이 하락한다. 따라서 현재 challenge replay에서는 precision 우선 후보로 기록하고 기본값으로 채택하지 않는다.
 - `SENTENCE_CONFIRM_CHUNKS=2`를 checked-in 기본값으로 복원한다. 이는 문구별 예외가 아니라 일반 staged 후보의 반복 확인 기준을 조정하는 핵심 생명주기 파라미터다.
 
+### 2026-06-23 recent-final suffix-tail suppression 기각
+
+시도:
+
+- `ko_log_draft_20260620_avc_whisper_log_002902`에서 actual final이 새 문장 prefix 뒤에 직전 final tail을 붙인 오염 문장으로 확정됐다.
+- 이를 막기 위해 candidate 후반부가 recent final 후반부의 여러 긴 token block으로 설명되면 해당 suffix를 제거하는 helper를 실험했다.
+- 단일 케이스에서는 오염된 second final이 사라져 `final_f1_avg 0.500 -> 0.667`로 개선됐다.
+
+CUDA/SaT 전체 challenge replay:
+
+```text
+기준 checked-in:
+final_f1_avg=0.6260714385
+final_precision_avg=0.6169176840
+final_recall_avg=0.6814894614
+strict_final_f1_avg=0.8466666667
+final_boundary_f1_avg=0.1777818994
+finalized=4695
+stage_start=9025
+
+recent-final suffix-tail suppression:
+final_f1_avg=0.623
+final_precision_avg=0.616
+final_recall_avg=0.676
+strict_final_f1_avg=0.858
+final_boundary_f1_avg=0.179
+finalized=4675
+stage_start=9330
+changed_cases=143
+improved_cases=47
+worse_cases=61
+```
+
+판정:
+
+- strict 후보 평균은 좋아졌지만 전체 final F1과 recall이 하락했고, 악화 케이스가 개선 케이스보다 많았다.
+- 악화 예시는 실제 후속 문장을 recent-final tail로 오판해 누락시키는 경우였다.
+- 따라서 이 suppressor는 핵심 원칙으로 채택하지 않고 앱 코드에 반영하지 않는다.
+- 다음 개선은 suffix 제거를 더 늘리는 방향보다, stable token-sentence 반복 후보가 실제 final로 소비되지 못하는 이유를 case-definition review와 strict 후보로 더 분리하는 방향이 우선이다.
+
 모델 선정 기준:
 
 | 흐름 | 선정 모델 | 탈락/보류 모델 | 선정 이유 |
