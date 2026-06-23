@@ -30051,3 +30051,29 @@ candidate_final_boundary_f1_avg=0.541
 - recall은 조금 오르지만 precision, final F1, strict F1, boundary F1이 모두 크게 악화된다.
 - 짧은 CJK 문장의 confirmation 요구치를 낮추는 방식은 false final을 늘리므로 폐기한다.
 - 짧은 문장 final 누락은 case-specific하게 보이더라도, 현재 corpus에서는 보편 개선 축이 아니다.
+
+## 2026-06-24 lifecycle helper test 도메인 정리
+
+목적:
+
+- `tests/eval/dictation_ai/tool_tests/test_dictation_ai_sbd_lifecycle.py`에 특정 실패 케이스의 final 결과를 고정한 테스트가 남아 있었다.
+- 이 테스트들은 현재 벤치 케이스와 CUDA replay로 판단해야 할 성능/튜닝 항목이며, tool test가 품질 게이트처럼 실패하면 실험 도메인과 도구 계약 도메인이 다시 섞인다.
+
+정리:
+
+```text
+removed_case_specific_tests=5
+remaining_tool_tests=18
+tool_test=./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle
+tool_test_result=OK, 18 tests
+case_definition_cleanup=zh_log_draft_20260620_avc_whisper_log_11_000826 expected_final에서 긴 stable sentence에 포함된 짧은 문장 제거
+case_validation=missing_source_trace_case_count=0, input_unsupported_case_count=0, input_unobserved_case_count=0, stable_repeat_unsupported_case_count=0
+cuda_benchmark=.tmp/eval/dictation-ai-sbd/current-20260624-after-expected-definition-cleanup-report.json
+cuda_benchmark_result=case_definition_flags=0, final_f1_avg=0.874, strict_final_f1_avg=0.967, final_boundary_f1_avg=0.579
+```
+
+해석:
+
+- lifecycle replay 도구 테스트는 helper 계약, metric counter, replay plumbing 검증으로 제한한다.
+- 특정 로그 실패/성능 튜닝 기대값은 `tests/eval/dictation_ai/sbd_cases/{language}/` 케이스와 CUDA 벤치 리포트에서 관리한다.
+- expected_final은 STT window 입력에서 관측된 독립 stable sentence를 기준으로 두며, 긴 stable sentence 내부에 포함되는 짧은 조각을 별도 expected로 중복 등록하지 않는다.
