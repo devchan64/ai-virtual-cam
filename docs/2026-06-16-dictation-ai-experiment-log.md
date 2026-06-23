@@ -28914,3 +28914,76 @@ case_fix_case_definition_flag_counts={}
 - 전체 `final_f1_avg`는 0.825에서 0.833으로 올랐고, `case_definition_review`는 10에서 8로 줄었다.
 - `strict_final_f1_avg`는 strict 후보 구성이 바뀌면서 0.846에서 0.837로 낮아졌다. 이는 앱 성능 저하가 아니라, 기존에 제외되던 케이스 일부가 다시 strict 후보로 들어온 영향으로 해석한다.
 - 남은 8건은 expected_final 문자열만 즉시 수정할 문제가 아니라 `initial_final`/재절단/수동 경계 리뷰 성격이다.
+
+## 2026-06-24 3회 반복 확정 원칙 기본값 반영
+
+목적:
+
+- 사용자가 정의한 “비슷한 token-sentence가 3회 반복되면 확정” 원칙과 앱 기본값을 맞춘다.
+- 짧은 CJK 후보만 별도로 confirmation을 더 요구하던 예외가 전체 원칙을 흐릴 수 있어 제거 가능성을 확인한다.
+
+비교:
+
+```text
+baseline_output=.tmp/eval/dictation-ai-sbd/current-20260624-expected-final-case-fix-report.json
+baseline_final_precision_avg=0.896
+baseline_final_recall_avg=0.808
+baseline_final_f1_avg=0.833
+baseline_strict_final_f1_avg=0.837
+baseline_final_boundary_f1_avg=0.560
+baseline_case_definition_review=8
+
+sentence_confirm_1_output=.tmp/eval/dictation-ai-sbd/current-20260624-sentence-confirm-1-after-case-fix-report.json
+sentence_confirm_1_final_precision_avg=0.778
+sentence_confirm_1_final_recall_avg=0.829
+sentence_confirm_1_final_f1_avg=0.781
+sentence_confirm_1_strict_final_f1_avg=0.836
+sentence_confirm_1_case_definition_review=15
+
+queue_promotion_age_12_output=.tmp/eval/dictation-ai-sbd/current-20260624-queue-promotion-age-12-after-case-fix-report.json
+queue_promotion_age_12_final_f1_avg=0.833
+queue_promotion_age_12_strict_final_f1_avg=0.837
+
+short_cjk_extra_0_output=.tmp/eval/dictation-ai-sbd/current-20260624-short-cjk-extra-0-after-case-fix-report.json
+short_cjk_extra_0_final_precision_avg=0.851
+short_cjk_extra_0_final_recall_avg=0.849
+short_cjk_extra_0_final_f1_avg=0.830
+short_cjk_extra_0_strict_final_f1_avg=0.848
+short_cjk_extra_0_case_definition_review=12
+
+revision_fallback_coverage_045_output=.tmp/eval/dictation-ai-sbd/current-20260624-revision-fallback-coverage-045-after-case-fix-report.json
+revision_fallback_coverage_045_final_f1_avg=0.833
+revision_fallback_coverage_045_strict_final_f1_avg=0.837
+
+sentence_confirm_3_output=.tmp/eval/dictation-ai-sbd/current-20260624-sentence-confirm-3-after-case-fix-report.json
+sentence_confirm_3_final_precision_avg=0.900
+sentence_confirm_3_final_recall_avg=0.805
+sentence_confirm_3_final_f1_avg=0.833
+sentence_confirm_3_strict_final_f1_avg=0.869
+sentence_confirm_3_final_boundary_f1_avg=0.520
+sentence_confirm_3_case_definition_review=5
+
+confirm_3_short_cjk_extra_0_output=.tmp/eval/dictation-ai-sbd/current-20260624-confirm-3-short-cjk-extra-0-after-case-fix-report.json
+confirm_3_short_cjk_extra_0_final_precision_avg=0.897
+confirm_3_short_cjk_extra_0_final_recall_avg=0.843
+confirm_3_short_cjk_extra_0_final_f1_avg=0.858
+confirm_3_short_cjk_extra_0_strict_final_f1_avg=0.886
+confirm_3_short_cjk_extra_0_final_boundary_f1_avg=0.552
+confirm_3_short_cjk_extra_0_case_definition_review=7
+
+checked_in_default_output=.tmp/eval/dictation-ai-sbd/current-20260624-confirm-3-default-after-case-fix-report.json
+checked_in_default_final_precision_avg=0.897
+checked_in_default_final_recall_avg=0.843
+checked_in_default_final_f1_avg=0.858
+checked_in_default_strict_final_f1_avg=0.886
+checked_in_default_final_boundary_f1_avg=0.552
+checked_in_default_case_definition_review=7
+```
+
+결론:
+
+- `SENTENCE_CONFIRM_CHUNKS=1`은 recall은 조금 오르지만 precision과 전체 F1을 크게 낮춰 폐기한다.
+- queue promotion age와 revision fallback coverage 완화는 현재 reviewed challenge에서 의미 있는 변화를 만들지 못했다.
+- `SENTENCE_CONFIRM_CHUNKS=3`은 전체 F1은 유지하면서 precision/strict F1을 올리지만 boundary F1이 내려갔다.
+- `SENTENCE_CONFIRM_CHUNKS=3`과 `SHORT_CJK_CONFIRM_EXTRA_CHUNKS=0` 조합은 전체 F1, strict F1, recall을 함께 개선했다.
+- 따라서 앱 기본값을 `SENTENCE_CONFIRM_CHUNKS=3`, `SHORT_CJK_CONFIRM_EXTRA_CHUNKS=0`으로 반영한다. 이는 “3회 반복 관측”이라는 핵심 원칙을 강화하고, 짧은 CJK에만 confirmation을 추가 요구하던 예외를 제거하는 방향이다.

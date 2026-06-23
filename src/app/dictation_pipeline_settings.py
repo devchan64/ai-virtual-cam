@@ -112,7 +112,7 @@ DELTA_SUPPRESSED_STAGE_MAX_CHUNKS = 2
 # SENTENCE_CONFIRM_CHUNKS는 지연과 중복 사이의 핵심 절충값이다. 낮추면 더
 # 빨리 final이 나오고 누락이 줄지만, 높이면 반복 근거를 더 기다려 premature
 # final 위험을 줄인다.
-SENTENCE_CONFIRM_CHUNKS = 2
+SENTENCE_CONFIRM_CHUNKS = 3
 FORCED_SENTENCE_CONFIRM_CHUNKS = 3
 
 # age는 정확한 confirmation을 계속 받지 못하는 staged 후보의 보조 확정
@@ -144,10 +144,10 @@ SHORT_CJK_FINAL_UNITS = 10
 SHORT_NO_END_FRAGMENT_UNITS = 5
 SHORT_CJK_REPLACEMENT_HOLD_CHUNKS = 0
 
-# 짧은 CJK 후보는 문장부호가 있어도 다음 window에서 긴 문장으로 확장되는
-# 경우가 많다. final을 막지는 않고 기본 confirmation보다 1회 더 관측해
-# premature fragment final을 줄인다.
-SHORT_CJK_CONFIRM_EXTRA_CHUNKS = 1
+# 기본 confirmation을 3회 반복 관측으로 맞추면서 짧은 CJK만 별도로 더
+# 지연시키는 예외는 제거한다. 짧은 후보의 품질 차단은 structural flag로
+# 유지하되, final 확정 반복 횟수는 언어별로 다르게 늘리지 않는다.
+SHORT_CJK_CONFIRM_EXTRA_CHUNKS = 0
 
 # 중국어 window에서 라틴 토큰과 1~2글자 CJK suffix만 붙은 짧은 조각은
 # 고유명사/브랜드명의 불완전한 STT 후보인 경우가 많다. 전체 mixed-latin
