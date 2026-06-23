@@ -292,6 +292,70 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
             2,
         )
 
+    def test_strict_mid_score_final_summary_keeps_medium_bottlenecks_visible(self) -> None:
+        args = Namespace(
+            model="sat-3l-sm",
+            device="cuda",
+            compute_type="float16",
+            min_final_f1=0.0,
+            fail_on_regression=False,
+        )
+        case = SbdCase(
+            id="mid-score-overfinal",
+            language="zh",
+            chunks=[
+                "第一句到了。第二句到了。",
+                "第一句到了。第二句到了。",
+                "第一句到了。第二句到了。",
+            ],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=["第一句到了。", "第二句到了。"],
+            expected_staged="",
+            tags=("duplicate-final",),
+            sentence_finalize_age=3,
+        )
+        results = [
+            {
+                "id": "mid-score-overfinal",
+                "language": "zh",
+                "tags": ["duplicate-final"],
+                "expected_final": ["第一句到了。", "第二句到了。"],
+                "chunks": [{"input": chunk} for chunk in case.chunks],
+                "initial_final": [],
+                "actual_final": ["第一句到了。", "第二句到了。", "后面太早出来了。"],
+                "actual_pending": "",
+                "actual_staged": "",
+                "actual_staged_queue": [],
+                "final_score": _score(2 / 3, 1.0, 0.8),
+                "final_ordered_score": _score(2 / 3, 1.0, 0.8),
+                "final_boundary_score": _score(0.5, 0.5, 0.5),
+                "completed_last_score": _score(0.0, 0.0, 0.0),
+                "pending_exact": True,
+                "staged_exact": True,
+                "case_exact_match": False,
+                "metrics": {"finalized": 3, "stage_start": 3, "stage_queue_promote": 1},
+            }
+        ]
+
+        report = build_benchmark_report(
+            args=args,
+            case_sources=["cases.jsonl"],
+            corpus_role="challenge-replay",
+            cases=[case],
+            results=results,
+            metric_totals={"finalized": 3, "stage_start": 3, "stage_queue_promote": 1},
+            elapsed_ms=1.0,
+        )
+
+        mid = report["strict_logic_candidate_summary"]["mid_score_final"]
+        self.assertEqual(mid["case_count"], 1)
+        self.assertEqual(mid["actionable_case_count"], 1)
+        self.assertEqual(mid["issue_kind_counts"], {"overfinal_or_extra_final": 1})
+        self.assertEqual(mid["overfinal_extra_kind_counts"], {"actual_unexpected_or_later_context": 1})
+        self.assertEqual(mid["examples"][0]["id"], "mid-score-overfinal")
+        self.assertEqual(report["strict_logic_candidate_summary"]["low_score_thresholds"]["0.65"]["case_count"], 0)
+
     def test_single_expected_final_can_be_strict_logic_candidate(self) -> None:
         args = Namespace(
             model="sat-3l-sm",

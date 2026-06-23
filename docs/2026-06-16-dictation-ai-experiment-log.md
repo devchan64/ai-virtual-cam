@@ -31077,3 +31077,59 @@ strict_final_f1_avg=0.922
 - 이번 structural subset에서는 checked-in 기본값을 바꿀 근거가 없다.
 - 낮은 structural 케이스는 `over-final later context`, `staged residue`, `boundary granularity`가 섞여 있어 단일 파라미터 변경으로 일반화하기 어렵다.
 - 다음 앱 로직 변경은 같은 세부 원인이 추가 로그 케이스에서 반복될 때만 검토한다.
+
+## 2026-06-24 strict mid-score 진단 추가
+
+목적:
+
+- 0.65 미만 low-score 케이스가 사라진 뒤에도 전체/structural 평균을 낮추는 0.65~0.95 strict 후보가 남아 있었다.
+- 기존 low-score 요약은 이 구간을 직접 보여주지 않아, 다음 앱 lifecycle 병목을 찾을 때 사람이 케이스별 JSON을 따로 읽어야 했다.
+- `strict_logic_candidate_summary.mid_score_final`을 추가해 중간 점수 구간의 over/under/boundary 분포를 리포트에 노출했다.
+
+시도:
+
+```text
+report=.tmp/eval/dictation-ai-sbd/current-20260624-mid-score-summary-report.json
+cases=57
+strict_logic_candidates=38
+final_f1_avg=0.913
+strict_final_f1_avg=0.953
+
+strict_mid_score_final:
+  case_count=7
+  boundary_sensitive_case_count=0
+  actionable_case_count=7
+  issue_kind_counts:
+    overfinal_or_extra_final=3
+    underfinal_missing_no_residue=2
+    short_fragment_sensitive=1
+    underfinal_boundary_or_revision=1
+  overfinal_extra_kind_counts:
+    actual_unexpected_or_later_context=3
+    actual_revision_of_expected=1
+  underfinal_missing_kind_counts:
+    prefix_expected_lost_after_later_progress=1
+    short_quality_blocked_missing=1
+
+structural_report=.tmp/eval/dictation-ai-sbd/structural-preflight-20260624-mid-score-report.json
+structural_mid_score_final:
+  case_count=4
+  boundary_sensitive_case_count=0
+  actionable_case_count=4
+  issue_kind_counts:
+    overfinal_or_extra_final=2
+    underfinal_boundary_or_revision=1
+    underfinal_missing_no_residue=1
+```
+
+해석:
+
+- 현재 문제는 0.65 미만의 명백한 failure보다 0.65~0.95 구간의 trade-off 케이스다.
+- 중간 점수 구간에서도 단일 원인이 지배적이지 않다.
+- structural subset에서는 `overfinal_or_extra_final`이 2건으로 가장 많지만, 아직 전역 앱 로직 변경 근거로 보기에는 케이스 수가 적다.
+
+결론:
+
+- 앱 기본값은 변경하지 않는다.
+- 다음 모니터링/케이스 추가는 중간 점수 구간의 `overfinal_or_extra_final`, `underfinal_missing_no_residue`, `underfinal_boundary_or_revision`이 같은 형태로 반복되는지 확인하는 방향이 적절하다.
+- 0.65 미만 low-score만 보는 방식은 현재 단계의 최적화 후보 탐색에 부족하므로, 이후 리포트 해석에서는 `strict_logic_candidate_summary.mid_score_final`을 함께 본다.
