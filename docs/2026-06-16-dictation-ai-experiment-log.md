@@ -28657,3 +28657,41 @@ missing_expected_split_coverage.split_coverage_total=3
 - `final_f1_avg`는 0.818에서 0.825로, `final_boundary_f1_avg`는 0.551에서 0.558로 올랐다. 이는 정의 오류 제거 효과로 해석한다.
 - 자동 감사가 직접 잡는 `case_definition_flag_counts`는 비어 있지만, replay tail 부족/중간 스트림/수동 경계 리뷰 등 case definition review는 5건 남아 있다.
 - 따라서 현재 상태는 "명시적 expected_final 정의 오류는 자동 감사 기준에서 제거됨"으로 해석하고, 앱 로직 튜닝은 `strict_logic_candidates=41` 중심으로 진행한다.
+
+## 2026-06-24 aged no-end final 완화 실험 폐기
+
+목적:
+
+- 낮은 점수 케이스에서 `stage_age_quality_blocked`, `stage_candidate_quality_blocked`, terminal staged/queue residue가 반복된다.
+- 종결부호가 없는 staged 문장도 충분히 오래 유지되면 final로 소비하도록 완화하면, 확정 누락이 줄어드는지 확인했다.
+
+시도:
+
+- `no_end_marker` staged 후보가 age 기준에 도달한 경우, 짧은 조각/반복/공백 CJK/내부 공백 등 품질 차단 플래그가 없으면 final을 허용하는 방향을 임시 적용했다.
+- 언어별 문구 규칙이 아니라, "오래 유지된 no-end 후보를 순서 보존을 위해 소비할 수 있는가"라는 생명주기 원칙을 검증하려는 시도였다.
+
+CUDA/SaT 확인:
+
+```text
+baseline_output=.tmp/eval/dictation-ai-sbd/current-20260624-case-definition-fixed-report.json
+baseline_finalized=131
+baseline_final_precision_avg=0.887
+baseline_final_recall_avg=0.800
+baseline_final_f1_avg=0.825
+baseline_strict_final_f1_avg=0.816
+baseline_final_boundary_f1_avg=0.558
+
+experiment_output=.tmp/eval/dictation-ai-sbd/current-20260624-aged-no-end-finalize-report.json
+experiment_finalized=136
+experiment_final_precision_avg=0.869
+experiment_final_recall_avg=0.800
+experiment_final_f1_avg=0.814
+experiment_strict_final_f1_avg=0.800
+experiment_final_boundary_f1_avg=0.548
+```
+
+해석:
+
+- finalized 수는 131에서 136으로 늘었지만 recall은 개선되지 않았고 precision, final F1, strict final F1, boundary F1이 모두 하락했다.
+- 따라서 no-end aged final을 넓게 허용하는 방향은 현재 challenge replay 기준에서 과확정 위험이 더 크다.
+- 이 앱 로직 변경은 폐기했고, 다음 개선은 no-end 전반 완화가 아니라 terminal residue/split coverage/pure loss를 더 분리한 뒤 더 좁은 생명주기 원칙을 찾아야 한다.
