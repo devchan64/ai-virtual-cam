@@ -60,16 +60,36 @@ class DictationAiSbdStructuralSelectorTest(unittest.TestCase):
 
         self.assertEqual([case["id"] for case in selected], ["high-queue", "high-revision"])
         self.assertIn("lifecycle-focus-top", selected[0]["selection_reasons"])
+        self.assertEqual(selected[0]["structural_issue_kind"], "revision_text_mismatch")
         self.assertEqual(selected[0]["expected_quality_flags"], [])
         self.assertEqual(selected[0]["input_evidence"]["covered_count"], 3)
         self.assertIn("- expected_quality_mode: exclude", markdown)
         self.assertIn("- input_evidence_mode: require", markdown)
         self.assertIn("- case_definition_mode: clean", markdown)
         self.assertIn("- source_trace_mode: require", markdown)
+        self.assertIn('- issue_kind_counts: {"revision_text_mismatch": 2}', markdown)
         self.assertIn("- corpus_role: exploratory", markdown)
         self.assertIn("- paper_evidence: false", markdown)
         self.assertIn("structural lifecycle preflight only", markdown)
-        self.assertIn("| 1 | high-queue | en |", markdown)
+        self.assertIn("| 1 | high-queue | en | revision_text_mismatch |", markdown)
+
+    def test_classifies_structural_issue_kinds(self) -> None:
+        underfinal = _case("underfinal", queue_len=1, boundary_f1=0.8, queue_revision=1, replace_deferred=1)
+        underfinal["actual_final"] = ["First sentence.", "Second sentence."]
+        underfinal["final_score"] = {"f1": 0.8}
+        overfinal = _case("overfinal", queue_len=1, boundary_f1=0.8, queue_revision=1, replace_deferred=1)
+        overfinal["actual_final"] = ["First sentence.", "Second sentence.", "Third sentence.", "Fourth sentence."]
+        overfinal["final_score"] = {"f1": 0.8}
+        boundary = _case("boundary", queue_len=1, boundary_f1=0.0, queue_revision=1, replace_deferred=1)
+        boundary["final_score"] = {"f1": 1.0}
+        report = {"cases": [underfinal, overfinal, boundary]}
+
+        selected = select_structural_cases(report, limit=3)
+        issue_kinds = {case["id"]: case["structural_issue_kind"] for case in selected}
+
+        self.assertEqual(issue_kinds["underfinal"], "underfinal_missing")
+        self.assertEqual(issue_kinds["overfinal"], "overfinal_or_extra_final")
+        self.assertEqual(issue_kinds["boundary"], "boundary_granularity_only")
 
     def test_excludes_expected_quality_review_candidates_by_default(self) -> None:
         quality_case = _case("quality-review", queue_len=8, boundary_f1=0.0, queue_revision=80, replace_deferred=80)

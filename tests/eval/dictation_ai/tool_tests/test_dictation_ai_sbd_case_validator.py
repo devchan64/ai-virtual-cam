@@ -871,6 +871,73 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
         self.assertEqual(summary["source_trace_case_count"], 1)
         self.assertEqual(summary["missing_source_trace_case_count"], 0)
 
+    def test_can_require_source_trace_to_match_raw_stt_chunk(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_path = Path(tmpdir) / "avc-whisper.log"
+            log_path.write_text(
+                "\n".join(
+                    [
+                        "[2026-06-24 10:00:00] [avc] Dictation AI 전사 요청: chunk=12",
+                        "[2026-06-24 10:00:00] [avc] Dictation AI stt_raw: [ko] 안녕하세요.",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            path = Path(tmpdir) / "cases.jsonl"
+            self._write_payload(
+                path,
+                {
+                    "id": "case-a",
+                    "language": "ko",
+                    "chunks": ["안녕하세요."],
+                    "expected_final": ["안녕하세요."],
+                    "source_log": str(log_path),
+                    "source_chunk": 12,
+                    "tags": ["missing-final"],
+                },
+            )
+
+            summary = validate_case_files([path], require_source_trace=True, require_source_trace_match=True)
+
+        self.assertEqual(summary["source_trace_case_count"], 1)
+        self.assertEqual(summary["source_trace_match_counts"], {"matched": 1})
+        self.assertEqual(summary["source_trace_mismatch_examples"], [])
+
+    def test_rejects_source_trace_text_mismatch_when_required(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_path = Path(tmpdir) / "avc-whisper.log"
+            log_path.write_text(
+                "\n".join(
+                    [
+                        "[2026-06-24 10:00:00] [avc] Dictation AI 전사 요청: chunk=12",
+                        "[2026-06-24 10:00:00] [avc] Dictation AI stt_raw: [ko] 다른 문장입니다.",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            path = Path(tmpdir) / "cases.jsonl"
+            self._write_payload(
+                path,
+                {
+                    "id": "case-a",
+                    "language": "ko",
+                    "chunks": ["안녕하세요."],
+                    "expected_final": ["안녕하세요."],
+                    "source_log": str(log_path),
+                    "source_chunk": 12,
+                    "tags": ["missing-final"],
+                },
+            )
+
+            summary = validate_case_files([path], require_source_trace=True)
+            with self.assertRaisesRegex(ValueError, "source trace does not resolve"):
+                validate_case_files([path], require_source_trace=True, require_source_trace_match=True)
+
+        self.assertEqual(summary["source_trace_match_counts"], {"source_chunk_text_mismatch": 1})
+        self.assertEqual(summary["source_trace_mismatch_examples"][0]["status"], "source_chunk_text_mismatch")
+
     def test_enforces_case_thresholds(self) -> None:
         summary = {"case_count": 2, "draft_count": 1, "expected_final_case_count": 1}
 

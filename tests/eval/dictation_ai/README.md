@@ -66,6 +66,9 @@ strict 후보로 본다.
 반복 기준 횟수는 고정값이 아니라 case의 `sentence_finalize_age`이며, 현재 기본값이 3이므로
 기본 설정에서는 의미가 비슷한 문장 후보가 3회 이상 반복된 문장을 확정 기대값으로 본다.
 따라서 3회는 별도 평가 정책이 아니라 현재 age 기본값을 벤치 케이스 정의에 반영한 값이다.
+`source_trace_match_counts`는 `source_log/source_chunk`가 현재 보관된 회전 로그의 raw STT window와
+연결되는지 보여준다. 이 값은 `expected_final` 정의 오류가 아니라 source trace 보정 큐를 찾기 위한
+진단 신호다. trace까지 강제 확인할 때만 `--require-source-trace-match`를 사용한다.
 구두점만 있는 후보는 token-sentence 반복 근거가 아니므로 stable 후보에서 제외한다.
 이 값이 높은 케이스는 삭제보다 먼저 `stable_candidate_examples`를 보고 `expected_final`을
 반복 관측 후보 기준으로 다시 작성한다.
@@ -74,6 +77,12 @@ strict 후보로 본다.
 `case_definition_action_summary`의 action 예시는 `stable_candidates`에 전체 stable 후보를 함께 담는다.
 `input_evidence.stable_candidate_examples`는 빠른 요약용으로 일부만 보여주므로, expected 문장 수가 많을 때는
 action 예시의 전체 후보를 기준으로 재작성/재단 여부를 판단한다.
+`tuning_next_action_summary.priority=collect_more_same_issue_kind_cases`이면 앱 로직 변경보다 같은 issue kind
+케이스 추가를 먼저 한다. strict low subset의 상위 issue kind가 충분히 반복되지 않으면, 한 케이스를 고치기
+위한 세부 분기가 전체 precision/boundary를 악화시킬 수 있다.
+`select-structural-cases` Markdown의 `issue_kind_counts`는 이 판단을 빠르게 보기 위한 요약이다.
+`boundary_granularity_only`가 많으면 라벨 boundary 또는 scoring 해석을 먼저 보고, `underfinal_missing`이나
+`overfinal_or_extra_final`이 같은 lifecycle metric과 함께 반복될 때만 앱 로직 preflight로 좁힌다.
 `stable_candidate_shape_counts`는 stable 후보와 `expected_final`의 문장 수 관계를 보여준다.
 `same_stable_candidate_count_as_expected`는 단순 재작성 후보일 수 있지만 stable 후보가 앞뒤 문장을
 섞지 않는지 확인해야 한다. `fewer_stable_candidates_than_expected`는 기대 문장을 줄이거나 replay

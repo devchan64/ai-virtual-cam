@@ -32224,3 +32224,89 @@ HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_
 - 현재 active challenge replay에서는 이 override가 실제 출력 차이를 만들지 않았다.
 - stable internal high와 duplicate suppression이 함께 관측된다는 사실만으로는 suppression 우회 조건을 일반 원칙으로 채택할 근거가 부족하다.
 - 임시 실험 코드는 제거하고, default/manifest에는 새 knob를 남기지 않는다.
+
+## 2026-06-24 short terminal final unblock preflight
+
+목적:
+
+- strict low 케이스에서 `stage_age_quality_blocked`, `stage_replace_deferred`, `short_cjk`가 함께 관측되어, 종결 경계가 있는 짧은 후보를 aged/right-context final 경로에서 차단하지 않는 완화를 검토했다.
+- 이 축은 “짧은 문장도 번역 대상이어야 한다”는 요구를 앱 final 확정 경로에 직접 반영할 수 있는지 확인하기 위한 preflight다.
+
+임시 변경:
+
+- `short_cjk`를 진단 플래그로만 두고 `_should_finalize_replaced_sentence`, `_should_finalize_before_replacement`, `_should_finalize_with_right_context`의 final 차단 조건에서 제외했다.
+- `no_end_marker`, `short_no_end_fragment`, 반복 n-gram, CJK 내부 공백 artefact 차단은 유지했다.
+
+명령:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --model sat-3l-sm \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-short-terminal-final-cuda.json
+```
+
+결과:
+
+| variant | finalized | finalized/stage_start | final_precision_avg | final_recall_avg | final_f1_avg | final_boundary_f1_avg | 판단 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| baseline | 131 | 0.441 | 0.9237 | 0.9175 | 0.9135 | 0.6044 | 유지 |
+| short terminal unblock | 190 | 0.671 | 0.7066 | 0.9020 | 0.7757 | 0.4543 | 폐기 |
+
+해석:
+
+- 완화는 일부 누락 케이스를 개선했지만, finalized 수를 크게 늘려 false final과 boundary 파괴를 증가시켰다.
+- `zh_log_draft_20260620_avc_whisper_log_11_000820`은 개선됐지만, 다수의 기존 1.0 케이스가 0.4~0.8대로 악화됐다.
+- 따라서 “짧은 종결 후보를 aged/right-context에서 일괄 허용”은 일반 원칙으로 채택하지 않는다.
+- 짧은 문장 번역 요구는 final 이후 번역 필터에서는 이미 허용되어 있으며, 현재 문제는 final 확정 전 생명주기 판단에서 precision을 보존하는 조건을 더 좁히는 방향으로 다뤄야 한다.
+
+## 2026-06-24 source trace cleanup verification
+
+목적:
+
+- active challenge replay의 `source_log/source_chunk` 메타데이터를 현재 보관된 회전 로그의 raw STT window와 다시 연결했다.
+- 이 작업은 `expected_final` 정의 변경이 아니라, 케이스 provenance 검증을 강화하기 위한 metadata 보정이다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases tests/eval/dictation_ai/sbd_cases \
+  --require-expected-final \
+  --require-input-evidence \
+  --require-observed-input-evidence \
+  --require-stable-repeat-evidence \
+  --require-source-trace \
+  --require-source-trace-match
+```
+
+결과:
+
+- `case_count=57`
+- `expected_final_case_count=53`
+- `expected_no_final_case_count=4`
+- `source_trace_match_counts={"matched": 53}`
+- `input_unobserved_case_count=0`
+- `stable_repeat_unsupported_case_count=0`
+
+CUDA 재검증:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --model sat-3l-sm \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-after-source-trace-cleanup-cuda.json
+```
+
+결과:
+
+| cases | finalized | finalized/stage_start | final_precision_avg | final_recall_avg | final_f1_avg | strict_final_f1_avg | final_boundary_f1_avg |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 57 | 131 | 0.441 | 0.924 | 0.918 | 0.913 | 0.953 | 0.604 |
+
+해석:
+
+- source trace 보정은 케이스 provenance 검증을 강화했지만 앱 출력 성능은 baseline과 동일하다.
+- `expected_definition_cleanup=0`이므로 현재 active set에서 `expected_final` 오작성 수정 큐는 비어 있다.
+- 남은 개선 후보는 케이스 정의가 아니라 strict low subset의 mixed issue kind를 더 모아 한 가지 구조 문제가 반복되는지 확인하는 방향이다.

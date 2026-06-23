@@ -26,6 +26,8 @@ from tests.eval.dictation_ai.representative.validate_sbd_representative_review_p
 
 
 TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
+LOG_CHUNK_RE = re.compile(r"\bchunk=(\d+)\b")
+STT_RAW_RE = re.compile(r"Dictation AI stt_raw: \[[^\]]+\] (.*)$")
 
 
 def _validated_case_paths(inputs: Iterable[Path]) -> list[Path]:
@@ -42,6 +44,77 @@ def _validated_case_paths(inputs: Iterable[Path]) -> list[Path]:
 
 def _as_dict(value: object) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def _source_log_path(source_log: str) -> Path:
+    path = Path(source_log)
+    if path.is_absolute():
+        return path
+    return REPO_ROOT / path
+
+
+def _load_source_raw_chunks(source_log: str) -> dict[int, list[str]] | None:
+    path = _source_log_path(source_log)
+    if not path.is_file():
+        return None
+    chunks: dict[int, list[str]] = {}
+    pending_chunk: int | None = None
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            if "전사 요청:" in line:
+                match = LOG_CHUNK_RE.search(line)
+                pending_chunk = int(match.group(1)) if match else None
+                continue
+            if "Dictation AI stt_raw:" not in line:
+                continue
+            match = STT_RAW_RE.search(line)
+            if pending_chunk is not None and match:
+                chunks.setdefault(pending_chunk, []).append(match.group(1).strip())
+            pending_chunk = None
+    return chunks
+
+
+def _first_case_chunk_text(payload: dict[str, object]) -> str:
+    chunks = payload.get("chunks")
+    if chunks is None:
+        chunks = [payload.get("text", "")]
+    if not isinstance(chunks, list):
+        return ""
+    for chunk in chunks:
+        text = str(chunk.get("input", "") if isinstance(chunk, dict) else chunk).strip()
+        if text:
+            return text
+    return ""
+
+
+def _source_trace_match_status(
+    payload: dict[str, object],
+    *,
+    source_raw_cache: dict[str, dict[int, list[str]] | None],
+) -> tuple[str, str]:
+    source_log = str(payload.get("source_log", "")).strip()
+    source_chunk = payload.get("source_chunk")
+    if not source_log or source_chunk is None:
+        return "missing_trace", ""
+    try:
+        chunk_index = int(source_chunk)
+    except (TypeError, ValueError):
+        return "invalid_source_chunk", str(source_chunk)
+    if source_log not in source_raw_cache:
+        source_raw_cache[source_log] = _load_source_raw_chunks(source_log)
+    raw_chunks = source_raw_cache[source_log]
+    if raw_chunks is None:
+        return "missing_source_log_file", source_log
+    raw_texts = raw_chunks.get(chunk_index) or []
+    if not raw_texts:
+        return "missing_source_chunk", str(chunk_index)
+    first_chunk = _first_case_chunk_text(payload)
+    if first_chunk:
+        for raw_text in raw_texts:
+            if first_chunk in raw_text or raw_text in first_chunk:
+                return "matched", raw_text
+        return "source_chunk_text_mismatch", raw_texts[-1]
+    return "matched", raw_texts[-1]
 
 
 def _load_review_packet_index(path: Path) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
@@ -133,6 +206,7 @@ def validate_case_files(
     allow_drafts: bool = False,
     require_expected_final: bool = False,
     require_source_trace: bool = False,
+    require_source_trace_match: bool = False,
     require_input_evidence: bool = False,
     require_observed_input_evidence: bool = False,
     require_stable_repeat_evidence: bool = False,
@@ -163,6 +237,9 @@ def validate_case_files(
     missing_source_trace_case_count = 0
     missing_source_trace_by_file: Counter[str] = Counter()
     missing_source_trace_examples: list[dict[str, object]] = []
+    source_trace_match_counts: Counter[str] = Counter()
+    source_trace_mismatch_examples: list[dict[str, object]] = []
+    source_raw_cache: dict[str, dict[int, list[str]] | None] = {}
     input_unsupported_case_count = 0
     input_unsupported_by_file: Counter[str] = Counter()
     input_unsupported_examples: list[dict[str, object]] = []
@@ -330,6 +407,32 @@ def validate_case_files(
                     has_source_chunk = payload.get("source_chunk") is not None
                     if source_log and has_source_chunk:
                         source_trace_case_count += 1
+                        match_status, match_detail = _source_trace_match_status(
+                            payload,
+                            source_raw_cache=source_raw_cache,
+                        )
+                        source_trace_match_counts[match_status] += 1
+                        if match_status != "matched":
+                            if len(source_trace_mismatch_examples) < 8:
+                                source_trace_mismatch_examples.append(
+                                    {
+                                        "id": case_id,
+                                        "path": str(path),
+                                        "line_no": line_no,
+                                        "language": str(payload.get("language", "")).strip().lower() or "en",
+                                        "source_log": source_log,
+                                        "source_chunk": payload.get("source_chunk"),
+                                        "status": match_status,
+                                        "detail_preview": match_detail[:120],
+                                        "first_chunk_preview": _first_case_chunk_text(payload)[:120],
+                                    }
+                                )
+                            if require_source_trace_match:
+                                raise ValueError(
+                                    f"{path}:{line_no} case {case_id!r} source trace does not resolve to "
+                                    f"the replay chunk: status={match_status} source_log={source_log!r} "
+                                    f"source_chunk={payload.get('source_chunk')!r}"
+                                )
                     else:
                         missing_source_trace_case_count += 1
                         missing_source_trace_by_file[str(path)] += 1
@@ -367,6 +470,8 @@ def validate_case_files(
         "unmarked_no_expected_final_case_count": unmarked_no_expected_final_case_count,
         "unmarked_no_expected_final_examples": unmarked_no_expected_final_examples,
         "source_trace_case_count": source_trace_case_count,
+        "source_trace_match_counts": dict(sorted(source_trace_match_counts.items())),
+        "source_trace_mismatch_examples": source_trace_mismatch_examples,
         "missing_source_trace_case_count": missing_source_trace_case_count,
         "missing_source_trace_by_file": dict(sorted(missing_source_trace_by_file.items())),
         "missing_source_trace_examples": missing_source_trace_examples,
@@ -433,6 +538,11 @@ def main() -> int:
         help="Fail when an expected_final case has no source_log/source_chunk trace metadata.",
     )
     parser.add_argument(
+        "--require-source-trace-match",
+        action="store_true",
+        help="Fail when source_log/source_chunk does not resolve to the first replay chunk raw STT text.",
+    )
+    parser.add_argument(
         "--require-input-evidence",
         action="store_true",
         help="Fail when expected_final is not fully supported by the case replay chunks.",
@@ -479,6 +589,7 @@ def main() -> int:
             allow_drafts=args.allow_drafts,
             require_expected_final=args.require_expected_final,
             require_source_trace=args.require_source_trace,
+            require_source_trace_match=args.require_source_trace_match,
             require_input_evidence=args.require_input_evidence,
             require_observed_input_evidence=args.require_observed_input_evidence,
             require_stable_repeat_evidence=args.require_stable_repeat_evidence,

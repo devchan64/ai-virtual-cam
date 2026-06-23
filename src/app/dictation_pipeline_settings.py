@@ -828,7 +828,7 @@ def dictation_tuning_manifest() -> list[dict[str, int | float | str]]:
             min_value=0,
             max_value=4,
             scope="lifecycle",
-            intent="require one more observation for punctuated short CJK candidates before finalizing",
+            intent="optionally add observations for punctuated short CJK candidates; default keeps language confirmation count unified",
         ),
         _tuning_manifest_entry(
             "SHORT_CJK_REPLACEMENT_HOLD_CHUNKS",
@@ -838,7 +838,7 @@ def dictation_tuning_manifest() -> list[dict[str, int | float | str]]:
             min_value=0,
             max_value=6,
             scope="lifecycle",
-            intent="delay suppression of punctuated short CJK staged heads when later replacement candidates arrive",
+            intent="optionally hold punctuated short CJK staged heads during replacement; default avoids queue stalls",
         ),
         _tuning_manifest_entry(
             "CJK_REVISION_RATIO_MIN",

@@ -75,6 +75,24 @@ def _case_id(item: dict[str, Any]) -> str:
     return str(item.get("id") or "").strip()
 
 
+def _structural_issue_kind(case: dict[str, Any]) -> str:
+    final_score = dict(case.get("final_score", {}))
+    boundary_score = dict(case.get("final_boundary_score", {}))
+    final_f1 = float(final_score.get("f1", 0.0))
+    boundary_f1 = float(boundary_score.get("f1", 0.0))
+    expected_final_count = len(case.get("expected_final", []) or [])
+    actual_final_count = len(case.get("actual_final", []) or [])
+    if final_f1 >= 0.95 and boundary_f1 < 0.80:
+        return "boundary_granularity_only"
+    if actual_final_count > expected_final_count:
+        return "overfinal_or_extra_final"
+    if actual_final_count < expected_final_count:
+        return "underfinal_missing"
+    if final_f1 < 0.95:
+        return "revision_text_mismatch"
+    return "no_final_mismatch"
+
+
 def _case_expected_quality_flags(case: dict[str, Any]) -> list[str]:
     expected_final = [
         str(sentence).strip()
@@ -184,6 +202,7 @@ def _append_unique(
     reasons.append(reason)
     item["selection_reasons"] = reasons
     item["structural_selection_score"] = round(_case_score(candidate), 3)
+    item["structural_issue_kind"] = _structural_issue_kind(candidate)
     item["expected_quality_flags"] = _case_expected_quality_flags(candidate)
     item["input_evidence"] = case_input_evidence(candidate)
     selected.append(item)
@@ -306,6 +325,10 @@ def render_markdown(
     case_definition_mode: str = "clean",
     source_trace_mode: str = "require",
 ) -> str:
+    issue_counts: dict[str, int] = {}
+    for case in cases:
+        issue_kind = str(case.get("structural_issue_kind", ""))
+        issue_counts[issue_kind] = issue_counts.get(issue_kind, 0) + 1
     lines = [
         "# Dictation AI Structural Case Selection",
         "",
@@ -319,9 +342,10 @@ def render_markdown(
         "- corpus_role: exploratory",
         "- paper_evidence: false",
         "- interpretation: structural lifecycle preflight only; case-definition review candidates, missing source trace cases, expected-quality review candidates, and partial/weak input-evidence candidates are excluded by default; rerun the full challenge replay with sat + cuda + float16 before using any metric as paper evidence.",
+        "- issue_kind_counts: " + json.dumps(issue_counts, ensure_ascii=False, sort_keys=True),
         "",
-        "| rank | id | language | score | reasons | expected_quality_flags | input_evidence | final_f1 | boundary_f1 | queue_len | stage_queue_revision | stage_replace_deferred |",
-        "| ---: | --- | --- | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| rank | id | language | issue_kind | score | reasons | expected_quality_flags | input_evidence | final_f1 | boundary_f1 | queue_len | stage_queue_revision | stage_replace_deferred |",
+        "| ---: | --- | --- | --- | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for rank, case in enumerate(cases, start=1):
         metrics = dict(case.get("metrics", {}))
@@ -341,6 +365,7 @@ def render_markdown(
                     str(rank),
                     str(case.get("id", "")),
                     str(case.get("language", "")),
+                    str(case.get("structural_issue_kind", "")),
                     f"{float(case.get('structural_selection_score', 0.0)):.3f}",
                     ", ".join(str(reason) for reason in case.get("selection_reasons", [])),
                     quality_flags,
