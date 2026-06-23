@@ -293,6 +293,7 @@ def validate_case_files(
                                     "stable_group_count_max": int(input_evidence.get("stable_group_count_max", 0)),
                                     "stable_candidate_count": int(input_evidence.get("stable_candidate_count", 0)),
                                     "stable_candidate_examples": input_evidence.get("stable_candidate_examples", []),
+                                    "expected_sentence_evidence": input_evidence.get("expected_sentence_evidence", []),
                                 }
                             )
                         if require_stable_repeat_evidence:

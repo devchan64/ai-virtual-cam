@@ -208,6 +208,20 @@ def case_input_evidence(case: dict[str, Any]) -> dict[str, Any]:
         expected_sentence_stable_group_count(sentence, stable_candidates)
         for sentence in expected_final
     ]
+    expected_sentence_evidence = [
+        {
+            "sentence": sentence,
+            "coverage": coverages[index],
+            "observed": observed[index],
+            "repeat_count": repeat_counts[index],
+            "stable_group_count": stable_group_counts[index],
+            "stable_repeat_supported": (
+                repeat_counts[index] >= required_repeat_observations
+                or stable_group_counts[index] >= required_repeat_observations
+            ),
+        }
+        for index, sentence in enumerate(expected_final)
+    ]
     covered_count = sum(1 for value in coverages if value >= MIN_INPUT_EVIDENCE_COVERAGE)
     observed_count = sum(1 for value in observed if value)
     # stable repeat evidence는 expected 문장 자체가 replay chunk sentence 후보에서
@@ -238,6 +252,7 @@ def case_input_evidence(case: dict[str, Any]) -> dict[str, Any]:
         "stable_group_count_max": max(stable_group_counts, default=0),
         "stable_candidate_count": len(stable_candidates),
         "stable_candidate_examples": stable_candidates[:STABLE_CANDIDATE_EXAMPLE_LIMIT],
+        "expected_sentence_evidence": expected_sentence_evidence,
         "fully_supported": bool(expected_final) and covered_count == len(expected_final),
         "observed_fully_supported": bool(expected_final) and observed_count == len(expected_final),
         "stable_repeat_fully_supported": bool(expected_final) and stable_repeat_count == len(expected_final),

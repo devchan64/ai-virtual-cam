@@ -46,6 +46,7 @@ from src.app.dictation_transcript_logic import (
     _should_confirm_staged_sentence,
     _should_defer_token_sentence_revision,
     _should_defer_unconfirmed_replacement,
+    _should_finalize_confirmed_before_prefix_drop_revision,
     _should_finalize_before_replacement,
     _should_finalize_with_right_context,
     _should_finalize_replaced_sentence,
@@ -487,6 +488,14 @@ def run_transcribe_loop(
             return finalized
         is_revision = _sentences_are_revisions(active_stage.sentence, candidate)
         if is_revision:
+            if _should_finalize_confirmed_before_prefix_drop_revision(
+                active_stage.sentence,
+                candidate,
+                active_stage.confirmations,
+                active_stage.forced,
+            ):
+                count_metric("stage_confirmed_before_prefix_drop_revision")
+                return finalize_staged_sentence(detected, "confirmed")
             count_metric("stage_revision")
             count_segment_state("revised")
             staged_before = active_stage.sentence

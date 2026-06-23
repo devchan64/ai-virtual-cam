@@ -1758,6 +1758,41 @@ def _is_cjk_prefixed_stale_revision(left: str, right: str) -> bool:
     return common_run >= 8 and right_coverage >= 0.70
 
 
+def _is_prefix_dropped_revision(left: str, right: str) -> bool:
+    normalized_left = _normalized_text(left)
+    normalized_right = _normalized_text(right)
+    if _boundary_sentence_end_count(normalized_left) == 0 or _boundary_sentence_end_count(normalized_right) == 0:
+        return False
+    left_words = _word_units(normalized_left)
+    right_words = _word_units(normalized_right)
+    if len(left_words) <= len(right_words) or len(right_words) < 8:
+        return False
+    matcher = SequenceMatcher(None, left_words, right_words, autojunk=False)
+    blocks = [block for block in matcher.get_matching_blocks() if block.size > 0]
+    if not blocks:
+        return False
+    first = blocks[0]
+    if first.b != 0 or not (2 <= first.a <= 10):
+        return False
+    matched_units = sum(block.size for block in blocks)
+    right_coverage = matched_units / max(len(right_words), 1)
+    return first.size >= 8 and right_coverage >= 0.70
+
+
+def _should_finalize_confirmed_before_prefix_drop_revision(
+    staged_sentence: str,
+    candidate: str,
+    staged_confirmations: int,
+    staged_forced: bool,
+) -> bool:
+    if not _should_confirm_staged_sentence(staged_sentence, staged_confirmations, staged_forced):
+        return False
+    if not _is_prefix_dropped_revision(staged_sentence, candidate):
+        return False
+    flags = set(_final_sentence_diagnostic_flags(staged_sentence, "zh" if _is_cjk_text(staged_sentence) else ""))
+    return not flags.intersection({"empty", "spaced_cjk", "cjk_repeated_ngram", "repeated_word_ngram"})
+
+
 def _is_cjk_prefixed_truncated_revision(left: str, right: str) -> bool:
     normalized_left = _normalized_text(left)
     normalized_right = _normalized_text(right)

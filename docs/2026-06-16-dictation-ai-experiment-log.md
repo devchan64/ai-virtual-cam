@@ -28380,3 +28380,95 @@ final_boundary_f1_avg=0.5446825396825398
 - final 지표와 실제 출력은 바뀌지 않았다. 이번 변경은 앱 성능 개선이 아니라 벤치 해석 오류 수정이다.
 - 남은 case-definition action은 `extend_replay_tail_or_reclassify_staged_expectation=3`, `add_initial_final_or_recut_mid_stream_case=1`, `manual_boundary_review=1`이다.
 - 따라서 "expected_final 정의 문제가 모두 고쳐졌다"가 아니라, 활성 60건 중 안정 반복 근거가 있는 staged residue 23건을 확정 누락 분석 대상으로 되돌린 상태로 본다.
+
+## 2026-06-23 confirmed prefix-drop revision 보호
+
+목적:
+
+- 낮은 strict 후보에서 confirmed staged sentence가 더 짧은 suffix revision으로 교체되며 앞부분이 손실되는 케이스를 확인했다.
+- 대표 케이스 `zh_log_missing_korea_day3_itinerary_connector_final_20260621_001`에서 `今天是我们在韩国第三天，应该算是第二天，第二个全天。`가 confirmations=2로 확정 가능한 상태였지만, 다음 chunk의 `第三天应该算是第二天，第二个全天。`로 revision 처리되어 prefix가 사라졌다.
+- final은 append-only이므로, 이미 confirmed 된 staged sentence는 앞부분을 떨어뜨린 prefix-drop revision으로 교체하기 전에 먼저 final로 소비해야 한다.
+
+변경:
+
+- `_is_prefix_dropped_revision()`과 `_should_finalize_confirmed_before_prefix_drop_revision()`을 추가했다.
+- staged sentence가 이미 `_should_confirm_staged_sentence()`를 통과하고, 새 revision 후보가 같은 문장의 앞부분을 떨어뜨린 suffix로 판단되면 `stage_confirmed_before_prefix_drop_revision` metric을 남기고 기존 staged sentence를 final 처리한다.
+- 운영 loop와 SBD lifecycle replay에 같은 규칙을 적용했다.
+
+CUDA/SaT 비교:
+
+```text
+base:
+output=.tmp/eval/dictation-ai-sbd/current-20260623-stable-supported-staged-residue-report.json
+finalized=131
+final_precision_avg=0.8875
+final_recall_avg=0.7899999999999999
+final_f1_avg=0.8175
+final_similarity_coverage_avg=0.7165824516710018
+final_boundary_f1_avg=0.5446825396825398
+
+patched:
+output=.tmp/eval/dictation-ai-sbd/current-20260623-confirmed-prefix-drop-report.json
+finalized=131
+final_precision_avg=0.8875
+final_recall_avg=0.7899999999999999
+final_f1_avg=0.8175
+final_similarity_coverage_avg=0.7177520423142766
+final_boundary_f1_avg=0.5513492063492064
+stage_confirmed_before_prefix_drop_revision=1
+```
+
+영향:
+
+- 변경된 케이스는 1건이다.
+- `zh_log_missing_korea_day3_itinerary_connector_final_20260621_001`의 actual final 첫 문장이 `第三天应该算是第二天，第二个全天。`에서 `今天是我们在韩国第三天，应该算是第二天，第二个全天。`로 바뀌었다.
+- 전체 precision/recall/final F1은 유지됐고 boundary F1만 `+0.0067` 상승했다.
+- 이 패치는 파라미터 완화가 아니라 append-only final lifecycle 원칙을 강화하는 보수적 변경으로 본다.
+
+## 2026-06-23 expected_final 반복 근거 감사 보강
+
+목적:
+
+- "expected_final 정의 문제가 모두 고쳐졌는가"는 단순 통과/실패가 아니라 각 expected 문장이 replay chunk의 token-sentence 후보에서 `sentence_finalize_age`만큼 반복 관측되는지로 판단해야 한다.
+- 기존 `require-stable-repeat-evidence`는 케이스 단위 통과 여부를 확인할 수 있었지만, 실패 시 어떤 expected 문장이 반복 근거를 충족하지 못했는지 확인하기 어려웠다.
+
+변경:
+
+- `case_input_evidence()`에 `expected_sentence_evidence`를 추가했다.
+- 각 expected 문장별 `coverage`, `observed`, `repeat_count`, `stable_group_count`, `stable_repeat_supported`를 validator summary에 노출한다.
+- 이 정보는 케이스 삭제보다 `expected_final` 재작성 또는 케이스 범위 재절단 여부를 판단하는 감사 근거로 사용한다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_case_validator \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report
+-> OK (92 tests)
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases \
+  tests/eval/dictation_ai/sbd_cases \
+  --require-source-trace \
+  --require-input-evidence \
+  --require-stable-repeat-evidence
+-> case_count=60 expected_final_case_count=56 stable_repeat_unsupported_case_count=0
+```
+
+CUDA/SaT 확인:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --model sat-3l-sm --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260623-prefix-drop-and-case-evidence-report.json
+
+cases=60 finalized=131
+final_precision_avg=0.887
+final_recall_avg=0.790
+final_f1_avg=0.818
+final_boundary_f1_avg=0.551
+case_definition_review=5
+logic_tuning_candidates=51
+strict_logic_candidates=40
+```

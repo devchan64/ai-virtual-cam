@@ -350,6 +350,31 @@ class DictationAiSbdLifecycleTest(unittest.TestCase):
 
         self.assertEqual(preferred, "被吓到了想要炸鸡可能吃不下去了。")
 
+    def test_confirmed_stage_finalizes_before_prefix_drop_revision(self) -> None:
+        previous = "今天是我们在韩国第三天，应该算是第二天，第二个全天。"
+        candidate = "第三天应该算是第二天，第二个全天。"
+        state = LifecycleState(
+            language="zh",
+            staged_sentence=previous,
+            staged_confirmations=2,
+            staged_age=1,
+            staged_deferred_age_chunk=2,
+        )
+
+        finalized = _stage_completed_sentence(
+            state,
+            candidate,
+            "zh",
+            forced=False,
+            sentence_finalize_age=3,
+            chunk_index=3,
+        )
+
+        self.assertEqual(finalized, [previous])
+        self.assertEqual(state.final_sentences, [previous])
+        self.assertEqual(state.staged_sentence, "")
+        self.assertEqual(state.metrics["stage_confirmed_before_prefix_drop_revision"], 1)
+
     def test_shifted_cjk_revision_drops_single_dangling_tail(self) -> None:
         preferred = _prefer_sentence_revision(
             "炒饭粒粒分明，好香啊，它。",

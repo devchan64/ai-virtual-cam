@@ -236,6 +236,27 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
         self.assertEqual(summary["stable_repeat_unsupported_examples"][0]["repeat_count_min"], 0)
         self.assertEqual(summary["stable_repeat_unsupported_examples"][0]["stable_candidate_count"], 1)
         self.assertEqual(
+            summary["stable_repeat_unsupported_examples"][0]["expected_sentence_evidence"],
+            [
+                {
+                    "sentence": "우리는 계속해서 미국 투자를 이어갈 것인가?",
+                    "coverage": 1.0,
+                    "observed": True,
+                    "repeat_count": 3,
+                    "stable_group_count": 3,
+                    "stable_repeat_supported": True,
+                },
+                {
+                    "sentence": "트럼프 행정부에서 지금 완전히 다른 정책을 보고 있습니다.",
+                    "coverage": 0.375,
+                    "observed": False,
+                    "repeat_count": 0,
+                    "stable_group_count": 0,
+                    "stable_repeat_supported": False,
+                },
+            ],
+        )
+        self.assertEqual(
             summary["stable_repeat_unsupported_examples"][0]["stable_candidate_examples"],
             [{"text": "우리는 계속해서 미국 투자를 이어갈 것인가?", "count": 3, "first_index": 0, "last_index": 2}],
         )
