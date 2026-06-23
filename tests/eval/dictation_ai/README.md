@@ -178,4 +178,22 @@ raw STT 기준 expected 재작성, 반복 case 정당화 여부를 사람이 검
   --compact
 ```
 
+같은 원인군 challenge case를 더 모을 때는 source audit의 `target_collection_source_ranking`을
+`select-representative-sources --priority-metric`으로 연결한다. 이 출력은 검토할 로그 파일
+manifest일 뿐이며, benchmark case나 논문 근거가 아니다. 회전 로그는 `sentence_finalize_age` 같은
+전사 루프 시작 메타데이터가 같은 파일 안에 없을 수 있으므로, priority 수집 manifest를 만들 때는
+필요하면 `--allow-missing-runtime-metadata --allow-mixed-runtime`을 사용하고 case 승격 전 원 로그
+문맥에서 런타임을 다시 확인한다.
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py select-representative-sources \
+  .tmp/eval/dictation-ai-sbd/target-source-audit-20260624.json \
+  --priority-metric stage_replace_deferred_per_stt_raw \
+  --per-language 3 \
+  --allow-missing-runtime-metadata \
+  --allow-mixed-runtime \
+  --output .tmp/eval/dictation-ai-sbd/target-stage-replace-sources.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/target-stage-replace-sources.md
+```
+
 새 코드에서 import할 때는 루트가 아니라 하위 도메인 경로를 사용한다. 예를 들어 paper readiness 구현은 `tests.eval.dictation_ai.paper.audit_paper_readiness`에서 가져온다.

@@ -31257,3 +31257,47 @@ top_target_sources:
 
 - 앱 기본값과 확정 로직은 변경하지 않는다.
 - 다음 challenge case 추가는 위 랭킹의 상위 파일에서 실제 transcript/final 흐름을 확인한 뒤, 사람이 `expected_final`을 명확히 작성할 수 있는 구간만 등록한다.
+
+## 2026-06-24 priority metric 기반 source manifest 연결
+
+목적:
+
+- 로그 소스 랭킹이 리포트에만 남으면 실제 케이스 수집 작업으로 이어지기 어렵다.
+- 기존 representative source selector는 hash 기반 대표성 샘플링만 지원하므로, `target_collection_source_ranking`의 특정 metric 상위 파일을 선택하는 priority mode를 추가했다.
+
+시도:
+
+```text
+tool_test=./.venv/bin/python -m unittest \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_representative_source_selector \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_representative_source_audit
+tool_test_result=OK
+
+selection_command=./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py select-representative-sources \
+  .tmp/eval/dictation-ai-sbd/target-source-audit-20260624.json \
+  --priority-metric stage_replace_deferred_per_stt_raw \
+  --per-language 3 \
+  --allow-missing-runtime-metadata \
+  --allow-mixed-runtime \
+  --output .tmp/eval/dictation-ai-sbd/target-stage-replace-sources-20260624.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/target-stage-replace-sources-20260624.md
+
+selected_source_count=3
+eligible_source_counts:
+  zh=8
+selected_sources:
+  .tmp/logs/avc-whisper.log.60 rank=0 ratio=3.306
+  .tmp/logs/avc-whisper.log.57 rank=1 ratio=3.182
+  .tmp/logs/avc-whisper.log.32 rank=2 ratio=2.629
+```
+
+해석:
+
+- `stage_replace_deferred_per_stt_raw` 상위 파일이 priority 순서대로 manifest에 잡힌다.
+- strict runtime metadata 필터에서는 0건이었는데, 회전 로그 파일 안에 전사 루프 시작 메타데이터가 없기 때문이다.
+- 이 manifest는 자동 case 승격 결과가 아니며, 사람이 해당 로그 구간에서 실제 STT window/final 흐름을 보고 `expected_final`을 작성해야 한다.
+
+결론:
+
+- 다음 케이스 수집은 `target-stage-replace-sources-20260624.md`의 상위 로그부터 확인한다.
+- priority manifest는 앱 로직 변경 근거가 아니라 동일 원인군 수집 대상을 좁히는 단계로만 사용한다.

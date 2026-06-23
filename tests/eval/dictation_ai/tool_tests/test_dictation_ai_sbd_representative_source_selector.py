@@ -120,6 +120,49 @@ class DictationAiSbdRepresentativeSourceSelectorTest(unittest.TestCase):
         self.assertEqual(strict["selected_source_count"], 0)
         self.assertEqual(relaxed["selected_source_count"], 1)
 
+    def test_priority_metric_selects_ranked_sources_before_hash_order(self) -> None:
+        audit = {
+            "target_collection_source_ranking": {
+                "rankings": {
+                    "stage_replace_deferred_per_stt_raw": [
+                        {"path": "logs/zh-b.log", "ratio": 2.0, "count": 20},
+                        {"path": "logs/zh-a.log", "ratio": 1.0, "count": 10},
+                    ]
+                }
+            },
+            "files": [
+                _file_summary("logs/zh-a.log", "zh"),
+                _file_summary("logs/zh-b.log", "zh"),
+                _file_summary("logs/zh-unranked.log", "zh"),
+            ],
+        }
+
+        manifest = select_representative_sources(
+            audit,
+            per_language=2,
+            seed="fixed-seed",
+            priority_metric="stage_replace_deferred_per_stt_raw",
+        )
+
+        self.assertEqual(manifest["priority_metric"], "stage_replace_deferred_per_stt_raw")
+        self.assertTrue(manifest["interpretation"]["targeted_collection"])
+        self.assertEqual(manifest["selected_source_count"], 2)
+        self.assertEqual(
+            [record["source_log"] for record in manifest["selected_sources"]],
+            ["logs/zh-b.log", "logs/zh-a.log"],
+        )
+        self.assertEqual([record["priority_rank"] for record in manifest["selected_sources"]], [0, 1])
+        self.assertEqual([record["priority_ratio"] for record in manifest["selected_sources"]], [2.0, 1.0])
+
+    def test_priority_metric_rejects_missing_ranking(self) -> None:
+        with self.assertRaises(ValueError):
+            select_representative_sources(
+                {"target_collection_source_ranking": {"rankings": {}}, "files": []},
+                per_language=1,
+                seed="fixed-seed",
+                priority_metric="stage_replace_deferred_per_stt_raw",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

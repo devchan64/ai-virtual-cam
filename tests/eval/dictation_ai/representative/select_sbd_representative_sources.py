@@ -12,6 +12,7 @@ from typing import Any
 
 REPRESENTATIVE_MANIFEST_VERSION = 1
 SAMPLING_RULE_PREFIX = "session-hash-v1"
+PRIORITY_SAMPLING_RULE_PREFIX = "target-signal-v1"
 
 
 def _as_counter(payload: object) -> Counter[str]:
@@ -75,6 +76,35 @@ def _review_id(language: str, digest: str) -> str:
     return f"{language}_representative_review_{digest[:12]}"
 
 
+def _priority_ranking_by_path(
+    audit_summary: dict[str, object],
+    *,
+    priority_metric: str | None,
+) -> dict[str, dict[str, object]]:
+    if priority_metric is None:
+        return {}
+    ranking_summary = dict(audit_summary.get("target_collection_source_ranking", {}) or {})
+    rankings = dict(ranking_summary.get("rankings", {}) or {})
+    if priority_metric not in rankings:
+        raise ValueError(f"priority metric is not available in source audit: {priority_metric}")
+    entries = list(rankings.get(priority_metric, []) or [])
+    if not entries:
+        raise ValueError(f"priority metric has no ranked source entries: {priority_metric}")
+    ranking_by_path: dict[str, dict[str, object]] = {}
+    for index, raw_entry in enumerate(entries):
+        if not isinstance(raw_entry, dict):
+            continue
+        path = str(raw_entry.get("path", ""))
+        if not path:
+            continue
+        entry = dict(raw_entry)
+        entry["priority_rank"] = index
+        ranking_by_path[path] = entry
+    if not ranking_by_path:
+        raise ValueError(f"priority metric has no usable source paths: {priority_metric}")
+    return ranking_by_path
+
+
 def eligible_file_summaries(
     audit_summary: dict[str, object],
     *,
@@ -107,6 +137,8 @@ def _candidate_record(
     *,
     seed: str,
     sampling_rule: str,
+    priority_metric: str | None = None,
+    priority_entry: dict[str, object] | None = None,
 ) -> dict[str, object]:
     language = _dominant_key(file_summary.get("language_counts"))
     path = str(file_summary.get("path", ""))
@@ -134,6 +166,10 @@ def _candidate_record(
         "line_count": int(file_summary.get("line_count", 0)),
         "timestamped_line_count": int(file_summary.get("timestamped_line_count", 0)),
         "review_status": "requires_expected_final_review",
+        "priority_metric": priority_metric,
+        "priority_rank": priority_entry.get("priority_rank") if priority_entry else None,
+        "priority_ratio": priority_entry.get("ratio") if priority_entry else None,
+        "priority_marker_count": priority_entry.get("count") if priority_entry else None,
         "notes": [
             "This is a representative source review candidate, not a benchmark case.",
             "Confirm runtime metadata in the selected source window before creating a representative JSONL case.",
@@ -149,8 +185,13 @@ def select_representative_sources(
     seed: str,
     require_runtime_metadata: bool = True,
     require_single_runtime: bool = True,
+    priority_metric: str | None = None,
 ) -> dict[str, object]:
-    sampling_rule = f"{SAMPLING_RULE_PREFIX}:seed={seed}:per_language={per_language}"
+    ranking_by_path = _priority_ranking_by_path(audit_summary, priority_metric=priority_metric)
+    sampling_rule_prefix = PRIORITY_SAMPLING_RULE_PREFIX if priority_metric else SAMPLING_RULE_PREFIX
+    sampling_rule = f"{sampling_rule_prefix}:seed={seed}:per_language={per_language}"
+    if priority_metric:
+        sampling_rule = f"{sampling_rule}:priority_metric={priority_metric}"
     eligible = eligible_file_summaries(
         audit_summary,
         require_runtime_metadata=require_runtime_metadata,
@@ -160,6 +201,8 @@ def select_representative_sources(
     for file_summary in eligible:
         language = _dominant_key(file_summary.get("language_counts"))
         path = str(file_summary.get("path", ""))
+        if priority_metric and path not in ranking_by_path:
+            continue
         digest = _selection_hash(seed=seed, language=language, path=path)
         eligible_by_language.setdefault(language, []).append((digest, file_summary))
 
@@ -167,10 +210,27 @@ def select_representative_sources(
     eligible_counts: Counter[str] = Counter()
     selected_counts: Counter[str] = Counter()
     for language, candidates in sorted(eligible_by_language.items()):
-        ordered = sorted(candidates, key=lambda item: (item[0], str(item[1].get("path", ""))))
+        if priority_metric:
+            ordered = sorted(
+                candidates,
+                key=lambda item: (
+                    int(ranking_by_path[str(item[1].get("path", ""))].get("priority_rank") or 0),
+                    item[0],
+                    str(item[1].get("path", "")),
+                ),
+            )
+        else:
+            ordered = sorted(candidates, key=lambda item: (item[0], str(item[1].get("path", ""))))
         eligible_counts[language] = len(ordered)
         for digest, file_summary in ordered[:per_language]:
-            record = _candidate_record(file_summary, seed=seed, sampling_rule=sampling_rule)
+            path = str(file_summary.get("path", ""))
+            record = _candidate_record(
+                file_summary,
+                seed=seed,
+                sampling_rule=sampling_rule,
+                priority_metric=priority_metric,
+                priority_entry=ranking_by_path.get(path),
+            )
             record["selection_hash"] = digest
             selected.append(record)
             selected_counts[language] += 1
@@ -183,6 +243,7 @@ def select_representative_sources(
         "per_language": per_language,
         "require_runtime_metadata": require_runtime_metadata,
         "require_single_runtime": require_single_runtime,
+        "priority_metric": priority_metric,
         "source_audit": {
             "source_count": audit_summary.get("source_count"),
             "first_timestamp": audit_summary.get("first_timestamp"),
@@ -198,23 +259,29 @@ def select_representative_sources(
             "case_generation": False,
             "requires_human_expected_final": True,
             "claim_scope": "representative source review manifest only",
+            "targeted_collection": priority_metric is not None,
         },
     }
 
 
 def write_markdown_manifest(manifest: dict[str, object], path: Path) -> None:
     rows = [
-        "| id | language | source_log | started | ended | stt_backend | stt_model | windows | finalize_age |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| id | language | source_log | priority | started | ended | stt_backend | stt_model | windows | finalize_age |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for record in list(manifest.get("selected_sources", [])):
         if not isinstance(record, dict):
             continue
         rows.append(
-            "| {id} | {language} | {source_log} | {source_started_at} | {source_ended_at} | {stt_backend} | {stt_model} | {windows} | {age} |".format(
+            "| {id} | {language} | {source_log} | {priority} | {source_started_at} | {source_ended_at} | {stt_backend} | {stt_model} | {windows} | {age} |".format(
                 id=record.get("id", ""),
                 language=record.get("language", ""),
                 source_log=record.get("source_log", ""),
+                priority=(
+                    ""
+                    if record.get("priority_metric") is None
+                    else f"{record.get('priority_metric')}#{record.get('priority_rank')}={record.get('priority_ratio')}"
+                ),
                 source_started_at=record.get("source_started_at", ""),
                 source_ended_at=record.get("source_ended_at", ""),
                 stt_backend=", ".join(sorted(dict(record.get("stt_backend_candidates", {})).keys())),
@@ -228,6 +295,7 @@ def write_markdown_manifest(manifest: dict[str, object], path: Path) -> None:
         "",
         f"- sampling_unit: `{manifest.get('sampling_unit')}`",
         f"- sampling_rule: `{manifest.get('sampling_rule')}`",
+        f"- priority_metric: `{manifest.get('priority_metric')}`",
         f"- selected_source_count: `{manifest.get('selected_source_count')}`",
         f"- eligible_source_counts: `{manifest.get('eligible_source_counts')}`",
         f"- selected_source_counts: `{manifest.get('selected_source_counts')}`",
@@ -249,6 +317,11 @@ def main() -> int:
     parser.add_argument("--seed", default="20260621-representative-v1")
     parser.add_argument("--allow-missing-runtime-metadata", action="store_true")
     parser.add_argument("--allow-mixed-runtime", action="store_true")
+    parser.add_argument(
+        "--priority-metric",
+        default=None,
+        help="Select from target_collection_source_ranking for targeted same-issue case collection.",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--markdown-output", type=Path, default=None)
     args = parser.parse_args()
@@ -264,6 +337,7 @@ def main() -> int:
             seed=args.seed,
             require_runtime_metadata=not args.allow_missing_runtime_metadata,
             require_single_runtime=not args.allow_mixed_runtime,
+            priority_metric=args.priority_metric,
         )
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         print(f"[dictation-ai-sbd-representative-selector] error: {exc}", file=sys.stderr)
