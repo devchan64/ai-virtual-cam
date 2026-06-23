@@ -224,6 +224,8 @@ def main() -> int:
         f"corpus_role={corpus_role} cases={len(results)} finalized={summary['finalized']} "
         f"claim_scope_key={evidence_protocol.get('claim_scope_key', '')} "
         f"case_definition_review={case_definition_actions.get('review_case_count', 0)} "
+        f"case_definition_cleanup={case_definition_actions.get('case_definition_cleanup_count', 0)} "
+        f"case_interpretation_review={case_definition_actions.get('case_interpretation_review_count', 0)} "
         f"case_definition_review_ratio={float(case_definition_health.get('case_definition_review_ratio', 0.0)):.3f} "
         f"logic_tuning_candidates={case_definition_actions.get('logic_tuning_candidate_count', 0)} "
         f"strict_logic_candidates={strict_logic_summary.get('strict_case_count', 0)} "

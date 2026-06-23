@@ -282,6 +282,18 @@ CASE_REVIEW_ACTION_FLAGS = (
     "deduplicate_or_justify_shifted_window_repeat",
     "manual_boundary_review",
 )
+CASE_DEFINITION_CLEANUP_ACTION_FLAGS = frozenset(
+    {
+        "recut_or_relabel_stable_candidate_mismatch",
+        "rewrite_expected_final_to_stable_repeated_candidate",
+        "remove_or_recut_expected_outside_replay_input",
+        "rewrite_expected_final_to_observed_stt_text",
+        "restore_source_log_or_recut_from_observed_log",
+        "rewrite_expected_final_to_final_sentence_boundary",
+        "deduplicate_or_justify_shifted_window_repeat",
+    }
+)
+CASE_INTERPRETATION_REVIEW_ACTION_FLAGS = frozenset(CASE_REVIEW_ACTION_FLAGS) - CASE_DEFINITION_CLEANUP_ACTION_FLAGS
 PREFIX_CONTEXT_MIN_SUPPORT = max(0.30, FINAL_SENTENCE_MATCH_MIN_SIMILARITY - 0.40)
 TERMINAL_RESIDUE_MIN_UNITS = 6
 TERMINAL_RESIDUE_SUFFIX_COVERAGE_MIN = 0.85
@@ -1603,6 +1615,16 @@ def summarize_case_definition_action_items(results: list[dict[str, Any]]) -> dic
         for result in results
         if _case_review_actions(result)
     ]
+    definition_cleanup_results = [
+        result
+        for result in review_results
+        if any(action in CASE_DEFINITION_CLEANUP_ACTION_FLAGS for action in _case_review_actions(result))
+    ]
+    interpretation_review_results = [
+        result
+        for result in review_results
+        if any(action in CASE_INTERPRETATION_REVIEW_ACTION_FLAGS for action in _case_review_actions(result))
+    ]
     logic_tuning_candidate_count = sum(
         1
         for result in results
@@ -1691,6 +1713,8 @@ def summarize_case_definition_action_items(results: list[dict[str, Any]]) -> dic
             "cases whose ordered expected_final labels still do not align with stable candidates."
         ),
         "review_case_count": len(review_results),
+        "case_definition_cleanup_count": len(definition_cleanup_results),
+        "case_interpretation_review_count": len(interpretation_review_results),
         "logic_tuning_candidate_count": logic_tuning_candidate_count,
         "action_counts": dict(sorted(action_counts.items())),
         "language_counts": dict(sorted(language_counts.items())),
@@ -2097,6 +2121,8 @@ def summarize_case_definition_health(
     """Summarize whether the current case set is usable as app-logic tuning evidence."""
     expected_final_count = sum(1 for result in results if result.get("expected_final"))
     review_case_count = int(case_definition_action_summary.get("review_case_count", 0))
+    cleanup_count = int(case_definition_action_summary.get("case_definition_cleanup_count", review_case_count))
+    interpretation_review_count = int(case_definition_action_summary.get("case_interpretation_review_count", 0))
     logic_tuning_candidate_count = int(case_definition_action_summary.get("logic_tuning_candidate_count", 0))
     strict_case_count = int(strict_logic_candidate_summary.get("strict_case_count", 0))
     action_counts = {
@@ -2108,22 +2134,29 @@ def summarize_case_definition_health(
         for action, count in sorted(action_counts.items(), key=lambda item: (-item[1], item[0]))[:CASE_EXEMPLAR_LIMIT]
     ]
     review_ratio = review_case_count / max(expected_final_count, 1)
+    cleanup_ratio = cleanup_count / max(expected_final_count, 1)
     strict_ratio = strict_case_count / max(expected_final_count, 1)
     if strict_case_count <= 0:
         recommendation = "case-definition-review-required"
-    elif review_ratio >= 0.50:
+    elif cleanup_ratio >= 0.50:
         recommendation = "prioritize-case-definition-cleanup"
     else:
         recommendation = "app-logic-tuning-subset-usable"
     return {
         "interpretation": (
             "Use this health summary before treating aggregate final_f1_avg as app-logic evidence. "
-            "High review ratios mean the challenge corpus is dominated by label/window definition work; "
+            "High cleanup ratios mean the challenge corpus is dominated by label/window definition work; "
+            "case_interpretation_review_count separates replay-tail and boundary-granularity cases from "
+            "expected_final cleanup work. "
             "strict_logic_candidates are the preferred subset for conservative app-logic tuning."
         ),
         "expected_final_case_count": expected_final_count,
         "case_definition_review_count": review_case_count,
         "case_definition_review_ratio": review_ratio,
+        "case_definition_cleanup_count": cleanup_count,
+        "case_definition_cleanup_ratio": cleanup_ratio,
+        "case_interpretation_review_count": interpretation_review_count,
+        "case_interpretation_review_ratio": interpretation_review_count / max(expected_final_count, 1),
         "logic_tuning_candidate_count": logic_tuning_candidate_count,
         "logic_tuning_candidate_ratio": logic_tuning_candidate_count / max(expected_final_count, 1),
         "strict_logic_candidate_count": strict_case_count,
@@ -2148,6 +2181,8 @@ def summarize_tuning_next_action(
     health_recommendation = str(case_definition_health_summary.get("recommendation", "unknown"))
     strict_count = int(case_definition_health_summary.get("strict_logic_candidate_count", 0))
     review_count = int(case_definition_health_summary.get("case_definition_review_count", 0))
+    definition_cleanup_count = int(case_definition_health_summary.get("case_definition_cleanup_count", review_count))
+    interpretation_review_count = int(case_definition_health_summary.get("case_interpretation_review_count", 0))
     terminal_residue_count = int(terminal_expected_residue_summary.get("case_count", 0))
     missing_no_residue_count = int(missing_expected_without_terminal_residue_summary.get("case_count", 0))
     split_coverage_count = int(missing_expected_split_coverage_summary.get("case_count", 0))
@@ -2182,6 +2217,8 @@ def summarize_tuning_next_action(
         "rationale": rationale,
         "health_recommendation": health_recommendation,
         "case_definition_review_count": review_count,
+        "case_definition_cleanup_count": definition_cleanup_count,
+        "case_interpretation_review_count": interpretation_review_count,
         "strict_logic_candidate_count": strict_count,
         "clean_low_case_count_lt_0_65": clean_low_065,
         "clean_low_case_count_lt_0_50": clean_low_050,

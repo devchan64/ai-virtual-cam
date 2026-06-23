@@ -1404,6 +1404,8 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         health = report["case_definition_health_summary"]
         self.assertEqual(health["expected_final_case_count"], 2)
         self.assertEqual(health["case_definition_review_count"], 1)
+        self.assertEqual(health["case_definition_cleanup_count"], 1)
+        self.assertEqual(health["case_interpretation_review_count"], 0)
         self.assertEqual(health["logic_tuning_candidate_count"], 1)
         self.assertEqual(health["strict_logic_candidate_count"], 1)
         self.assertEqual(health["recommendation"], "prioritize-case-definition-cleanup")
@@ -2327,6 +2329,8 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
             {"extend_replay_tail_or_reclassify_staged_expectation": 1},
         )
         self.assertEqual(report["case_definition_health_summary"]["case_definition_review_count"], 1)
+        self.assertEqual(report["case_definition_health_summary"]["case_definition_cleanup_count"], 0)
+        self.assertEqual(report["case_definition_health_summary"]["case_interpretation_review_count"], 1)
         self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
 
     def test_fragment_expected_final_is_reported_as_rewrite_action(self) -> None:
