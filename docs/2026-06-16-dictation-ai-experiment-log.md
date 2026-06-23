@@ -28472,3 +28472,32 @@ case_definition_review=5
 logic_tuning_candidates=51
 strict_logic_candidates=40
 ```
+
+## 2026-06-23 confirmed-before-age-queue 리포트 해석 보강
+
+목적:
+
+- `stage_confirmed_before_age_queue`는 이미 운영/replay에 존재하는 순서 보호 metric이다.
+- 그러나 benchmark report의 bottleneck/exemplar metric 목록에는 빠져 있어 ordered gap 케이스를 해석할 때 원인 신호가 누락됐다.
+
+변경:
+
+- `stage_confirmed_before_age_queue`를 lifecycle bottleneck, case exemplar, supported-low bottleneck metric 후보에 추가했다.
+- 앱 동작은 변경하지 않고, 이미 발생한 lifecycle 결정을 리포트에서 관측 가능하게 했다.
+
+CUDA/SaT 확인:
+
+```text
+output=.tmp/eval/dictation-ai-sbd/current-20260623-report-age-queue-metric-report.json
+cases=60 finalized=131
+final_precision_avg=0.887
+final_recall_avg=0.790
+final_f1_avg=0.818
+final_boundary_f1_avg=0.551
+stage_confirmed_before_age_queue=1
+```
+
+해석:
+
+- 해당 metric은 low final F1 후보가 아니라 ordered gap 케이스 `zh_log_draft_20260620_avc_whisper_log_11_000866`에서 관측됐다.
+- 따라서 현재 다음 튜닝 후보는 단순 누락 개선보다 final 순서/경계 granularity 해석 문제로 분리해서 보는 편이 적절하다.
