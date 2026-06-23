@@ -1704,7 +1704,7 @@ def summarize_case_definition_action_items(results: list[dict[str, Any]]) -> dic
             "traceable source_log/source_chunk, "
             "rewrite_expected_final_to_final_sentence_boundary for fragment-like "
             "expected_final labels, extend_replay_tail_or_reclassify_staged_expectation when expected final "
-            "text is still staged at the end of the replay window without ordered stable-repeat support, "
+            "text is still staged at the end of the replay window or the replay tail is too short, "
             "deduplicate_or_justify_shifted_window_repeat when repeated sliding-window samples overweight "
             "one log region, and manual_boundary_review for remaining nested boundary ambiguities. "
             "stable_candidate_shape_counts separates simple expected_final rewrites from cases that need "
@@ -2155,8 +2155,18 @@ def summarize_case_definition_health(
         "case_review_ratio": review_ratio,
         "case_definition_review_count": review_case_count,
         "case_definition_review_ratio": review_ratio,
+        "expected_definition_status": (
+            "no_expected_final_definition_cleanup_candidates"
+            if cleanup_count == 0
+            else "expected_final_definition_cleanup_required"
+        ),
         "expected_definition_cleanup_count": cleanup_count,
         "expected_definition_cleanup_ratio": cleanup_ratio,
+        "case_interpretation_status": (
+            "no_case_interpretation_review_candidates"
+            if interpretation_review_count == 0
+            else "replay_tail_or_boundary_interpretation_review_required"
+        ),
         "case_definition_cleanup_count": cleanup_count,
         "case_definition_cleanup_ratio": cleanup_ratio,
         "case_interpretation_review_count": interpretation_review_count,
