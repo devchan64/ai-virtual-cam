@@ -36,6 +36,7 @@ from src.app.dictation_pipeline_settings import (
 )
 from src.app.dictation_transcript_logic import (
     _prefer_sentence_revision,
+    _strip_prior_pending_prefix_revision,
     _should_translate_final_sentence,
 )
 from src.app.sentence_boundary import SentenceBoundaryResult
@@ -297,6 +298,29 @@ class DictationPipelineNodeTest(unittest.TestCase):
             preferred,
             "我们最后一天想说来圣水洞这边晃晃，因为妹妹想要买的东西在圣水洞这边的Beaker有，然后呢。",
         )
+
+    def test_prior_pending_prefix_keeps_normal_continuation(self) -> None:
+        candidate = _strip_prior_pending_prefix_revision(
+            "",
+            "I went to the store.",
+            "I went to",
+        )
+
+        self.assertEqual(candidate, "I went to the store.")
+
+    def test_prior_pending_prefix_strips_repeated_accumulation_suffix(self) -> None:
+        prior_pending = (
+            "원래 삼성이 2등을 했을 거라고 다들 예측했는데 "
+            "원래 삼성이 2등을 했을 거라고 다들 예측했는데 "
+            "미세한 차이로 SMIC가"
+        )
+        candidate = _strip_prior_pending_prefix_revision(
+            "",
+            prior_pending + " 원래 삼성이 2등을 했을 거라고 다들 예측했는데 미세한 차이로 SMIC가 2등을 했어요.",
+            prior_pending,
+        )
+
+        self.assertEqual(candidate, "원래 삼성이 2등을 했을 거라고 다들 예측했는데 미세한 차이로 SMIC가 2등을 했어요.")
 
     def test_cjk_revision_keeps_longer_tail_when_prefix_is_same(self) -> None:
         preferred = _prefer_sentence_revision(

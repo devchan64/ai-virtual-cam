@@ -826,10 +826,17 @@ def _stage_completed_sentence(
             state.staged_delta_suppressed_chunk_index = -1
             _promote_next_staged_sentence(state, chunk_index)
         return []
-    if state.staged_deferred_age_chunk == chunk_index:
+    allow_same_chunk_suffix_replacement = (
+        replacement_reason == "duplicate_or_suffix"
+        and _sentence_end_count(candidate) > 0
+        and _should_stage_boundary_candidate(candidate, language)
+    )
+    if state.staged_deferred_age_chunk == chunk_index and not allow_same_chunk_suffix_replacement:
         _queue_staged_sentence(state, candidate, forced, chunk_index)
         state.count("stage_replace_deferred_same_chunk")
         return []
+    if allow_same_chunk_suffix_replacement:
+        state.count("stage_replace_same_chunk_suffix_allowed")
     if _should_finalize_replaced_sentence(
         state.staged_sentence,
         candidate,

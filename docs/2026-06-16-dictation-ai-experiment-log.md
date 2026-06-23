@@ -29400,6 +29400,41 @@ SHORT_NO_END_FRAGMENT_UNITS=6=final_f1_avg=0.895906, strict_final_f1_avg=0.95140
 - short no-end 단일 임계값은 현재 active challenge corpus에서 성능 개선축이 아니다.
 - 다음 앱 로직 후보는 `review_boundary_granularity` 문제를 직접 다루되, 케이스별 문구/언어별 예외나 overlap join 복원 없이 “완결 boundary 후보가 stable token-sentence로 3회 이상 관측됐는가”를 기준으로 검토해야 한다.
 
+## 2026-06-24 repeated pending prefix와 same-chunk suffix guard 완화
+
+목적:
+
+- 최저점 케이스 중 `ko_log_draft_20260620_avc_whisper_log_002879`는 expected 문장이 STT chunk 안에서 반복 관측됐지만, SaT 완료 후보 앞에 긴 prior pending prefix가 다시 붙고 `stage_replace_deferred_same_chunk` 경로로 밀리면서 final이 누락됐다.
+- 이미 폐기한 normalization/join을 되살리지 않고, 구조적으로 반복 누적된 pending prefix가 completed 후보 앞에 그대로 붙은 경우에만 suffix를 회수한다.
+- 같은 chunk에서 `duplicate_or_suffix` replacement가 발생해도 suffix 후보가 종결부호를 가진 stage 가능한 문장이면 same-chunk guard를 완화한다.
+
+반영:
+
+```text
+app_patch=src/app/dictation_transcript_logic.py, src/app/dictation_pipeline_loop.py
+replay_patch=tests/eval/dictation_ai/benchmark/sbd_lifecycle_replay.py
+unit_test=./.venv/bin/python -m unittest tests.unit.test_dictation_pipeline_nodes
+unit_test_result=OK, 21 tests
+
+baseline=.tmp/eval/dictation-ai-sbd/current-20260624-continuation-report.json
+baseline_result=case_count=57, finalized=130, case_definition_review=7, strict_logic_candidates=37
+baseline_final=final_precision_avg=0.906, final_recall_avg=0.900, final_f1_avg=0.896, strict_final_f1_avg=0.951, final_boundary_f1_avg=0.581
+
+patched=.tmp/eval/dictation-ai-sbd/current-20260624-samechunk-suffix-guard-relax-report.json
+patched_result=case_count=57, finalized=131, case_definition_review=6, strict_logic_candidates=38
+patched_final=final_precision_avg=0.924, final_recall_avg=0.918, final_f1_avg=0.913, strict_final_f1_avg=0.953, final_boundary_f1_avg=0.581
+changed_case_count=1
+improved_case=ko_log_draft_20260620_avc_whisper_log_002879, final_f1=0.000->1.000
+```
+
+해석:
+
+- 이번 변경은 케이스별 문구 규칙이 아니라, `pending prefix가 반복 ngram을 가진 장기 누적 상태`이고 completed 후보가 그 prefix를 그대로 포함하며 새 종결부호를 추가한 경우에만 작동한다.
+- 정상적인 짧은 continuation은 strip하지 않도록 테스트로 고정했다.
+- final F1/precision/recall은 함께 개선됐고, strict final F1도 소폭 개선됐다.
+- boundary F1은 개선되지 않았다. 따라서 이 패치는 boundary granularity 문제의 해결책이 아니라, 반복 pending prefix가 확정 후보 소비를 막는 lifecycle stall을 줄이는 보수 개선으로 해석한다.
+- suffix 후보 자체를 final로 보내는 변형도 확인했지만 `final_f1_avg=0.896`, `strict_final_f1_avg=0.926`, `final_boundary_f1_avg=0.563`으로 악화되어 폐기했다.
+
 ## 2026-06-24 confirmation 축 재검토
 
 목적:

@@ -737,7 +737,12 @@ def run_transcribe_loop(
                 active_stage.clear()
                 promote_next_staged_sentence(detected)
             return []
-        if active_stage.deferredAgeChunk == chunks:
+        allow_same_chunk_suffix_replacement = (
+            replacement_reason == "duplicate_or_suffix"
+            and _sentence_end_count(candidate) > 0
+            and _should_stage_boundary_candidate(candidate, detected)
+        )
+        if active_stage.deferredAgeChunk == chunks and not allow_same_chunk_suffix_replacement:
             queue_staged_sentence(candidate, forced)
             count_metric("stage_replace_deferred_same_chunk")
             worker._emit(
@@ -750,6 +755,8 @@ def run_transcribe_loop(
                 display=False,
             )
             return []
+        if allow_same_chunk_suffix_replacement:
+            count_metric("stage_replace_same_chunk_suffix_allowed")
         worker._emit(
             "status",
             "받아쓰기 AI stage 교체: "

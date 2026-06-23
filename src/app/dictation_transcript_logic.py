@@ -1614,7 +1614,7 @@ def _strip_prior_pending_prefix_revision(staged_sentence: str, candidate: str, p
     pending_words = _word_units(normalized_pending)
     if not candidate_words or not pending_words:
         return normalized_candidate
-    if len(pending_words) > 12 or len(pending_words) >= len(candidate_words):
+    if len(pending_words) >= len(candidate_words):
         return normalized_candidate
     if candidate_words[: len(pending_words)] != pending_words:
         return normalized_candidate
@@ -1624,6 +1624,14 @@ def _strip_prior_pending_prefix_revision(staged_sentence: str, candidate: str, p
     suffix = _cjk_delta_from_words(suffix_words) if _has_cjk_words(candidate_words) else _sentence_delta_from_words(suffix_words)
     if not suffix:
         return normalized_candidate
+    if len(pending_words) > 12:
+        if not (_has_repeated_word_ngram(pending_words) or _has_repeated_cjk_ngram(pending_words)):
+            return normalized_candidate
+        if _boundary_sentence_end_count(normalized_candidate) <= _boundary_sentence_end_count(normalized_pending):
+            return normalized_candidate
+        if normalized_candidate.startswith(normalized_pending):
+            suffix = normalized_candidate[len(normalized_pending) :].strip()
+        return _with_candidate_terminal(suffix, normalized_candidate)
     if staged_sentence and not _sentences_are_revisions(staged_sentence, suffix):
         staged_words = _word_units(staged_sentence)
         suffix_words = _word_units(suffix)
