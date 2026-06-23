@@ -1371,7 +1371,7 @@ def _case_primary_review_action(result: dict[str, Any]) -> str:
         return "deduplicate_or_justify_shifted_window_repeat"
     if "expected_final_omits_stable_actual_sentence" in definition_flags:
         return "manual_boundary_review"
-    if _has_expected_final_staged_residue(result) and not _expected_final_matches_stable_repeat_evidence(result):
+    if _has_expected_final_staged_residue(result):
         return "extend_replay_tail_or_reclassify_staged_expectation"
     if _missing_expected_split_coverage_payload(result) is not None:
         return "manual_boundary_review"
@@ -1380,16 +1380,6 @@ def _case_primary_review_action(result: dict[str, Any]) -> str:
     if definition_flags.intersection({"nested_expected_sentence"}):
         return "manual_boundary_review"
     return ""
-
-
-def _expected_final_matches_stable_repeat_evidence(result: dict[str, Any]) -> bool:
-    input_evidence = dict(result.get("input_evidence", {}) or {})
-    return (
-        bool(input_evidence.get("fully_supported"))
-        and bool(input_evidence.get("observed_fully_supported", True))
-        and bool(input_evidence.get("stable_repeat_fully_supported", True))
-        and _stable_candidate_ordered_alignment(result) == "ordered_high_similarity"
-    )
 
 
 def _is_boundary_granularity_review(result: dict[str, Any]) -> bool:

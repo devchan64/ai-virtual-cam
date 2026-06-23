@@ -2183,7 +2183,7 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         )
         self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
 
-    def test_stable_repeated_expected_final_staged_residue_is_logic_candidate(self) -> None:
+    def test_stable_repeated_expected_final_staged_residue_is_replay_tail_review(self) -> None:
         args = Namespace(
             model="sat-3l-sm",
             device="cuda",
@@ -2238,9 +2238,12 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
             elapsed_ms=1.0,
         )
 
-        self.assertEqual(report["case_definition_action_summary"]["action_counts"], {})
-        self.assertEqual(report["case_definition_health_summary"]["case_definition_review_count"], 0)
-        self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 1)
+        self.assertEqual(
+            report["case_definition_action_summary"]["action_counts"],
+            {"extend_replay_tail_or_reclassify_staged_expectation": 1},
+        )
+        self.assertEqual(report["case_definition_health_summary"]["case_definition_review_count"], 1)
+        self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
 
     def test_fragment_expected_final_is_reported_as_rewrite_action(self) -> None:
         args = Namespace(

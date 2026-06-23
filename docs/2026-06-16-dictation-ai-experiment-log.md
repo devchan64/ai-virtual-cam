@@ -29029,3 +29029,56 @@ case_definition_flag_counts={}
 - 전체 F1은 동일하다. 변경은 앱 로직이 아니라 벤치 리포트의 후보 분류 보정이다.
 - strict 후보가 39건에서 41건으로 늘고 strict F1이 낮아진 것은, 이전에 case definition 문제로 제외되던 실제 앱 과확정 후보가 다시 strict 후보로 들어왔기 때문이다.
 - 이후 앱 로직 개선은 이 strict 후보를 기준으로 보아야 한다.
+
+## 2026-06-24 terminal staged residue의 replay-tail 분리
+
+목적:
+
+- `ko_log_draft_20260620_avc_whisper_log_002879`는 `final_f1=0.0`이었지만, expected 문장이 active staged 안에 남아 있었다.
+- 같은 케이스에 tail chunk를 하나 추가한 탐색 replay에서는 `final_f1=1.0`이 되어, 앱 로직이 문장을 완전히 잃은 것이 아니라 replay window가 finalization 기회를 끝까지 포함하지 못한 것으로 확인됐다.
+
+탐색 확인:
+
+```text
+probe_output=.tmp/eval/dictation-ai-sbd/probe-ko-002879-tail.json
+probe_case=ko_log_draft_20260620_avc_whisper_log_002879_tail_probe
+probe_final_f1_avg=1.000
+probe_strict_final_f1_avg=1.000
+probe_finalized=1
+```
+
+변경:
+
+- expected final이 terminal staged/queue/pending residue에 남아 있는 경우는 stable repeat 근거가 있더라도 `extend_replay_tail_or_reclassify_staged_expectation`으로 분리한다.
+- stable repeat는 “문장이 관측되었다”는 근거이지, replay가 finalization lifecycle을 끝까지 포함했다는 증거가 아니다.
+
+CUDA/SaT 확인:
+
+```text
+baseline_output=.tmp/eval/dictation-ai-sbd/current-20260624-stable-only-case-definition-report.json
+baseline_case_definition_review=5
+baseline_logic_tuning_candidates=51
+baseline_strict_logic_candidates=41
+baseline_final_f1_avg=0.858
+baseline_strict_final_f1_avg=0.871
+baseline_final_boundary_f1_avg=0.552
+
+output=.tmp/eval/dictation-ai-sbd/current-20260624-terminal-residue-review-report.json
+case_definition_review=22
+case_definition_review_ratio=0.393
+logic_tuning_candidates=34
+strict_logic_candidates=29
+final_precision_avg=0.897
+final_recall_avg=0.843
+final_f1_avg=0.858
+strict_final_f1_avg=0.943
+final_boundary_f1_avg=0.552
+terminal_expected_residue_summary.case_count=16
+terminal_expected_residue_summary.matched_missing_expected_total=16
+```
+
+해석:
+
+- 전체 F1은 변하지 않는다. 변경은 앱 로직이 아니라 벤치 해석 분리다.
+- strict 후보에서 replay-tail residue를 제거하면 strict F1이 0.871에서 0.943으로 오른다.
+- 이후 앱 로직 개선은 terminal residue가 아닌 strict 후보 29건을 기준으로 보아야 한다.
