@@ -30507,3 +30507,71 @@ review_actions=extend_replay_tail_or_reclassify_staged_expectation:3, manual_bou
 - 활성 `sbd_cases` 안에서 `expected_final`이 replay input에 없거나 raw STT text로 관측되지 않거나, `sentence_finalize_age` 기준 stable repeat 근거가 없는 명백한 cleanup 대상은 현재 0건이다.
 - 남은 6건은 expected label cleanup이 아니라 replay 종료 시점의 staged/queue residue, mid-stream initial context, boundary granularity 해석 문제로 분리한다.
 - 따라서 benchmark CLI 출력은 `case_review`, `expected_definition_cleanup`, `case_interpretation_review`를 함께 보여주도록 정리했다. 기존 JSON 호환 키인 `case_definition_review_count`는 유지하지만, 실험 해석에서는 `expected_definition_cleanup_count`를 우선 확인한다.
+
+## 2026-06-24 short no-end fragment gate sweep
+
+목적:
+
+- 최신 routing hint는 `review_boundary_granularity`였다.
+- clean low-score 후보는 없었으므로 새 boundary 규칙을 추가하지 않고, 기존 structural 품질 gate인 `SHORT_NO_END_FRAGMENT_UNITS`만 sweep했다.
+- 이 값은 종결부호 없는 짧은 조각이 stage head를 차지하는 것을 막는 일반 기준이며, 언어별 문구 규칙이 아니다.
+
+비교:
+
+```text
+baseline=SHORT_NO_END_FRAGMENT_UNITS=5
+report=.tmp/eval/dictation-ai-sbd/current-20260624-review-terminology-report.json
+final_f1_avg=0.913
+strict_final_f1_avg=0.953
+final_boundary_f1_avg=0.599
+stage_start=304
+finalized_per_stage_start=0.431
+staged_exact_match=27
+case_review=6
+expected_definition_cleanup=0
+case_interpretation_review=6
+
+env=AVC_DICTATION_SHORT_NO_END_FRAGMENT_UNITS=4
+report=.tmp/eval/dictation-ai-sbd/current-20260624-short-no-end4-report.json
+final_f1_avg=0.911
+strict_final_f1_avg=0.931
+final_boundary_f1_avg=0.596
+stage_start=305
+finalized_per_stage_start=0.430
+staged_exact_match=27
+
+env=AVC_DICTATION_SHORT_NO_END_FRAGMENT_UNITS=6
+report=.tmp/eval/dictation-ai-sbd/current-20260624-short-no-end6-report.json
+final_f1_avg=0.913
+strict_final_f1_avg=0.953
+final_boundary_f1_avg=0.599
+stage_start=299
+finalized_per_stage_start=0.438
+staged_exact_match=28
+
+env=AVC_DICTATION_SHORT_NO_END_FRAGMENT_UNITS=7
+report=.tmp/eval/dictation-ai-sbd/current-20260624-short-no-end7-report.json
+final_f1_avg=0.913
+strict_final_f1_avg=0.953
+final_boundary_f1_avg=0.599
+stage_start=297
+finalized_per_stage_start=0.441
+staged_exact_match=28
+
+env=AVC_DICTATION_SHORT_NO_END_FRAGMENT_UNITS=8
+report=.tmp/eval/dictation-ai-sbd/current-20260624-short-no-end8-report.json
+final_f1_avg=0.906
+strict_final_f1_avg=0.935
+final_boundary_f1_avg=0.591
+stage_start=293
+finalized_per_stage_start=0.447
+staged_exact_match=30
+```
+
+해석:
+
+- 4는 case review 수를 줄이지만 strict F1이 크게 하락해 조각 final을 더 쉽게 허용하는 부작용이 있다.
+- 6과 7은 final/strict/boundary F1을 유지하면서 stage churn을 줄인다.
+- 8은 stage churn은 더 줄지만 final F1, strict F1, boundary F1이 모두 하락해 과억제다.
+- 따라서 기본값은 `SHORT_NO_END_FRAGMENT_UNITS=7`로 올린다. 이 변경은 final 확정 정책을 새로 만들지 않고, 기존 short no-end fragment 품질 gate를 reviewed challenge 기준으로 보수 조정하는 것이다.
+- checked-in 기본값 검증은 `.tmp/eval/dictation-ai-sbd/current-20260624-short-no-end7-default-report.json`에서 확인했다. 결과는 env sweep의 7과 동일하게 `final_f1_avg=0.913`, `strict_final_f1_avg=0.953`, `stage_start=297`, `staged_exact_match=28`이다.

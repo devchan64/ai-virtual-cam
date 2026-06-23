@@ -143,7 +143,7 @@ SLOW_PENDING_MAX_CHARS_PER_CHUNK = 18.0
 # 이 임계값들은 낮은 가치의 조각이 stage/final 텍스트가 되는 것을 막는다.
 # 구조적 기준으로만 유지하고, 관측된 단어나 문구를 여기에 넣지 않는다.
 SHORT_CJK_FINAL_UNITS = 10
-SHORT_NO_END_FRAGMENT_UNITS = 5
+SHORT_NO_END_FRAGMENT_UNITS = 7
 SHORT_CJK_REPLACEMENT_HOLD_CHUNKS = 0
 
 # 기본 confirmation을 3회 반복 관측으로 맞추면서 짧은 CJK만 별도로 더
