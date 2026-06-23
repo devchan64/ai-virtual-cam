@@ -15,6 +15,7 @@ from tests.eval.dictation_ai.benchmark.sbd_benchmark_report import (
     summarize_results_by_language,
     summarize_results_by_tag,
     summarize_staged_queue_residue,
+    summarize_missing_expected_without_terminal_residue,
     summarize_terminal_expected_residue,
 )
 from tests.eval.dictation_ai.cases.sbd_case_loader import SbdCase
@@ -246,6 +247,7 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(report["staged_queue_residue_summary"]["queue_residue_case_count"], 0)
         self.assertEqual(report["staged_queue_residue_summary"]["active_staged_residue_case_count"], 0)
         self.assertEqual(report["terminal_expected_residue_summary"]["case_count"], 0)
+        self.assertEqual(report["missing_expected_without_terminal_residue_summary"]["case_count"], 0)
         self.assertEqual(report["lifecycle_bottleneck_summary"]["metrics"]["stage_start"], 2)
         self.assertEqual(report["lifecycle_bottleneck_summary"]["metrics"]["stage_age_hold"], 2)
         self.assertEqual(report["lifecycle_bottleneck_summary"]["metrics"]["pending_overrun"], 1)
@@ -384,6 +386,48 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(top["stage_queue_promote"], 2)
         self.assertEqual(top["stage_revision_token_sentence_deferred"], 1)
         self.assertEqual(top["expected_residue_matches"][0]["expected"], "남은 문장입니다.")
+
+    def test_report_summarizes_expected_final_missing_without_terminal_residue(self) -> None:
+        result = {
+            "id": "case-missing-without-residue",
+            "language": "ko",
+            "tags": ["missing-final", "stage-queue"],
+            "expected_final": ["첫 문장입니다.", "소실된 문장입니다."],
+            "actual_final": ["첫 문장입니다."],
+            "actual_pending": "",
+            "actual_staged": "다른 후보입니다.",
+            "actual_staged_queue": [],
+            "final_score": _score(1.0, 0.5, 0.6666666666666666),
+            "final_boundary_score": _score(1.0, 0.5, 0.6666666666666666),
+            "metrics": {
+                "stage_age_quality_blocked": 2,
+                "stage_candidate_quality_blocked": 1,
+                "stage_queue_promote": 3,
+                "stage_revision_token_sentence_deferred": 1,
+                "candidate_delta_trimmed": 4,
+                "candidate_recent_final_delta_trimmed": 2,
+            },
+        }
+
+        summary = summarize_missing_expected_without_terminal_residue([result])
+
+        self.assertEqual(summary["case_count"], 1)
+        self.assertEqual(summary["missing_expected_total"], 1)
+        self.assertEqual(
+            summary["metric_totals"],
+            {
+                "stage_age_quality_blocked": 2,
+                "stage_candidate_quality_blocked": 1,
+                "stage_queue_promote": 3,
+                "stage_revision_token_sentence_deferred": 1,
+                "candidate_delta_trimmed": 4,
+                "candidate_recent_final_delta_trimmed": 2,
+            },
+        )
+        top = summary["top_cases"][0]
+        self.assertEqual(top["id"], "case-missing-without-residue")
+        self.assertEqual(top["missing_expected_count"], 1)
+        self.assertEqual(top["missing_expected"][0]["expected"], "소실된 문장입니다.")
 
     def test_report_marks_boundary_zero_high_final_as_metric_sensitivity(self) -> None:
         args = Namespace(

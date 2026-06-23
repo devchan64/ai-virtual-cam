@@ -28536,3 +28536,46 @@ terminal_expected_residue.matched_missing_expected_total=21
   - terminal residue 그룹: 확정 속도/queue promotion/age 정책을 보수적으로 검토한다.
   - no-residue 누락 그룹: 실제 문장 소실 또는 suppress/delta trim 문제로 검토한다.
 - 따라서 현재 단계에서 파라미터를 단순 완화하기보다, terminal residue 비율을 관측하면서 확정 지연과 조기 확정 사이의 trade-off를 따로 평가하는 것이 맞다.
+
+## 2026-06-24 no-residue expected loss 리포트 추가
+
+목적:
+
+- terminal residue 요약만으로는 expected final이 실제로 사라진 케이스와 replay 끝에 남아 있는 케이스를 모두 설명할 수 없다.
+- actual final에도 없고 terminal staged/queue/pending에도 없는 expected 문장을 별도 집계하여, 앱 로직 개선 후보를 더 좁힌다.
+
+변경:
+
+- benchmark report에 `missing_expected_without_terminal_residue_summary`를 추가했다.
+- 각 expected 문장에 대해 actual final similarity와 terminal residue similarity가 모두 `FINAL_SENTENCE_MATCH_MIN_SIMILARITY` 미만인 경우만 no-residue 소실 후보로 분류한다.
+- `stage_age_quality_blocked`, `stage_candidate_quality_blocked`, `stage_queue_promote`, `stage_revision_token_sentence_deferred`, delta trim 계열 metric total을 함께 노출한다.
+
+CUDA/SaT 확인:
+
+```text
+output=.tmp/eval/dictation-ai-sbd/current-20260624-missing-without-residue-report.json
+cases=60 finalized=131
+final_precision_avg=0.887
+final_recall_avg=0.790
+final_f1_avg=0.818
+final_boundary_f1_avg=0.551
+
+terminal_expected_residue.case_count=21
+terminal_expected_residue.matched_missing_expected_total=21
+
+missing_expected_without_terminal_residue.case_count=10
+missing_expected_without_terminal_residue.missing_expected_total=14
+missing_expected_without_terminal_residue.metric_totals.stage_age_quality_blocked=49
+missing_expected_without_terminal_residue.metric_totals.stage_candidate_quality_blocked=24
+missing_expected_without_terminal_residue.metric_totals.stage_queue_promote=64
+missing_expected_without_terminal_residue.metric_totals.stage_revision_token_sentence_deferred=23
+missing_expected_without_terminal_residue.metric_totals.candidate_delta_trimmed=43
+missing_expected_without_terminal_residue.metric_totals.candidate_recent_final_delta_trimmed=29
+```
+
+해석:
+
+- 전체 challenge replay에서 expected 누락처럼 보이는 케이스 중 상당수는 terminal residue에 남아 있었고, 실제 no-residue 소실 후보는 10건/14문장이다.
+- no-residue 상위 후보는 `zh_log_promo_bbq_short_token_sentence_echo_20260621_001`, `ko_log_draft_20260620_avc_whisper_log_002756`, `zh_log_missing_winter_shopping_hat_queue_head_stall_20260621_001` 등이다.
+- 공통 신호는 quality block + queue promotion + token-sentence deferred + delta trim 조합이다.
+- 다음 앱 로직 검토는 이 10건을 중심으로 하되, terminal residue 그룹까지 같이 개선하는 단순 age 완화는 premature final 위험이 있으므로 보류한다.

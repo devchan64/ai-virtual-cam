@@ -2152,6 +2152,54 @@ def _terminal_expected_residue_payload(result: dict[str, Any]) -> dict[str, Any]
     }
 
 
+def _missing_expected_without_terminal_residue_payload(result: dict[str, Any]) -> dict[str, Any] | None:
+    expected_final = [str(sentence).strip() for sentence in result.get("expected_final", []) or [] if str(sentence).strip()]
+    if not expected_final:
+        return None
+    actual_final = [str(sentence).strip() for sentence in result.get("actual_final", []) or [] if str(sentence).strip()]
+    residues = _terminal_residue_texts(result)
+    missing: list[dict[str, Any]] = []
+    for sentence in expected_final:
+        actual_score = _best_sentence_similarity(sentence, actual_final)
+        residue_score = _best_sentence_similarity(sentence, residues)
+        if actual_score >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY or residue_score >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY:
+            continue
+        missing.append(
+            {
+                "expected": _text_preview(sentence),
+                "best_actual_similarity": actual_score,
+                "best_residue_similarity": residue_score,
+            }
+        )
+    if not missing:
+        return None
+    final_score = dict(result.get("final_score", {}))
+    boundary_score = dict(result.get("final_boundary_score", {}))
+    metrics = dict(result.get("metrics", {}))
+    return {
+        "id": result.get("id"),
+        "language": result.get("language"),
+        "tags": list(result.get("tags", [])),
+        "final_f1": float(final_score.get("f1", 0.0)),
+        "final_boundary_f1": float(boundary_score.get("f1", 0.0)),
+        "expected_final_count": len(expected_final),
+        "actual_final_count": len(actual_final),
+        "terminal_residue_count": len(residues),
+        "missing_expected_count": len(missing),
+        "stage_age_quality_blocked": int(metrics.get("stage_age_quality_blocked", 0)),
+        "stage_candidate_quality_blocked": int(metrics.get("stage_candidate_quality_blocked", 0)),
+        "stage_queue_promote": int(metrics.get("stage_queue_promote", 0)),
+        "stage_revision_token_sentence_deferred": int(metrics.get("stage_revision_token_sentence_deferred", 0)),
+        "candidate_delta_trimmed": int(metrics.get("candidate_delta_trimmed", 0)),
+        "candidate_recent_final_delta_trimmed": int(metrics.get("candidate_recent_final_delta_trimmed", 0)),
+        "missing_expected": missing[:3],
+        "actual_final_preview": _first_text_preview(actual_final),
+        "actual_staged_preview": _text_preview(result.get("actual_staged")),
+        "actual_staged_queue_preview": _first_text_preview(result.get("actual_staged_queue")),
+        "actual_pending_preview": _text_preview(result.get("actual_pending")),
+    }
+
+
 def summarize_terminal_expected_residue(results: list[dict[str, Any]]) -> dict[str, Any]:
     payloads = [
         payload
@@ -2173,6 +2221,43 @@ def summarize_terminal_expected_residue(results: list[dict[str, Any]]) -> dict[s
         ),
         "case_count": len(payloads),
         "matched_missing_expected_total": sum(int(item["matched_missing_expected_count"]) for item in payloads),
+        "top_cases": payloads[:8],
+    }
+
+
+def summarize_missing_expected_without_terminal_residue(results: list[dict[str, Any]]) -> dict[str, Any]:
+    payloads = [
+        payload
+        for result in results
+        if (payload := _missing_expected_without_terminal_residue_payload(result)) is not None
+    ]
+    payloads.sort(
+        key=lambda item: (
+            int(item["missing_expected_count"]),
+            -float(item["final_f1"]),
+            int(item["stage_age_quality_blocked"]) + int(item["stage_candidate_quality_blocked"]),
+        ),
+        reverse=True,
+    )
+    metric_totals: dict[str, int] = {
+        "stage_age_quality_blocked": 0,
+        "stage_candidate_quality_blocked": 0,
+        "stage_queue_promote": 0,
+        "stage_revision_token_sentence_deferred": 0,
+        "candidate_delta_trimmed": 0,
+        "candidate_recent_final_delta_trimmed": 0,
+    }
+    for item in payloads:
+        for key in metric_totals:
+            metric_totals[key] += int(item.get(key, 0))
+    return {
+        "interpretation": (
+            "Expected finals absent from both actual final and terminal residue are stronger candidates "
+            "for real sentence loss than replay-tail residue cases."
+        ),
+        "case_count": len(payloads),
+        "missing_expected_total": sum(int(item["missing_expected_count"]) for item in payloads),
+        "metric_totals": metric_totals,
         "top_cases": payloads[:8],
     }
 
@@ -2505,6 +2590,7 @@ def build_benchmark_report(
     lifecycle_bottleneck_summary = summarize_lifecycle_bottlenecks(results, metric_totals)
     staged_queue_residue_summary = summarize_staged_queue_residue(results)
     terminal_expected_residue_summary = summarize_terminal_expected_residue(results)
+    missing_expected_without_terminal_residue_summary = summarize_missing_expected_without_terminal_residue(results)
     ordered_final_gap_summary = summarize_ordered_final_gap(results)
     boundary_zero_high_final_summary = summarize_boundary_zero_high_final_cases(results)
     boundary_granularity_summary = summarize_boundary_granularity_cases(results)
@@ -2584,6 +2670,7 @@ def build_benchmark_report(
         "lifecycle_bottleneck_summary": lifecycle_bottleneck_summary,
         "staged_queue_residue_summary": staged_queue_residue_summary,
         "terminal_expected_residue_summary": terminal_expected_residue_summary,
+        "missing_expected_without_terminal_residue_summary": missing_expected_without_terminal_residue_summary,
         "ordered_final_gap_summary": ordered_final_gap_summary,
         "boundary_zero_high_final_summary": boundary_zero_high_final_summary,
         "boundary_granularity_summary": boundary_granularity_summary,
