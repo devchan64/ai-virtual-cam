@@ -298,6 +298,35 @@ worse_cases=61
 - 따라서 이 suppressor는 핵심 원칙으로 채택하지 않고 앱 코드에 반영하지 않는다.
 - 다음 개선은 suffix 제거를 더 늘리는 방향보다, stable token-sentence 반복 후보가 실제 final로 소비되지 못하는 이유를 case-definition review와 strict 후보로 더 분리하는 방향이 우선이다.
 
+### 2026-06-23 strict logic candidate 리포트 보강
+
+배경:
+
+- `strict_logic_candidate_summary`는 전체 strict 후보 수와 lowest case만 제공했다.
+- 이후 분석에서 실제 strict 25개 전체와 lowest 일부를 혼동할 수 있어, 후보 재구성 스크립트가 리포트 정의와 다른 범위를 잡는 문제가 있었다.
+
+변경:
+
+- `strict_logic_candidate_summary.strict_case_ids`를 추가해 실제 strict 후보 ID 전체를 리포트에 저장한다.
+- `strict_logic_candidate_summary.metric_presence`를 추가해 strict 후보 전체에서 어떤 lifecycle metric이 얼마나 자주 나타나는지 확인할 수 있게 했다.
+
+확인:
+
+```text
+CUDA/SaT rerun:
+cases=1027
+logic_tuning_candidates=30
+strict_logic_candidates=25
+final_f1_avg=0.626
+strict_final_f1_avg=0.847
+```
+
+해석:
+
+- 수치는 checked-in 기준과 동일하므로 성능 로직 변경은 아니다.
+- 다음 로직 튜닝은 `strict_case_ids` 기준의 실제 strict 후보에서만 진행한다.
+- 현재 strict 전체에서는 `candidate_duplicate_suppressed`, `candidate_recent_final_delta_trimmed`, `candidate_delta_trimmed`, `stage_age_quality_blocked`가 많이 보인다. 단, recent-final suffix-tail suppression은 전체 회귀가 있어 기각했으므로 같은 방향을 단순 확대하지 않는다.
+
 모델 선정 기준:
 
 | 흐름 | 선정 모델 | 탈락/보류 모델 | 선정 이유 |

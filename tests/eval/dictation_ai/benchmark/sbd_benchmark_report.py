@@ -1809,8 +1809,14 @@ def summarize_strict_logic_candidate_results(cases: list[SbdCase], results: list
             "Use this subset before changing app logic; other challenge cases may still be valid diagnostics but need review context."
         ),
         "strict_case_count": len(strict),
+        "strict_case_ids": [str(result.get("id")) for result in strict],
         "summary": _summarize_result_group(strict),
         "collection_strata": summarize_results_by_collection_strata(strict),
+        "metric_presence": {
+            metric: _summarize_supported_low_metric_presence(strict, metric)
+            for metric in SUPPORTED_LOW_BOTTLENECK_METRICS
+            if any(int(dict(result.get("metrics", {})).get(metric, 0)) > 0 for result in strict)
+        },
         "lowest_cases": [
             _low_score_case_payload(result, "strict_logic_candidate")
             for result in sorted(

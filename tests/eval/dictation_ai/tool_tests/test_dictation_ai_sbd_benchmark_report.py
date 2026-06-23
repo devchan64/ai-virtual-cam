@@ -321,7 +321,7 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
                 "pending_exact": True,
                 "staged_exact": True,
                 "case_exact_match": False,
-                "metrics": {"stage_start": 1},
+                "metrics": {"stage_start": 1, "stage_candidate_quality_blocked": 1},
             }
         ]
 
@@ -337,6 +337,8 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
 
         strict_summary = report["strict_logic_candidate_summary"]
         self.assertEqual(strict_summary["strict_case_count"], 1)
+        self.assertEqual(strict_summary["strict_case_ids"], ["single-supported"])
+        self.assertEqual(strict_summary["metric_presence"]["stage_candidate_quality_blocked"]["case_count"], 1)
         self.assertEqual(strict_summary["lowest_cases"][0]["id"], "single-supported")
         self.assertEqual(
             report["clean_low_bottleneck_intersection_summary"]["thresholds"]["0.35"]["case_count"],
