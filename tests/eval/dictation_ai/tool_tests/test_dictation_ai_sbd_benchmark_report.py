@@ -249,6 +249,8 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(next_action["priority"], "collect_more_cases")
         self.assertEqual(next_action["health_recommendation"], "app-logic-tuning-subset-usable")
         self.assertEqual(next_action["strict_logic_candidate_count"], 1)
+        self.assertEqual(next_action["strict_actionable_low_signal"], "no_actionable_low_cases")
+        self.assertEqual(next_action["strict_actionable_low_issue_kind_counts"], {})
         self.assertEqual(next_action["clean_low_case_count_lt_0_65"], 0)
         source_trace = report["source_trace_strata_summary"]["strata"]
         self.assertEqual(source_trace["missing_source_trace"]["expected_final_case_count"], 1)
@@ -379,6 +381,13 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         )
         self.assertEqual(strict_summary["metric_presence"]["stage_candidate_quality_blocked"]["case_count"], 1)
         self.assertEqual(strict_summary["lowest_cases"][0]["id"], "single-supported")
+        next_action = report["tuning_next_action_summary"]
+        self.assertEqual(next_action["priority"], "collect_more_same_issue_kind_cases")
+        self.assertEqual(next_action["strict_actionable_low_signal"], "mixed_issue_kinds_collect_more_cases")
+        self.assertEqual(
+            next_action["strict_actionable_low_issue_kind_counts"],
+            {"underfinal_missing_no_residue": 1},
+        )
         self.assertEqual(
             report["clean_low_bottleneck_intersection_summary"]["thresholds"]["0.35"]["case_count"],
             1,

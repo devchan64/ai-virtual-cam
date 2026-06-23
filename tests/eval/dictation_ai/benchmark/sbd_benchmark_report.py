@@ -2500,6 +2500,25 @@ def summarize_tuning_next_action(
     strict_actionable_low_count = int(
         dict(strict_logic_candidate_summary.get("actionable_low_final", {}) or {}).get("case_count", 0)
     )
+    strict_actionable_low_summary = dict(strict_logic_candidate_summary.get("actionable_low_final", {}) or {})
+    strict_actionable_low_issue_counts = {
+        str(kind): int(count)
+        for kind, count in dict(strict_actionable_low_summary.get("issue_kind_counts", {}) or {}).items()
+    }
+    strict_actionable_low_top_issue = ""
+    strict_actionable_low_top_issue_count = 0
+    if strict_actionable_low_issue_counts:
+        strict_actionable_low_top_issue, strict_actionable_low_top_issue_count = sorted(
+            strict_actionable_low_issue_counts.items(),
+            key=lambda item: (-item[1], item[0]),
+        )[0]
+    strict_actionable_low_top_issue_ratio = strict_actionable_low_top_issue_count / max(strict_actionable_low_count, 1)
+    if strict_actionable_low_count <= 0:
+        strict_actionable_low_signal = "no_actionable_low_cases"
+    elif strict_actionable_low_top_issue_count >= 3 and strict_actionable_low_top_issue_ratio >= 0.50:
+        strict_actionable_low_signal = "common_issue_kind_present"
+    else:
+        strict_actionable_low_signal = "mixed_issue_kinds_collect_more_cases"
     strict_boundary_sensitive_count = int(
         dict(strict_logic_candidate_summary.get("boundary_metric_sensitivity", {}) or {}).get("case_count", 0)
     )
@@ -2512,6 +2531,9 @@ def summarize_tuning_next_action(
     elif health_recommendation != "app-logic-tuning-subset-usable":
         priority = "case_definition_review"
         rationale = "case definition review ratio or strict candidate count is not healthy enough for app tuning."
+    elif strict_actionable_low_signal == "mixed_issue_kinds_collect_more_cases" and strict_actionable_low_count > 0:
+        priority = "collect_more_same_issue_kind_cases"
+        rationale = "strict low-score cases exist, but their issue kinds are mixed; avoid app changes until one issue kind repeats."
     elif clean_low_065 > 0:
         priority = "inspect_clean_low_app_logic_candidates"
         rationale = "strict, fully supported low-score cases remain; inspect common lifecycle metrics before code changes."
@@ -2542,6 +2564,17 @@ def summarize_tuning_next_action(
         "case_interpretation_review_count": interpretation_review_count,
         "strict_logic_candidate_count": strict_count,
         "strict_actionable_low_final_case_count": strict_actionable_low_count,
+        "strict_actionable_low_signal": strict_actionable_low_signal,
+        "strict_actionable_low_top_issue_kind": strict_actionable_low_top_issue,
+        "strict_actionable_low_top_issue_count": strict_actionable_low_top_issue_count,
+        "strict_actionable_low_top_issue_ratio": strict_actionable_low_top_issue_ratio,
+        "strict_actionable_low_issue_kind_counts": strict_actionable_low_issue_counts,
+        "strict_actionable_low_overfinal_extra_kind_counts": dict(
+            strict_actionable_low_summary.get("overfinal_extra_kind_counts", {}) or {}
+        ),
+        "strict_actionable_low_underfinal_missing_kind_counts": dict(
+            strict_actionable_low_summary.get("underfinal_missing_kind_counts", {}) or {}
+        ),
         "strict_boundary_sensitive_case_count": strict_boundary_sensitive_count,
         "clean_low_case_count_lt_0_65": clean_low_065,
         "clean_low_case_count_lt_0_50": clean_low_050,

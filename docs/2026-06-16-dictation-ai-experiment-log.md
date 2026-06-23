@@ -30909,3 +30909,45 @@ strict_actionable_low_final.underfinal_missing_kind_counts:
 - short CJK 완화는 앞선 CUDA 실험에서 전체 F1과 strict F1을 악화시켜 이미 기각됐다.
 - prefix expected loss는 첫 후보를 더 오래 보존하는 방향을 시사하지만, 같은 조정이 over-final/later-context 선행 확정을 악화시킬 수 있다.
 - 따라서 이번 단계에서는 앱 로직을 변경하지 않고, report가 over-final과 under-final의 세부 원인을 분리하도록 유지한다. 다음 앱 패치는 같은 세부 원인이 여러 케이스에서 반복될 때만 검토한다.
+
+## 2026-06-24 next-action issue signal 반영
+
+목적:
+
+- 세부 원인 분류가 리포트에 있어도 `tuning_next_action_summary`가 이를 반영하지 않으면, 낮은 F1 케이스가 있다는 이유로 앱 로직을 과하게 바꾸기 쉽다.
+- strict low-score 후보의 원인 분포와 dominant issue 비율을 next-action에 포함해, 공통 원인이 충분하지 않으면 케이스 수집을 우선하도록 했다.
+
+시도:
+
+```text
+report=.tmp/eval/dictation-ai-sbd/current-20260624-next-action-issue-signal-report.json
+cases=57
+strict_logic_candidates=38
+strict_actionable_low_final_case_count=7
+final_f1_avg=0.913
+strict_final_f1_avg=0.953
+final_boundary_f1_avg=0.599
+
+tuning_next_action.priority=collect_more_same_issue_kind_cases
+tuning_next_action.strict_actionable_low_signal=mixed_issue_kinds_collect_more_cases
+tuning_next_action.strict_actionable_low_top_issue_kind=overfinal_or_extra_final
+tuning_next_action.strict_actionable_low_top_issue_count=3
+tuning_next_action.strict_actionable_low_top_issue_ratio=0.429
+
+strict_actionable_low_issue_kind_counts:
+  overfinal_or_extra_final=3
+  underfinal_missing_no_residue=2
+  short_fragment_sensitive=1
+  underfinal_boundary_or_revision=1
+```
+
+해석:
+
+- top issue kind가 3건이지만 전체 strict actionable low 7건 중 42.9%라 공통 원인으로 보기에는 약하다.
+- over-final 내부도 `actual_unexpected_or_later_context=3`, `actual_revision_of_expected=1`로 나뉘고, under-final 내부도 1건씩 나뉜다.
+
+결론:
+
+- 현재 벤치 근거에서는 앱 로직 전역 변경보다 같은 세부 원인의 추가 사례 수집이 우선이다.
+- 이 상태에서 앱 코드를 바꾸면 핵심 원칙이 아니라 소수 케이스 대응 규칙이 될 가능성이 높다.
+- 다음 모니터링/케이스 추가는 `overfinal_or_extra_final`, `prefix_expected_lost_after_later_progress`, `short_quality_blocked_missing` 중 같은 세부 원인이 반복되는지 확인하는 방향으로 진행한다.
