@@ -27814,3 +27814,60 @@ staged_exact_match=455
 - no-end 후보를 전역적으로 더 많이 품질 차단하면 finalized와 stage_start는 줄지만 recall과 전체 F1이 크게 하락한다.
 - strict F1도 하락하므로 기본값 변경으로 채택하지 않는다.
 - 다음 앱 로직 후보는 no-end 전역 차단이 아니라, false-positive splice final을 구분할 수 있는 더 좁은 lifecycle 신호가 있어야 한다.
+
+### 2026-06-23 no-end confirmation 추가 재검증 기각
+
+배경:
+
+- 최신 strict 저점에서도 한국어 false-positive final 일부가 `final_quality_no_end_marker=1`을 동반했다.
+- 후보 원칙은 "종결부호가 없는 후보는 SBD가 명확한 문장 경계를 주지 못했으므로 기본 confirmation보다 1회 더 반복 관측한다"였다.
+- 이 원칙은 언어별 문구 규칙이 아니지만, 과거 실험에서 유사 축이 precision/recall trade-off를 만든 기록이 있어 checked-in 기본값으로 반영하기 전에 override 실험으로만 확인했다.
+
+실험:
+
+```text
+baseline:
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output .tmp/eval/dictation-ai-sbd/current-20260623-no-end-extra0-report.json
+
+no-end confirmation +1:
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 AVC_DICTATION_NO_END_CONFIRM_EXTRA_CHUNKS=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output .tmp/eval/dictation-ai-sbd/current-20260623-no-end-extra1-report.json
+```
+
+CUDA/SaT 비교:
+
+```text
+baseline:
+finalized=4689
+stage_start=9009
+finalized_per_stage_start=0.5204795204795205
+final_precision_avg=0.6192229179836273
+final_recall_avg=0.6853140474655618
+final_f1_avg=0.6286280681884436
+final_boundary_f1_avg=0.17872001143824437
+strict_logic_candidates=23
+strict_final_f1_avg=0.8913043478260869
+
+NO_END_CONFIRM_EXTRA_CHUNKS=1:
+finalized=4612
+stage_start=9001
+finalized_per_stage_start=0.5123875124986113
+final_precision_avg=0.621035808412041
+final_recall_avg=0.6815334515963584
+final_f1_avg=0.6294317963084576
+final_boundary_f1_avg=0.17793437499620932
+strict_logic_candidates=25
+strict_final_f1_avg=0.8361904761904762
+```
+
+판정:
+
+- 전체 `final_f1_avg`는 +0.0008로 미세 상승했지만, strict 후보의 `final_f1_avg`가 `0.891 -> 0.836`으로 크게 하락했다.
+- strict 후보에서 `final_quality_no_end_marker`가 `6 -> 11`, `finalize_reason_aged`가 `4 -> 8`, `stage_finalize_before_replace`가 `0 -> 8`로 늘었다. 즉 confirmation 지연이 no-end false final을 구조적으로 줄이지 못하고, aged/next-completed 소비 경로를 늘렸다.
+- 전체 평균의 미세 개선은 challenge corpus의 라벨/난이도 분포 효과로 보고, 앱 로직 기본값으로 채택하지 않는다.
+- 실험용 설정도 checked-in 운영 설정으로 남기지 않는다. 다음 후보는 no-end 전역 지연이 아니라 recent-final splice, revision reset, active/queue 소비 순서 같은 더 직접적인 lifecycle 신호에서 찾아야 한다.
