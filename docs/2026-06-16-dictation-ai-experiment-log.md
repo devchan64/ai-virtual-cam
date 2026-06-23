@@ -30867,3 +30867,45 @@ strict_actionable_low_final.overfinal_extra_kind_counts:
 - over-final 그룹은 “짧은 fragment final만 더 억제”하는 단일 앱 패치 근거가 아니다.
 - suppress/trim 계열 metric은 under-final과 over-final 양쪽에서 동시에 나타나므로, recent-final echo 억제를 더 강하게 하거나 약하게 하는 전역 변경은 현재 근거로는 위험하다.
 - 다음 앱 패치 후보는 extra final이 아닌 `underfinal_missing_no_residue` 2건에서 공통 lifecycle 원인이 반복되는지 더 확인한 뒤 판단한다.
+
+## 2026-06-24 under-final missing-no-residue 세부 분류
+
+목적:
+
+- `strict_actionable_low_final` 중 실제 content loss 후보로 남은 `underfinal_missing_no_residue=2`가 같은 앱 로직 병목인지 확인했다.
+- 공통 원인이 있으면 앱 로직 패치 후보가 될 수 있지만, 원인이 다르면 세부 규칙 추가가 되어 보편성이 떨어진다.
+
+시도:
+
+```text
+report=.tmp/eval/dictation-ai-sbd/current-20260624-underfinal-missing-kind-report.json
+cases=57
+strict_logic_candidates=38
+strict_actionable_low_final_case_count=7
+final_f1_avg=0.913
+strict_final_f1_avg=0.953
+final_boundary_f1_avg=0.599
+
+strict_actionable_low_final.issue_kind_counts:
+  overfinal_or_extra_final=3
+  underfinal_missing_no_residue=2
+  short_fragment_sensitive=1
+  underfinal_boundary_or_revision=1
+
+strict_actionable_low_final.underfinal_missing_kind_counts:
+  prefix_expected_lost_after_later_progress=1
+  short_quality_blocked_missing=1
+```
+
+해석:
+
+- 중국어 케이스는 짧은 CJK expected가 품질 차단/duplicate suppression 뒤 사라진 `short_quality_blocked_missing`이다.
+- 한국어 케이스는 첫 expected가 빠지고 후속 expected가 final/residue로 진행된 `prefix_expected_lost_after_later_progress`다.
+- 두 케이스 모두 stable repeat 근거는 있지만, lifecycle 실패 형태가 서로 다르다.
+
+결론:
+
+- 현재 남은 under-final 2건도 단일 앱 로직 병목으로 묶이지 않는다.
+- short CJK 완화는 앞선 CUDA 실험에서 전체 F1과 strict F1을 악화시켜 이미 기각됐다.
+- prefix expected loss는 첫 후보를 더 오래 보존하는 방향을 시사하지만, 같은 조정이 over-final/later-context 선행 확정을 악화시킬 수 있다.
+- 따라서 이번 단계에서는 앱 로직을 변경하지 않고, report가 over-final과 under-final의 세부 원인을 분리하도록 유지한다. 다음 앱 패치는 같은 세부 원인이 여러 케이스에서 반복될 때만 검토한다.

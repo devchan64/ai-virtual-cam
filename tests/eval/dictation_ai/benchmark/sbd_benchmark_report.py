@@ -2146,6 +2146,63 @@ def _actual_extra_final_kind_counts(results: list[dict[str, Any]]) -> dict[str, 
     return dict(sorted(counts.items()))
 
 
+def _missing_expected_sentences_without_terminal_residue(result: dict[str, Any]) -> list[str]:
+    expected = [str(sentence).strip() for sentence in result.get("expected_final", []) or [] if str(sentence).strip()]
+    actual = [str(sentence).strip() for sentence in result.get("actual_final", []) or [] if str(sentence).strip()]
+    residues = _terminal_residue_texts(result)
+    missing: list[str] = []
+    for sentence in expected:
+        if _best_sentence_similarity(sentence, actual) >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY:
+            continue
+        if _best_sentence_similarity(sentence, residues) >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY:
+            continue
+        missing.append(sentence)
+    return missing
+
+
+def _strict_underfinal_missing_kind(result: dict[str, Any]) -> str:
+    if _strict_actionable_low_kind(result) != "underfinal_missing_no_residue":
+        return ""
+    missing = _missing_expected_sentences_without_terminal_residue(result)
+    if not missing:
+        return "missing_without_residue_unclassified"
+    language = str(result.get("language") or "")
+    metrics = dict(result.get("metrics", {}) or {})
+    missing_flags = [
+        set(_final_sentence_diagnostic_flags(sentence, language))
+        for sentence in missing
+    ]
+    if any(flags.intersection({"short_cjk", "short_no_end_fragment", "low_value_cjk_fragment"}) for flags in missing_flags) and (
+        int(metrics.get("stage_age_quality_blocked", 0)) > 0
+        or int(metrics.get("stage_candidate_quality_blocked", 0)) > 0
+    ):
+        return "short_quality_blocked_missing"
+
+    expected = [str(sentence).strip() for sentence in result.get("expected_final", []) or [] if str(sentence).strip()]
+    actual_and_residue = [
+        str(sentence).strip()
+        for sentence in list(result.get("actual_final", []) or []) + _terminal_residue_texts(result)
+        if str(sentence).strip()
+    ]
+    if expected and missing[0] == expected[0]:
+        later_expected = expected[1:]
+        if any(_best_sentence_similarity(sentence, actual_and_residue) >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY for sentence in later_expected):
+            return "prefix_expected_lost_after_later_progress"
+
+    if result.get("actual_staged") or result.get("actual_staged_queue") or result.get("actual_pending"):
+        return "missing_with_unmatched_active_residue"
+    return "missing_without_residue_unclassified"
+
+
+def _strict_underfinal_missing_kind_counts(results: list[dict[str, Any]]) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for result in results:
+        kind = _strict_underfinal_missing_kind(result)
+        if kind:
+            counts[kind] += 1
+    return dict(sorted(counts.items()))
+
+
 def _strict_actionable_low_final_summary(strict_results: list[dict[str, Any]]) -> dict[str, Any]:
     boundary_sensitive_ids = {
         str(item.get("id"))
@@ -2166,6 +2223,7 @@ def _strict_actionable_low_final_summary(strict_results: list[dict[str, Any]]) -
         "case_count": len(low_final),
         "issue_kind_counts": _strict_actionable_low_kind_counts(low_final),
         "overfinal_extra_kind_counts": _actual_extra_final_kind_counts(low_final),
+        "underfinal_missing_kind_counts": _strict_underfinal_missing_kind_counts(low_final),
         "metric_presence": {
             metric: _summarize_supported_low_metric_presence(low_final, metric)
             for metric in SUPPORTED_LOW_BOTTLENECK_METRICS
@@ -2176,6 +2234,7 @@ def _strict_actionable_low_final_summary(strict_results: list[dict[str, Any]]) -
                 **_low_score_case_payload(result, "strict_actionable_low_final"),
                 "issue_kind": _strict_actionable_low_kind(result),
                 "overfinal_extra_kinds": _actual_extra_final_kinds(result),
+                "underfinal_missing_kind": _strict_underfinal_missing_kind(result),
             }
             for result in sorted(
                 low_final,

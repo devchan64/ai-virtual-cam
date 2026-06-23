@@ -359,12 +359,20 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
             {"underfinal_missing_no_residue": 1},
         )
         self.assertEqual(strict_summary["actionable_low_final"]["overfinal_extra_kind_counts"], {})
+        self.assertEqual(
+            strict_summary["actionable_low_final"]["underfinal_missing_kind_counts"],
+            {"missing_without_residue_unclassified": 1},
+        )
         self.assertEqual(strict_summary["actionable_low_final"]["examples"][0]["id"], "single-supported")
         self.assertEqual(
             strict_summary["actionable_low_final"]["examples"][0]["issue_kind"],
             "underfinal_missing_no_residue",
         )
         self.assertEqual(strict_summary["actionable_low_final"]["examples"][0]["overfinal_extra_kinds"], [])
+        self.assertEqual(
+            strict_summary["actionable_low_final"]["examples"][0]["underfinal_missing_kind"],
+            "missing_without_residue_unclassified",
+        )
         self.assertEqual(
             strict_summary["actionable_low_final"]["metric_presence"]["stage_candidate_quality_blocked"]["case_count"],
             1,
@@ -456,6 +464,83 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(
             actionable["examples"][0]["overfinal_extra_kinds"],
             ["actual_fragment_of_expected"],
+        )
+
+    def test_strict_actionable_low_summarizes_prefix_expected_loss(self) -> None:
+        args = Namespace(
+            model="sat-3l-sm",
+            device="cuda",
+            compute_type="float16",
+            min_final_f1=0.0,
+            fail_on_regression=False,
+        )
+        case = SbdCase(
+            id="prefix-loss-supported",
+            language="ko",
+            chunks=[
+                "첫 문장입니다.",
+                "둘째 문장입니다.",
+                "첫 문장입니다.",
+                "둘째 문장입니다.",
+                "첫 문장입니다.",
+                "둘째 문장입니다.",
+            ],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=["첫 문장입니다.", "둘째 문장입니다."],
+            expected_staged="",
+            tags=("missing-final",),
+            sentence_finalize_age=3,
+        )
+        results = [
+            {
+                "id": case.id,
+                "language": case.language,
+                "tags": list(case.tags),
+                "expected_final": case.expected_final,
+                "chunks": [{"input": chunk} for chunk in case.chunks],
+                "actual_final": ["둘째 문장입니다."],
+                "actual_pending": "",
+                "actual_staged": "",
+                "actual_staged_queue": [],
+                "final_score": _score(1.0, 0.5, 0.6666666667),
+                "final_ordered_score": _score(1.0, 0.5, 0.6666666667),
+                "final_boundary_score": _score(1.0, 0.5, 0.6666666667),
+                "completed_last_score": _score(0.0, 0.0, 0.0),
+                "pending_exact": True,
+                "staged_exact": True,
+                "case_exact_match": False,
+                "metrics": {"finalized": 1, "stage_start": 2},
+                "expected_quality_flags": [],
+                "input_evidence": {
+                    "fully_supported": True,
+                    "stable_repeat_fully_supported": True,
+                },
+                "case_context_flags": [],
+                "case_definition_flags": [],
+            }
+        ]
+
+        report = build_benchmark_report(
+            args=args,
+            case_sources=["cases.jsonl"],
+            corpus_role="challenge-replay",
+            cases=[case],
+            results=results,
+            metric_totals={"finalized": 1, "stage_start": 2},
+            elapsed_ms=1.0,
+        )
+
+        actionable = report["strict_logic_candidate_summary"]["actionable_low_final"]
+        self.assertEqual(actionable["case_count"], 1)
+        self.assertEqual(actionable["issue_kind_counts"], {"underfinal_missing_no_residue": 1})
+        self.assertEqual(
+            actionable["underfinal_missing_kind_counts"],
+            {"prefix_expected_lost_after_later_progress": 1},
+        )
+        self.assertEqual(
+            actionable["examples"][0]["underfinal_missing_kind"],
+            "prefix_expected_lost_after_later_progress",
         )
 
     def test_report_summarizes_expected_final_left_as_terminal_residue(self) -> None:
