@@ -49,9 +49,9 @@ def _dominant_int(candidates: dict[str, Any]) -> int | None:
         return None
 
 
-def _sample_texts(packet: dict[str, Any]) -> list[str]:
+def _sample_texts(record: dict[str, Any]) -> list[str]:
     texts: list[str] = []
-    for sample in _as_list(packet.get("raw_chunks_sample")):
+    for sample in _as_list(record.get("raw_chunks_sample")):
         sample_record = _as_dict(sample)
         text = str(sample_record.get("text", "")).strip()
         if text:
@@ -59,19 +59,34 @@ def _sample_texts(packet: dict[str, Any]) -> list[str]:
     return texts
 
 
-def _draft_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
+def _window_range(record: dict[str, Any]) -> tuple[str, str]:
+    window_filter = _as_dict(record.get("source_window_filter"))
+    started_at = str(record.get("source_started_at") or window_filter.get("started_at") or "").strip()
+    ended_at = str(record.get("source_ended_at") or window_filter.get("ended_at") or "").strip()
+    return started_at, ended_at
+
+
+def _anchor_summary(anchor: object) -> str:
+    record = _as_dict(anchor)
+    if not record:
+        return str(anchor or "").strip()
+    parts = [str(record.get("timestamp", "")).strip()]
+    for key, label in (("line_number", "line"), ("kind", "kind"), ("chunk", "chunk")):
+        value = str(record.get(key, "")).strip()
+        if value:
+            parts.append(f"{label}={value}")
+    return " ".join(part for part in parts if part)
+
+
+def _base_draft_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
     runtime = _as_dict(packet.get("runtime_candidates"))
     language = str(packet.get("language", "")).strip()
     packet_id = str(packet.get("id", "")).strip()
     return {
-        "id": f"{packet_id}_draft",
         "corpus_role": "representative",
         "sampling_unit": str(packet.get("sampling_unit", "")).strip(),
         "sampling_rule": str(packet.get("sampling_rule", "")).strip(),
         "source_log": str(packet.get("source_log", "")).strip(),
-        "source_started_at": str(packet.get("source_started_at", "")).strip(),
-        "source_ended_at": str(packet.get("source_ended_at", "")).strip(),
-        "source_window_filter": _as_dict(packet.get("source_window_filter")),
         "language": language,
         "priority_metric": packet.get("priority_metric"),
         "priority_rank": packet.get("priority_rank"),
@@ -86,7 +101,6 @@ def _draft_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
         ),
         "review_packet_id": packet_id,
         "expected_final_reviewed_by": "",
-        "chunks": _sample_texts(packet),
         "expected_final": [],
         "expected_pending": "",
         "expected_staged": "",
@@ -97,6 +111,53 @@ def _draft_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _draft_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
+    packet_id = str(packet.get("id", "")).strip()
+    started_at, ended_at = _window_range(packet)
+    return {
+        **_base_draft_from_packet(packet),
+        "id": f"{packet_id}_draft",
+        "review_scope": "source",
+        "source_started_at": started_at,
+        "source_ended_at": ended_at,
+        "source_window_filter": _as_dict(packet.get("source_window_filter")),
+        "chunks": _sample_texts(packet),
+    }
+
+
+def _draft_from_bounded_window(packet: dict[str, Any], window: dict[str, Any]) -> dict[str, Any]:
+    packet_id = str(packet.get("id", "")).strip()
+    window_id = str(window.get("id", "")).strip()
+    if not window_id:
+        draft_id = f"{packet_id}_bounded_draft"
+    elif window_id.startswith(f"{packet_id}_"):
+        draft_id = f"{window_id}_draft"
+    else:
+        draft_id = f"{packet_id}_{window_id}_draft"
+    started_at, ended_at = _window_range(window)
+    return {
+        **_base_draft_from_packet(packet),
+        "id": draft_id,
+        "review_scope": "bounded-window",
+        "bounded_window_id": window_id,
+        "bounded_window_anchor": _anchor_summary(window.get("anchor")),
+        "bounded_window_event_counts": _as_dict(window.get("event_counts")),
+        "bounded_window_review_complexity": window.get("review_complexity"),
+        "priority_lifecycle_kind": str(window.get("priority_lifecycle_kind", "")).strip(),
+        "source_started_at": started_at,
+        "source_ended_at": ended_at,
+        "source_window_filter": _as_dict(window.get("source_window_filter")),
+        "chunks": _sample_texts(window),
+    }
+
+
+def _drafts_from_packet(packet: dict[str, Any]) -> list[dict[str, Any]]:
+    windows = [_as_dict(window) for window in _as_list(packet.get("bounded_window_candidates"))]
+    if not windows:
+        return [_draft_from_packet(packet)]
+    return [_draft_from_bounded_window(packet, window) for window in windows]
+
+
 def build_case_drafts(review_packets: dict[str, Any]) -> dict[str, Any]:
     packets = [_as_dict(packet) for packet in _as_list(review_packets.get("packets"))]
     ready_packets = [
@@ -104,7 +165,7 @@ def build_case_drafts(review_packets: dict[str, Any]) -> dict[str, Any]:
         for packet in packets
         if bool(_as_dict(packet.get("review_readiness")).get("ready_for_human_review", False))
     ]
-    drafts = [_draft_from_packet(packet) for packet in ready_packets]
+    drafts = [draft for packet in ready_packets for draft in _drafts_from_packet(packet)]
     return {
         "representative_case_draft_version": DRAFT_VERSION,
         "source_review_packet_count": len(packets),
@@ -173,6 +234,7 @@ def render_markdown(drafts_payload: dict[str, Any]) -> str:
                 f"## {record.get('id', '')}",
                 "",
                 f"- language: `{record.get('language', '')}`",
+                f"- review_scope: `{record.get('review_scope', '')}`",
                 f"- source_log: `{record.get('source_log', '')}`",
                 f"- source_range: `{record.get('source_started_at', '')}` - `{record.get('source_ended_at', '')}`",
                 f"- source_window_filter: `{record.get('source_window_filter', {})}`",
@@ -202,6 +264,16 @@ def render_markdown(drafts_payload: dict[str, Any]) -> str:
                 "```",
             ]
         )
+        if record.get("review_scope") == "bounded-window":
+            lines.extend(
+                [
+                    f"- bounded_window_id: `{record.get('bounded_window_id', '')}`",
+                    f"- bounded_window_anchor: `{record.get('bounded_window_anchor', '')}`",
+                    f"- priority_lifecycle_kind: `{record.get('priority_lifecycle_kind', '')}`",
+                    f"- bounded_window_review_complexity: `{record.get('bounded_window_review_complexity', '')}`",
+                    f"- bounded_window_event_counts: `{record.get('bounded_window_event_counts', {})}`",
+                ]
+            )
         if preview_chunks:
             lines.extend(["", "STT chunk preview:", ""])
             for index, chunk in enumerate(preview_chunks, start=1):
