@@ -30605,3 +30605,108 @@ final_boundary_f1_avg=0.448
 - 단일 누락 케이스는 개선하지만 전체 challenge에서 짧은 CJK false final을 대량으로 허용한다.
 - `short_cjk` aged-final 허용은 핵심 원칙으로 일반화하기에 너무 넓다.
 - 이 패치는 기각하고 적용하지 않는다. 짧은 문장 번역 문제는 short CJK 전체 허용이 아니라, 반복 근거와 boundary/right-context가 충분한 경우를 더 좁게 구분할 수 있을 때만 다시 검토한다.
+
+## 2026-06-24 strict logic 후보 기준 품질 gate 재검증
+
+목적:
+
+- `expected_definition_cleanup=0`인 상태에서 남은 낮은 점수 strict logic 후보를 기준으로, 앱 로직 기본값을 추가로 조정할 근거가 있는지 확인했다.
+- 낮은 점수 7건은 공통적으로 `candidate_duplicate_suppressed`, `stage_age_quality_blocked`, `candidate_delta_trimmed`, `stage_queue_promote`가 많이 나타났다.
+- 단어/문구별 예외가 아니라 구조적 품질 gate와 revision confirmation 관련 상수만 재검증했다.
+
+기준선:
+
+```text
+report=.tmp/eval/dictation-ai-sbd/current-20260624-definition-status-report.json
+cases=57
+case_review=6
+expected_definition_cleanup=0
+case_interpretation_review=6
+strict_logic_candidates=38
+finalized=131
+stage_start=297
+finalized_per_stage_start=0.441
+final_f1_avg=0.913
+strict_final_f1_avg=0.953
+final_boundary_f1_avg=0.599
+```
+
+재검증:
+
+```text
+env=AVC_DICTATION_SHORT_CJK_FINAL_UNITS=8
+report=.tmp/eval/dictation-ai-sbd/current-20260624-short-cjk-units8-report.json
+finalized=140
+case_review=9
+strict_logic_candidates=38
+stage_start=290
+finalized_per_stage_start=0.483
+final_f1_avg=0.883
+strict_final_f1_avg=0.928
+final_boundary_f1_avg=0.573
+
+env=AVC_DICTATION_SHORT_CJK_FINAL_UNITS=12
+report=.tmp/eval/dictation-ai-sbd/current-20260624-short-cjk-units12-report.json
+finalized=129
+case_review=6
+strict_logic_candidates=38
+stage_start=297
+finalized_per_stage_start=0.434
+final_f1_avg=0.910
+strict_final_f1_avg=0.947
+final_boundary_f1_avg=0.594
+
+env=AVC_DICTATION_SHORT_NO_END_FRAGMENT_UNITS=6
+report=.tmp/eval/dictation-ai-sbd/current-20260624-short-no-end6-report.json
+finalized=131
+case_review=6
+strict_logic_candidates=38
+stage_start=299
+finalized_per_stage_start=0.438
+final_f1_avg=0.913
+strict_final_f1_avg=0.953
+final_boundary_f1_avg=0.599
+
+env=AVC_DICTATION_SHORT_NO_END_FRAGMENT_UNITS=8
+report=.tmp/eval/dictation-ai-sbd/current-20260624-short-no-end8-report.json
+finalized=131
+case_review=5
+strict_logic_candidates=39
+stage_start=293
+finalized_per_stage_start=0.447
+final_f1_avg=0.906
+strict_final_f1_avg=0.935
+final_boundary_f1_avg=0.591
+
+env=AVC_DICTATION_SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=1
+report=.tmp/eval/dictation-ai-sbd/current-20260624-short-cjk-hold1-report.json
+finalized=131
+case_review=12
+strict_logic_candidates=33
+stage_start=290
+finalized_per_stage_start=0.452
+final_f1_avg=0.893
+strict_final_f1_avg=0.933
+final_boundary_f1_avg=0.555
+
+env=AVC_DICTATION_CJK_CONFIRM_PRESERVE_RATIO_MIN=0.45
+report=.tmp/eval/dictation-ai-sbd/current-20260624-cjk-preserve-ratio045-report.json
+finalized=131
+case_review=6
+strict_logic_candidates=38
+stage_start=297
+finalized_per_stage_start=0.441
+final_f1_avg=0.913
+strict_final_f1_avg=0.953
+final_boundary_f1_avg=0.599
+```
+
+결론:
+
+- `SHORT_CJK_FINAL_UNITS=8`은 final 수와 stage 효율을 늘리지만 precision/F1을 크게 낮춘다. 짧은 CJK false final을 너무 많이 허용하므로 기각한다.
+- `SHORT_CJK_FINAL_UNITS=12`는 더 보수적이지만 recall과 F1을 낮춰 기본값 변경 근거가 없다.
+- `SHORT_NO_END_FRAGMENT_UNITS=6`은 품질 지표가 같고 stage churn이 증가하므로 현재 기본값 7보다 불리하다.
+- `SHORT_NO_END_FRAGMENT_UNITS=8`은 stage 효율만 약간 좋아지고 final/strict/boundary F1이 모두 낮아져 기각한다.
+- `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=1`은 case review 수를 늘리고 strict 후보 수와 F1을 낮춰 기각한다.
+- `CJK_CONFIRM_PRESERVE_RATIO_MIN=0.45`는 기준선과 동일해 기본값 변경 효과가 없다.
+- 현재 남은 병목은 단순 품질 gate 임계값 조정으로 개선되지 않는다. 다음 구조 검토는 boundary granularity와 replay-tail 해석을 분리한 뒤, `stage_age_quality_blocked`가 반복 근거가 있는 후보를 suppress하는 경우를 더 좁고 일반적인 조건으로 설명할 수 있을 때만 진행한다.
