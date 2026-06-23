@@ -969,6 +969,72 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
             {"recut_or_relabel_stable_candidate_mismatch": 1},
         )
 
+    def test_omitted_input_stable_candidate_is_definition_cleanup(self) -> None:
+        args = Namespace(
+            model="sat-3l-sm",
+            device="cuda",
+            compute_type="float16",
+            min_final_f1=0.0,
+            fail_on_regression=False,
+        )
+        case = SbdCase(
+            id="omitted-input-stable-candidate",
+            language="ko",
+            chunks=[
+                "첫 번째 문장입니다. 빠진 안정 문장입니다.",
+                "첫 번째 문장입니다. 빠진 안정 문장입니다.",
+                "첫 번째 문장입니다. 빠진 안정 문장입니다.",
+            ],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=["첫 번째 문장입니다."],
+            expected_staged="",
+            tags=("missing-final",),
+            sentence_finalize_age=3,
+        )
+        results = [
+            {
+                "id": case.id,
+                "language": case.language,
+                "tags": list(case.tags),
+                "expected_final": case.expected_final,
+                "chunks": [{"input": chunk} for chunk in case.chunks],
+                "initial_final": [],
+                "actual_final": ["첫 번째 문장입니다."],
+                "actual_pending": "",
+                "actual_staged": "",
+                "actual_staged_queue": [],
+                "final_score": _score(1.0, 1.0, 1.0),
+                "final_ordered_score": _score(1.0, 1.0, 1.0),
+                "final_boundary_score": _score(1.0, 1.0, 1.0),
+                "completed_last_score": _score(1.0, 1.0, 1.0),
+                "pending_exact": True,
+                "staged_exact": True,
+                "case_exact_match": False,
+                "metrics": {"finalized": 1, "stage_start": 1},
+            }
+        ]
+
+        report = build_benchmark_report(
+            args=args,
+            case_sources=["cases.jsonl"],
+            corpus_role="challenge-replay",
+            cases=[case],
+            results=results,
+            metric_totals={"finalized": 1, "stage_start": 1},
+            elapsed_ms=1.0,
+        )
+
+        self.assertEqual(
+            report["cases"][0]["case_definition_flags"],
+            ["expected_final_omits_stable_candidate"],
+        )
+        self.assertEqual(
+            report["case_definition_action_summary"]["action_counts"],
+            {"recut_or_relabel_stable_candidate_mismatch": 1},
+        )
+        self.assertEqual(report["case_definition_action_summary"]["case_definition_cleanup_count"], 1)
+
     def test_report_marks_boundary_zero_high_final_as_metric_sensitivity(self) -> None:
         args = Namespace(
             model="sat-3l-sm",

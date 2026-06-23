@@ -31673,3 +31673,49 @@ result:
 - 하지만 두 케이스가 각각 compact suppression과 fragment echo suppression으로 갈라져 아직 단일 앱 로직 변경 근거는 약하다.
 - 다음 수집은 `stable_missing_after_*_suppression`이 반복되는 케이스를 우선 모은다.
 - 현재 단계에서는 앱 로직을 바꾸지 않는다. 동일 blocker가 반복될 때 recent-final suppression 정책을 일반 원칙으로 재검토한다.
+
+## 2026-06-24 expected_final stable 후보 누락 진단 보강
+
+목적:
+
+- `expected_final`이 replay input/source/stable repeat 검증을 통과해도, 입력에서 `sentence_finalize_age`회 이상 반복된 별도 stable 후보가 `expected_final`에 빠진 경우를 분리한다.
+- 이런 케이스는 앱 로직 튜닝 근거로 바로 쓰지 않고 case definition cleanup 후보로 격리한다.
+
+변경:
+
+- benchmark report에 `expected_final_omits_stable_candidate` 정의 플래그를 추가했다.
+- stable 후보가 인접 expected 문장의 boundary merge로 설명되거나, actual final 안에 이미 흡수된 경우는 오탐으로 보아 제외한다.
+- 해당 플래그는 `recut_or_relabel_stable_candidate_mismatch` action으로 분류한다.
+
+검증:
+
+```text
+tool_test=./.venv/bin/python -m unittest \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report
+
+result:
+  Ran 49 tests
+  OK
+```
+
+CUDA benchmark:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output .tmp/eval/dictation-ai-sbd/current-20260624-expected-stable-omission-report.json
+
+result:
+  case_count=57
+  final_f1_avg=0.913
+  strict_final_f1_avg=0.963
+  expected_definition_cleanup=10
+  case_interpretation_review=6
+  logic_tuning_candidates=37
+```
+
+해석:
+
+- 이전의 `expected_definition_cleanup=0`은 “형식/기본 근거 오류 없음”에 가까웠고, “반복 stable 후보가 expected에서 빠진 경우까지 전부 정리됨”을 의미하지 않았다.
+- 새 기준에서는 10건이 cleanup 후보로 드러났다. 이들은 `expected_final`을 수정하거나 replay window/context를 재검토하기 전까지 앱 로직 성능 개선 근거에서 제외한다.
+- 따라서 현재 답은 “전부 고친 상태”가 아니라 “검증 기준을 보강했고, 남은 cleanup 후보 10건을 식별한 상태”다.

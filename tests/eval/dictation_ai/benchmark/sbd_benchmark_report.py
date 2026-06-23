@@ -587,6 +587,42 @@ def _has_actual_final_supported_by_omitted_stable_candidate(result: dict[str, An
     return False
 
 
+def _has_omitted_stable_candidate(result: dict[str, Any]) -> bool:
+    expected_final = [
+        str(sentence).strip()
+        for sentence in result.get("expected_final", []) or []
+        if str(sentence).strip()
+    ]
+    actual_final = [
+        str(sentence).strip()
+        for sentence in result.get("actual_final", []) or []
+        if str(sentence).strip()
+    ]
+    stable_candidates = [
+        str(candidate.get("text", "")).strip()
+        for candidate in case_stable_sentence_candidates(result)
+        if str(candidate.get("text", "")).strip()
+    ]
+    if not expected_final or not stable_candidates:
+        return False
+    expected_units = [
+        *expected_final,
+        *[
+            normalized_text(left) + normalized_text(right)
+            for left, right in zip(expected_final, expected_final[1:], strict=False)
+        ],
+    ]
+    for stable in stable_candidates:
+        stable_flags = set(_final_sentence_diagnostic_flags(stable, str(result.get("language") or "")))
+        if stable_flags.intersection({"empty", "spaced_cjk", "cjk_repeated_ngram", "repeated_word_ngram"}):
+            continue
+        if max((_sentence_support_score(stable, expected) for expected in expected_units), default=0.0) < FINAL_SENTENCE_MATCH_MIN_SIMILARITY:
+            if max((_sentence_support_score(stable, actual) for actual in actual_final), default=0.0) >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY:
+                continue
+            return True
+    return False
+
+
 def _expected_final_order_support_kind(case: SbdCase) -> str:
     if len(case.expected_final) < 2:
         return "single"
@@ -1401,6 +1437,8 @@ def _case_primary_review_action(result: dict[str, Any]) -> str:
         return "remove_or_recut_expected_outside_replay_input"
     if not input_evidence.get("observed_fully_supported", True):
         return "rewrite_expected_final_to_observed_stt_text"
+    if "expected_final_omits_stable_candidate" in definition_flags:
+        return "recut_or_relabel_stable_candidate_mismatch"
     if context_flags.intersection({"unmodeled_prefix_context", "actual_prefix_before_expected_final"}):
         return "add_initial_final_or_recut_mid_stream_case"
     if "legacy_sample_without_source_trace" in definition_flags:
@@ -2917,6 +2955,13 @@ def _with_case_evidence_metadata(results: list[dict[str, Any]]) -> list[dict[str
             and _has_actual_final_supported_by_omitted_stable_candidate(item)
         ):
             case_definition_flags.append("expected_final_omits_stable_actual_sentence")
+        if (
+            not case_definition_flags
+            and not item["expected_quality_flags"]
+            and not item["case_context_flags"]
+            and _has_omitted_stable_candidate(item)
+        ):
+            case_definition_flags.append("expected_final_omits_stable_candidate")
         item["case_definition_flags"] = case_definition_flags
         enriched.append(item)
     return enriched
