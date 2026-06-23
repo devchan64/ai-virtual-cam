@@ -69,6 +69,7 @@ MAX_RECENT_SHORT_TEXT_REPEATS = 2
 # 목적어/보어 확장도 번역 단위를 바꿀 수 있어 3 unit 이상부터 회수한다.
 RECENT_FINAL_EXTENSION_MIN_PREFIX_UNITS = 8
 RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS = 3
+RECENT_FINAL_TAIL_ANCHOR_MIN_UNITS = 8
 
 # recent final의 일부 조각이 다음 window에서 짧은 prefix/noise와 함께 다시
 # 등장하는 경우는 새 문장보다 echo일 가능성이 높다. 아래 값은 후보의
@@ -322,6 +323,10 @@ def recent_final_extension_min_suffix_units() -> int:
     return _dictation_env_int("RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS", RECENT_FINAL_EXTENSION_MIN_SUFFIX_UNITS)
 
 
+def recent_final_tail_anchor_min_units() -> int:
+    return _dictation_env_int("RECENT_FINAL_TAIL_ANCHOR_MIN_UNITS", RECENT_FINAL_TAIL_ANCHOR_MIN_UNITS)
+
+
 def recent_final_fragment_echo_min_units() -> int:
     return _dictation_env_int("RECENT_FINAL_FRAGMENT_ECHO_MIN_UNITS", RECENT_FINAL_FRAGMENT_ECHO_MIN_UNITS)
 
@@ -393,6 +398,7 @@ def dictation_pipeline_policy() -> dict[str, object]:
         "recent_transcript_window": RECENT_TRANSCRIPT_WINDOW,
         "recent_final_extension_min_prefix_units": recent_final_extension_min_prefix_units(),
         "recent_final_extension_min_suffix_units": recent_final_extension_min_suffix_units(),
+        "recent_final_tail_anchor_min_units": recent_final_tail_anchor_min_units(),
         "recent_final_fragment_echo_min_units": recent_final_fragment_echo_min_units(),
         "recent_final_fragment_echo_coverage_min": recent_final_fragment_echo_coverage_min(),
         "recent_final_fragment_echo_max_unmatched_units": recent_final_fragment_echo_max_unmatched_units(),
@@ -607,6 +613,16 @@ def dictation_tuning_manifest() -> list[dict[str, int | float | str]]:
             max_value=40,
             scope="duplicate-suppression",
             intent="recover only meaningful suffix extensions while keeping tiny echo corrections suppressed",
+        ),
+        _tuning_manifest_entry(
+            "RECENT_FINAL_TAIL_ANCHOR_MIN_UNITS",
+            default=RECENT_FINAL_TAIL_ANCHOR_MIN_UNITS,
+            current=recent_final_tail_anchor_min_units(),
+            value_type="int",
+            min_value=4,
+            max_value=16,
+            scope="duplicate-suppression",
+            intent="trim a candidate prefix as a recent-final tail echo only when the shared tail anchor is long enough",
         ),
         _tuning_manifest_entry(
             "RECENT_FINAL_FRAGMENT_ECHO_MIN_UNITS",

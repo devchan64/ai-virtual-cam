@@ -36,6 +36,7 @@ from src.app.dictation_pipeline_settings import (
     recent_final_fragment_echo_max_length_ratio as _recent_final_fragment_echo_max_length_ratio,
     recent_final_fragment_echo_max_unmatched_units as _recent_final_fragment_echo_max_unmatched_units,
     recent_final_fragment_echo_min_units as _recent_final_fragment_echo_min_units,
+    recent_final_tail_anchor_min_units as _recent_final_tail_anchor_min_units,
     sentence_confirm_chunks as _sentence_confirm_chunks,
     sentence_confirm_max_age_chunks as _sentence_confirm_max_age_chunks,
     short_cjk_confirm_extra_chunks as _short_cjk_confirm_extra_chunks,
@@ -1335,7 +1336,8 @@ def _recent_final_tail_anchor_delta(
     if not (_has_cjk_words(candidate_words) and _has_cjk_words(recent_words)):
         return None
     max_tail_len = min(8, len(recent_words), len(candidate_words) - 4)
-    for tail_len in range(max_tail_len, 3, -1):
+    min_tail_len = _recent_final_tail_anchor_min_units()
+    for tail_len in range(max_tail_len, min_tail_len - 1, -1):
         recent_tail = recent_words[-tail_len:]
         if candidate_words[:tail_len] != recent_tail:
             continue

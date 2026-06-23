@@ -401,6 +401,15 @@ class DictationAiSbdLifecycleTest(unittest.TestCase):
         self.assertFalse(_should_reset_revision_age(previous, preferred))
         self.assertEqual(_next_revision_confirmation_count(previous, preferred, 1), 2)
 
+    def test_recent_final_short_tail_anchor_keeps_bridge_prefix(self) -> None:
+        recent = "我的里面还有小熊猫、小浣熊，加一些豆芽菜。"
+        candidate = "加一些豆芽菜，还有泡菜，还有葱，跟这个自制的萝卜。"
+
+        delta, source = _recent_final_output_delta(candidate, [recent], "zh")
+
+        self.assertIsNone(source)
+        self.assertEqual(delta, candidate)
+
     def test_deferred_revision_extension_blocks_aged_fragment_final(self) -> None:
         state = LifecycleState(
             language="zh",

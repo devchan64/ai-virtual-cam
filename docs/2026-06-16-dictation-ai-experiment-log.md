@@ -27590,3 +27590,54 @@ manual_boundary_review=3
 
 - `boundary_granularity_summary`, `boundary_zero_high_final_summary`, case-definition action 분류는 벤치 해석과 케이스 정리용이다.
 - 이들은 앱 확정 정책이 아니라 평가 데이터 오염과 label boundary 문제를 분리하기 위한 도구이므로 운영 앱 로직에 넣지 않는다.
+
+### 2026-06-23 recent-final tail anchor 최소 길이 8 채택
+
+배경:
+
+- CJK bridge prefix가 이전 final tail과 짧게 겹칠 때, 새 문장 앞부분이 recent-final echo로 잘려 확정 누락 또는 fragment stage로 남는 케이스를 확인했다.
+- 대표 케이스는 `加一些豆芽菜`가 이전 final tail이면서 다음 안정 문장의 prefix이기도 한 유형이다.
+- 기존 tail anchor 최소 4 unit은 이 bridge prefix를 너무 쉽게 제거했다.
+
+변경:
+
+- `_recent_final_tail_anchor_delta()`의 최소 tail anchor 길이를 `RECENT_FINAL_TAIL_ANCHOR_MIN_UNITS=8`로 관리한다.
+- 문구별 예외가 아니라, recent-final tail을 후보 prefix에서 제거하기 위한 공통 최소 anchor 길이를 보수화한 것이다.
+
+검증:
+
+```text
+two-case check:
+final_f1_avg 0.583 -> 0.667
+```
+
+```text
+full challenge replay:
+cases=1027
+finalized=4689
+stage_start=9009
+final_precision_avg=0.619
+final_recall_avg=0.684
+final_f1_avg=0.628
+strict_final_f1_avg=0.861
+final_similarity_coverage_avg=0.532
+final_boundary_f1_avg=0.178
+```
+
+baseline 대비:
+
+```text
+final_precision_avg +0.0023
+final_recall_avg +0.0024
+final_f1_avg +0.0017
+strict_final_f1_avg 0.847 -> 0.861
+finalized 4695 -> 4689
+stage_start 9025 -> 9009
+changed cases=24 improved=10 worse=8 same_f1_changed=6
+```
+
+판정:
+
+- 전체 평균 개선 폭은 작지만 strict 후보 지표가 개선됐고, prefix 파괴 대표 케이스가 회복됐다.
+- finalized/stage_start 감소는 짧은 tail anchor trimming을 덜 적용한 결과로 해석한다.
+- 중복 억제보다 신규 문장 prefix 보존을 우선하는 보수적 수정으로 채택한다.
