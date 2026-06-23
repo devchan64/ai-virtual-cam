@@ -29291,3 +29291,119 @@ stage_start=329
 
 - `src/app/dictation_pipeline_settings.py`의 `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS` 기본값을 `6 -> 1`로 변경했다.
 - 관련 유닛테스트는 오래된 queue revision이 active final을 선점하거나 reset-age revision을 별도 queue 후보로 늘린다는 기대를 제거하고, 현재 생명주기 원칙에 맞게 정리했다.
+
+## 2026-06-24 short fragment 품질 게이트 재검토
+
+목적:
+
+- queue age 1 반영 뒤에도 strict 저점 케이스에서 짧은 no-end fragment와 CJK short final 관련 손실이 남는지 확인한다.
+- 새 세부 규칙을 추가하기 전에 기존 구조 임계값만으로 누락/중복 균형이 개선되는지 검증한다.
+
+검증:
+
+```text
+output_dir=.tmp/eval/dictation-ai-sbd/parameter-sweeps/current-20260624-short-fragment-after-queue-age-1
+
+baseline:
+  final_precision_avg=0.905278
+  final_recall_avg=0.839722
+  final_f1_avg=0.861111
+  final_boundary_f1_avg=0.558108
+  strict_final_f1_avg=0.961270
+  strict_final_boundary_f1_avg=0.653413
+  case_definition_review=20
+
+SHORT_NO_END_FRAGMENT_UNITS=3:
+  final_f1_avg=0.841667
+  final_boundary_f1_avg=0.544220
+  strict_final_f1_avg=0.920159
+
+SHORT_NO_END_FRAGMENT_UNITS=4:
+  final_f1_avg=0.858333
+  final_boundary_f1_avg=0.555331
+  strict_final_f1_avg=0.933487
+  case_definition_review=19
+
+SHORT_NO_END_FRAGMENT_UNITS=6:
+  final_f1_avg=0.861111
+  final_boundary_f1_avg=0.558108
+  strict_final_f1_avg=0.961270
+  staged_exact_match=19
+
+SHORT_CJK_FINAL_UNITS=8:
+  final_f1_avg=0.833413
+  final_boundary_f1_avg=0.517288
+  strict_final_f1_avg=0.927750
+  case_definition_review=22
+
+SHORT_CJK_FINAL_UNITS=12:
+  final_f1_avg=0.856905
+  final_boundary_f1_avg=0.538902
+  strict_final_f1_avg=0.963218
+  case_definition_review=21
+```
+
+해석:
+
+- `SHORT_NO_END_FRAGMENT_UNITS=3/4`는 전체 final F1과 strict F1을 낮춘다.
+- `SHORT_NO_END_FRAGMENT_UNITS=6`은 주요 지표가 baseline과 같고 staged exact만 18에서 19로 오른다. final 성능 개선 근거가 아니므로 기본값으로 채택하지 않는다.
+- `SHORT_CJK_FINAL_UNITS=8`은 finalized 수를 늘리지만 precision, final F1, boundary F1을 크게 낮춘다.
+- `SHORT_CJK_FINAL_UNITS=12`는 precision과 strict F1은 소폭 올리지만 recall, 전체 F1, boundary F1, review count가 악화된다.
+- 짧은 fragment 품질 게이트를 더 강하거나 약하게 만드는 단일 임계값 변경은 현재 목표와 맞지 않는다. 다음 개선은 임계값 추가가 아니라 boundary granularity와 replay tail 정의를 분리해 해석하는 쪽이 맞다.
+
+## 2026-06-24 confirmation 축 재검토
+
+목적:
+
+- queue age 1 반영 이후 문장 확정이 여전히 늦거나 조각나는 저점 케이스가 있어 confirmation 축을 최신 baseline에서 재검증한다.
+- 기본 원칙인 "유사 token-sentence 3회 반복 관측"을 낮추거나 높였을 때 누락/중복 균형이 좋아지는지 확인한다.
+
+검증:
+
+```text
+output_dir=.tmp/eval/dictation-ai-sbd/parameter-sweeps/current-20260624-confirm-after-queue-age-1
+
+baseline:
+  SENTENCE_CONFIRM_CHUNKS=3
+  SHORT_CJK_CONFIRM_EXTRA_CHUNKS=0
+  final_precision_avg=0.905278
+  final_recall_avg=0.839722
+  final_f1_avg=0.861111
+  final_boundary_f1_avg=0.558108
+  strict_final_f1_avg=0.961270
+  case_definition_review=20
+
+SENTENCE_CONFIRM_CHUNKS=2:
+  finalized=146
+  final_precision_avg=0.867
+  final_recall_avg=0.851
+  final_f1_avg=0.840
+  final_boundary_f1_avg=0.539
+  strict_final_f1_avg=0.884
+  case_definition_review=23
+
+SENTENCE_CONFIRM_CHUNKS=4:
+  finalized=127
+  final_precision_avg=0.898
+  final_recall_avg=0.801
+  final_f1_avg=0.829
+  final_boundary_f1_avg=0.493
+  strict_final_f1_avg=0.936
+  case_definition_review=23
+
+SHORT_CJK_CONFIRM_EXTRA_CHUNKS=1:
+  finalized=121
+  final_precision_avg=0.892
+  final_recall_avg=0.783
+  final_f1_avg=0.818
+  final_boundary_f1_avg=0.518
+  strict_final_f1_avg=0.945
+  case_definition_review=23
+```
+
+해석:
+
+- `SENTENCE_CONFIRM_CHUNKS=2`는 finalized 수와 recall을 늘리지만 precision, final F1, strict F1, boundary F1이 모두 크게 하락한다. premature/duplicate final 위험이 커진다.
+- `SENTENCE_CONFIRM_CHUNKS=4`는 final 지연으로 recall과 boundary F1이 크게 하락한다.
+- `SHORT_CJK_CONFIRM_EXTRA_CHUNKS=1`은 언어별 예외를 되살리는 방향이고, 실제 지표도 누락이 커져 채택하지 않는다.
+- 따라서 현재 corpus에서는 "유사 token-sentence 3회 반복 관측" 원칙을 유지한다.
