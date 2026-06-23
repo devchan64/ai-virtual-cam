@@ -28613,3 +28613,47 @@ missing_expected_split_coverage.split_coverage_total=3
 - `zh_log_delayed_fleece_sweatpants_snow_mountain_queue_20260621_001`, `zh_log_missing_korea_day3_itinerary_connector_final_20260621_001`, `ko_log_draft_20260620_avc_whisper_log_002962`는 순수 소실보다 split-final/boundary granularity 후보로 본다.
 - 따라서 순수 content loss 후보는 10건/14문장보다 작으며, 현재 리포트 기준으로는 7건/11문장 수준으로 좁혀진다.
 - 다음 앱 로직 후보는 split coverage 그룹과 pure loss 그룹을 분리해서 봐야 한다. 전자는 boundary coalescing 또는 final scoring 해석 문제이고, 후자는 quality block/delta trim으로 실제 후보가 사라지는 문제일 가능성이 높다.
+
+## 2026-06-24 expected_final 정의 감사 보강 및 케이스 수정
+
+목적:
+
+- 앱 로직 개선 후보를 고르기 전에, `expected_final` 자체가 앱의 확정 정책과 충돌하는 케이스를 먼저 분리한다.
+- 특히 짧은 토큰 sentence가 긴 expected sentence 내부에 포함된 경우와, 앱 품질 게이트가 차단하는 반복/공백 CJK expected sentence는 로직 튜닝 근거로 바로 사용하지 않는다.
+
+변경:
+
+- benchmark report의 case definition 감사에 `short_contained_expected_token_sentence` 탐지를 추가했다.
+- benchmark report의 case definition 감사에 `expected_app_quality_blocked_sentence` 탐지를 추가했다.
+- 두 플래그는 삭제 규칙이 아니라 `rewrite_expected_final_to_final_sentence_boundary` 리뷰 액션으로 분류한다.
+- `zh_log_promo_bbq_short_token_sentence_echo_20260621_001`의 `expected_final`에서 앱 품질 게이트가 차단하는 반복 웃음 문장과 3회 반복 근거가 부족한 짧은 문장을 제거하고, 실제 반복 확정 가능한 두 문장으로 재정의했다.
+
+CUDA/SaT 확인:
+
+```text
+output=.tmp/eval/dictation-ai-sbd/current-20260624-case-definition-fixed-report.json
+cases=60 finalized=131
+final_precision_avg=0.887
+final_recall_avg=0.800
+final_f1_avg=0.825
+strict_final_f1_avg=0.816
+final_boundary_f1_avg=0.558
+
+case_definition_review=5
+case_definition_review_ratio=0.089
+logic_tuning_candidates=51
+strict_logic_candidates=41
+case_definition_flag_counts={}
+
+missing_expected_without_terminal_residue.case_count=9
+missing_expected_without_terminal_residue.missing_expected_total=11
+missing_expected_split_coverage.case_count=3
+missing_expected_split_coverage.split_coverage_total=3
+```
+
+해석:
+
+- 이번 개선은 앱 로직 개선이 아니라, 잘못 정의된 expected를 수정해 벤치의 해석 신뢰도를 올린 작업이다.
+- `final_f1_avg`는 0.818에서 0.825로, `final_boundary_f1_avg`는 0.551에서 0.558로 올랐다. 이는 정의 오류 제거 효과로 해석한다.
+- 자동 감사가 직접 잡는 `case_definition_flag_counts`는 비어 있지만, replay tail 부족/중간 스트림/수동 경계 리뷰 등 case definition review는 5건 남아 있다.
+- 따라서 현재 상태는 "명시적 expected_final 정의 오류는 자동 감사 기준에서 제거됨"으로 해석하고, 앱 로직 튜닝은 `strict_logic_candidates=41` 중심으로 진행한다.

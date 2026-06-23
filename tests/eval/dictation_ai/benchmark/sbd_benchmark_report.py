@@ -15,7 +15,7 @@ from src.app.dictation_pipeline_settings import (
     dictation_tuning_protocol,
     lifecycle_tuning_policy,
 )
-from src.app.dictation_transcript_logic import _revision_similarity_policy, _word_units
+from src.app.dictation_transcript_logic import _final_sentence_diagnostic_flags, _revision_similarity_policy, _word_units
 from src.app.sentence_boundary import normalized_text
 from tests.eval.dictation_ai.cases.sbd_case_loader import SbdCase
 from tests.eval.dictation_ai.cases.sbd_case_paths import (
@@ -253,6 +253,7 @@ EXPECTED_REVISION_VARIANT_MIN_COVERAGE = 0.55
 EXPECTED_REVISION_VARIANT_MIN_COMMON_RUN = 8
 EXPECTED_CONTAINED_TOKEN_MIN_UNITS = 8
 EXPECTED_CONTAINED_TOKEN_MIN_COVERAGE = 0.80
+EXPECTED_SHORT_CONTAINED_TOKEN_MIN_UNITS = 5
 COMBINED_RESIDUE_MATCH_MIN_SIMILARITY = 0.70
 
 
@@ -294,6 +295,28 @@ def _expected_sentences_have_contained_token_units(left: str, right: str) -> boo
     matcher = SequenceMatcher(None, left_words, right_words, autojunk=False)
     matched_units = sum(block.size for block in matcher.get_matching_blocks())
     return matched_units / max(shorter_len, 1) >= EXPECTED_CONTAINED_TOKEN_MIN_COVERAGE
+
+
+def _expected_sentences_have_short_contained_token_units(left: str, right: str) -> bool:
+    left_words = _word_units(normalized_text(left))
+    right_words = _word_units(normalized_text(right))
+    if not left_words or not right_words:
+        return False
+    shorter, longer = (left_words, right_words) if len(left_words) <= len(right_words) else (right_words, left_words)
+    if len(shorter) < EXPECTED_SHORT_CONTAINED_TOKEN_MIN_UNITS or len(shorter) >= EXPECTED_CONTAINED_TOKEN_MIN_UNITS:
+        return False
+    for index in range(0, len(longer) - len(shorter) + 1):
+        if longer[index : index + len(shorter)] == shorter:
+            return True
+    return False
+
+
+def _has_expected_app_quality_blocked_sentence(expected_final: list[str], language: str) -> bool:
+    app_quality_flags = {"empty", "spaced_cjk", "cjk_repeated_ngram", "repeated_word_ngram"}
+    for sentence in expected_final:
+        if app_quality_flags.intersection(_final_sentence_diagnostic_flags(sentence, language)):
+            return True
+    return False
 
 
 def _punctuation_only_final_mismatch(result: dict[str, Any]) -> bool:
@@ -1303,7 +1326,13 @@ def _case_primary_review_action(result: dict[str, Any]) -> str:
     if "legacy_sample_without_source_trace" in definition_flags:
         return "restore_source_log_or_recut_from_observed_log"
     if definition_flags.intersection(
-        {"duplicate_expected_sentence", "expected_revision_variant_group", "contained_expected_token_sentence"}
+        {
+            "duplicate_expected_sentence",
+            "expected_revision_variant_group",
+            "contained_expected_token_sentence",
+            "short_contained_expected_token_sentence",
+            "expected_app_quality_blocked_sentence",
+        }
     ):
         return "rewrite_expected_final_to_final_sentence_boundary"
     if "punctuation_only_final_mismatch" in definition_flags:
@@ -2044,6 +2073,17 @@ def _with_case_evidence_metadata(results: list[dict[str, Any]]) -> list[dict[str
         )
         if has_contained_token_expected and not has_revision_variant_expected:
             case_definition_flags.append("contained_expected_token_sentence")
+        has_short_contained_token_expected = any(
+            _expected_sentences_have_short_contained_token_units(left, right)
+            for left_index, left in enumerate(expected_final)
+            for right_index, right in enumerate(expected_final)
+            if left_index < right_index and left and right and left != right and left not in right and right not in left
+        )
+        if has_short_contained_token_expected and not has_revision_variant_expected:
+            case_definition_flags.append("short_contained_expected_token_sentence")
+        language = str(item.get("language", "")).strip().lower()
+        if _has_expected_app_quality_blocked_sentence(expected_final, language):
+            case_definition_flags.append("expected_app_quality_blocked_sentence")
         if _punctuation_only_final_mismatch(item):
             case_definition_flags.append("punctuation_only_final_mismatch")
         if expected_final:

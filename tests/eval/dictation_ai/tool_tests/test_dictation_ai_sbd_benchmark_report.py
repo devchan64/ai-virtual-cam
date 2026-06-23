@@ -1666,6 +1666,137 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         )
         self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
 
+    def test_short_contained_token_expected_sentences_are_case_definition_review(self) -> None:
+        args = Namespace(
+            model="sat-3l-sm",
+            device="cuda",
+            compute_type="float16",
+            min_final_f1=0.0,
+            fail_on_regression=False,
+        )
+        case = SbdCase(
+            id="short-contained-token-expected",
+            language="ko",
+            chunks=[
+                "정부도 라는 좀 이런 태세의 전환도 필요하고 정부도 적극적으로 나서야 합니다.",
+                "이거를 우리가 끌고 가겠다 라는 좀 이런 태세의 전환도 필요하고 정부도 적극적으로 나서야 합니다.",
+                "우리가 끌고 가겠다 라는 좀 이런 태세의 전환도 필요하고 정부도 적극적으로 나서야 합니다.",
+            ],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=[
+                "이거를 우리가 끌고 가겠다 라는 좀 이런 태세의 전환도 필요하고 정부도 적극적으로 나서야 합니다.",
+                "라는 좀 이런 태세의 전환도.",
+            ],
+            expected_staged="",
+            tags=("case-definition-review",),
+            sentence_finalize_age=3,
+        )
+        results = [
+            {
+                "id": case.id,
+                "language": case.language,
+                "tags": list(case.tags),
+                "expected_final": case.expected_final,
+                "chunks": [{"input": chunk} for chunk in case.chunks],
+                "actual_final": [
+                    "이거를 우리가 끌고 가겠다 라는 좀 이런 태세의 전환도 필요하고 정부도 적극적으로 나서야 합니다."
+                ],
+                "actual_pending": "",
+                "actual_staged": "",
+                "actual_staged_queue": [],
+                "final_score": _score(1.0, 0.5, 0.6666666667),
+                "final_ordered_score": _score(1.0, 0.5, 0.6666666667),
+                "final_boundary_score": _score(1.0, 0.5, 0.6666666667),
+                "completed_last_score": _score(1.0, 0.5, 0.6666666667),
+                "pending_exact": True,
+                "staged_exact": True,
+                "case_exact_match": False,
+                "metrics": {"finalized": 1, "stage_start": 1},
+            }
+        ]
+
+        report = build_benchmark_report(
+            args=args,
+            case_sources=["cases.jsonl"],
+            corpus_role="challenge-replay",
+            cases=[case],
+            results=results,
+            metric_totals={"finalized": 1, "stage_start": 1},
+            elapsed_ms=1.0,
+        )
+
+        self.assertEqual(
+            report["cases"][0]["case_definition_flags"],
+            ["short_contained_expected_token_sentence"],
+        )
+        self.assertEqual(
+            report["case_definition_action_summary"]["action_counts"],
+            {"rewrite_expected_final_to_final_sentence_boundary": 1},
+        )
+        self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
+
+    def test_app_quality_blocked_expected_sentence_is_case_definition_review(self) -> None:
+        args = Namespace(
+            model="sat-3l-sm",
+            device="cuda",
+            compute_type="float16",
+            min_final_f1=0.0,
+            fail_on_regression=False,
+        )
+        case = SbdCase(
+            id="app-quality-blocked-expected",
+            language="zh",
+            chunks=["哈哈哈哈。好浓的猪手。", "哈哈哈哈。好浓的猪手。", "哈哈哈哈。好浓的猪手。"],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=["哈哈哈哈。", "好浓的猪手。"],
+            expected_staged="",
+            tags=("case-definition-review",),
+            sentence_finalize_age=3,
+        )
+        results = [
+            {
+                "id": case.id,
+                "language": case.language,
+                "tags": list(case.tags),
+                "expected_final": case.expected_final,
+                "chunks": [{"input": chunk} for chunk in case.chunks],
+                "actual_final": ["好浓的猪手。"],
+                "actual_pending": "",
+                "actual_staged": "",
+                "actual_staged_queue": [],
+                "final_score": _score(1.0, 0.5, 0.6666666667),
+                "final_ordered_score": _score(1.0, 0.5, 0.6666666667),
+                "final_boundary_score": _score(1.0, 0.5, 0.6666666667),
+                "completed_last_score": _score(1.0, 0.5, 0.6666666667),
+                "pending_exact": True,
+                "staged_exact": True,
+                "case_exact_match": False,
+                "metrics": {"finalized": 1, "stage_start": 1, "stage_candidate_quality_blocked": 1},
+            }
+        ]
+
+        report = build_benchmark_report(
+            args=args,
+            case_sources=["cases.jsonl"],
+            corpus_role="challenge-replay",
+            cases=[case],
+            results=results,
+            metric_totals={"finalized": 1, "stage_start": 1, "stage_candidate_quality_blocked": 1},
+            elapsed_ms=1.0,
+        )
+
+        self.assertEqual(
+            report["cases"][0]["case_definition_flags"],
+            ["expected_app_quality_blocked_sentence"],
+        )
+        self.assertEqual(
+            report["case_definition_action_summary"]["action_counts"],
+            {"rewrite_expected_final_to_final_sentence_boundary": 1},
+        )
+        self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
+
     def test_punctuation_only_final_mismatch_is_boundary_review(self) -> None:
         args = Namespace(
             model="sat-3l-sm",
