@@ -28186,3 +28186,71 @@ strict_final_boundary_f1_avg=0.7000000000000001
 - CUDA report의 더 엄격한 summary는 아직 316건을 case-definition review로 본다. 특히 shifted-window 반복, `initial_final`/recut, source trace 복원, replay tail 연장 후보가 남아 있다.
 - strict 저점 후보는 `candidate_delta_trimmed`, `candidate_recent_final_delta_trimmed`, `candidate_duplicate_suppressed`, `stage_age_quality_blocked`가 함께 나타나는 구간으로 좁혀졌다.
 - 다음 로직 튜닝은 전체 평균보다 strict 후보의 `ko_log_draft_20260620_avc_whisper_log_002756`, `zh_log_missing_winter_shopping_hat_queue_head_stall_20260621_001` 같은 case를 우선 분석한다.
+
+## 2026-06-23 case-definition review 대상 추가 격리
+
+목적:
+
+- active challenge replay에 남은 `expected_final` 정의/윈도우 정의 검토 대상을 앱 로직 튜닝 평균에서 더 분리한다.
+- 삭제하지 않고 `sbd_case_review_queue/`에 보관해 이후 `expected_final`, replay tail, `initial_final`, source context를 다시 확정할 수 있게 한다.
+- 전체 `final_f1_avg`보다 logic/strict 후보 지표를 앱 로직 분석 기준으로 사용한다.
+
+조치:
+
+- CUDA report의 case별 `case_definition_flags`, `case_context_flags`, `expected_quality_flags`가 있는 289건을 `tests/eval/dictation_ai/sbd_case_review_queue/case-definition-review-20260623.jsonl`로 이동했다.
+- 각 record에는 `_review_queue.removed_reason=case_definition_review`, 원래 path/line, flags, input evidence, final score를 남겼다.
+- active case가 모두 빠져 빈 JSONL shard가 된 10개 파일을 제거했다.
+
+validator 변화:
+
+```text
+이전:
+case_count=349
+expected_final_case_count=345
+input_unsupported_case_count=0
+input_unobserved_case_count=0
+stable_repeat_unsupported_case_count=0
+missing_source_trace_case_count=47
+
+정리 후:
+case_count=60
+expected_final_case_count=56
+input_unsupported_case_count=0
+input_unobserved_case_count=0
+stable_repeat_unsupported_case_count=0
+missing_source_trace_case_count=0
+```
+
+CUDA/SaT 벤치:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --model sat-3l-sm \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260623-case-definition-review-queue-report.json
+```
+
+```text
+cases=60
+finalized=131
+stage_start=372
+finalized_per_stage_start=0.352
+final_precision_avg=0.885
+final_recall_avg=0.787
+final_f1_avg=0.814
+final_boundary_f1_avg=0.538
+case_definition_review=27
+case_definition_review_ratio=0.482
+logic_tuning_candidates=29
+strict_logic_candidates=24
+strict_final_f1_avg=0.879
+```
+
+해석:
+
+- 이번 변화는 앱 로직 성능 개선이 아니라 case-definition review 대상 격리다.
+- active corpus의 source trace와 replay input evidence 문제는 0으로 정리됐다.
+- CUDA report에는 `extend_replay_tail_or_reclassify_staged_expectation` 성격의 보조 review 27건이 남지만, 별도 audit action item은 0건이며 report recommendation은 `app-logic-tuning-subset-usable`로 바뀌었다.
+- 다음 앱 로직 변경은 active 전체 평균이 아니라 `logic_tuning_candidates=29`, `strict_logic_candidates=24`, 특히 `stage_age_quality_blocked`, `stage_replace_deferred`, `candidate_duplicate_suppressed`가 겹치는 낮은 점수 케이스를 근거로 판단한다.
