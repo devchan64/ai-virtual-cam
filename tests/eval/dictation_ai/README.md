@@ -80,6 +80,11 @@ stable 문장 일부를 빠뜨렸거나 boundary가 과하게 합쳐졌는지 �
 revision 후보가 둘 이상 들어간 경우다. final은 append-only로 한 revision 계열을 한 번만 소비하므로,
 이 플래그가 붙은 케이스는 앱 로직 튜닝 근거에서 제외하고 final sentence boundary 또는 expected 수를
 다시 검토한다.
+`punctuation_only_final_mismatch`는 expected와 actual final의 token-sentence는 같지만 종결부호만
+다른 경우다. 받아쓰기 확정 성능 후보가 아니라 boundary 표기/라벨 검토 대상으로 본다.
+expected 문장이 active staged와 staged queue의 연속 잔여를 합쳤을 때만 설명되는 경우는
+`extend_replay_tail_or_reclassify_staged_expectation` 액션으로 분류한다. 이 경우도 즉시 앱 로직을
+바꾸기보다 replay tail을 늘리거나 expected boundary를 다시 정한다.
 `stable_candidate_ordered_alignment_counts`는 stable 후보 수가 맞더라도 순서대로 대응되는 문장인지
 확인하는 보조 신호다. `ordered_high_similarity`만 자동 재작성에 가까운 후보로 보고,
 `ordered_review_similarity`와 `ordered_low_similarity`는 사람이 경계/시작점/expected 수를 다시 본다.

@@ -203,6 +203,7 @@ STABLE_CANDIDATE_ORDERED_REVIEW_MIN_SIMILARITY = 0.60
 EXPECTED_REVISION_VARIANT_MIN_SIMILARITY = 0.55
 EXPECTED_REVISION_VARIANT_MIN_COVERAGE = 0.55
 EXPECTED_REVISION_VARIANT_MIN_COMMON_RUN = 8
+COMBINED_RESIDUE_MATCH_MIN_SIMILARITY = 0.70
 
 
 def _sentence_support_score(sentence: str, chunk: str) -> float:
@@ -229,6 +230,27 @@ def _expected_sentences_are_revision_variants(left: str, right: str) -> bool:
         common_run >= EXPECTED_REVISION_VARIANT_MIN_COMMON_RUN
         and coverage >= EXPECTED_REVISION_VARIANT_MIN_COVERAGE
         and matcher.ratio() >= EXPECTED_REVISION_VARIANT_MIN_SIMILARITY
+    )
+
+
+def _punctuation_only_final_mismatch(result: dict[str, Any]) -> bool:
+    expected_final = [
+        str(sentence).strip()
+        for sentence in result.get("expected_final", []) or []
+        if str(sentence).strip()
+    ]
+    actual_final = [
+        str(sentence).strip()
+        for sentence in result.get("actual_final", []) or []
+        if str(sentence).strip()
+    ]
+    if not expected_final or len(expected_final) != len(actual_final):
+        return False
+    if expected_final == actual_final:
+        return False
+    return all(
+        _word_units(normalized_text(expected)) == _word_units(normalized_text(actual))
+        for expected, actual in zip(expected_final, actual_final, strict=True)
     )
 
 
@@ -1219,6 +1241,8 @@ def _case_primary_review_action(result: dict[str, Any]) -> str:
         return "restore_source_log_or_recut_from_observed_log"
     if definition_flags.intersection({"duplicate_expected_sentence", "expected_revision_variant_group"}):
         return "rewrite_expected_final_to_final_sentence_boundary"
+    if "punctuation_only_final_mismatch" in definition_flags:
+        return "manual_boundary_review"
     if expected_quality:
         return "rewrite_expected_final_to_final_sentence_boundary"
     if "repeated_expected_group" in definition_flags:
@@ -1283,9 +1307,24 @@ def _has_expected_final_staged_residue(result: dict[str, Any]) -> bool:
             return True
         if any(_is_expected_terminal_residue(expected, staged) for staged in residue):
             return True
+        if _combined_residue_support_score(expected, residue) >= COMBINED_RESIDUE_MATCH_MIN_SIMILARITY:
+            return True
         if actual_support >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY:
             continue
     return False
+
+
+def _combined_residue_support_score(expected: str, residue: list[str]) -> float:
+    expected_text = normalized_text(expected)
+    if not expected_text or len(residue) < 2:
+        return 0.0
+    best = 0.0
+    for index in range(0, len(residue) - 1):
+        combined = normalized_text(residue[index]) + normalized_text(residue[index + 1])
+        if not combined:
+            continue
+        best = max(best, _sentence_support_score(expected_text, combined))
+    return best
 
 
 def _is_expected_terminal_residue(expected: str, residue: str) -> bool:
@@ -1916,6 +1955,8 @@ def _with_case_evidence_metadata(results: list[dict[str, Any]]) -> list[dict[str
         )
         if has_revision_variant_expected:
             case_definition_flags.append("expected_revision_variant_group")
+        if _punctuation_only_final_mismatch(item):
+            case_definition_flags.append("punctuation_only_final_mismatch")
         if expected_final:
             expected_group_key = json.dumps(
                 {

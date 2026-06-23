@@ -1487,6 +1487,127 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         )
         self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
 
+    def test_punctuation_only_final_mismatch_is_boundary_review(self) -> None:
+        args = Namespace(
+            model="sat-3l-sm",
+            device="cuda",
+            compute_type="float16",
+            min_final_f1=0.0,
+            fail_on_regression=False,
+        )
+        case = SbdCase(
+            id="punctuation-only-final-mismatch",
+            language="ko",
+            chunks=[
+                "만약에 그렇게 될 경우에는 가장 큰 피해를 보는 나라는 뭐 OO같은 나라가 되겠죠",
+                "그렇게 될 경우에는 가장 큰 피해를 보는 나라는 뭐 OO같은 나라가 되겠죠.",
+                "피해를 보는 나라는 뭐 OO같은 나라가 되겠죠",
+            ],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=["만약에 그렇게 될 경우에는 가장 큰 피해를 보는 나라는 뭐 OO같은 나라가 되겠죠."],
+            expected_staged="",
+            tags=("missing-final",),
+            sentence_finalize_age=3,
+        )
+        results = [
+            {
+                "id": "punctuation-only-final-mismatch",
+                "language": "ko",
+                "tags": ["missing-final"],
+                "expected_final": ["만약에 그렇게 될 경우에는 가장 큰 피해를 보는 나라는 뭐 OO같은 나라가 되겠죠."],
+                "chunks": [{"input": chunk} for chunk in case.chunks],
+                "actual_final": ["만약에 그렇게 될 경우에는 가장 큰 피해를 보는 나라는 뭐 OO같은 나라가 되겠죠"],
+                "actual_pending": "",
+                "actual_staged": "",
+                "actual_staged_queue": [],
+                "final_score": _score(1.0, 1.0, 1.0),
+                "final_ordered_score": _score(1.0, 1.0, 1.0),
+                "final_boundary_score": _score(0.0, 0.0, 0.0),
+                "completed_last_score": _score(1.0, 1.0, 1.0),
+                "pending_exact": True,
+                "staged_exact": True,
+                "case_exact_match": False,
+                "metrics": {"finalized": 1, "stage_start": 1},
+            }
+        ]
+
+        report = build_benchmark_report(
+            args=args,
+            case_sources=["cases.jsonl"],
+            corpus_role="challenge-replay",
+            cases=[case],
+            results=results,
+            metric_totals={"finalized": 1, "stage_start": 1},
+            elapsed_ms=1.0,
+        )
+
+        self.assertEqual(report["cases"][0]["case_definition_flags"], ["punctuation_only_final_mismatch"])
+        self.assertEqual(report["case_definition_action_summary"]["action_counts"], {"manual_boundary_review": 1})
+        self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
+
+    def test_expected_final_matching_combined_staged_queue_is_replay_tail_review(self) -> None:
+        args = Namespace(
+            model="sat-3l-sm",
+            device="cuda",
+            compute_type="float16",
+            min_final_f1=0.0,
+            fail_on_regression=False,
+        )
+        case = SbdCase(
+            id="combined-staged-queue-residue",
+            language="zh",
+            chunks=[
+                "时间真的是过得真快，去年呢，李酷生日呢，我们也是。",
+                "时间真的是过得真快。去年呢，李酷生日呢，我们也是到那个汉江。",
+                "帽子。时间真的是过得真快。去年呢，李酷生日呢，我们也是到那个汉江公园那里去演。",
+            ],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=["时间真的是过得真快，去年呢，李酷生日呢，我们也是。"],
+            expected_staged="",
+            tags=("missing-final",),
+            sentence_finalize_age=3,
+        )
+        results = [
+            {
+                "id": "combined-staged-queue-residue",
+                "language": "zh",
+                "tags": ["missing-final"],
+                "expected_final": ["时间真的是过得真快，去年呢，李酷生日呢，我们也是。"],
+                "chunks": [{"input": chunk} for chunk in case.chunks],
+                "actual_final": [],
+                "actual_pending": "",
+                "actual_staged": "时间真的是过得真快。",
+                "actual_staged_queue": ["去年呢，李酷生日呢，我们也是到那个汉江公园那里去演。"],
+                "final_score": _score(0.0, 0.0, 0.0),
+                "final_ordered_score": _score(0.0, 0.0, 0.0),
+                "final_boundary_score": _score(0.0, 0.0, 0.0),
+                "completed_last_score": _score(0.0, 0.0, 0.0),
+                "pending_exact": True,
+                "staged_exact": False,
+                "case_exact_match": False,
+                "metrics": {"stage_start": 1, "stage_queue_enqueue": 1},
+            }
+        ]
+
+        report = build_benchmark_report(
+            args=args,
+            case_sources=["cases.jsonl"],
+            corpus_role="challenge-replay",
+            cases=[case],
+            results=results,
+            metric_totals={"stage_start": 1, "stage_queue_enqueue": 1},
+            elapsed_ms=1.0,
+        )
+
+        self.assertEqual(report["cases"][0]["case_definition_flags"], [])
+        self.assertEqual(
+            report["case_definition_action_summary"]["action_counts"],
+            {"extend_replay_tail_or_reclassify_staged_expectation": 1},
+        )
+        self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
+
     def test_fragment_expected_final_is_reported_as_rewrite_action(self) -> None:
         args = Namespace(
             model="sat-3l-sm",
