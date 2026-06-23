@@ -30575,3 +30575,33 @@ staged_exact_match=30
 - 8은 stage churn은 더 줄지만 final F1, strict F1, boundary F1이 모두 하락해 과억제다.
 - 따라서 기본값은 `SHORT_NO_END_FRAGMENT_UNITS=7`로 올린다. 이 변경은 final 확정 정책을 새로 만들지 않고, 기존 short no-end fragment 품질 gate를 reviewed challenge 기준으로 보수 조정하는 것이다.
 - checked-in 기본값 검증은 `.tmp/eval/dictation-ai-sbd/current-20260624-short-no-end7-default-report.json`에서 확인했다. 결과는 env sweep의 7과 동일하게 `final_f1_avg=0.913`, `strict_final_f1_avg=0.953`, `stage_start=297`, `staged_exact_match=28`이다.
+
+## 2026-06-24 punctuated short CJK aged-final 허용 기각
+
+목적:
+
+- `zh_log_draft_20260620_avc_whisper_log_11_000820`에서 `哦，还有泡菜，还有葱。`처럼 종결부호가 있는 짧은 CJK 문장이 staged 상태에서 age가 찬 뒤 `short_cjk` 품질 차단으로 suppress되는 현상을 확인했다.
+- 단일 케이스 기준으로는 `short_cjk`를 aged-final 차단에서 제외하면 해당 문장이 final로 나오며 `final_f1=0.667 -> 1.000`으로 개선됐다.
+
+시도:
+
+```text
+patch=allow punctuated short_cjk aged final
+single_case_report=.tmp/eval/dictation-ai-sbd/current-20260624-short-cjk-aged-final-zh-c-report.json
+single_case_result=finalized:1->2, final_f1:0.667->1.000
+
+full_report=.tmp/eval/dictation-ai-sbd/current-20260624-short-cjk-aged-final-report.json
+finalized=190
+case_review=21
+final_precision_avg=0.707
+final_recall_avg=0.902
+final_f1_avg=0.776
+strict_final_f1_avg=0.886
+final_boundary_f1_avg=0.448
+```
+
+결론:
+
+- 단일 누락 케이스는 개선하지만 전체 challenge에서 짧은 CJK false final을 대량으로 허용한다.
+- `short_cjk` aged-final 허용은 핵심 원칙으로 일반화하기에 너무 넓다.
+- 이 패치는 기각하고 적용하지 않는다. 짧은 문장 번역 문제는 short CJK 전체 허용이 아니라, 반복 근거와 boundary/right-context가 충분한 경우를 더 좁게 구분할 수 있을 때만 다시 검토한다.
