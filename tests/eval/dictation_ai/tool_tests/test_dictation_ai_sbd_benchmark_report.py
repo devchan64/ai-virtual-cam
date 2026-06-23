@@ -1680,6 +1680,65 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         )
         self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
 
+    def test_stable_repeated_expected_final_staged_residue_is_logic_candidate(self) -> None:
+        args = Namespace(
+            model="sat-3l-sm",
+            device="cuda",
+            compute_type="float16",
+            min_final_f1=0.0,
+            fail_on_regression=False,
+        )
+        case = SbdCase(
+            id="stable-staged-residue",
+            language="zh",
+            chunks=[
+                "时间真的是过得真快。",
+                "帽子。时间真的是过得真快。",
+                "帽子。时间真的是过得真快。去年呢，李酷生日呢。",
+            ],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=["时间真的是过得真快。"],
+            expected_staged="",
+            tags=("missing-final",),
+            sentence_finalize_age=3,
+        )
+        results = [
+            {
+                "id": "stable-staged-residue",
+                "language": "zh",
+                "tags": ["missing-final"],
+                "expected_final": ["时间真的是过得真快。"],
+                "chunks": [{"input": chunk} for chunk in case.chunks],
+                "actual_final": [],
+                "actual_pending": "",
+                "actual_staged": "时间真的是过得真快。",
+                "actual_staged_queue": [],
+                "final_score": _score(0.0, 0.0, 0.0),
+                "final_ordered_score": _score(0.0, 0.0, 0.0),
+                "final_boundary_score": _score(0.0, 0.0, 0.0),
+                "completed_last_score": _score(0.0, 0.0, 0.0),
+                "pending_exact": True,
+                "staged_exact": False,
+                "case_exact_match": False,
+                "metrics": {"stage_start": 1, "stage_age_hold": 1},
+            }
+        ]
+
+        report = build_benchmark_report(
+            args=args,
+            case_sources=["cases.jsonl"],
+            corpus_role="challenge-replay",
+            cases=[case],
+            results=results,
+            metric_totals={"stage_start": 1, "stage_age_hold": 1},
+            elapsed_ms=1.0,
+        )
+
+        self.assertEqual(report["case_definition_action_summary"]["action_counts"], {})
+        self.assertEqual(report["case_definition_health_summary"]["case_definition_review_count"], 0)
+        self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 1)
+
     def test_fragment_expected_final_is_reported_as_rewrite_action(self) -> None:
         args = Namespace(
             model="sat-3l-sm",

@@ -28338,3 +28338,45 @@ completed_short_no_end_coalesced=8
 - `ko_log_draft_20260620_avc_whisper_log_002962`에서 no-end prefix가 다음 completed sentence와 결합되어 case `final_f1`이 `0.4`에서 `0.5`로 올랐다.
 - 전체 precision과 boundary F1이 함께 상승했고 recall 하락은 없었다.
 - strict 최저점 후보는 그대로 남아 있으므로, 이 패치는 SBD short no-end over-segmentation 완화로 제한해서 해석한다.
+
+## 2026-06-23 stable-repeat 기반 staged residue 해석 수정
+
+목적:
+
+- 사용자가 정의한 벤치 case 기준은 `sentence_finalize_age=3`일 때 유사 token-sentence가 3회 이상 반복 관측되면 `expected_final` 후보로 보는 것이다.
+- 기존 report는 expected 문장이 replay 종료 시점에 staged/pending으로 남으면 안정 반복 근거가 있어도 `extend_replay_tail_or_reclassify_staged_expectation`으로 분류했다.
+- 이 분류는 안정 반복 expected가 final로 소비되지 못한 케이스를 case-definition 문제로 과대 분류해 앱 lifecycle 병목 해석을 흐렸다.
+
+변경:
+
+- `sbd_benchmark_report.py`에서 staged residue가 있더라도 `expected_final`이 replay input에서 fully supported이고, raw STT text로 관측되며, stable repeat가 fully supported이고, stable candidate와 ordered high similarity이면 case-definition review action을 만들지 않는다.
+- 이 경우는 `expected_final` 정의 오류가 아니라 확정 누락 lifecycle tuning 후보로 해석한다.
+- stable 반복 근거가 부족하거나 expected/stable candidate count가 맞지 않는 staged residue는 기존처럼 tail 연장 또는 staged expectation 재분류 대상으로 남긴다.
+
+CUDA/SaT 비교:
+
+```text
+base:
+output=.tmp/eval/dictation-ai-sbd/current-20260623-coalesce-short-no-end-report.json
+case_definition_review_count=28
+case_definition_review_ratio=0.5
+logic_tuning_candidate_count=28
+strict_logic_candidate_count=24
+final_f1_avg=0.8175
+final_boundary_f1_avg=0.5446825396825398
+
+patched:
+output=.tmp/eval/dictation-ai-sbd/current-20260623-stable-supported-staged-residue-report.json
+case_definition_review_count=5
+case_definition_review_ratio=0.08928571428571429
+logic_tuning_candidate_count=51
+strict_logic_candidate_count=40
+final_f1_avg=0.8175
+final_boundary_f1_avg=0.5446825396825398
+```
+
+영향:
+
+- final 지표와 실제 출력은 바뀌지 않았다. 이번 변경은 앱 성능 개선이 아니라 벤치 해석 오류 수정이다.
+- 남은 case-definition action은 `extend_replay_tail_or_reclassify_staged_expectation=3`, `add_initial_final_or_recut_mid_stream_case=1`, `manual_boundary_review=1`이다.
+- 따라서 "expected_final 정의 문제가 모두 고쳐졌다"가 아니라, 활성 60건 중 안정 반복 근거가 있는 staged residue 23건을 확정 누락 분석 대상으로 되돌린 상태로 본다.

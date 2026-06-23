@@ -89,9 +89,11 @@ revision 후보가 둘 이상 들어간 경우다. final은 append-only로 한 r
 붙은 케이스도 앱 로직 튜닝 근거에서 제외하고 expected 수를 다시 검토한다.
 `punctuation_only_final_mismatch`는 expected와 actual final의 token-sentence는 같지만 종결부호만
 다른 경우다. 받아쓰기 확정 성능 후보가 아니라 boundary 표기/라벨 검토 대상으로 본다.
-expected 문장이 active staged와 staged queue의 연속 잔여를 합쳤을 때만 설명되는 경우는
-`extend_replay_tail_or_reclassify_staged_expectation` 액션으로 분류한다. 이 경우도 즉시 앱 로직을
-바꾸기보다 replay tail을 늘리거나 expected boundary를 다시 정한다.
+expected 문장이 active staged와 staged queue의 연속 잔여를 합쳤을 때만 설명되고, 그 expected가
+`sentence_finalize_age`회 이상 반복 관측된 stable token-sentence와 순서대로 맞지 않으면
+`extend_replay_tail_or_reclassify_staged_expectation` 액션으로 분류한다. 반대로 stable 반복 근거가
+충분한 expected가 replay 종료 시점에 staged/pending으로 남은 경우는 케이스 정의 오류가 아니라
+확정 누락 lifecycle 후보로 본다.
 `stable_candidate_ordered_alignment_counts`는 stable 후보 수가 맞더라도 순서대로 대응되는 문장인지
 확인하는 보조 신호다. `ordered_high_similarity`만 자동 재작성에 가까운 후보로 보고,
 `ordered_review_similarity`와 `ordered_low_similarity`는 사람이 경계/시작점/expected 수를 다시 본다.
@@ -111,7 +113,7 @@ shifted-window 반복이므로 distinct lifecycle failure가 있는지 사람이
 5. `add_initial_final_or_recut_mid_stream_case`: 중간 스트림 시작 후보이므로 이미 확정됐어야 할 prefix를 `initial_final`로 옮기거나 시작점을 조정한다. 입력 chunk 또는 actual final에서 expected 앞의 완결 prefix가 보이면 이 검토 대상으로 분류한다.
 6. `restore_source_log_or_recut_from_observed_log`: source trace가 없는 이관 케이스는 원 로그 근거를 복원하거나 관측 로그에서 다시 자른다.
 7. `rewrite_expected_final_to_final_sentence_boundary`: final-only 번역 큐 기준의 완성 문장으로 expected를 다시 쓴다.
-8. `extend_replay_tail_or_reclassify_staged_expectation`: expected의 terminal suffix가 replay 종료 시점에 staged/pending으로 남아 있으면 tail을 늘리거나 final expectation에서 분리한다.
+8. `extend_replay_tail_or_reclassify_staged_expectation`: expected의 terminal suffix가 replay 종료 시점에 staged/pending으로 남아 있고 stable 반복 근거가 부족하면 tail을 늘리거나 final expectation에서 분리한다.
 9. `deduplicate_or_justify_shifted_window_repeat`: 같은 expected 묶음이 반복된 case는 distinct lifecycle failure가 있는 경우만 남긴다.
 10. `manual_boundary_review`: nested boundary, label boundary, 또는 높은 recall이지만 actual final이 더 잘게 나뉜 boundary granularity 케이스는 사람이 경계를 다시 판단한다.
 
