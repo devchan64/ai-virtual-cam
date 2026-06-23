@@ -262,6 +262,23 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
             [{"text": "우리는 계속해서 미국 투자를 이어갈 것인가?", "count": 3, "first_index": 0, "last_index": 2}],
         )
 
+    def test_case_input_evidence_accepts_repeated_expected_inside_context_windows(self) -> None:
+        evidence = case_input_evidence(
+            {
+                "sentence_finalize_age": 3,
+                "chunks": [
+                    "앞선 문맥입니다. 목표 문장입니다.",
+                    "다른 앞선 문맥입니다. 목표 문장입니다. 다음 문장입니다.",
+                    "목표 문장입니다. 더 이어지는 문맥입니다.",
+                ],
+                "expected_final": ["목표 문장입니다."],
+            }
+        )
+
+        self.assertTrue(evidence["stable_repeat_fully_supported"])
+        self.assertEqual(evidence["stable_repeat_count"], 1)
+        self.assertEqual(evidence["repeat_count_min"], 3)
+
     def test_case_input_evidence_ignores_punctuation_only_sentence_candidates(self) -> None:
         evidence = case_input_evidence(
             {

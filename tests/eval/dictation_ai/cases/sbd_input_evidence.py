@@ -210,7 +210,16 @@ def case_input_evidence(case: dict[str, Any]) -> dict[str, Any]:
     ]
     covered_count = sum(1 for value in coverages if value >= MIN_INPUT_EVIDENCE_COVERAGE)
     observed_count = sum(1 for value in observed if value)
-    stable_repeat_count = sum(1 for value in stable_group_counts if value >= required_repeat_observations)
+    # stable repeat evidence는 expected 문장 자체가 replay chunk sentence 후보에서
+    # sentence_finalize_age회 이상 유사하게 관측되는지를 본다. stable_candidates는
+    # expected_final 재작성 후보를 보여주는 보조 진단이며, 주변 context가 매번 조금씩
+    # 달라지는 sliding window에서는 대표 후보 그룹이 없어도 expected 문장 반복 근거가
+    # 충분할 수 있다.
+    stable_repeat_count = sum(
+        1
+        for repeat_count, stable_group_count in zip(repeat_counts, stable_group_counts, strict=True)
+        if repeat_count >= required_repeat_observations or stable_group_count >= required_repeat_observations
+    )
     return {
         "expected_count": len(expected_final),
         "covered_count": covered_count,
