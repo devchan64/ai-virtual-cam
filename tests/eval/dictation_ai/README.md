@@ -76,6 +76,10 @@ action 예시의 전체 후보를 기준으로 재작성/재단 여부를 판단
 섞지 않는지 확인해야 한다. `fewer_stable_candidates_than_expected`는 기대 문장을 줄이거나 replay
 구간을 다시 잘라야 할 가능성이 크고, `more_stable_candidates_than_expected`는 `expected_final`이
 stable 문장 일부를 빠뜨렸거나 boundary가 과하게 합쳐졌는지 먼저 본다.
+`expected_revision_variant_group`은 한 case의 `expected_final` 안에 같은 발화의 token-sentence
+revision 후보가 둘 이상 들어간 경우다. final은 append-only로 한 revision 계열을 한 번만 소비하므로,
+이 플래그가 붙은 케이스는 앱 로직 튜닝 근거에서 제외하고 final sentence boundary 또는 expected 수를
+다시 검토한다.
 `stable_candidate_ordered_alignment_counts`는 stable 후보 수가 맞더라도 순서대로 대응되는 문장인지
 확인하는 보조 신호다. `ordered_high_similarity`만 자동 재작성에 가까운 후보로 보고,
 `ordered_review_similarity`와 `ordered_low_similarity`는 사람이 경계/시작점/expected 수를 다시 본다.

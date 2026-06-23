@@ -200,6 +200,9 @@ TERMINAL_RESIDUE_SUFFIX_COVERAGE_MIN = 0.85
 TERMINAL_RESIDUE_ACTUAL_COMPLETE_MIN = 0.95
 STABLE_CANDIDATE_ORDERED_REWRITE_MIN_SIMILARITY = 0.80
 STABLE_CANDIDATE_ORDERED_REVIEW_MIN_SIMILARITY = 0.60
+EXPECTED_REVISION_VARIANT_MIN_SIMILARITY = 0.55
+EXPECTED_REVISION_VARIANT_MIN_COVERAGE = 0.55
+EXPECTED_REVISION_VARIANT_MIN_COMMON_RUN = 8
 
 
 def _sentence_support_score(sentence: str, chunk: str) -> float:
@@ -212,6 +215,21 @@ def _sentence_support_score(sentence: str, chunk: str) -> float:
         coverage = common_run / max(len(sentence_words), 1)
         return max(ratio, coverage)
     return SequenceMatcher(None, normalized_text(sentence), normalized_text(chunk), autojunk=False).ratio()
+
+
+def _expected_sentences_are_revision_variants(left: str, right: str) -> bool:
+    left_words = _word_units(normalized_text(left))
+    right_words = _word_units(normalized_text(right))
+    if not left_words or not right_words:
+        return False
+    matcher = SequenceMatcher(None, left_words, right_words, autojunk=False)
+    common_run = max((block.size for block in matcher.get_matching_blocks()), default=0)
+    coverage = common_run / max(min(len(left_words), len(right_words)), 1)
+    return (
+        common_run >= EXPECTED_REVISION_VARIANT_MIN_COMMON_RUN
+        and coverage >= EXPECTED_REVISION_VARIANT_MIN_COVERAGE
+        and matcher.ratio() >= EXPECTED_REVISION_VARIANT_MIN_SIMILARITY
+    )
 
 
 def _expected_sentence_support(sentence: str, chunks: list[str]) -> dict[str, Any]:
@@ -1199,7 +1217,7 @@ def _case_primary_review_action(result: dict[str, Any]) -> str:
         return "add_initial_final_or_recut_mid_stream_case"
     if "legacy_sample_without_source_trace" in definition_flags:
         return "restore_source_log_or_recut_from_observed_log"
-    if definition_flags.intersection({"duplicate_expected_sentence"}):
+    if definition_flags.intersection({"duplicate_expected_sentence", "expected_revision_variant_group"}):
         return "rewrite_expected_final_to_final_sentence_boundary"
     if expected_quality:
         return "rewrite_expected_final_to_final_sentence_boundary"
@@ -1890,6 +1908,14 @@ def _with_case_evidence_metadata(results: list[dict[str, Any]]) -> list[dict[str
         )
         if has_nested_expected:
             case_definition_flags.append("nested_expected_sentence")
+        has_revision_variant_expected = any(
+            _expected_sentences_are_revision_variants(left, right)
+            for left_index, left in enumerate(expected_final)
+            for right_index, right in enumerate(expected_final)
+            if left_index < right_index and left and right and left != right and left not in right and right not in left
+        )
+        if has_revision_variant_expected:
+            case_definition_flags.append("expected_revision_variant_group")
         if expected_final:
             expected_group_key = json.dumps(
                 {
