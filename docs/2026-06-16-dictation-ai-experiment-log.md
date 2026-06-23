@@ -29657,3 +29657,53 @@ candidate_duplicate_suppressed.case_count=4 total_count=37
 
 - 남은 strict actionable 저점은 `stage_age_quality_blocked`만의 문제가 아니라 delta trimming, recent-final trimming, duplicate suppression이 동시에 반복되는 복합 병목이다.
 - 따라서 다음 앱 로직 변경은 하나의 상수를 느슨하게 만드는 방식보다, 확정 직전 후보가 final history와 비교되는 과정에서 실제 새 문장/부분 중복/잔여 suffix가 어떻게 분기되는지 추적한 뒤 최소 원칙을 찾아야 한다.
+
+## 2026-06-24 recent-final delta reason 계측 추가
+
+목적:
+
+- strict actionable 저점 4건에서 `candidate_recent_final_delta_trimmed`와 `candidate_duplicate_suppressed`가 공통으로 나타났지만, 어떤 recent-final delta 경로가 원인인지 구분되지 않았다.
+- 앱 로직을 바로 바꾸지 않고 replay metric에 reason suffix를 추가해 prefix extension, compact echo, fragment echo, suffix echo 등을 분리해서 본다.
+
+검증:
+
+```text
+tool_test=./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report
+tool_test_result=OK, 44 tests
+
+helper_tests=./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle.DictationAiSbdLifecycleTest.test_recent_final_echo_suppression_matches_runtime_lifecycle_metric tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle.DictationAiSbdLifecycleTest.test_recent_final_suffix_recovery_runs_even_when_committed_delta_is_empty tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle.DictationAiSbdLifecycleTest.test_recent_final_internal_match_can_recover_following_sentence tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle.DictationAiSbdLifecycleTest.test_recent_final_tail_anchor_does_not_drop_new_sentence_prefix tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle.DictationAiSbdLifecycleTest.test_recent_final_short_tail_anchor_keeps_bridge_prefix
+helper_tests_result=OK, 5 tests
+
+cuda_output=.tmp/eval/dictation-ai-sbd/current-20260624-recent-final-delta-reason-report.json
+final_f1_avg=0.862698
+strict_final_f1_avg=0.964444
+final_boundary_f1_avg=0.564458
+strict_actionable_low_final.case_count=4
+```
+
+strict actionable 저점의 recent-final reason:
+
+```text
+candidate_duplicate_suppressed_compact.case_count=4 total_count=22
+candidate_recent_final_delta_trimmed_compact.case_count=3 total_count=6
+candidate_recent_final_delta_trimmed_prefix_extension.case_count=2 total_count=4
+candidate_duplicate_suppressed_prefix_extension.case_count=2 total_count=3
+candidate_duplicate_suppressed_fragment_echo.case_count=2 total_count=3
+```
+
+fragment echo 상수 sweep:
+
+```text
+sweep_output=.tmp/eval/dictation-ai-sbd/sweep-20260624-recent-final-echo-strict-summary.json
+params=RECENT_FINAL_FRAGMENT_ECHO_COVERAGE_MIN=0.75, RECENT_FINAL_FRAGMENT_ECHO_MAX_UNMATCHED_UNITS=2, RECENT_FINAL_FRAGMENT_ECHO_MAX_LENGTH_RATIO=0.35
+changed_cases=0
+final_f1_delta=0.0000
+strict_final_f1_delta=0.0000
+boundary_f1_delta=0.0000
+```
+
+해석:
+
+- fragment echo 상수축은 현재 저점 개선에 영향을 주지 않는다.
+- 남은 공통 병목은 `compact` recent-final echo가 가장 강하다. 다만 compact는 중복 확정 억제의 핵심 안전장치이므로 바로 완화하지 않는다.
+- 다음 검토는 premature final로 등록된 recent final이 이후 더 안정된 token-sentence 후보를 compact echo로 차단하는 조건을 케이스 단위로 추적하고, 동일 token-sentence의 정정인지 실제 중복인지 구분할 일반 기준이 있는지 확인하는 것이다.

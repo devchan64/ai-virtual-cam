@@ -22,7 +22,7 @@ from src.app.dictation_transcript_logic import (
     _pending_overrun_reason,
     _pending_text_diagnostic_flags,
     _prefer_sentence_revision,
-    _recent_final_output_delta,
+    _recent_final_output_delta_with_reason,
     _replacement_decision_reason,
     _revision_internal_stability_bucket,
     _sentence_max_age_chunks,
@@ -104,7 +104,7 @@ def _promote_next_staged_sentence(state: LifecycleState, chunk_index: int) -> No
             state.staged_delta_suppressed_chunks = 0
             state.staged_delta_suppressed_chunk_index = -1
             continue
-        promoted_sentence, recent_source = _recent_final_output_delta(
+        promoted_sentence, recent_source, recent_reason = _recent_final_output_delta_with_reason(
             state.staged_sentence,
             tuple(state.final_sentences or ()),
             state.language,
@@ -116,6 +116,7 @@ def _promote_next_staged_sentence(state: LifecycleState, chunk_index: int) -> No
             state.staged_delta_suppressed_chunks = 0
             state.staged_delta_suppressed_chunk_index = -1
             state.count("stage_queue_recent_final_delta_trimmed")
+            state.count(f"stage_queue_recent_final_delta_trimmed_{recent_reason}")
             return
         state.staged_sentence = ""
         state.staged_confirmations = 0
@@ -125,6 +126,7 @@ def _promote_next_staged_sentence(state: LifecycleState, chunk_index: int) -> No
         state.staged_delta_suppressed_chunks = 0
         state.staged_delta_suppressed_chunk_index = -1
         state.count("stage_queue_recent_final_suppressed")
+        state.count(f"stage_queue_recent_final_suppressed_{recent_reason}")
         state.count("segment_state_suppressed")
 
 
@@ -400,10 +402,15 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
         state.count("finalize_delta_fragment_preserved")
         output_sentence = staged_before
     assert state.final_sentences is not None
-    output_sentence, recent_source = _recent_final_output_delta(output_sentence, tuple(state.final_sentences), language)
+    output_sentence, recent_source, recent_reason = _recent_final_output_delta_with_reason(
+        output_sentence,
+        tuple(state.final_sentences),
+        language,
+    )
     if recent_source is not None:
         if output_sentence:
             state.count("finalize_recent_delta_trimmed")
+            state.count(f"finalize_recent_delta_trimmed_{recent_reason}")
         else:
             state.staged_sentence = ""
             state.staged_confirmations = 0
@@ -413,6 +420,7 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
             state.staged_delta_suppressed_chunks = 0
             state.staged_delta_suppressed_chunk_index = -1
             state.count("finalize_recent_echo_suppressed")
+            state.count(f"finalize_recent_echo_suppressed_{recent_reason}")
             state.count("segment_state_suppressed")
             _promote_next_staged_sentence(state, chunk_index)
             return []
@@ -491,7 +499,7 @@ def _stage_completed_sentence(
             candidate = stripped_candidate
             state.count("candidate_prior_pending_prefix_trimmed")
     assert state.final_sentences is not None
-    recent_candidate, recent_source = _recent_final_output_delta(
+    recent_candidate, recent_source, recent_reason = _recent_final_output_delta_with_reason(
         normalized_sentence,
         tuple(state.final_sentences),
         language,
@@ -499,8 +507,11 @@ def _stage_completed_sentence(
     if recent_source is not None and recent_candidate != candidate:
         candidate = recent_candidate
         state.count("candidate_recent_final_delta_trimmed")
+        state.count(f"candidate_recent_final_delta_trimmed_{recent_reason}")
     if not candidate:
         state.count("candidate_duplicate_suppressed")
+        if recent_source is not None:
+            state.count(f"candidate_duplicate_suppressed_{recent_reason}")
         state.count("segment_state_suppressed")
         return []
     if _is_pending_prefix_mixed_candidate(candidate, state.pending_text):

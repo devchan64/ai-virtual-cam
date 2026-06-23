@@ -1218,62 +1218,67 @@ def _compact_recent_final_delta(candidate_words: list[str], recent_words: list[s
 
 
 def _recent_final_sentence_delta(candidate: str, recent_sentence: str, language: str) -> str | None:
+    delta, _reason = _recent_final_sentence_delta_with_reason(candidate, recent_sentence, language)
+    return delta
+
+
+def _recent_final_sentence_delta_with_reason(candidate: str, recent_sentence: str, language: str) -> tuple[str | None, str]:
     normalized_candidate = _normalized_text(candidate)
     normalized_recent = _normalized_text(recent_sentence)
     if not normalized_candidate or not normalized_recent:
-        return None
+        return None, "empty"
     candidate_words = _word_units(normalized_candidate)
     recent_words = _word_units(normalized_recent)
     if candidate_words and candidate_words == recent_words:
-        return ""
+        return "", "exact"
     extension_delta = _recent_final_prefix_extension_delta(candidate_words, recent_words, normalized_candidate)
     if extension_delta is not None:
-        return extension_delta
+        return extension_delta, "prefix_extension"
     tail_anchor_delta = _recent_final_tail_anchor_delta(candidate_words, recent_words, normalized_candidate)
     if tail_anchor_delta is not None:
-        return tail_anchor_delta
+        return tail_anchor_delta, "tail_anchor"
     compact_delta = _compact_recent_final_delta(candidate_words, recent_words)
     if compact_delta is not None:
-        return compact_delta
+        return compact_delta, "compact"
     fragment_echo_delta = _recent_final_fragment_echo_delta(normalized_candidate, candidate_words, recent_words)
     if fragment_echo_delta is not None:
-        return fragment_echo_delta
+        return fragment_echo_delta, "fragment_echo"
     short_tail_delta = _recent_final_short_tail_echo_delta(candidate_words, recent_words)
     if short_tail_delta is not None:
-        return short_tail_delta
+        return short_tail_delta, "short_tail_echo"
     tail_subset_delta = _recent_final_tail_subset_echo_delta(candidate_words, recent_words)
     if tail_subset_delta is not None:
-        return tail_subset_delta
+        return tail_subset_delta, "tail_subset_echo"
     fuzzy_suffix_delta = _recent_final_fuzzy_suffix_echo_delta(candidate_words, recent_words)
     if fuzzy_suffix_delta is not None:
-        return fuzzy_suffix_delta
+        return fuzzy_suffix_delta, "fuzzy_suffix_echo"
     no_end_suffix_delta = _recent_final_no_end_suffix_echo_delta(
         normalized_candidate,
         candidate_words,
         recent_words,
     )
     if no_end_suffix_delta is not None:
-        return no_end_suffix_delta
+        return no_end_suffix_delta, "no_end_suffix_echo"
     if min(len(candidate_words), len(recent_words)) < 8:
         suffix_delta = _recent_final_suffix_delta(candidate_words, recent_words)
         if suffix_delta is not None:
-            return suffix_delta
-        return None
+            return suffix_delta, "suffix"
+        return None, "no_match"
     suffix_delta = _recent_final_suffix_delta(candidate_words, recent_words)
     if suffix_delta is not None:
-        return suffix_delta
+        return suffix_delta, "suffix"
     if _contains_word_sequence(recent_words, candidate_words):
-        return ""
+        return "", "contained_in_recent"
     if _contains_word_sequence(candidate_words, recent_words):
         for start in range(0, len(candidate_words) - len(recent_words) + 1):
             if _is_subsequence_at(candidate_words, recent_words, start):
                 suffix_words = candidate_words[start + len(recent_words) :]
                 if not suffix_words:
-                    return ""
+                    return "", "contains_recent"
                 if _has_cjk_words(candidate_words) and len(suffix_words) < 4:
-                    return ""
+                    return "", "contains_recent_short_cjk_suffix"
                 delta = _cjk_delta_from_words(suffix_words) if _has_cjk_words(candidate_words) else _sentence_delta_from_words(suffix_words)
-                return _with_candidate_terminal(delta, normalized_candidate)
+                return _with_candidate_terminal(delta, normalized_candidate), "contains_recent"
     matcher = SequenceMatcher(None, recent_words, candidate_words, autojunk=False)
     prefix_blocks = [
         block
@@ -1295,11 +1300,11 @@ def _recent_final_sentence_delta(candidate: str, recent_sentence: str, language:
         if covered_recent / max(len(recent_words), 1) >= 0.80 and last_candidate_end >= len(recent_words) - 2:
             suffix_words = candidate_words[last_candidate_end:]
             if not suffix_words:
-                return ""
+                return "", "prefix_block"
             if _has_cjk_words(candidate_words) and len(suffix_words) < 4:
-                return ""
+                return "", "prefix_block_short_cjk_suffix"
             delta = _cjk_delta_from_words(suffix_words) if _has_cjk_words(candidate_words) else _sentence_delta_from_words(suffix_words)
-            return _with_candidate_terminal(delta, normalized_candidate)
+            return _with_candidate_terminal(delta, normalized_candidate), "prefix_block"
     if _has_cjk_words(candidate_words) and _has_cjk_words(recent_words):
         cjk_blocks = [
             block
@@ -1311,38 +1316,38 @@ def _recent_final_sentence_delta(candidate: str, recent_sentence: str, language:
             last_candidate_end = max((block.b + block.size for block in cjk_blocks), default=0)
             suffix_words = candidate_words[last_candidate_end:]
             if not suffix_words:
-                return ""
+                return "", "cjk_block"
             if len(suffix_words) < 4:
-                return ""
-            return _with_candidate_terminal(_cjk_delta_from_words(suffix_words), normalized_candidate)
+                return "", "cjk_block_short_suffix"
+            return _with_candidate_terminal(_cjk_delta_from_words(suffix_words), normalized_candidate), "cjk_block"
         best_i, best_j, best_len = _best_common_word_run(recent_words, candidate_words)
         recent_coverage = best_len / max(len(recent_words), 1)
         if best_len >= 10 and recent_coverage >= 0.45:
             suffix_words = candidate_words[best_j + best_len :]
             if not suffix_words:
-                return ""
+                return "", "cjk_common_run"
             if len(suffix_words) < 4:
-                return ""
-            return _with_candidate_terminal(_cjk_delta_from_words(suffix_words), normalized_candidate)
+                return "", "cjk_common_run_short_suffix"
+            return _with_candidate_terminal(_cjk_delta_from_words(suffix_words), normalized_candidate), "cjk_common_run"
     if not _is_recent_final_echo(normalized_candidate, normalized_recent, language):
-        return None
+        return None, "no_match"
     blocks = [
         block
         for block in matcher.get_matching_blocks()
         if block.size >= 8 and block.a <= 3 and block.b <= 3
     ]
     if not blocks:
-        return ""
+        return "", "echo"
     block = max(blocks, key=lambda item: item.size)
     if block.size / max(len(recent_words), 1) < 0.60:
-        return ""
+        return "", "echo_low_coverage"
     suffix_words = candidate_words[block.b + block.size :]
     if not suffix_words:
-        return ""
+        return "", "echo"
     if _has_cjk_words(candidate_words) and len(suffix_words) < 4:
-        return ""
+        return "", "echo_short_cjk_suffix"
     delta = _cjk_delta_from_words(suffix_words) if _has_cjk_words(candidate_words) else _sentence_delta_from_words(suffix_words)
-    return _with_candidate_terminal(delta, normalized_candidate)
+    return _with_candidate_terminal(delta, normalized_candidate), "echo"
 
 
 def _recent_final_prefix_extension_delta(
@@ -1578,15 +1583,24 @@ def _with_candidate_terminal(delta: str, candidate: str) -> str:
 
 
 def _recent_final_output_delta(candidate: str, recent_sentences: list[str] | tuple[str, ...], language: str) -> tuple[str, str | None]:
+    delta, recent, _reason = _recent_final_output_delta_with_reason(candidate, recent_sentences, language)
+    return delta, recent
+
+
+def _recent_final_output_delta_with_reason(
+    candidate: str,
+    recent_sentences: list[str] | tuple[str, ...],
+    language: str,
+) -> tuple[str, str | None, str]:
     normalized = _normalized_text(candidate)
     if not normalized:
-        return "", None
+        return "", None, "empty"
     for recent in reversed(recent_sentences):
-        delta = _recent_final_sentence_delta(normalized, recent, language)
+        delta, reason = _recent_final_sentence_delta_with_reason(normalized, recent, language)
         if delta is None:
             continue
-        return delta, recent
-    return normalized, None
+        return delta, recent, reason
+    return normalized, None, "no_match"
 
 
 def _strip_prior_pending_prefix_revision(staged_sentence: str, candidate: str, prior_pending_text: str) -> str:

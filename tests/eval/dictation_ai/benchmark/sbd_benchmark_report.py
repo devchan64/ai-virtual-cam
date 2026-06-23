@@ -29,6 +29,43 @@ from tests.eval.dictation_ai.cases.sbd_expected_quality import expected_quality_
 from tests.eval.dictation_ai.cases.sbd_input_evidence import case_input_evidence, case_stable_sentence_candidates
 from tests.eval.dictation_ai.benchmark.sbd_runtime_contract import lifecycle_replay_contract, runtime_contract
 
+RECENT_FINAL_DELTA_REASON_KEYS = (
+    "exact",
+    "prefix_extension",
+    "tail_anchor",
+    "compact",
+    "fragment_echo",
+    "short_tail_echo",
+    "tail_subset_echo",
+    "fuzzy_suffix_echo",
+    "no_end_suffix_echo",
+    "suffix",
+    "contained_in_recent",
+    "contains_recent",
+    "contains_recent_short_cjk_suffix",
+    "prefix_block",
+    "prefix_block_short_cjk_suffix",
+    "cjk_block",
+    "cjk_block_short_suffix",
+    "cjk_common_run",
+    "cjk_common_run_short_suffix",
+    "echo",
+    "echo_low_coverage",
+    "echo_short_cjk_suffix",
+)
+RECENT_FINAL_DELTA_DETAIL_METRICS = tuple(
+    f"{prefix}_{reason}"
+    for prefix in (
+        "stage_queue_recent_final_delta_trimmed",
+        "stage_queue_recent_final_suppressed",
+        "finalize_recent_delta_trimmed",
+        "finalize_recent_echo_suppressed",
+        "candidate_recent_final_delta_trimmed",
+        "candidate_duplicate_suppressed",
+    )
+    for reason in RECENT_FINAL_DELTA_REASON_KEYS
+)
+
 LIFECYCLE_BOTTLENECK_METRICS = (
     "stage_start",
     "finalized",
@@ -102,6 +139,7 @@ LIFECYCLE_BOTTLENECK_METRICS = (
     "candidate_delta_trimmed_cjk",
     "candidate_recent_final_delta_trimmed",
     "candidate_duplicate_suppressed",
+    *RECENT_FINAL_DELTA_DETAIL_METRICS,
     "candidate_pending_prefix_mixed_suppressed",
     "candidate_prior_pending_prefix_trimmed",
     "candidate_prior_pending_recent_final_mixed_suppressed",
@@ -188,6 +226,7 @@ CASE_EXEMPLAR_METRICS = (
     "candidate_delta_trimmed_cjk",
     "candidate_recent_final_delta_trimmed",
     "candidate_duplicate_suppressed",
+    *RECENT_FINAL_DELTA_DETAIL_METRICS,
     "candidate_pending_prefix_mixed_suppressed",
     "candidate_prior_pending_prefix_trimmed",
     "candidate_prior_pending_recent_final_mixed_suppressed",
@@ -229,6 +268,7 @@ SUPPORTED_LOW_BOTTLENECK_METRICS = (
     "candidate_recent_final_delta_trimmed",
     "candidate_delta_trimmed",
     "candidate_duplicate_suppressed",
+    *RECENT_FINAL_DELTA_DETAIL_METRICS,
 )
 CASE_REVIEW_ACTION_FLAGS = (
     "recut_or_relabel_stable_candidate_mismatch",
