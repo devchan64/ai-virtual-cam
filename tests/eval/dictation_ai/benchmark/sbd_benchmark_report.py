@@ -1345,6 +1345,8 @@ def _case_primary_review_action(result: dict[str, Any]) -> str:
         return "manual_boundary_review"
     if _has_expected_final_staged_residue(result) and not _expected_final_matches_stable_repeat_evidence(result):
         return "extend_replay_tail_or_reclassify_staged_expectation"
+    if _missing_expected_split_coverage_payload(result) is not None:
+        return "manual_boundary_review"
     if _is_boundary_granularity_review(result):
         return "manual_boundary_review"
     if definition_flags.intersection({"nested_expected_sentence"}):
@@ -1909,7 +1911,8 @@ def summarize_strict_logic_candidate_results(cases: list[SbdCase], results: list
     return {
         "interpretation": (
             "Strict logic candidates are single or supported_monotonic, fully input-supported, have no expected quality flags, "
-            "do not have unmodeled prefix context flags, and have no case-definition review flags. "
+            "do not have unmodeled prefix context flags, have no case-definition review flags, and exclude split-coverage "
+            "boundary granularity cases. "
             "Use this subset before changing app logic; other challenge cases may still be valid diagnostics but need review context."
         ),
         "strict_case_count": len(strict),

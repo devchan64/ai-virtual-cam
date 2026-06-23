@@ -28695,3 +28695,45 @@ experiment_final_boundary_f1_avg=0.548
 - finalized 수는 131에서 136으로 늘었지만 recall은 개선되지 않았고 precision, final F1, strict final F1, boundary F1이 모두 하락했다.
 - 따라서 no-end aged final을 넓게 허용하는 방향은 현재 challenge replay 기준에서 과확정 위험이 더 크다.
 - 이 앱 로직 변경은 폐기했고, 다음 개선은 no-end 전반 완화가 아니라 terminal residue/split coverage/pure loss를 더 분리한 뒤 더 좁은 생명주기 원칙을 찾아야 한다.
+
+## 2026-06-24 split coverage 케이스를 strict logic 후보에서 제외
+
+목적:
+
+- `missing_expected_without_terminal_residue` 안에는 실제 문장 소실뿐 아니라, expected 한 문장이 actual final/staged/pending 조각으로 나뉘어 덮이는 split coverage 케이스가 섞여 있다.
+- 이런 케이스는 앱 로직 결함으로 바로 튜닝하기보다 boundary granularity 또는 expected 경계 리뷰 대상으로 분리해야 한다.
+
+변경:
+
+- `missing_expected_split_coverage_summary`가 잡는 케이스를 `manual_boundary_review` 액션으로 분류했다.
+- strict logic candidate 해석에서 split coverage boundary granularity 케이스를 제외하도록 명시했다.
+
+CUDA/SaT 확인:
+
+```text
+baseline_output=.tmp/eval/dictation-ai-sbd/current-20260624-case-definition-fixed-report.json
+baseline_case_definition_review=5
+baseline_logic_tuning_candidates=51
+baseline_strict_logic_candidates=41
+baseline_strict_final_f1_avg=0.816
+
+output=.tmp/eval/dictation-ai-sbd/current-20260624-split-coverage-review-report.json
+case_definition_review=8
+case_definition_review_ratio=0.143
+logic_tuning_candidates=48
+strict_logic_candidates=39
+strict_final_f1_avg=0.834
+final_precision_avg=0.887
+final_recall_avg=0.800
+final_f1_avg=0.825
+final_boundary_f1_avg=0.558
+
+missing_expected_split_coverage.case_count=3
+missing_expected_split_coverage.split_coverage_total=3
+```
+
+해석:
+
+- 전체 성능은 변하지 않는다. 이 변경은 앱 로직 개선이 아니라, 앱 로직 튜닝 후보를 더 엄격하게 분리하는 리포트 개선이다.
+- split coverage 3건을 strict 후보에서 제외하자 strict subset F1이 0.816에서 0.834로 상승했다.
+- 다음 앱 로직 개선 후보는 split coverage와 terminal residue를 제외한 pure loss 후보 위주로 봐야 한다.

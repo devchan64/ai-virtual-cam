@@ -456,6 +456,68 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(top["split_coverage_matches"][0]["expected"], "긴 문장이 앞부분과 가운데 내용과 뒷부분으로 나뉘어서 출력됩니다.")
         self.assertEqual(top["split_coverage_matches"][0]["combined_total_coverage"], 1.0)
 
+    def test_split_coverage_case_is_boundary_review_not_strict_logic_candidate(self) -> None:
+        args = Namespace(
+            model="sat-3l-sm",
+            device="cuda",
+            compute_type="float16",
+            min_final_f1=0.0,
+            fail_on_regression=False,
+        )
+        case = SbdCase(
+            id="case-split-covered",
+            language="ko",
+            chunks=[
+                "긴 문장이 앞부분과 가운데 내용과 뒷부분으로 나뉘어서 출력됩니다.",
+                "긴 문장이 앞부분과 가운데 내용과 뒷부분으로 나뉘어서 출력됩니다.",
+                "긴 문장이 앞부분과 가운데 내용과 뒷부분으로 나뉘어서 출력됩니다.",
+            ],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=["긴 문장이 앞부분과 가운데 내용과 뒷부분으로 나뉘어서 출력됩니다."],
+            expected_staged="",
+            tags=("missing-final",),
+            sentence_finalize_age=3,
+        )
+        results = [
+            {
+                "id": "case-split-covered",
+                "language": "ko",
+                "tags": ["missing-final"],
+                "expected_final": case.expected_final,
+                "chunks": [{"input": chunk} for chunk in case.chunks],
+                "initial_final": [],
+                "actual_final": ["긴 문장이 앞부분과"],
+                "actual_pending": "",
+                "actual_staged": "가운데 내용과",
+                "actual_staged_queue": ["뒷부분으로 나뉘어서 출력됩니다."],
+                "final_score": _score(0.0, 0.0, 0.0),
+                "final_ordered_score": _score(0.0, 0.0, 0.0),
+                "final_boundary_score": _score(0.0, 0.0, 0.0),
+                "completed_last_score": _score(0.0, 0.0, 0.0),
+                "pending_exact": True,
+                "staged_exact": False,
+                "case_exact_match": False,
+                "metrics": {"stage_age_quality_blocked": 1},
+            }
+        ]
+
+        report = build_benchmark_report(
+            args=args,
+            case_sources=["cases.jsonl"],
+            corpus_role="challenge-replay",
+            cases=[case],
+            results=results,
+            metric_totals={"stage_age_quality_blocked": 1},
+            elapsed_ms=1.0,
+        )
+
+        self.assertEqual(
+            report["case_definition_action_summary"]["action_counts"],
+            {"manual_boundary_review": 1},
+        )
+        self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
+
     def test_report_marks_boundary_zero_high_final_as_metric_sensitivity(self) -> None:
         args = Namespace(
             model="sat-3l-sm",
