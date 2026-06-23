@@ -31214,3 +31214,46 @@ tuning_next_action.strict_mid_score_overfinal_extra_stability_kind_counts:
 
 - 다음 단계는 앱 기본값 변경이 아니라 같은 세부 원인의 추가 로그 케이스 수집이다.
 - 특히 `actual_extra_not_stably_repeated`, `actual_extra_partial_stable_fragment`, `prefix_expected_lost_after_later_progress`가 반복되는지 우선 확인한다.
+
+## 2026-06-24 로그 수집 대상 랭킹 추가
+
+목적:
+
+- `expected_final` 정의 정리 후보는 사라졌지만, strict mid-score 구간의 원인 분포가 아직 혼합되어 있다.
+- 앱 로직을 바로 바꾸기보다 같은 원인군이 반복되는 로그 구간을 더 모아야 하므로, 로그 파일별 lifecycle 신호 비율을 수집 우선순위로 노출했다.
+- 이 랭킹은 benchmark 성능 근거가 아니라 challenge case 수집 위치를 고르는 보조 지표다.
+
+시도:
+
+```text
+tool_test=./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_representative_source_audit
+tool_test_result=OK
+
+source_audit=.tmp/eval/dictation-ai-sbd/target-source-audit-20260624.json
+source_count=143
+stt_raw_line_count=97874
+finalize_per_stt_raw=0.203
+
+top_target_sources:
+  stage_replace_deferred_per_stt_raw:
+    .tmp/logs/avc-whisper.log.60 ratio=3.306 count=2169 stt_raw=656 language=zh
+  quality_block_per_stt_raw:
+    .tmp/logs/avc-whisper.log.80 ratio=1.008 count=657 stt_raw=652 language=en
+  stage_queue_recent_final_suppressed_per_stt_raw:
+    .tmp/logs/avc-whisper.log.11 ratio=0.344 count=226 stt_raw=657 language=zh
+  duplicate_suppressed_per_stt_raw:
+    .tmp/logs/avc-whisper.log.80 ratio=4.584 count=2989 stt_raw=652 language=en
+  stage_queue_promote_per_stt_raw:
+    .tmp/logs/avc-whisper.log ratio=0.815 count=181 stt_raw=222 language=zh
+```
+
+해석:
+
+- 다음 수집은 전체 로그를 균등하게 보는 방식보다 lifecycle 신호가 높은 파일에서 시작하는 편이 효율적이다.
+- `stage_replace_deferred`, `quality_block`, `stage_queue_recent_final_suppressed`, `duplicate_suppressed`는 서로 다른 실패 가능성을 가리키므로 한 지표만으로 앱 로직 변경을 결정하지 않는다.
+- `quality_block`과 `duplicate_suppressed`가 함께 높은 영어 구간은 short/duplicate 확정 문제를, `stage_replace_deferred`와 `recent_final_suppressed`가 높은 중국어 구간은 revision 생명주기와 확정 누락 문제를 우선 관찰할 후보로 본다.
+
+결론:
+
+- 앱 기본값과 확정 로직은 변경하지 않는다.
+- 다음 challenge case 추가는 위 랭킹의 상위 파일에서 실제 transcript/final 흐름을 확인한 뒤, 사람이 `expected_final`을 명확히 작성할 수 있는 구간만 등록한다.

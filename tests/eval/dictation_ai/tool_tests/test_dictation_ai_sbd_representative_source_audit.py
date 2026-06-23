@@ -88,6 +88,12 @@ class DictationAiSbdRepresentativeSourceAuditTest(unittest.TestCase):
         self.assertEqual(summary["finalization_observation"]["stage_queue_recent_final_delta_trimmed_count"], 1)
         self.assertEqual(summary["finalization_observation"]["finalize_delta_suppressed_stage_retained_count"], 1)
         self.assertEqual(summary["finalization_observation"]["finalize_delta_suppressed_stage_dropped_count"], 1)
+        ranking = summary["target_collection_source_ranking"]
+        self.assertIn("stage_queue_recent_final_suppressed_per_stt_raw", ranking["active_metrics"])
+        self.assertEqual(
+            ranking["rankings"]["stage_queue_recent_final_suppressed_per_stt_raw"][0]["path"],
+            str(path),
+        )
         self.assertEqual(
             summary["segment_linkage"],
             {
@@ -194,7 +200,48 @@ class DictationAiSbdRepresentativeSourceAuditTest(unittest.TestCase):
         self.assertIn("source_count", compact)
         self.assertIn("representative_readiness", compact)
         self.assertIn("finalization_observation", compact)
+        self.assertIn("target_collection_source_ranking", compact)
         self.assertNotIn("files", compact)
+
+    def test_target_collection_source_ranking_orders_files_by_signal_ratio(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            high_signal = root / "avc-whisper.log"
+            low_signal = root / "avc-whisper.log.1"
+            high_signal.write_text(
+                "\n".join(
+                    [
+                        "[2026-06-20 21:22:40] [avc] Dictation AI stt_raw: [ko raw] 첫 번째.",
+                        "[2026-06-20 21:22:41] [avc] Dictation AI stt_raw: [ko raw] 두 번째.",
+                        "[2026-06-20 21:22:42] [avc] Dictation AI status: stage 큐 승격: chunk=2",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            low_signal.write_text(
+                "\n".join(
+                    [
+                        "[2026-06-20 21:23:40] [avc] Dictation AI stt_raw: [ko raw] 하나.",
+                        "[2026-06-20 21:23:41] [avc] Dictation AI stt_raw: [ko raw] 둘.",
+                        "[2026-06-20 21:23:42] [avc] Dictation AI stt_raw: [ko raw] 셋.",
+                        "[2026-06-20 21:23:43] [avc] Dictation AI stt_raw: [ko raw] 넷.",
+                        "[2026-06-20 21:23:44] [avc] Dictation AI status: stage 큐 승격: chunk=4",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            summary = audit_sources([root])
+
+        ranking = summary["target_collection_source_ranking"]
+        entries = ranking["rankings"]["stage_queue_promote_per_stt_raw"]
+        self.assertEqual([entry["path"] for entry in entries], [str(high_signal), str(low_signal)])
+        self.assertEqual(entries[0]["count"], 1)
+        self.assertEqual(entries[0]["stt_raw_line_count"], 2)
+        self.assertEqual(entries[0]["ratio"], 0.5)
+        self.assertEqual(entries[1]["ratio"], 0.25)
 
 
 if __name__ == "__main__":

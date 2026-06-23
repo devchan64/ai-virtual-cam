@@ -16,6 +16,17 @@ KV_RE = re.compile(r"\b(?P<key>[A-Za-z_][A-Za-z0-9_]*)=(?P<value>[^\s,]+)")
 TRANSCRIPT_SEGMENT_RE = re.compile(r"Dictation AI transcript:\s+\[[a-z]{2}#(?P<segment_id>\d+)\]")
 TRANSLATION_SEGMENT_RE = re.compile(r"Dictation AI translation:\s+\[[a-z]{2}->[a-z]{2}#(?P<segment_id>\d+)\]")
 LOG_GLOB = "avc-whisper.log*"
+TARGET_COLLECTION_RANKING_METRICS = (
+    "stage_queue_promote_per_stt_raw",
+    "stage_replace_deferred_per_stt_raw",
+    "quality_block_per_stt_raw",
+    "duplicate_suppressed_per_stt_raw",
+    "stage_queue_recent_final_suppressed_per_stt_raw",
+    "stage_queue_recent_final_delta_trimmed_per_stt_raw",
+    "finalize_delta_suppressed_stage_retained_per_stt_raw",
+    "finalize_delta_suppressed_stage_dropped_per_stt_raw",
+)
+TARGET_COLLECTION_RANKING_LIMIT = 8
 
 
 def iter_log_paths(inputs: Iterable[Path]) -> list[Path]:
@@ -470,6 +481,82 @@ def _finalization_observation_payload(marker_counts: Counter[str]) -> dict[str, 
     }
 
 
+def _target_collection_source_entry(
+    file_summary: dict[str, object],
+    *,
+    metric_name: str,
+    marker_name: str,
+) -> dict[str, object] | None:
+    marker_counts = Counter(dict(file_summary.get("marker_counts", {})))
+    stt_raw = int(marker_counts.get("stt_raw", 0))
+    count = int(marker_counts.get(marker_name, 0))
+    if stt_raw <= 0 or count <= 0:
+        return None
+    ratio = count / stt_raw
+    return {
+        "path": file_summary.get("path"),
+        "metric": metric_name,
+        "marker": marker_name,
+        "count": count,
+        "stt_raw_line_count": stt_raw,
+        "ratio": ratio,
+        "first_timestamp": file_summary.get("first_timestamp"),
+        "last_timestamp": file_summary.get("last_timestamp"),
+        "language_counts": file_summary.get("language_counts", {}),
+        "window_seconds_counts": file_summary.get("window_seconds_counts", {}),
+        "step_seconds_counts": file_summary.get("step_seconds_counts", {}),
+        "sentence_finalize_age_counts": file_summary.get("sentence_finalize_age_counts", {}),
+    }
+
+
+def _target_collection_source_ranking(file_summaries: list[dict[str, object]]) -> dict[str, object]:
+    metric_to_marker = {
+        "stage_queue_promote_per_stt_raw": "stage_queue_promote",
+        "stage_replace_deferred_per_stt_raw": "stage_replace_deferred",
+        "quality_block_per_stt_raw": "quality_block",
+        "duplicate_suppressed_per_stt_raw": "duplicate_suppressed",
+        "stage_queue_recent_final_suppressed_per_stt_raw": "stage_queue_recent_final_suppressed",
+        "stage_queue_recent_final_delta_trimmed_per_stt_raw": "stage_queue_recent_final_delta_trimmed",
+        "finalize_delta_suppressed_stage_retained_per_stt_raw": "finalize_delta_suppressed_stage_retained",
+        "finalize_delta_suppressed_stage_dropped_per_stt_raw": "finalize_delta_suppressed_stage_dropped",
+    }
+    rankings: dict[str, list[dict[str, object]]] = {}
+    for metric_name in TARGET_COLLECTION_RANKING_METRICS:
+        marker_name = metric_to_marker[metric_name]
+        entries = [
+            entry
+            for file_summary in file_summaries
+            if (
+                entry := _target_collection_source_entry(
+                    file_summary,
+                    metric_name=metric_name,
+                    marker_name=marker_name,
+                )
+            )
+            is not None
+        ]
+        entries.sort(
+            key=lambda entry: (
+                float(entry.get("ratio") or 0.0),
+                int(entry.get("count") or 0),
+                str(entry.get("last_timestamp") or ""),
+            ),
+            reverse=True,
+        )
+        rankings[metric_name] = entries[:TARGET_COLLECTION_RANKING_LIMIT]
+    active_metrics = [metric_name for metric_name, entries in rankings.items() if entries]
+    return {
+        "purpose": (
+            "source-selection aid only; use these files to collect more same-issue challenge cases, "
+            "not as benchmark performance evidence"
+        ),
+        "ranking_limit": TARGET_COLLECTION_RANKING_LIMIT,
+        "active_metric_count": len(active_metrics),
+        "active_metrics": active_metrics,
+        "rankings": rankings,
+    }
+
+
 def build_readiness(summary: dict[str, object]) -> dict[str, object]:
     marker_counts = dict(summary.get("marker_counts", {}))
     language_counts = dict(summary.get("language_counts", {}))
@@ -602,6 +689,7 @@ def audit_sources(
         "files": file_summaries,
     }
     summary["finalization_observation"] = _finalization_observation_payload(marker_counts)
+    summary["target_collection_source_ranking"] = _target_collection_source_ranking(file_summaries)
     summary["representative_readiness"] = build_readiness(summary)
     return summary
 
@@ -631,6 +719,7 @@ def compact_summary(summary: dict[str, object]) -> dict[str, object]:
         "sentence_finalize_age_counts": summary.get("sentence_finalize_age_counts", {}),
         "segment_linkage": summary.get("segment_linkage", {}),
         "finalization_observation": summary.get("finalization_observation", {}),
+        "target_collection_source_ranking": summary.get("target_collection_source_ranking", {}),
         "representative_readiness": summary.get("representative_readiness", {}),
     }
 
