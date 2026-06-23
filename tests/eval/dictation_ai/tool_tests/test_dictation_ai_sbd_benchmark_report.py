@@ -359,6 +359,14 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
             mid["examples"][0]["overfinal_extra_stability_kinds"],
             ["actual_extra_not_stably_repeated"],
         )
+        next_action = report["tuning_next_action_summary"]
+        self.assertEqual(next_action["strict_mid_score_final_case_count"], 1)
+        self.assertEqual(next_action["strict_mid_score_final_actionable_case_count"], 1)
+        self.assertEqual(next_action["strict_mid_score_issue_kind_counts"], {"overfinal_or_extra_final": 1})
+        self.assertEqual(
+            next_action["strict_mid_score_overfinal_extra_stability_kind_counts"],
+            {"actual_extra_not_stably_repeated": 1},
+        )
         self.assertEqual(report["strict_logic_candidate_summary"]["low_score_thresholds"]["0.65"]["case_count"], 0)
 
     def test_single_expected_final_can_be_strict_logic_candidate(self) -> None:

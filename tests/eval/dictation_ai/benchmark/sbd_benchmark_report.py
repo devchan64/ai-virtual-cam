@@ -2617,10 +2617,13 @@ def summarize_tuning_next_action(
         dict(strict_logic_candidate_summary.get("actionable_low_final", {}) or {}).get("case_count", 0)
     )
     strict_actionable_low_summary = dict(strict_logic_candidate_summary.get("actionable_low_final", {}) or {})
+    strict_mid_score_summary = dict(strict_logic_candidate_summary.get("mid_score_final", {}) or {})
     strict_actionable_low_issue_counts = {
         str(kind): int(count)
         for kind, count in dict(strict_actionable_low_summary.get("issue_kind_counts", {}) or {}).items()
     }
+    strict_mid_score_count = int(strict_mid_score_summary.get("case_count", 0))
+    strict_mid_score_actionable_count = int(strict_mid_score_summary.get("actionable_case_count", 0))
     strict_actionable_low_top_issue = ""
     strict_actionable_low_top_issue_count = 0
     if strict_actionable_low_issue_counts:
@@ -2688,8 +2691,23 @@ def summarize_tuning_next_action(
         "strict_actionable_low_overfinal_extra_kind_counts": dict(
             strict_actionable_low_summary.get("overfinal_extra_kind_counts", {}) or {}
         ),
+        "strict_actionable_low_overfinal_extra_stability_kind_counts": dict(
+            strict_actionable_low_summary.get("overfinal_extra_stability_kind_counts", {}) or {}
+        ),
         "strict_actionable_low_underfinal_missing_kind_counts": dict(
             strict_actionable_low_summary.get("underfinal_missing_kind_counts", {}) or {}
+        ),
+        "strict_mid_score_final_case_count": strict_mid_score_count,
+        "strict_mid_score_final_actionable_case_count": strict_mid_score_actionable_count,
+        "strict_mid_score_issue_kind_counts": dict(strict_mid_score_summary.get("issue_kind_counts", {}) or {}),
+        "strict_mid_score_overfinal_extra_kind_counts": dict(
+            strict_mid_score_summary.get("overfinal_extra_kind_counts", {}) or {}
+        ),
+        "strict_mid_score_overfinal_extra_stability_kind_counts": dict(
+            strict_mid_score_summary.get("overfinal_extra_stability_kind_counts", {}) or {}
+        ),
+        "strict_mid_score_underfinal_missing_kind_counts": dict(
+            strict_mid_score_summary.get("underfinal_missing_kind_counts", {}) or {}
         ),
         "strict_boundary_sensitive_case_count": strict_boundary_sensitive_count,
         "clean_low_case_count_lt_0_65": clean_low_065,

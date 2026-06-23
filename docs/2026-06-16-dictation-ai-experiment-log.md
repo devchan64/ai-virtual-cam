@@ -31172,3 +31172,45 @@ structural_mid_score_final.overfinal_extra_stability_kind_counts:
 - 앱 로직 기본값은 변경하지 않는다.
 - 이후 over-final 최적화 검토는 `actual_extra_not_stably_repeated`와 `actual_extra_partial_stable_fragment`가 더 많은 로그 기반 케이스에서 반복되는지 확인한 뒤 진행한다.
 - `actual_extra_stable_repeated_candidate`는 앱 premature final보다 expected/window 정의 누락 후보로 먼저 본다.
+
+## 2026-06-24 next-action mid-score/stability 신호 반영
+
+목적:
+
+- `strict_logic_candidate_summary.mid_score_final`과 over-final extra stability 분류를 추가했지만, 최상위 `tuning_next_action_summary`가 이를 직접 보여주지 않으면 다음 행동 판단이 다시 low-score 중심으로 흐를 수 있다.
+- next-action에 strict mid-score 분포와 over-final stability 분포를 함께 노출해, 앱 로직 변경보다 같은 원인 케이스 수집이 우선이라는 결론을 리포트 상단에서 확인 가능하게 했다.
+
+시도:
+
+```text
+report=.tmp/eval/dictation-ai-sbd/current-20260624-next-action-mid-stability-report.json
+cases=57
+strict_logic_candidates=38
+final_f1_avg=0.913
+strict_final_f1_avg=0.953
+
+tuning_next_action.priority=collect_more_same_issue_kind_cases
+tuning_next_action.strict_actionable_low_signal=mixed_issue_kinds_collect_more_cases
+
+tuning_next_action.strict_mid_score_final_case_count=7
+tuning_next_action.strict_mid_score_final_actionable_case_count=7
+tuning_next_action.strict_mid_score_issue_kind_counts:
+  overfinal_or_extra_final=3
+  underfinal_missing_no_residue=2
+  short_fragment_sensitive=1
+  underfinal_boundary_or_revision=1
+tuning_next_action.strict_mid_score_overfinal_extra_stability_kind_counts:
+  actual_extra_not_stably_repeated=1
+  actual_extra_partial_stable_fragment=2
+  actual_extra_stable_repeated_candidate=1
+```
+
+해석:
+
+- mid-score 구간도 actionable low 구간과 같은 혼합 분포를 보인다.
+- over-final 내부에는 앱 premature final 후보와 expected/window 검토 후보가 함께 있으므로 아직 단일 앱 로직 패치로 일반화하기 어렵다.
+
+결론:
+
+- 다음 단계는 앱 기본값 변경이 아니라 같은 세부 원인의 추가 로그 케이스 수집이다.
+- 특히 `actual_extra_not_stably_repeated`, `actual_extra_partial_stable_fragment`, `prefix_expected_lost_after_later_progress`가 반복되는지 우선 확인한다.
