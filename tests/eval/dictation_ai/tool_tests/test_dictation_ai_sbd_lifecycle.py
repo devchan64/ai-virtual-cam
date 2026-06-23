@@ -431,7 +431,8 @@ class DictationAiSbdLifecycleTest(unittest.TestCase):
 
         self.assertEqual(finalized, [])
         self.assertEqual(state.staged_sentence, "像是松板的部分口感上那真的就是一个脆嫩带。")
-        self.assertEqual(state.metrics["stage_finalize_deferred_for_queue_revision"], 1)
+        self.assertEqual(state.metrics["stage_replace_deferred"], 1)
+        self.assertEqual(state.metrics["stage_queue_promote"], 1)
         self.assertEqual(state.metrics["stage_queue_enqueue"], 1)
         self.assertNotIn("finalized", state.metrics)
 

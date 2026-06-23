@@ -104,7 +104,7 @@ DELTA_SUPPRESSED_STAGE_MAX_CHUNKS = 2
 # SENTENCE_CONFIRM_CHUNKS는 지연과 중복 사이의 핵심 절충값이다. 낮추면 더
 # 빨리 final이 나오고 누락이 줄지만, 높이면 반복 근거를 더 기다려 premature
 # final 위험을 줄인다.
-SENTENCE_CONFIRM_CHUNKS = 1
+SENTENCE_CONFIRM_CHUNKS = 2
 FORCED_SENTENCE_CONFIRM_CHUNKS = 3
 
 # age는 정확한 confirmation을 계속 받지 못하는 staged 후보의 보조 확정

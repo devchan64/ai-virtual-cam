@@ -210,6 +210,54 @@ stage_start: 9263 -> 9234
 - 전체 평균 개선은 작고 boundary/case exact는 소폭 하락하므로, 이 패치는 boundary 개선이 아니라 prefix-growth revision의 confirmation reset 완화로 해석한다.
 - 특정 중국어 문구나 음식명 규칙은 추가하지 않았다. 조건은 token-sentence prefix 보존과 length delta 상한만 사용한다.
 
+### 2026-06-23 stable-repeat 보정 후 confirmation 기본값 재검증
+
+배경:
+
+- `expected_final`을 stable token-sentence 반복 후보 기준으로 재작성한 뒤 전체 challenge replay의 case-definition 오염이 크게 줄었다.
+- 현재 앱 코드는 `SENTENCE_CONFIRM_CHUNKS=1`로 남아 있었지만, 기존 실험일지와 파라미터 해석에서는 `SENTENCE_CONFIRM_CHUNKS=2`를 확인 수 절충 기준선으로 다룬 기록이 많다.
+- 사용자가 기대한 케이스 정의도 “비슷한 token-sentence가 `sentence_finalize_age`회 반복 관측되면 final 후보로 본다”는 방향이다. 다만 운영 기본값은 단일 원칙보다 precision/recall trade-off를 함께 본다.
+
+CUDA/SaT 재검증:
+
+```text
+기준: checked-in 직전 SENTENCE_CONFIRM_CHUNKS=1
+cases=1027
+final_f1_avg=0.6212942956
+final_precision_avg=0.5904889109
+final_recall_avg=0.7035239534
+strict_final_f1_avg=0.8099206349
+final_boundary_f1_avg=0.1618191823
+finalized=5120
+stage_start=9234
+
+AVC_DICTATION_SENTENCE_CONFIRM_CHUNKS=2
+cases=1027
+final_f1_avg=0.6260714385
+final_precision_avg=0.6169176840
+final_recall_avg=0.6814894614
+strict_final_f1_avg=0.8466666667
+final_boundary_f1_avg=0.1777818994
+finalized=4695
+stage_start=9025
+
+AVC_DICTATION_SENTENCE_CONFIRM_CHUNKS=3
+cases=1027
+final_f1_avg=0.6118452682
+final_precision_avg=0.6246075324
+final_recall_avg=0.6461062706
+strict_final_f1_avg=0.8652777778
+final_boundary_f1_avg=0.1746459934
+finalized=4303
+stage_start=8775
+```
+
+판정:
+
+- `2`는 전체 final F1, precision, boundary F1, strict final F1을 함께 개선한다. recall은 낮아지지만 finalized 수 감소와 precision 상승으로 premature final 억제 효과가 확인된다.
+- `3`은 strict final F1이 가장 높지만 전체 final F1과 recall이 하락한다. 따라서 현재 challenge replay에서는 precision 우선 후보로 기록하고 기본값으로 채택하지 않는다.
+- `SENTENCE_CONFIRM_CHUNKS=2`를 checked-in 기본값으로 복원한다. 이는 문구별 예외가 아니라 일반 staged 후보의 반복 확인 기준을 조정하는 핵심 생명주기 파라미터다.
+
 모델 선정 기준:
 
 | 흐름 | 선정 모델 | 탈락/보류 모델 | 선정 이유 |
