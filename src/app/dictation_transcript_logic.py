@@ -1024,6 +1024,34 @@ def _should_stage_boundary_candidate(sentence: str, language: str) -> bool:
     )
 
 
+def _coalesce_completed_short_no_end_fragments(
+    sentences: list[str] | tuple[str, ...],
+    language: str,
+) -> tuple[str, ...]:
+    coalesced: list[str] = []
+    index = 0
+    while index < len(sentences):
+        current = _normalized_text(sentences[index])
+        if (
+            current
+            and index + 1 < len(sentences)
+            and _sentence_end_count(current) == 0
+            and "short_no_end_fragment" in set(_final_sentence_diagnostic_flags(current, language))
+        ):
+            following = _normalized_text(sentences[index + 1])
+            if following and _sentence_end_count(following) > 0:
+                separator = "" if _is_cjk_text(current + following) else " "
+                combined = _normalized_text(f"{current}{separator}{following}")
+                if _should_stage_boundary_candidate(combined, language):
+                    coalesced.append(combined)
+                    index += 2
+                    continue
+        if current:
+            coalesced.append(current)
+        index += 1
+    return tuple(coalesced)
+
+
 def _should_finalize_before_replacement(
     sentence: str,
     language: str,

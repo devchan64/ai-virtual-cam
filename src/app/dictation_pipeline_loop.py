@@ -19,6 +19,7 @@ from src.app.dictation_pipeline_settings import (
     staged_queue_max_promotion_age_chunks,
 )
 from src.app.dictation_transcript_logic import (
+    _coalesce_completed_short_no_end_fragments,
     _diagnostic_tail,
     _final_sentence_diagnostic_flags,
     _format_transcript_metrics,
@@ -991,6 +992,16 @@ def run_transcribe_loop(
                     ),
                 )
                 completed_sentences = list(candidate_set.completedCandidates)
+                coalesced_completed_sentences = list(
+                    _coalesce_completed_short_no_end_fragments(completed_sentences, detected)
+                )
+                if coalesced_completed_sentences != completed_sentences:
+                    count_metric("completed_short_no_end_coalesced")
+                    count_metric(
+                        "completed_short_no_end_coalesced_delta",
+                        len(completed_sentences) - len(coalesced_completed_sentences),
+                    )
+                    completed_sentences = coalesced_completed_sentences
                 pending_transcript_text = candidate_set.pendingTail
                 boundary_complete = int(candidate_set.boundarySignals.get("boundary_count", 0))
                 boundary_soft = int(candidate_set.boundarySignals.get("soft_boundary_count", 0))

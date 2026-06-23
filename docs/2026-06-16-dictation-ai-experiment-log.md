@@ -28295,3 +28295,46 @@ strict_final_f1_avg=0.8791666666666668
 - `zh_log_draft_20260620_avc_whisper_log_11_000866`에서 누락됐던 `是我的错觉吗？`가 final에 추가되어 case `final_f1`이 `0.888888888888889`에서 `1.0`으로 올랐다.
 - 전체 recall과 `final_f1_avg`는 소폭 상승했고 precision 하락은 없었다.
 - strict 저점 후보는 그대로이므로 이 패치는 핵심 병목 전체 해결이 아니라 confirmed stage 폐기 방지에 대한 보수적 개선으로 본다.
+
+## 2026-06-23 short no-end completed 후보 boundary smoothing
+
+목적:
+
+- SBD가 종결 부호 없는 짧은 prefix를 completed sentence로 분리하고, 바로 뒤 완결 sentence와 같은 발화로 반복 관측되는 경우를 줄인다.
+- raw overlap join이 아니라 SBD completed candidate 단계의 boundary smoothing으로 제한한다.
+- 언어별 예외가 아니라 `short_no_end_fragment + following completed sentence with end marker`라는 보편 조건만 사용한다.
+
+변경:
+
+- completed candidate 목록에서 `short_no_end_fragment`이고 종결 부호가 없는 후보가 바로 뒤 completed sentence와 붙었을 때 stage 가능한 문장이 되면 하나로 합친다.
+- 운영 루프와 SBD lifecycle replay에 같은 전처리를 적용했다.
+- metric으로 `completed_short_no_end_coalesced`, `completed_short_no_end_coalesced_delta`를 추가했다.
+
+CUDA/SaT 비교:
+
+```text
+base:
+output=.tmp/eval/dictation-ai-sbd/current-20260623-confirmed-before-deferred-report.json
+finalized=132
+final_precision_avg=0.8847222222222223
+final_recall_avg=0.7899999999999999
+final_f1_avg=0.8158333333333334
+final_boundary_f1_avg=0.538015873015873
+strict_final_f1_avg=0.8791666666666668
+
+patched:
+output=.tmp/eval/dictation-ai-sbd/current-20260623-coalesce-short-no-end-report.json
+finalized=131
+final_precision_avg=0.8875
+final_recall_avg=0.7899999999999999
+final_f1_avg=0.8175
+final_boundary_f1_avg=0.5446825396825398
+strict_final_f1_avg=0.8791666666666668
+completed_short_no_end_coalesced=8
+```
+
+영향:
+
+- `ko_log_draft_20260620_avc_whisper_log_002962`에서 no-end prefix가 다음 completed sentence와 결합되어 case `final_f1`이 `0.4`에서 `0.5`로 올랐다.
+- 전체 precision과 boundary F1이 함께 상승했고 recall 하락은 없었다.
+- strict 최저점 후보는 그대로 남아 있으므로, 이 패치는 SBD short no-end over-segmentation 완화로 제한해서 해석한다.

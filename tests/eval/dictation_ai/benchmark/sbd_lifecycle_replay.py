@@ -12,6 +12,7 @@ from src.app.dictation_pipeline_settings import (
     staged_queue_max_promotion_age_chunks,
 )
 from src.app.dictation_transcript_logic import (
+    _coalesce_completed_short_no_end_fragments,
     _final_sentence_diagnostic_flags,
     _has_later_completed_extension,
     _is_cjk_text,
@@ -990,6 +991,11 @@ def _run_lifecycle_case(case: SbdCase, detector: Any) -> dict[str, Any]:
         completed = []
         for sentence in boundary.completed:
             completed.append(normalized_text(sentence))
+        coalesced_completed = list(_coalesce_completed_short_no_end_fragments(completed, case.language))
+        if coalesced_completed != completed:
+            state.count("completed_short_no_end_coalesced")
+            state.count("completed_short_no_end_coalesced_delta", len(completed) - len(coalesced_completed))
+            completed = coalesced_completed
         state.pending_text = normalized_text(boundary.pending)
         if boundary.end_mark_count:
             state.count("boundary_end_marks", boundary.end_mark_count)
