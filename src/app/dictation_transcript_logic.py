@@ -857,7 +857,7 @@ def _should_confirm_staged_sentence(
     if "repeated_word_ngram" in flags:
         return False
     if _is_cjk_text(staged_sentence):
-        if flags.intersection({"empty", "no_end_marker", "spaced_cjk", "cjk_repeated_ngram", "latin_only_for_zh"}):
+        if flags.intersection({"empty", "no_end_marker", "spaced_cjk", "cjk_repeated_ngram"}):
             return False
     return staged_confirmations >= _staged_sentence_required_confirmations(staged_sentence, staged_forced)
 
@@ -970,7 +970,7 @@ def _should_finalize_replaced_sentence(
     if reason == "confirmed":
         return _should_confirm_staged_sentence(staged_sentence, staged_confirmations, staged_forced)
     if reason == "aged" and _is_cjk_text(staged_sentence):
-        if flags.intersection({"empty", "short_cjk", "spaced_cjk", "cjk_internal_gap", "cjk_repeated_ngram", "latin_only_for_zh"}):
+        if flags.intersection({"empty", "short_cjk", "spaced_cjk", "cjk_internal_gap", "cjk_repeated_ngram"}):
             return False
     if "repeated_word_ngram" in flags:
         return False
@@ -1003,7 +1003,6 @@ def _should_stage_boundary_candidate(sentence: str, language: str) -> bool:
             "spaced_cjk",
             "cjk_repeated_ngram",
             "repeated_word_ngram",
-            "latin_only_for_zh",
             "short_mixed_latin_zh",
             "low_value_cjk_fragment",
             "short_no_end_fragment",
@@ -1030,7 +1029,6 @@ def _should_finalize_before_replacement(
             "spaced_cjk",
             "cjk_repeated_ngram",
             "repeated_word_ngram",
-            "latin_only_for_zh",
             "short_no_end_fragment",
         }
     ):
@@ -1075,7 +1073,6 @@ def _should_finalize_with_right_context(
             "spaced_cjk",
             "cjk_repeated_ngram",
             "repeated_word_ngram",
-            "latin_only_for_zh",
             "short_no_end_fragment",
             "trailing_ellipsis",
         }

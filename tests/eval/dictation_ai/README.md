@@ -51,24 +51,53 @@ case 내부의 중복/포함 expected 문장, replay 입력 chunks에서 근거�
 `initial_final` 보정, raw STT에서 관측되지 않은 expected 재작성, fragment expected 재작성,
 shifted-window 반복 그룹 정리, 수동 문장 경계 검토를 분리해서 보여준다. 앱 로직 튜닝 근거는 먼저 `strict_logic_candidate_summary`와
 `clean_low_bottleneck_intersection_summary`를 본다. 두 요약은 모든 `expected_final`이 replay 입력에서
-확인되고 raw STT text로 관측되는 케이스를 기준으로 해석한다.
+확인되고 raw STT text로 관측되는 케이스를 기준으로 해석한다. 단일 `expected_final` 문장은
+순서 역전 검토 대상이 아니므로 stable 반복 근거와 case-definition review flag가 없으면 strict 후보에
+포함한다. 여러 expected 문장은 replay 입력에서 같은 순서로 지지되는 `supported_monotonic` 케이스만
+strict 후보로 본다.
 `validate-cases`의 `input_unsupported_case_count`는 `expected_final`이 replay 입력에서 충분히
 지지되지 않는 케이스 수다. `input_unobserved_case_count`는 충분한 unit coverage가 있어도
 `expected_final`이 raw STT text 그대로 관측되지 않는 케이스까지 포함한다.
+`stable_repeat_unsupported_case_count`는 `expected_final`의 각 문장이 `chunks`에서 추출한 문장
+후보 중 `sentence_finalize_age`회 이상 반복 관측된 token-sentence 후보로 설명되지 않는 케이스 수다.
+반복 기준 횟수는 고정값이 아니라 case의 `sentence_finalize_age`이며, 현재 기본값이 3이므로
+기본 설정에서는 의미가 비슷한 문장 후보가 3회 이상 반복된 문장을 확정 기대값으로 본다.
+따라서 3회는 별도 평가 정책이 아니라 현재 age 기본값을 벤치 케이스 정의에 반영한 값이다.
+구두점만 있는 후보는 token-sentence 반복 근거가 아니므로 stable 후보에서 제외한다.
+이 값이 높은 케이스는 삭제보다 먼저 `stable_candidate_examples`를 보고 `expected_final`을
+반복 관측 후보 기준으로 다시 작성한다.
+`stable_candidate_examples`의 `first_index`/`last_index`는 chunk에서 추출된 문장 후보의 최초/마지막
+관측 순서다. final은 append-only이므로 재작성 후보는 빈도보다 이 순서를 우선해서 검토한다.
+`case_definition_action_summary`의 action 예시는 `stable_candidates`에 전체 stable 후보를 함께 담는다.
+`input_evidence.stable_candidate_examples`는 빠른 요약용으로 일부만 보여주므로, expected 문장 수가 많을 때는
+action 예시의 전체 후보를 기준으로 재작성/재단 여부를 판단한다.
+`stable_candidate_shape_counts`는 stable 후보와 `expected_final`의 문장 수 관계를 보여준다.
+`same_stable_candidate_count_as_expected`는 단순 재작성 후보일 수 있지만 stable 후보가 앞뒤 문장을
+섞지 않는지 확인해야 한다. `fewer_stable_candidates_than_expected`는 기대 문장을 줄이거나 replay
+구간을 다시 잘라야 할 가능성이 크고, `more_stable_candidates_than_expected`는 `expected_final`이
+stable 문장 일부를 빠뜨렸거나 boundary가 과하게 합쳐졌는지 먼저 본다.
+`stable_candidate_ordered_alignment_counts`는 stable 후보 수가 맞더라도 순서대로 대응되는 문장인지
+확인하는 보조 신호다. `ordered_high_similarity`만 자동 재작성에 가까운 후보로 보고,
+`ordered_review_similarity`와 `ordered_low_similarity`는 사람이 경계/시작점/expected 수를 다시 본다.
+`case_definition_cleanup_queue_summary`는 `recut_or_relabel_stable_candidate_mismatch` 케이스를
+expected 과다 지정, stable 후보 누락, 같은 개수의 text mismatch 같은 정리 큐로 다시 묶는다.
+여기서도 반복 기준은 `sentence_finalize_age`이며, 현재 3회 관측 기준은 기본 age 값에서 나온 것이다.
 `case_definition_action_summary.evidence_disposition_counts`는 action을 두 부류로 다시 묶는다.
 `exclude_from_logic_tuning_until_fixed`는 window/label/initial state가 고쳐지기 전까지 앱 로직
 성능 근거에서 제외할 케이스다. `manual_review_before_deduplicate`는 입력 근거는 충분하지만
 shifted-window 반복이므로 distinct lifecycle failure가 있는지 사람이 확인할 케이스다.
 `case_definition_action_summary`의 우선순위는 다음과 같다.
 
-1. `remove_or_recut_expected_outside_replay_input`: `expected_final`이 replay chunks에 충분히 없으므로 제거하거나 window/label을 다시 잡는다.
-2. `rewrite_expected_final_to_observed_stt_text`: `expected_final`이 유사 unit으로는 커버되지만 raw STT text로 관측되지 않으므로 STT 출력 기준으로 label을 다시 쓴다.
-3. `add_initial_final_or_recut_mid_stream_case`: 중간 스트림 시작 후보이므로 이미 확정됐어야 할 prefix를 `initial_final`로 옮기거나 시작점을 조정한다. 입력 chunk 또는 actual final에서 expected 앞의 완결 prefix가 보이면 이 검토 대상으로 분류한다.
-4. `restore_source_log_or_recut_from_observed_log`: source trace가 없는 이관 케이스는 원 로그 근거를 복원하거나 관측 로그에서 다시 자른다.
-5. `rewrite_expected_final_to_final_sentence_boundary`: final-only 번역 큐 기준의 완성 문장으로 expected를 다시 쓴다.
-6. `extend_replay_tail_or_reclassify_staged_expectation`: expected의 terminal suffix가 replay 종료 시점에 staged/pending으로 남아 있으면 tail을 늘리거나 final expectation에서 분리한다.
-7. `deduplicate_or_justify_shifted_window_repeat`: 같은 expected 묶음이 반복된 case는 distinct lifecycle failure가 있는 경우만 남긴다.
-8. `manual_boundary_review`: nested boundary, label boundary, 또는 높은 recall이지만 actual final이 더 잘게 나뉜 boundary granularity 케이스는 사람이 경계를 다시 판단한다.
+1. `recut_or_relabel_stable_candidate_mismatch`: replay chunks에 `sentence_finalize_age`회 이상 반복 관측된 stable token-sentence 후보가 있지만 `expected_final`의 문장 수나 순서 대응이 맞지 않는다. 단순 재작성보다 replay 시작점, `initial_final`, expected 문장 수를 먼저 조정한다.
+2. `rewrite_expected_final_to_stable_repeated_candidate`: stable 후보가 `expected_final`과 문장 수가 같고 순서 대응 유사도가 높을 때만 raw STT 반복 후보 기준으로 다시 쓴다.
+3. `remove_or_recut_expected_outside_replay_input`: `expected_final`이 replay chunks에 충분히 없고 stable 반복 후보도 없으므로 제거하거나 window/label을 다시 잡는다.
+4. `rewrite_expected_final_to_observed_stt_text`: `expected_final`이 유사 unit으로는 커버되지만 raw STT text로 관측되지 않으므로 STT 출력 기준으로 label을 다시 쓴다.
+5. `add_initial_final_or_recut_mid_stream_case`: 중간 스트림 시작 후보이므로 이미 확정됐어야 할 prefix를 `initial_final`로 옮기거나 시작점을 조정한다. 입력 chunk 또는 actual final에서 expected 앞의 완결 prefix가 보이면 이 검토 대상으로 분류한다.
+6. `restore_source_log_or_recut_from_observed_log`: source trace가 없는 이관 케이스는 원 로그 근거를 복원하거나 관측 로그에서 다시 자른다.
+7. `rewrite_expected_final_to_final_sentence_boundary`: final-only 번역 큐 기준의 완성 문장으로 expected를 다시 쓴다.
+8. `extend_replay_tail_or_reclassify_staged_expectation`: expected의 terminal suffix가 replay 종료 시점에 staged/pending으로 남아 있으면 tail을 늘리거나 final expectation에서 분리한다.
+9. `deduplicate_or_justify_shifted_window_repeat`: 같은 expected 묶음이 반복된 case는 distinct lifecycle failure가 있는 경우만 남긴다.
+10. `manual_boundary_review`: nested boundary, label boundary, 또는 높은 recall이지만 actual final이 더 잘게 나뉜 boundary granularity 케이스는 사람이 경계를 다시 판단한다.
 
 이 action에 걸린 case는 앱 로직 성능 저하로 해석하지 않는다. 로직 튜닝 후보는 action summary의
 `logic_tuning_candidate_count`와 clean/strict 요약을 기준으로 좁힌다.

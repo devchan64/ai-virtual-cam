@@ -89,6 +89,7 @@
 - STT text가 없는 chunk가 반복되면 confirmation 기준을 만족하지 못한 staged 후보는 final로 승격하지 않고 stale 후보로 폐기할 수 있다.
 - 이전 pending tail이 다음 completed 후보 앞에 붙어 기존 staged 문장의 revision처럼 보이는 경우, pending tail prefix는 final 후보에서 제거하고 staged 본문 기준으로 비교한다.
 - CJK 문자 사이에 삽입된 STT 공백 artefact는 후보 품질 판단 전에 제거한다. 이는 문장 재작성이나 overlap 접합이 아니라 no-space 문자의 표준화이며, Latin/숫자 token 경계는 유지한다.
+- 언어 설정과 후보 script가 일치하지 않는 상황은 진단 플래그로만 기록한다. STT window에서 반복 관측되고 token-sentence 확정 조건을 만족한 후보를 언어별 예외만으로 final 차단하지 않는다.
 - revision 후보 비교에서 한 후보가 명확한 종결 경계를 가진 prefix 문장이고 다른 후보가 그 뒤에 짧은 tail을 붙여 하나의 문장처럼 만든 경우, 더 긴 문자열보다 종결 경계를 보존한 후보를 우선한다.
 - 미확정 replacement는 기존 후보를 삭제하지 않고 새 후보를 candidate buffer에 보류한다. 앞 후보는 확정, revision 대체, 품질/중복 suppress 중 하나로 정리된 뒤에 다음 후보로 넘어간다. 단, 미확정 replacement와 충돌 중인 앞 후보는 age만으로 final 승격하지 않고, age 한계 전에는 즉시 suppress하지 않는다.
 - 짧은 CJK staged 후보가 replacement와 충돌할 때는 추가 hold를 기본 적용하지 않는다. 1223건 replay에서는 짧은 active head가 뒤의 completed sentence queue 소비를 막는 사례가 많아 `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=0`이 가장 좋았다. 이 값은 짧은 문장을 즉시 final로 보내는 규칙이 아니라, 확정 불가능한 짧은 head가 오래 남아 생성순서 queue를 막지 않게 하는 suppress/promote 정책이다.

@@ -135,6 +135,7 @@ def validate_case_files(
     require_source_trace: bool = False,
     require_input_evidence: bool = False,
     require_observed_input_evidence: bool = False,
+    require_stable_repeat_evidence: bool = False,
     review_packets: Path | None = None,
     corpus_role_override: str | None = None,
 ) -> dict[str, object]:
@@ -165,6 +166,9 @@ def validate_case_files(
     input_unobserved_case_count = 0
     input_unobserved_by_file: Counter[str] = Counter()
     input_unobserved_examples: list[dict[str, object]] = []
+    stable_repeat_unsupported_case_count = 0
+    stable_repeat_unsupported_by_file: Counter[str] = Counter()
+    stable_repeat_unsupported_examples: list[dict[str, object]] = []
     sources: list[str] = []
     for path in _validated_case_paths(input_list):
         sources.append(str(path))
@@ -266,6 +270,40 @@ def validate_case_files(
                                 f"{input_evidence.get('expected_count', 0)} "
                                 f"coverage_avg={float(input_evidence.get('coverage_avg', 0.0)):.3f}"
                             )
+                    if not bool(input_evidence.get("stable_repeat_fully_supported", False)):
+                        stable_repeat_unsupported_case_count += 1
+                        stable_repeat_unsupported_by_file[str(path)] += 1
+                        if len(stable_repeat_unsupported_examples) < 8:
+                            stable_repeat_unsupported_examples.append(
+                                {
+                                    "id": case_id,
+                                    "path": str(path),
+                                    "line_no": line_no,
+                                    "language": str(payload.get("language", "")).strip().lower() or "en",
+                                    "expected_count": int(input_evidence.get("expected_count", 0)),
+                                    "stable_repeat_count": int(input_evidence.get("stable_repeat_count", 0)),
+                                    "required_repeat_observations": int(
+                                        input_evidence.get("required_repeat_observations", 0)
+                                    ),
+                                    "repeat_count_min": int(input_evidence.get("repeat_count_min", 0)),
+                                    "repeat_count_avg": float(input_evidence.get("repeat_count_avg", 0.0)),
+                                    "repeat_count_max": int(input_evidence.get("repeat_count_max", 0)),
+                                    "stable_group_count_min": int(input_evidence.get("stable_group_count_min", 0)),
+                                    "stable_group_count_avg": float(input_evidence.get("stable_group_count_avg", 0.0)),
+                                    "stable_group_count_max": int(input_evidence.get("stable_group_count_max", 0)),
+                                    "stable_candidate_count": int(input_evidence.get("stable_candidate_count", 0)),
+                                    "stable_candidate_examples": input_evidence.get("stable_candidate_examples", []),
+                                }
+                            )
+                        if require_stable_repeat_evidence:
+                            raise ValueError(
+                                f"{path}:{line_no} case {case_id!r} expected_final is not supported by "
+                                "repeated token-sentence candidates: "
+                                f"stable_repeat={input_evidence.get('stable_repeat_count', 0)}/"
+                                f"{input_evidence.get('expected_count', 0)} "
+                                f"required_observations={input_evidence.get('required_repeat_observations', 0)} "
+                                f"stable_group_min={input_evidence.get('stable_group_count_min', 0)}"
+                            )
                     source_log = str(payload.get("source_log", "")).strip()
                     has_source_chunk = payload.get("source_chunk") is not None
                     if source_log and has_source_chunk:
@@ -313,6 +351,9 @@ def validate_case_files(
         "input_unobserved_case_count": input_unobserved_case_count,
         "input_unobserved_by_file": dict(sorted(input_unobserved_by_file.items())),
         "input_unobserved_examples": input_unobserved_examples,
+        "stable_repeat_unsupported_case_count": stable_repeat_unsupported_case_count,
+        "stable_repeat_unsupported_by_file": dict(sorted(stable_repeat_unsupported_by_file.items())),
+        "stable_repeat_unsupported_examples": stable_repeat_unsupported_examples,
         "language_counts": dict(sorted(language_counts.items())),
         "tag_counts": dict(sorted(tag_counts.items())),
         "sources": sources,
@@ -376,6 +417,14 @@ def main() -> int:
         action="store_true",
         help="Fail when expected_final is not observed as raw STT text in the case replay chunks.",
     )
+    parser.add_argument(
+        "--require-stable-repeat-evidence",
+        action="store_true",
+        help=(
+            "Fail when any expected_final sentence is not supported by token-sentence candidates repeated "
+            "at least sentence_finalize_age times."
+        ),
+    )
     parser.add_argument("--min-cases", type=int, default=None, help="Fail when loaded case count is below this value.")
     parser.add_argument(
         "--min-expected-final-cases",
@@ -407,6 +456,7 @@ def main() -> int:
             require_source_trace=args.require_source_trace,
             require_input_evidence=args.require_input_evidence,
             require_observed_input_evidence=args.require_observed_input_evidence,
+            require_stable_repeat_evidence=args.require_stable_repeat_evidence,
             review_packets=args.review_packets,
             corpus_role_override=args.corpus_role,
         )

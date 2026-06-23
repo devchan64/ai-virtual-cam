@@ -16,7 +16,9 @@
 - 로그 구간이 이미 이전 window에서 확정된 문장을 포함한 중간 스트림에서 시작한다면 `initial_final`에 그 문장을 넣는다. `initial_final`은 recent-final/committed memory로만 사용하며 `actual_final` 평가 대상에는 포함하지 않는다.
 - 정식 finalization benchmark case는 앱 로그에서 관측된 lifecycle 실패 현상과 확정한 `expected_final`이 모두 있어야 한다.
 - 실패 현상은 확정 누락, 중복 확정, 문장 순서 파괴, premature fragment final, staged/pending 잔류, 최근 final echo처럼 final-only 번역 입력을 오염시키는 동작을 기준으로 본다.
-- `expected_final`은 같은 case의 `chunks`에서 입력 근거를 가져야 하며 raw STT text에서 관측된 표현을 기준으로 쓴다. 사람이 원문 의미를 보정한 문장은 STT 이후 파이프라인 평가의 정답으로 쓰지 않는다.
+- `expected_final`은 같은 case의 `chunks`에서 문장 후보를 찾고, 그 문장과 비슷한 token-sentence가 `sentence_finalize_age`회 이상 반복 관측된 후보를 기준으로 쓴다. 3회는 현재 기본 `sentence_finalize_age=3`에서 나온 값이며 별도 평가 정책이 아니다. 케이스에 다른 age가 있으면 그 값을 따른다.
+- stable 반복 후보는 숫자/라틴/한글/CJK 같은 실제 텍스트 단위를 가진 문장 후보만 인정한다. 구두점만 반복된 후보는 확정 근거로 쓰지 않는다.
+- `expected_final`은 raw STT text에서 관측된 표현을 기준으로 쓰며 사람이 원문 의미를 보정한 문장은 STT 이후 파이프라인 평가의 정답으로 쓰지 않는다. 관측 표현과 다르면 삭제보다 먼저 반복 관측 후보 기준으로 `expected_final`을 다시 작성한다.
 - 입력 근거가 없거나 일부 expected만 chunks에서 확인되는 케이스, `expected_final`이 window 밖 문장으로 보이는 케이스, 유사 unit coverage는 높지만 raw STT text로 관측되지 않는 케이스는 로직 튜닝 근거로 쓰지 않고 제거하거나 재검토한다.
 - raw STT 자체가 해석 불가능하거나 입력 음성과 무관한 경우, 연속 window 문맥이 부족한 경우, 사람이 봐도 하나의 `expected_final`을 정하기 어려운 경우, 같은 로그 구간의 거의 동일한 반복 후보는 정식 케이스로 승격하지 않는다.
 - 중간 스트림에서 시작한 케이스는 이전에 이미 확정됐어야 할 문장을 `expected_final`에 섞지 않는다. 필요하면 `initial_final`에 넣거나 케이스 시작점을 조정한다.
@@ -41,6 +43,16 @@
   --min-expected-final-cases 1000 \
   --max-drafts 0
 ```
+
+`expected_final` 재작성 후보를 엄격히 확인할 때는 stable 반복 근거를 강제한다.
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/cases/validate_sbd_case_files.py \
+  tests/eval/dictation_ai/sbd_cases \
+  --require-stable-repeat-evidence
+```
+
+이 검증은 `expected_final`의 각 문장이 `sentence_finalize_age`회 이상 유사 token-sentence 후보로 반복 관측되는지 확인한다. 실패한 케이스는 앱 로직 실패로 바로 해석하지 않고, stable 후보 예시를 보고 `expected_final`을 먼저 다시 쓴다.
 
 ## CUDA 벤치 예
 

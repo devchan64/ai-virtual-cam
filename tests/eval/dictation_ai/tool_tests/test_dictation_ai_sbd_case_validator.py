@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tests.eval.dictation_ai.cases.sbd_case_paths import SBD_CHALLENGE_CASE_DIR
+from tests.eval.dictation_ai.cases.sbd_input_evidence import case_input_evidence
 from tests.eval.dictation_ai.cases.validate_sbd_case_files import enforce_case_thresholds, validate_case_files
 
 
@@ -199,6 +200,110 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
                     "coverage_avg": 0.75,
                 }
             ],
+        )
+
+    def test_reports_expected_final_without_three_repeated_sentence_candidates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "cases.jsonl"
+            self._write_payload(
+                path,
+                {
+                    "id": "case-a",
+                    "language": "ko",
+                    "chunks": [
+                        "우리는 계속해서 미국 투자를 이어갈 것인가?",
+                        "우리는 계속해서 미국 투자를 이어갈 것인가?",
+                        "우리는 계속해서 미국 투자를 이어갈 것인가?",
+                        "트럼프 행정부에서 지금",
+                    ],
+                    "sentence_finalize_age": 3,
+                    "expected_final": [
+                        "우리는 계속해서 미국 투자를 이어갈 것인가?",
+                        "트럼프 행정부에서 지금 완전히 다른 정책을 보고 있습니다.",
+                    ],
+                    "tags": ["missing-final"],
+                },
+            )
+
+            summary = validate_case_files([path])
+            with self.assertRaisesRegex(ValueError, "expected_final is not supported by repeated token-sentence candidates"):
+                validate_case_files([path], require_stable_repeat_evidence=True)
+
+        self.assertEqual(summary["stable_repeat_unsupported_case_count"], 1)
+        self.assertEqual(summary["stable_repeat_unsupported_by_file"], {str(path): 1})
+        self.assertEqual(summary["stable_repeat_unsupported_examples"][0]["stable_repeat_count"], 1)
+        self.assertEqual(summary["stable_repeat_unsupported_examples"][0]["required_repeat_observations"], 3)
+        self.assertEqual(summary["stable_repeat_unsupported_examples"][0]["repeat_count_min"], 0)
+        self.assertEqual(summary["stable_repeat_unsupported_examples"][0]["stable_candidate_count"], 1)
+        self.assertEqual(
+            summary["stable_repeat_unsupported_examples"][0]["stable_candidate_examples"],
+            [{"text": "우리는 계속해서 미국 투자를 이어갈 것인가?", "count": 3, "first_index": 0, "last_index": 2}],
+        )
+
+    def test_case_input_evidence_accepts_three_repeated_sentence_candidates(self) -> None:
+        evidence = case_input_evidence(
+            {
+                "sentence_finalize_age": 3,
+                "chunks": [
+                    "우리는 계속해서 미국 투자를 이어갈 것인가?",
+                    "우리는 계속해서 미국 투자를 이어갈 것인가?",
+                    "우리는 계속해서 미국 투자를 이어갈 것인가?",
+                ],
+                "expected_final": ["우리는 계속해서 미국 투자를 이어갈 것인가?"],
+            }
+        )
+
+        self.assertTrue(evidence["stable_repeat_fully_supported"])
+        self.assertEqual(evidence["stable_repeat_count"], 1)
+        self.assertEqual(evidence["required_repeat_observations"], 3)
+        self.assertEqual(evidence["repeat_count_min"], 3)
+        self.assertEqual(
+            evidence["stable_candidate_examples"],
+            [{"text": "우리는 계속해서 미국 투자를 이어갈 것인가?", "count": 3, "first_index": 0, "last_index": 2}],
+        )
+
+    def test_case_input_evidence_ignores_punctuation_only_sentence_candidates(self) -> None:
+        evidence = case_input_evidence(
+            {
+                "sentence_finalize_age": 3,
+                "chunks": [
+                    ".",
+                    ".",
+                    ".",
+                    "실제 문장입니다.",
+                    "실제 문장입니다.",
+                    "실제 문장입니다.",
+                ],
+                "expected_final": ["실제 문장입니다."],
+            }
+        )
+
+        self.assertTrue(evidence["stable_repeat_fully_supported"])
+        self.assertEqual(evidence["stable_candidate_count"], 1)
+        self.assertEqual(
+            evidence["stable_candidate_examples"],
+            [{"text": "실제 문장입니다.", "count": 3, "first_index": 0, "last_index": 2}],
+        )
+
+    def test_case_input_evidence_prefers_terminated_stable_candidate_representative(self) -> None:
+        evidence = case_input_evidence(
+            {
+                "sentence_finalize_age": 3,
+                "chunks": [
+                    "반복 문장입니다 이어지는 미완성 꼬리",
+                    "반복 문장입니다 이어지는 미완성 꼬리.",
+                    "반복 문장입니다 이어지는 미완성 꼬리",
+                    "반복 문장입니다 이어지는 미완성 꼬리.",
+                    "반복 문장입니다 이어지는 미완성 꼬리.",
+                ],
+                "expected_final": ["반복 문장입니다 이어지는 미완성 꼬리."],
+            }
+        )
+
+        self.assertTrue(evidence["stable_repeat_fully_supported"])
+        self.assertEqual(
+            evidence["stable_candidate_examples"],
+            [{"text": "반복 문장입니다 이어지는 미완성 꼬리.", "count": 5, "first_index": 0, "last_index": 4}],
         )
 
     def test_loads_reviewed_cases_recursively_from_group_directories(self) -> None:

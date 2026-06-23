@@ -56,7 +56,11 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         case = SbdCase(
             id="case-a",
             language="ko",
-            chunks=["안녕하세요.", "안녕하세요. 반갑습니다."],
+            chunks=[
+                "안녕하세요. 반갑습니다.",
+                "안녕하세요. 반갑습니다.",
+                "안녕하세요. 반갑습니다.",
+            ],
             expected_completed=[],
             expected_pending="",
             expected_final=["안녕하세요.", "반갑습니다."],
@@ -70,7 +74,11 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
                 "language": "ko",
                 "tags": ["missing-final"],
                 "expected_final": ["안녕하세요.", "반갑습니다."],
-                "chunks": [{"input": "안녕하세요."}, {"input": "안녕하세요. 반갑습니다."}],
+                "chunks": [
+                    {"input": "안녕하세요. 반갑습니다."},
+                    {"input": "안녕하세요. 반갑습니다."},
+                    {"input": "안녕하세요. 반갑습니다."},
+                ],
                 "actual_final": ["안녕하세요.", "반갑습니다."],
                 "actual_pending": "",
                 "actual_staged": "",
@@ -265,6 +273,78 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(
             report["lifecycle_bottleneck_summary"]["by_language"]["ko"]["expected_final_count"],
             2,
+        )
+
+    def test_single_expected_final_can_be_strict_logic_candidate(self) -> None:
+        args = Namespace(
+            model="sat-3l-sm",
+            device="cuda",
+            compute_type="float16",
+            min_final_f1=0.0,
+            fail_on_regression=False,
+        )
+        case = SbdCase(
+            id="single-supported",
+            language="ko",
+            chunks=[
+                "단일 문장입니다.",
+                "단일 문장입니다.",
+                "단일 문장입니다.",
+            ],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=["단일 문장입니다."],
+            expected_staged="",
+            tags=("missing-final",),
+            sentence_finalize_age=3,
+        )
+        results = [
+            {
+                "id": "single-supported",
+                "language": "ko",
+                "tags": ["missing-final"],
+                "expected_final": ["단일 문장입니다."],
+                "chunks": [
+                    {"input": "단일 문장입니다."},
+                    {"input": "단일 문장입니다."},
+                    {"input": "단일 문장입니다."},
+                ],
+                "initial_final": [],
+                "actual_final": [],
+                "actual_pending": "",
+                "actual_staged": "",
+                "actual_staged_queue": [],
+                "final_score": _score(0.0, 0.0, 0.0),
+                "final_ordered_score": _score(0.0, 0.0, 0.0),
+                "final_boundary_score": _score(0.0, 0.0, 0.0),
+                "completed_last_score": _score(0.0, 0.0, 0.0),
+                "pending_exact": True,
+                "staged_exact": True,
+                "case_exact_match": False,
+                "metrics": {"stage_start": 1},
+            }
+        ]
+
+        report = build_benchmark_report(
+            args=args,
+            case_sources=["cases.jsonl"],
+            corpus_role="challenge-replay",
+            cases=[case],
+            results=results,
+            metric_totals={"stage_start": 1},
+            elapsed_ms=1.0,
+        )
+
+        strict_summary = report["strict_logic_candidate_summary"]
+        self.assertEqual(strict_summary["strict_case_count"], 1)
+        self.assertEqual(strict_summary["lowest_cases"][0]["id"], "single-supported")
+        self.assertEqual(
+            report["clean_low_bottleneck_intersection_summary"]["thresholds"]["0.35"]["case_count"],
+            1,
+        )
+        self.assertEqual(
+            report["supported_low_bottleneck_intersection_summary"]["thresholds"]["0.35"]["case_count"],
+            1,
         )
 
     def test_report_marks_boundary_zero_high_final_as_metric_sensitivity(self) -> None:
@@ -842,7 +922,9 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
             id="full-input-low",
             language="en",
             chunks=[
-                "The first expected sentence appears. The second expected sentence appears too."
+                "The first expected sentence appears. The second expected sentence appears too.",
+                "The first expected sentence appears. The second expected sentence appears too.",
+                "The first expected sentence appears. The second expected sentence appears too.",
             ],
             expected_completed=[],
             expected_pending="",
@@ -891,7 +973,13 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
                 "chunks": [
                     {
                         "input": "The first expected sentence appears. The second expected sentence appears too."
-                    }
+                    },
+                    {
+                        "input": "The first expected sentence appears. The second expected sentence appears too."
+                    },
+                    {
+                        "input": "The first expected sentence appears. The second expected sentence appears too."
+                    },
                 ],
                 "initial_final": [],
                 "actual_final": ["Wrong sentence."],
@@ -1452,6 +1540,146 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(report["cases"][0]["input_evidence"]["covered_count"], 1)
         self.assertEqual(report["cases"][0]["input_evidence"]["observed_count"], 0)
         self.assertFalse(report["cases"][0]["input_evidence"]["observed_fully_supported"])
+        self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
+
+    def test_stable_repeat_mismatch_action_reports_candidate_shape(self) -> None:
+        args = Namespace(
+            model="sat-3l-sm",
+            device="cuda",
+            compute_type="float16",
+            min_final_f1=0.0,
+            fail_on_regression=False,
+        )
+        case = SbdCase(
+            id="stable-repeat-shape",
+            language="en",
+            chunks=[
+                "Alpha sentence.",
+                "Alpha sentence.",
+                "Alpha sentence.",
+            ],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=["Alpha sentence.", "Beta sentence."],
+            expected_staged="",
+            tags=("missing-final",),
+            sentence_finalize_age=3,
+        )
+        results = [
+            {
+                "id": "stable-repeat-shape",
+                "language": "en",
+                "tags": ["missing-final"],
+                "expected_final": ["Alpha sentence.", "Beta sentence."],
+                "chunks": [
+                    {"input": "Alpha sentence."},
+                    {"input": "Alpha sentence."},
+                    {"input": "Alpha sentence."},
+                ],
+                "initial_final": [],
+                "actual_final": ["Alpha sentence."],
+                "actual_pending": "",
+                "actual_staged": "",
+                "actual_staged_queue": [],
+                "final_score": _score(1.0, 0.5, 0.667),
+                "final_ordered_score": _score(1.0, 0.5, 0.667),
+                "final_boundary_score": _score(1.0, 0.5, 0.667),
+                "completed_last_score": _score(0.0, 0.0, 0.0),
+                "pending_exact": True,
+                "staged_exact": True,
+                "case_exact_match": False,
+                "metrics": {"finalized": 1, "stage_start": 1},
+            }
+        ]
+
+        report = build_benchmark_report(
+            args=args,
+            case_sources=["cases.jsonl"],
+            corpus_role="challenge-replay",
+            cases=[case],
+            results=results,
+            metric_totals={"finalized": 1, "stage_start": 1},
+            elapsed_ms=1.0,
+        )
+
+        action_summary = report["case_definition_action_summary"]
+        self.assertEqual(
+            action_summary["action_counts"],
+            {"recut_or_relabel_stable_candidate_mismatch": 1},
+        )
+        self.assertEqual(
+            action_summary["stable_candidate_shape_counts"],
+            {"fewer_stable_candidates_than_expected": 1},
+        )
+        self.assertEqual(
+            action_summary["by_action"]["rewrite_expected_final_to_stable_repeated_candidate"][
+                "stable_candidate_shape_counts"
+            ],
+            {},
+        )
+        self.assertEqual(
+            action_summary["by_action"]["recut_or_relabel_stable_candidate_mismatch"][
+                "stable_candidate_shape_counts"
+            ],
+            {"fewer_stable_candidates_than_expected": 1},
+        )
+        self.assertEqual(
+            action_summary["stable_candidate_ordered_alignment_counts"],
+            {"candidate_count_mismatch": 1},
+        )
+        self.assertEqual(
+            action_summary["by_action"]["recut_or_relabel_stable_candidate_mismatch"][
+                "stable_candidate_ordered_alignment_counts"
+            ],
+            {"candidate_count_mismatch": 1},
+        )
+        self.assertEqual(
+            action_summary["by_action"]["recut_or_relabel_stable_candidate_mismatch"]["examples"][0][
+                "stable_candidate_shape"
+            ],
+            "fewer_stable_candidates_than_expected",
+        )
+        self.assertEqual(
+            action_summary["by_action"]["recut_or_relabel_stable_candidate_mismatch"]["examples"][0][
+                "stable_candidate_ordered_alignment"
+            ],
+            "candidate_count_mismatch",
+        )
+        self.assertEqual(
+            action_summary["by_action"]["recut_or_relabel_stable_candidate_mismatch"]["examples"][0]["expected_final"],
+            ["Alpha sentence.", "Beta sentence."],
+        )
+        self.assertEqual(
+            action_summary["by_action"]["recut_or_relabel_stable_candidate_mismatch"]["examples"][0]["actual_final"],
+            ["Alpha sentence."],
+        )
+        self.assertEqual(
+            action_summary["by_action"]["recut_or_relabel_stable_candidate_mismatch"]["examples"][0][
+                "stable_candidates"
+            ],
+            [{"text": "Alpha sentence.", "count": 3, "first_index": 0, "last_index": 2}],
+        )
+        cleanup_summary = report["case_definition_cleanup_queue_summary"]
+        self.assertEqual(cleanup_summary["case_count"], 1)
+        self.assertEqual(
+            cleanup_summary["queue_counts"],
+            {"expected_final_over_specified_or_window_too_short": 1},
+        )
+        cleanup_item = cleanup_summary["by_queue"]["expected_final_over_specified_or_window_too_short"]
+        self.assertEqual(
+            cleanup_item["stable_candidate_shape_counts"],
+            {"fewer_stable_candidates_than_expected": 1},
+        )
+        self.assertEqual(
+            cleanup_item["stable_candidate_ordered_alignment_counts"],
+            {"candidate_count_mismatch": 1},
+        )
+        self.assertEqual(
+            cleanup_item["examples"][0]["stable_candidates"],
+            [{"text": "Alpha sentence.", "count": 3, "first_index": 0, "last_index": 2}],
+        )
+        self.assertEqual(report["cases"][0]["input_evidence"]["stable_candidate_count"], 1)
+        self.assertEqual(report["cases"][0]["input_evidence"]["stable_repeat_count"], 1)
         self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
 
     def test_terminal_staged_expected_final_is_tail_review_action(self) -> None:

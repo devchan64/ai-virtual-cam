@@ -26,7 +26,7 @@ from tests.eval.dictation_ai.cases.sbd_case_paths import (
 )
 from tests.eval.dictation_ai.cases.sbd_diagnostic_tags import is_diagnostic_tag
 from tests.eval.dictation_ai.cases.sbd_expected_quality import expected_quality_flags
-from tests.eval.dictation_ai.cases.sbd_input_evidence import case_input_evidence
+from tests.eval.dictation_ai.cases.sbd_input_evidence import case_input_evidence, case_stable_sentence_candidates
 from tests.eval.dictation_ai.benchmark.sbd_runtime_contract import lifecycle_replay_contract, runtime_contract
 
 LIFECYCLE_BOTTLENECK_METRICS = (
@@ -183,6 +183,8 @@ SUPPORTED_LOW_BOTTLENECK_METRICS = (
     "candidate_duplicate_suppressed",
 )
 CASE_REVIEW_ACTION_FLAGS = (
+    "recut_or_relabel_stable_candidate_mismatch",
+    "rewrite_expected_final_to_stable_repeated_candidate",
     "remove_or_recut_expected_outside_replay_input",
     "rewrite_expected_final_to_observed_stt_text",
     "add_initial_final_or_recut_mid_stream_case",
@@ -196,6 +198,8 @@ PREFIX_CONTEXT_MIN_SUPPORT = max(0.30, FINAL_SENTENCE_MATCH_MIN_SIMILARITY - 0.4
 TERMINAL_RESIDUE_MIN_UNITS = 6
 TERMINAL_RESIDUE_SUFFIX_COVERAGE_MIN = 0.85
 TERMINAL_RESIDUE_ACTUAL_COMPLETE_MIN = 0.95
+STABLE_CANDIDATE_ORDERED_REWRITE_MIN_SIMILARITY = 0.80
+STABLE_CANDIDATE_ORDERED_REVIEW_MIN_SIMILARITY = 0.60
 
 
 def _sentence_support_score(sentence: str, chunk: str) -> float:
@@ -389,6 +393,10 @@ def _expected_final_order_support_kind(case: SbdCase) -> str:
     return "supported_monotonic"
 
 
+def _expected_order_supports_logic_tuning(kind: str) -> bool:
+    return kind in {"single", "supported_monotonic"}
+
+
 def summarize_expected_final_order_support(cases: list[SbdCase]) -> dict[str, Any]:
     review_cases: list[dict[str, Any]] = []
     multi_expected_cases = [case for case in cases if len(case.expected_final) >= 2]
@@ -549,7 +557,7 @@ def summarize_low_score_characteristics(cases: list[SbdCase], results: list[dict
     return {
         "interpretation": (
             "Low-F1 cases are diagnostics, not direct optimization targets. "
-            "Prefer supported_monotonic low cases for app logic tuning; review_needed cases require expected_final/input-order audit first."
+            "Prefer single or supported_monotonic low cases for app logic tuning; review_needed cases require expected_final/input-order audit first."
         ),
         "expected_result_count": len(expected_results),
         "thresholds": thresholds,
@@ -566,7 +574,7 @@ def summarize_supported_low_bottleneck_intersections(
         low_results = [
             result
             for result in results
-            if support_by_id.get(str(result.get("id")), "unknown") == "supported_monotonic"
+            if _expected_order_supports_logic_tuning(support_by_id.get(str(result.get("id")), "unknown"))
             and result.get("expected_final")
             and isinstance(result.get("final_score"), dict)
             and float(dict(result.get("final_score", {})).get("f1", 0.0)) < threshold
@@ -574,7 +582,7 @@ def summarize_supported_low_bottleneck_intersections(
         thresholds[f"{threshold:.2f}"] = _summarize_supported_low_threshold(low_results, threshold)
     return {
         "interpretation": (
-            "These are low-score cases whose expected_final sentences are supported by input chunks in monotonic order. "
+            "These are low-score cases whose expected_final is a single sentence or whose sentences are supported by input chunks in monotonic order. "
             "Use them before changing app logic; review_needed cases may be collection or labeling issues."
         ),
         "metric_candidates": list(SUPPORTED_LOW_BOTTLENECK_METRICS),
@@ -593,7 +601,7 @@ def summarize_clean_low_bottleneck_intersections(
         low_results = [
             result
             for result in results
-            if support_by_id.get(str(result.get("id")), "unknown") == "supported_monotonic"
+            if _expected_order_supports_logic_tuning(support_by_id.get(str(result.get("id")), "unknown"))
             and result.get("expected_final")
             and isinstance(result.get("final_score"), dict)
             and float(dict(result.get("final_score", {})).get("f1", 0.0)) < threshold
@@ -606,7 +614,7 @@ def summarize_clean_low_bottleneck_intersections(
         thresholds[f"{threshold:.2f}"] = _summarize_supported_low_threshold(low_results, threshold)
     return {
         "interpretation": (
-            "Clean low-score cases are supported_monotonic, have full input evidence, and have no expected_quality_flags. "
+            "Clean low-score cases are single or supported_monotonic, have full input evidence, and have no expected_quality_flags. "
             "They also exclude unmodeled prefix context flags. "
             "They exclude case-definition review flags such as repeated expected groups. "
             "Prefer this subset for app logic changes; broader low-score groups can still be label or source review work."
@@ -1176,6 +1184,13 @@ def _case_primary_review_action(result: dict[str, Any]) -> str:
     expected_quality = set(result.get("expected_quality_flags", []) or [])
     context_flags = set(result.get("case_context_flags", []) or [])
     definition_flags = set(result.get("case_definition_flags", []) or [])
+    if (
+        not input_evidence.get("stable_repeat_fully_supported", True)
+        and int(input_evidence.get("stable_candidate_count", 0)) > 0
+    ):
+        if _stable_candidate_ordered_alignment(result) != "ordered_high_similarity":
+            return "recut_or_relabel_stable_candidate_mismatch"
+        return "rewrite_expected_final_to_stable_repeated_candidate"
     if not input_evidence.get("fully_supported"):
         return "remove_or_recut_expected_outside_replay_input"
     if not input_evidence.get("observed_fully_supported", True):
@@ -1290,7 +1305,13 @@ def _case_review_payload(result: dict[str, Any]) -> dict[str, Any]:
         "review_group_id": metadata.get("review_group_id"),
         "actions": _case_review_actions(result),
         "primary_action": _case_primary_review_action(result),
+        "stable_candidate_shape": _stable_repeat_candidate_shape(result),
+        "stable_candidate_ordered_alignment": _stable_candidate_ordered_alignment(result),
+        "initial_final": list(result.get("initial_final", []) or []),
+        "expected_final": list(result.get("expected_final", []) or []),
+        "actual_final": list(result.get("actual_final", []) or []),
         "input_evidence": dict(result.get("input_evidence", {}) or {}),
+        "stable_candidates": case_stable_sentence_candidates(result),
         "expected_quality_flags": list(result.get("expected_quality_flags", []) or []),
         "case_context_flags": list(result.get("case_context_flags", []) or []),
         "case_definition_flags": list(result.get("case_definition_flags", []) or []),
@@ -1300,6 +1321,59 @@ def _case_review_payload(result: dict[str, Any]) -> dict[str, Any]:
         "expected_final_preview": _first_text_preview(result.get("expected_final")),
         "actual_final_preview": _first_text_preview(result.get("actual_final")),
     }
+
+
+def _stable_repeat_candidate_shape(result: dict[str, Any]) -> str:
+    input_evidence = dict(result.get("input_evidence", {}) or {})
+    expected_count = int(input_evidence.get("expected_count", 0) or 0)
+    stable_candidate_count = int(input_evidence.get("stable_candidate_count", 0) or 0)
+    stable_repeat_count = int(input_evidence.get("stable_repeat_count", 0) or 0)
+    if expected_count <= 0:
+        return "no_expected_final"
+    if stable_repeat_count >= expected_count:
+        return "fully_supported"
+    if stable_candidate_count <= 0:
+        return "no_stable_candidate"
+    if stable_candidate_count < expected_count:
+        return "fewer_stable_candidates_than_expected"
+    if stable_candidate_count == expected_count:
+        return "same_stable_candidate_count_as_expected"
+    return "more_stable_candidates_than_expected"
+
+
+def _stable_candidate_ordered_alignment(result: dict[str, Any]) -> str:
+    expected_final = [
+        str(sentence).strip()
+        for sentence in result.get("expected_final", []) or []
+        if str(sentence).strip()
+    ]
+    if not expected_final:
+        return "no_expected_final"
+    input_evidence = dict(result.get("input_evidence", {}) or {})
+    stable_candidate_count = int(input_evidence.get("stable_candidate_count", 0) or 0)
+    if stable_candidate_count <= 0:
+        return "no_stable_candidate"
+    if stable_candidate_count != len(expected_final):
+        return "candidate_count_mismatch"
+    stable_examples = [
+        str(candidate.get("text", "")).strip()
+        for candidate in case_stable_sentence_candidates(result)
+        if str(candidate.get("text", "")).strip()
+    ]
+    if len(stable_examples) != stable_candidate_count:
+        return "candidate_count_mismatch"
+    similarities = [
+        _sentence_support_score(expected, stable)
+        for expected, stable in zip(expected_final, stable_examples, strict=False)
+    ]
+    if not similarities:
+        return "no_stable_candidate"
+    min_similarity = min(similarities)
+    if min_similarity >= STABLE_CANDIDATE_ORDERED_REWRITE_MIN_SIMILARITY:
+        return "ordered_high_similarity"
+    if min_similarity >= STABLE_CANDIDATE_ORDERED_REVIEW_MIN_SIMILARITY:
+        return "ordered_review_similarity"
+    return "ordered_low_similarity"
 
 
 def summarize_case_definition_action_items(results: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1319,12 +1393,16 @@ def summarize_case_definition_action_items(results: list[dict[str, Any]]) -> dic
     expected_quality_counts: Counter[str] = Counter()
     context_flag_counts: Counter[str] = Counter()
     definition_flag_counts: Counter[str] = Counter()
+    stable_candidate_shape_counts: Counter[str] = Counter()
+    stable_candidate_ordered_alignment_counts: Counter[str] = Counter()
     for result in review_results:
         action_counts.update(_case_review_actions(result))
         language_counts[str(result.get("language") or "unknown")] += 1
         expected_quality_counts.update(str(flag) for flag in result.get("expected_quality_flags", []) or [])
         context_flag_counts.update(str(flag) for flag in result.get("case_context_flags", []) or [])
         definition_flag_counts.update(str(flag) for flag in result.get("case_definition_flags", []) or [])
+        stable_candidate_shape_counts[_stable_repeat_candidate_shape(result)] += 1
+        stable_candidate_ordered_alignment_counts[_stable_candidate_ordered_alignment(result)] += 1
     by_action: dict[str, Any] = {}
     for action in CASE_REVIEW_ACTION_FLAGS:
         action_results = [
@@ -1337,6 +1415,12 @@ def summarize_case_definition_action_items(results: list[dict[str, Any]]) -> dic
             "final_f1_avg": _avg_final_f1(action_results),
             "language_counts": dict(
                 sorted(Counter(str(result.get("language") or "unknown") for result in action_results).items())
+            ),
+            "stable_candidate_shape_counts": dict(
+                sorted(Counter(_stable_repeat_candidate_shape(result) for result in action_results).items())
+            ),
+            "stable_candidate_ordered_alignment_counts": dict(
+                sorted(Counter(_stable_candidate_ordered_alignment(result) for result in action_results).items())
             ),
             "examples": [
                 _case_review_payload(result)
@@ -1352,8 +1436,14 @@ def summarize_case_definition_action_items(results: list[dict[str, Any]]) -> dic
     return {
         "interpretation": (
             "These are prioritized case-definition review actions, not automatic deletion rules. "
-            "Use remove_or_recut_expected_outside_replay_input when expected_final is not fully represented "
-            "in replay chunks, rewrite_expected_final_to_observed_stt_text when expected labels have similar "
+            "Use recut_or_relabel_stable_candidate_mismatch when replay chunks contain stable token-sentence "
+            "candidates repeated at least sentence_finalize_age times but expected_final does not align with "
+            "their count or ordered text; this usually needs replay recut, initial_final restoration, or "
+            "expected sentence count changes before app-logic tuning. Use rewrite_expected_final_to_stable_repeated_candidate "
+            "only when stable candidates are count-compatible and ordered-high-similarity with expected_final. "
+            "Use remove_or_recut_expected_outside_replay_input when expected_final "
+            "is not fully represented in replay chunks and no stable repeated candidate explains the case, "
+            "rewrite_expected_final_to_observed_stt_text when expected labels have similar "
             "unit coverage but are not observed as raw STT text, add_initial_final_or_recut_mid_stream_case "
             "for mid-stream cases or actual finals that show missing prefix context, "
             "restore_source_log_or_recut_from_observed_log when migrated legacy sample cases have no "
@@ -1362,7 +1452,11 @@ def summarize_case_definition_action_items(results: list[dict[str, Any]]) -> dic
             "expected_final labels, extend_replay_tail_or_reclassify_staged_expectation when expected final "
             "text is still staged at the end of the replay window, "
             "deduplicate_or_justify_shifted_window_repeat when repeated sliding-window samples overweight "
-            "one log region, and manual_boundary_review for remaining nested boundary ambiguities."
+            "one log region, and manual_boundary_review for remaining nested boundary ambiguities. "
+            "stable_candidate_shape_counts separates simple expected_final rewrites from cases that need "
+            "label count changes, replay recuts, or initial_final context restoration. "
+            "stable_candidate_ordered_alignment_counts separates count-compatible stable candidates from "
+            "cases whose ordered expected_final labels still do not align with stable candidates."
         ),
         "review_case_count": len(review_results),
         "logic_tuning_candidate_count": logic_tuning_candidate_count,
@@ -1371,7 +1465,86 @@ def summarize_case_definition_action_items(results: list[dict[str, Any]]) -> dic
         "expected_quality_flag_counts": dict(sorted(expected_quality_counts.items())),
         "case_context_flag_counts": dict(sorted(context_flag_counts.items())),
         "case_definition_flag_counts": dict(sorted(definition_flag_counts.items())),
+        "stable_candidate_shape_counts": dict(sorted(stable_candidate_shape_counts.items())),
+        "stable_candidate_ordered_alignment_counts": dict(sorted(stable_candidate_ordered_alignment_counts.items())),
         "by_action": by_action,
+    }
+
+
+def _stable_cleanup_queue_for_result(result: dict[str, Any]) -> str:
+    shape = _stable_repeat_candidate_shape(result)
+    alignment = _stable_candidate_ordered_alignment(result)
+    if shape == "fewer_stable_candidates_than_expected":
+        return "expected_final_over_specified_or_window_too_short"
+    if shape == "more_stable_candidates_than_expected":
+        return "expected_final_omits_stable_candidates_or_boundary_merged"
+    if shape == "same_stable_candidate_count_as_expected":
+        if alignment == "ordered_low_similarity":
+            return "same_count_but_expected_text_mismatch"
+        if alignment == "ordered_review_similarity":
+            return "same_count_needs_manual_text_review"
+        return "same_count_alignment_review"
+    if shape == "no_stable_candidate":
+        return "no_stable_repeat_evidence"
+    return "other_stable_candidate_review"
+
+
+def summarize_case_definition_cleanup_queue(results: list[dict[str, Any]]) -> dict[str, Any]:
+    stable_mismatches = [
+        result
+        for result in results
+        if _case_primary_review_action(result) == "recut_or_relabel_stable_candidate_mismatch"
+    ]
+    by_queue: dict[str, Any] = {}
+    for queue in sorted({_stable_cleanup_queue_for_result(result) for result in stable_mismatches}):
+        queue_results = [
+            result
+            for result in stable_mismatches
+            if _stable_cleanup_queue_for_result(result) == queue
+        ]
+        by_queue[queue] = {
+            "case_count": len(queue_results),
+            "final_f1_avg": _avg_final_f1(queue_results),
+            "language_counts": dict(
+                sorted(Counter(str(result.get("language") or "unknown") for result in queue_results).items())
+            ),
+            "stable_candidate_shape_counts": dict(
+                sorted(Counter(_stable_repeat_candidate_shape(result) for result in queue_results).items())
+            ),
+            "stable_candidate_ordered_alignment_counts": dict(
+                sorted(Counter(_stable_candidate_ordered_alignment(result) for result in queue_results).items())
+            ),
+            "case_file_counts": dict(
+                sorted(
+                    Counter(
+                        str(dict(result.get("case_metadata", {}) or {}).get("case_file") or "unknown")
+                        for result in queue_results
+                    ).items()
+                )
+            ),
+            "examples": [
+                _case_review_payload(result)
+                for result in sorted(
+                    queue_results,
+                    key=lambda result: (
+                        float(dict(result.get("final_score", {})).get("f1", 0.0)),
+                        str(result.get("id")),
+                    ),
+                )[:CASE_EXEMPLAR_LIMIT]
+            ],
+        }
+    return {
+        "interpretation": (
+            "Groups recut_or_relabel_stable_candidate_mismatch cases by the kind of expected_final cleanup needed. "
+            "The repeat threshold is the case sentence_finalize_age; with the current default this is 3 observations, "
+            "but it is not a separate benchmark policy. Use this queue before changing app logic."
+        ),
+        "case_count": len(stable_mismatches),
+        "queue_counts": {
+            queue: int(item["case_count"])
+            for queue, item in by_queue.items()
+        },
+        "by_queue": by_queue,
     }
 
 
@@ -1538,11 +1711,14 @@ def summarize_results_by_source_trace_strata(results: list[dict[str, Any]]) -> d
 def _strict_logic_candidate(case: SbdCase, result: dict[str, Any]) -> bool:
     if not result.get("expected_final"):
         return False
-    if _expected_final_order_support_kind(case) != "supported_monotonic":
+    if not _expected_order_supports_logic_tuning(_expected_final_order_support_kind(case)):
         return False
     if result.get("expected_quality_flags"):
         return False
-    if not dict(result.get("input_evidence", {})).get("fully_supported"):
+    input_evidence = dict(result.get("input_evidence", {}))
+    if not input_evidence.get("fully_supported"):
+        return False
+    if not input_evidence.get("stable_repeat_fully_supported", True):
         return False
     if result.get("case_context_flags"):
         return False
@@ -1571,7 +1747,7 @@ def summarize_strict_logic_candidate_results(cases: list[SbdCase], results: list
         low_by_threshold[f"{threshold:.2f}"] = _summarize_supported_low_threshold(low, threshold)
     return {
         "interpretation": (
-            "Strict logic candidates are supported_monotonic, fully input-supported, have no expected quality flags, "
+            "Strict logic candidates are single or supported_monotonic, fully input-supported, have no expected quality flags, "
             "do not have unmodeled prefix context flags, and have no case-definition review flags. "
             "Use this subset before changing app logic; other challenge cases may still be valid diagnostics but need review context."
         ),
@@ -1731,6 +1907,7 @@ def _with_case_evidence_metadata(results: list[dict[str, Any]]) -> list[dict[str
             and not item["case_context_flags"]
             and dict(item["input_evidence"]).get("fully_supported")
             and dict(item["input_evidence"]).get("observed_fully_supported", True)
+            and dict(item["input_evidence"]).get("stable_repeat_fully_supported", True)
             and _has_supported_actual_final_omitted_from_expected(item)
         ):
             case_definition_flags.append("expected_final_omits_supported_actual_sentence")
@@ -2065,6 +2242,7 @@ def build_benchmark_report(
     context_strata_summary = summarize_results_by_context_strata(results)
     case_definition_strata_summary = summarize_results_by_case_definition_strata(results)
     case_definition_action_summary = summarize_case_definition_action_items(results)
+    case_definition_cleanup_queue_summary = summarize_case_definition_cleanup_queue(results)
     case_definition_file_summary = summarize_case_definition_files(results)
     collection_strata_summary = summarize_results_by_collection_strata(results)
     source_trace_strata_summary = summarize_results_by_source_trace_strata(results)
@@ -2171,6 +2349,7 @@ def build_benchmark_report(
         "context_strata_summary": context_strata_summary,
         "case_definition_strata_summary": case_definition_strata_summary,
         "case_definition_action_summary": case_definition_action_summary,
+        "case_definition_cleanup_queue_summary": case_definition_cleanup_queue_summary,
         "case_definition_health_summary": case_definition_health_summary,
         "case_definition_file_summary": case_definition_file_summary,
         "collection_strata_summary": collection_strata_summary,
