@@ -30996,3 +30996,84 @@ case_definition_action_summary.case_interpretation_review_case_ids:
 - "3회 이상 반복된 유사 token-sentence를 expected_final 후보로 둔다"는 케이스 정의 원칙은 유지한다.
 - expected 정의 cleanup은 현재 완료 상태로 보고, 남은 항목은 case interpretation review로 추적한다.
 - 앱 로직 튜닝은 `logic_tuning_candidate` 및 `strict_logic_candidate` subset을 우선 근거로 사용한다.
+
+## 2026-06-24 structural preflight 파라미터 재확인
+
+목적:
+
+- expected 정의 cleanup 대상이 없는 structural lifecycle 후보만 골라 단일 파라미터 변경이 앱 로직 개선으로 이어지는지 확인했다.
+- 목표는 세부 케이스 규칙이 아니라 queue age, confirmation count, max age 같은 일반 생명주기 원칙의 유효성 확인이다.
+
+기준 subset:
+
+```text
+source_report=.tmp/eval/dictation-ai-sbd/current-20260624-expected-definition-status-report.json
+case_output=.tmp/eval/dictation-ai-sbd/structural-preflight-20260624.jsonl
+selected_case_count=16
+
+baseline_report=.tmp/eval/dictation-ai-sbd/structural-preflight-20260624-report.json
+case_review=0
+logic_tuning_candidates=16
+strict_logic_candidates=12
+final_precision_avg=0.927
+final_recall_avg=0.904
+final_f1_avg=0.901
+strict_final_f1_avg=0.922
+final_boundary_f1_avg=0.442
+```
+
+시도:
+
+```text
+STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=2
+report=.tmp/eval/dictation-ai-sbd/structural-preflight-20260624-queue-age2-report.json
+case_review=3
+final_precision_avg=0.906
+final_recall_avg=0.917
+final_f1_avg=0.896
+strict_final_f1_avg=0.907
+final_boundary_f1_avg=0.441
+
+STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=3
+report=.tmp/eval/dictation-ai-sbd/structural-preflight-20260624-queue-age3-report.json
+case_review=3
+final_precision_avg=0.906
+final_recall_avg=0.917
+final_f1_avg=0.896
+strict_final_f1_avg=0.907
+final_boundary_f1_avg=0.441
+
+SENTENCE_CONFIRM_CHUNKS=4
+FORCED_SENTENCE_CONFIRM_CHUNKS=4
+report=.tmp/eval/dictation-ai-sbd/structural-preflight-20260624-confirm4-report.json
+case_review=5
+final_precision_avg=0.828
+final_recall_avg=0.758
+final_f1_avg=0.759
+strict_final_f1_avg=0.904
+final_boundary_f1_avg=0.292
+
+SENTENCE_CONFIRM_MAX_AGE_CHUNKS=2
+FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS=2
+report=.tmp/eval/dictation-ai-sbd/structural-preflight-20260624-maxage2-report.json
+final_f1_avg=0.901
+strict_final_f1_avg=0.922
+
+SENTENCE_CONFIRM_MAX_AGE_CHUNKS=4
+FORCED_SENTENCE_CONFIRM_MAX_AGE_CHUNKS=4
+report=.tmp/eval/dictation-ai-sbd/structural-preflight-20260624-maxage4-report.json
+final_f1_avg=0.901
+strict_final_f1_avg=0.922
+```
+
+해석:
+
+- queue promotion age를 2 이상으로 늘리면 recall은 소폭 오르지만 precision, final F1, strict F1이 모두 낮아지고 case interpretation review가 3건 생긴다.
+- confirmation count 4는 over-final을 줄이기보다 누락과 경계 점수 악화를 크게 만든다.
+- max age 2/4는 현재 structural subset에서 결과를 바꾸지 않았다.
+
+결론:
+
+- 이번 structural subset에서는 checked-in 기본값을 바꿀 근거가 없다.
+- 낮은 structural 케이스는 `over-final later context`, `staged residue`, `boundary granularity`가 섞여 있어 단일 파라미터 변경으로 일반화하기 어렵다.
+- 다음 앱 로직 변경은 같은 세부 원인이 추가 로그 케이스에서 반복될 때만 검토한다.
