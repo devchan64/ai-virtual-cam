@@ -2073,6 +2073,38 @@ def _strict_boundary_shift_kind(result: dict[str, Any]) -> str:
     return counts.most_common(1)[0][0]
 
 
+def _strict_actionable_low_kind(result: dict[str, Any]) -> str:
+    expected_count = len(result.get("expected_final", []) or [])
+    actual_count = len(result.get("actual_final", []) or [])
+    metrics = dict(result.get("metrics", {}) or {})
+    tags = {str(tag) for tag in result.get("tags", []) or []}
+
+    if _terminal_expected_residue_payload(result) is not None:
+        return "terminal_residue"
+    if actual_count > expected_count:
+        return "overfinal_or_extra_final"
+    if actual_count < expected_count:
+        if _missing_expected_without_terminal_residue_payload(result) is not None:
+            return "underfinal_missing_no_residue"
+        return "underfinal_boundary_or_revision"
+    if (
+        int(metrics.get("stage_candidate_quality_short_cjk", 0)) > 0
+        or int(metrics.get("stage_candidate_quality_short_no_end_fragment", 0)) > 0
+        or "short-cjk" in tags
+        or "short-cjk-fragment" in tags
+    ):
+        return "short_fragment_sensitive"
+    if result.get("actual_staged") or result.get("actual_staged_queue") or result.get("actual_pending"):
+        return "active_residue_with_equal_final_count"
+    if _missing_expected_without_terminal_residue_payload(result) is not None:
+        return "same_count_revision_loss"
+    return "same_count_low_similarity"
+
+
+def _strict_actionable_low_kind_counts(results: list[dict[str, Any]]) -> dict[str, int]:
+    return dict(sorted(Counter(_strict_actionable_low_kind(result) for result in results).items()))
+
+
 def _strict_actionable_low_final_summary(strict_results: list[dict[str, Any]]) -> dict[str, Any]:
     boundary_sensitive_ids = {
         str(item.get("id"))
@@ -2091,13 +2123,17 @@ def _strict_actionable_low_final_summary(strict_results: list[dict[str, Any]]) -
         ),
         "max_final_f1": BOUNDARY_ZERO_HIGH_FINAL_F1,
         "case_count": len(low_final),
+        "issue_kind_counts": _strict_actionable_low_kind_counts(low_final),
         "metric_presence": {
             metric: _summarize_supported_low_metric_presence(low_final, metric)
             for metric in SUPPORTED_LOW_BOTTLENECK_METRICS
             if any(int(dict(result.get("metrics", {})).get(metric, 0)) > 0 for result in low_final)
         },
         "examples": [
-            _low_score_case_payload(result, "strict_actionable_low_final")
+            {
+                **_low_score_case_payload(result, "strict_actionable_low_final"),
+                "issue_kind": _strict_actionable_low_kind(result),
+            }
             for result in sorted(
                 low_final,
                 key=lambda result: (

@@ -30782,3 +30782,47 @@ boundary_shift_kind_counts:
 - `low_overlap` 3건도 final content F1은 1.0이며, 실제 예시는 한국어 띄어쓰기/합성어 차이, 중국어 STT 어휘 변형, 라틴 suffix 표기 차이가 섞여 있다.
 - 따라서 현재 strict boundary-sensitive 11건은 앱의 append-only final lifecycle을 곧바로 바꿀 근거가 아니라, boundary metric sensitivity와 case boundary 해석을 먼저 분리해야 하는 신호다.
 - 다음 앱 로직 변경은 이 그룹 전체가 아니라, content F1이 실제로 낮은 `strict_actionable_low_final` 7건 중에서도 case-definition/replay-tail 영향이 없는 케이스로 제한한다.
+
+## 2026-06-24 strict actionable-low 원인 분류
+
+목적:
+
+- `expected_final` 정의 정리는 `expected_definition_cleanup=0`까지 낮아졌다.
+- 남은 `strict_actionable_low_final` 7건이 실제 앱 로직 수정 근거인지 확인하기 위해 content-loss, over-final, short fragment, active residue를 분리했다.
+- 이 분류는 점수가 낮다는 이유만으로 앱 로직을 과도하게 바꾸는 것을 막기 위한 진단이다.
+
+시도:
+
+```text
+report=.tmp/eval/dictation-ai-sbd/current-20260624-actionable-low-kind-report.json
+cases=57
+case_review=6
+expected_definition_cleanup=0
+case_interpretation_review=6
+strict_logic_candidates=38
+strict_actionable_low_final_case_count=7
+strict_boundary_sensitive_case_count=11
+final_f1_avg=0.913
+strict_final_f1_avg=0.953
+final_boundary_f1_avg=0.599
+
+strict_actionable_low_final.issue_kind_counts:
+  overfinal_or_extra_final=3
+  underfinal_missing_no_residue=2
+  short_fragment_sensitive=1
+  underfinal_boundary_or_revision=1
+```
+
+해석:
+
+- `strict_actionable_low_final` 7건은 단일 병목이 아니다.
+- 3건은 expected보다 actual final이 많아진 over-final/extra-final 형태다. 이는 누락 개선보다 중복/과분할 억제가 우선인 후보로 본다.
+- 2건은 terminal residue 없이 expected가 빠진 실제 누락 후보지만, 중국어 짧은 문장 완화 실험은 이미 전체 F1과 strict F1을 악화시켜 기각됐다.
+- 1건은 short fragment 민감도이며, short CJK/no-end 임계값 조정 실험군에서 일반화 근거가 없었다.
+- 1건은 under-final이지만 boundary/revision 변형 영향이 커서 단순 품질 gate 완화 근거로 쓰기 어렵다.
+
+결론:
+
+- 현재 수치만으로는 앱 로직을 넓게 완화할 근거가 부족하다.
+- 다음 개선은 전체 short fragment 허용이 아니라, `overfinal_or_extra_final`과 `underfinal_missing_no_residue`를 분리한 뒤 각각의 공통 lifecycle 원인이 확인될 때만 보수적으로 진행한다.
+- 리포트에 `issue_kind_counts`를 추가해 이후 CUDA 벤치 결과에서 낮은 F1의 성격을 먼저 확인하도록 했다.
