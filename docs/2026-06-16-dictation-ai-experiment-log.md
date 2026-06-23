@@ -29494,3 +29494,42 @@ actual_final_count=4 -> 3
 - 전체 precision, final F1, boundary F1, strict final F1이 함께 상승했고 recall은 유지됐다.
 - 남은 우선순위는 app logic 저점이 아니라 boundary granularity 검토로 바뀌었다.
 - 이 변경은 observed phrase를 직접 다루지 않고, mixed-script token-sentence prefix-growth revision에서 더 긴 후보를 보존하는 일반 생명주기 원칙이다.
+
+## 2026-06-24 active challenge case expected_final 검증
+
+목적:
+
+- `expected_final` 정의가 잘못된 케이스를 앱 로직 튜닝 근거로 오해하지 않도록 active challenge case 전체를 검증했다.
+- 검증 기준은 source trace 존재, replay input coverage, raw STT text 관측, `sentence_finalize_age` 기준 stable token-sentence 반복 근거다.
+
+명령:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases \
+  tests/eval/dictation_ai/sbd_cases \
+  --require-source-trace \
+  --require-input-evidence \
+  --require-observed-input-evidence \
+  --require-stable-repeat-evidence \
+  --summary-output .tmp/eval/dictation-ai-sbd/validate-active-cases-20260624-summary.json
+```
+
+결과:
+
+```text
+case_count=60
+expected_final_case_count=56
+draft_count=0
+source_trace_case_count=56
+missing_source_trace_case_count=0
+input_unsupported_case_count=0
+input_unobserved_case_count=0
+stable_repeat_unsupported_case_count=0
+```
+
+해석:
+
+- active finalization case의 `expected_final`은 현재 정의한 최소 근거 기준을 통과한다.
+- 따라서 최신 CUDA report의 `case_definition_cleanup_queue_count=0`은 검증 결과와 일치한다.
+- 남은 `case_definition_review_count=20`은 즉시 expected label 오류로 보지 않는다. 대부분 replay tail, mid-stream initial context, boundary granularity 해석 문제로 분리한다.
+- 다음 튜닝은 전체 challenge 평균보다 `strict_logic_candidate_summary`와 `boundary_granularity_summary`를 우선한다. strict subset은 이미 `strict_final_f1_avg=0.964444`이므로, 낮은 전체 평균을 쫓아 세부 규칙을 늘리는 변경은 보류한다.
