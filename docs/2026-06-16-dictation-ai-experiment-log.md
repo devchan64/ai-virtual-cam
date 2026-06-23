@@ -32310,3 +32310,55 @@ HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_
 - source trace 보정은 케이스 provenance 검증을 강화했지만 앱 출력 성능은 baseline과 동일하다.
 - `expected_definition_cleanup=0`이므로 현재 active set에서 `expected_final` 오작성 수정 큐는 비어 있다.
 - 남은 개선 후보는 케이스 정의가 아니라 strict low subset의 mixed issue kind를 더 모아 한 가지 구조 문제가 반복되는지 확인하는 방향이다.
+
+## 2026-06-24 revision reset and queue age recheck
+
+목적:
+
+- 최근 실패 분석에서 `stage_revision_confirmation_reset`, `stage_revision_token_sentence_deferred`, queue residue가 낮은 점수 케이스와 함께 관측됐다.
+- 사용자가 지적한 “새 revision이 생겼다고 바로 reset하지 말고 token-sentence 기준으로 보수적으로 reset해야 한다”는 원칙을 상수 sweep으로 확인했다.
+- 문구별 예외나 언어별 ad-hoc 규칙이 아니라, token-sentence revision similarity와 생성순서 queue age만 비교했다.
+
+명령:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sweeps/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --output-dir .tmp/eval/dictation-ai-sbd/sweep-20260624-revision-reset-preserve \
+  --summary-output .tmp/eval/dictation-ai-sbd/sweep-20260624-revision-reset-preserve-summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/sweep-20260624-revision-reset-preserve-summary.md \
+  --param CJK_CONFIRM_PRESERVE_PREFIX_GROWTH_MAX_DELTA=24 \
+  --param CJK_CONFIRM_PRESERVE_PREFIX_GROWTH_MAX_DELTA=32 \
+  --param REVISION_FALLBACK_COVERAGE_MIN=0.50 \
+  --param REVISION_FALLBACK_COVERAGE_MIN=0.45
+
+./.venv/bin/python tests/eval/dictation_ai/sweeps/run_sbd_parameter_sweep.py \
+  --include-baseline \
+  --output-dir .tmp/eval/dictation-ai-sbd/sweep-20260624-queue-age-recheck \
+  --summary-output .tmp/eval/dictation-ai-sbd/sweep-20260624-queue-age-recheck-summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/sweep-20260624-queue-age-recheck-summary.md \
+  --param STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=2 \
+  --param STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=3 \
+  --param STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=4
+```
+
+결과:
+
+| variant | final_precision_avg | final_recall_avg | final_f1_avg | strict_final_f1_avg | final_boundary_f1_avg | 판단 |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| baseline | 0.9237 | 0.9175 | 0.9135 | 0.9526 | 0.6044 | 유지 |
+| `CJK_CONFIRM_PRESERVE_PREFIX_GROWTH_MAX_DELTA=24` | 0.9237 | 0.9175 | 0.9135 | 0.9526 | 0.6044 | 변화 없음 |
+| `CJK_CONFIRM_PRESERVE_PREFIX_GROWTH_MAX_DELTA=32` | 0.9237 | 0.9175 | 0.9135 | 0.9526 | 0.6044 | 변화 없음 |
+| `REVISION_FALLBACK_COVERAGE_MIN=0.50` | 0.9178 | 0.9175 | 0.9099 | 0.9474 | 0.6008 | 폐기 |
+| `REVISION_FALLBACK_COVERAGE_MIN=0.45` | 0.9178 | 0.9175 | 0.9099 | 0.9474 | 0.6008 | 폐기 |
+| `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=2` | 0.916 | 0.925 | 0.914 | 0.938 | 0.598 | 폐기 |
+| `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=3` | 0.916 | 0.925 | 0.914 | 0.938 | 0.598 | 폐기 |
+| `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=4` | 0.916 | 0.925 | 0.914 | 0.938 | 0.598 | 폐기 |
+
+해석:
+
+- prefix-growth 보존 한계를 16에서 24/32로 늘려도 현재 active challenge replay 출력은 바뀌지 않았다.
+- revision fallback coverage를 낮추면 unconfirmed CJK replacement defer는 줄지만, 한 케이스에서 false/extra final이 늘어 precision과 boundary가 하락했다.
+- queue age를 2 이상으로 늘리면 recall은 오르지만 precision, strict final F1, boundary F1이 동시에 하락하고 review 대상이 증가했다.
+- 따라서 현재 evidence에서는 age reset과 queue age를 더 느슨하게 만드는 상수 변경을 기본값으로 채택하지 않는다.
+- 다음 개선은 상수 완화보다 strict low 케이스의 `overfinal_or_extra_final`과 `underfinal_missing_no_residue`를 더 분리해, 같은 issue kind가 반복되는지 확인한 뒤 앱 로직 preflight를 좁히는 쪽이 맞다.
