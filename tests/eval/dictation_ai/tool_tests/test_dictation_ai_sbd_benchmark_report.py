@@ -2574,6 +2574,10 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
             ],
             "terminal-staged",
         )
+        self.assertEqual(
+            [item["id"] for item in action_summary["review_cases"]],
+            ["terminal-staged"],
+        )
         self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
 
     def test_terminal_suffix_residue_is_tail_review_action(self) -> None:

@@ -29136,3 +29136,35 @@ fragment_echo_coverage_075_final_boundary_f1_avg=0.552
 - CJK revision ratio 완화는 finalized 수를 1개 늘렸지만 precision, 전체 F1, strict F1, boundary F1을 모두 낮췄다.
 - 따라서 이번 sweep에서는 추가 앱 기본값 변경을 채택하지 않는다.
 - 다음 개선은 상수 sweep보다 strict 저점 2건의 boundary granularity/over-final 원인을 케이스 단위로 추적해 일반 원칙이 있는지 확인하는 방향이 맞다.
+
+## 2026-06-24 expected_final 정의 감사 목록 보강
+
+목적:
+
+- "expected_final 정의 문제가 있는 케이스를 전부 고쳤는가"를 리포트에서 직접 추적할 수 있게 한다.
+- 기존 `case_definition_action_summary.by_action.*.examples`는 action별 일부 예시만 제공하므로, 남은 review 대상 전체를 빠르게 닫기 어렵다.
+- 새 리포트는 `case_definition_action_summary.review_cases`에 review 대상 전체 id/action/file/line/evidence payload를 포함한다.
+
+검증:
+
+```text
+tool_test=./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report
+tool_test_result=OK, 43 tests
+
+output=.tmp/eval/dictation-ai-sbd/current-20260624-review-cases-list-report.json
+case_definition_review=22
+review_cases_len=22
+action_counts.add_initial_final_or_recut_mid_stream_case=1
+action_counts.extend_replay_tail_or_reclassify_staged_expectation=20
+action_counts.manual_boundary_review=1
+final_f1_avg=0.858
+strict_final_f1_avg=0.943
+final_boundary_f1_avg=0.552
+```
+
+해석:
+
+- 이번 변경은 벤치 해석 보강이며 앱 로직 성능 수치를 바꾸지 않는다.
+- 최신 기준에서 `rewrite_expected_final_to_stable_repeated_candidate`, `recut_or_relabel_stable_candidate_mismatch`, `rewrite_expected_final_to_observed_stt_text` 계열은 0건이다.
+- 따라서 현재 남은 22건은 명백한 expected 문장 rewrite 대상이라기보다 replay tail 확장, mid-stream initial_final 복원, 또는 boundary 수동 검토 대상으로 본다.
+- 이후 "expected_final 정의 오류를 전부 고쳤는가"는 `review_cases` 전체 목록을 기준으로 action을 하나씩 닫아 검증한다.

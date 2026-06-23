@@ -1614,6 +1614,17 @@ def summarize_case_definition_action_items(results: list[dict[str, Any]]) -> dic
                 )[:CASE_EXEMPLAR_LIMIT]
             ],
         }
+    review_cases = [
+        _case_review_payload(result)
+        for result in sorted(
+            review_results,
+            key=lambda result: (
+                str(_case_review_actions(result)[0]) if _case_review_actions(result) else "",
+                float(dict(result.get("final_score", {})).get("f1", 0.0)),
+                str(result.get("id")),
+            ),
+        )
+    ]
     return {
         "interpretation": (
             "These are prioritized case-definition review actions, not automatic deletion rules. "
@@ -1648,6 +1659,7 @@ def summarize_case_definition_action_items(results: list[dict[str, Any]]) -> dic
         "case_definition_flag_counts": dict(sorted(definition_flag_counts.items())),
         "stable_candidate_shape_counts": dict(sorted(stable_candidate_shape_counts.items())),
         "stable_candidate_ordered_alignment_counts": dict(sorted(stable_candidate_ordered_alignment_counts.items())),
+        "review_cases": review_cases,
         "by_action": by_action,
     }
 
