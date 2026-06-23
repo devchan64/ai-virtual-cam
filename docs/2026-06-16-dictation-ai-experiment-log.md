@@ -28028,3 +28028,85 @@ logic_tuning_candidate_count=26
 - strict logic 후보 수와 strict 점수는 변하지 않았다.
 - 따라서 이번 변경은 앱 로직 성능 개선이 아니라, active challenge replay에서 라벨/window 오염을 줄인 데이터 정리로 본다.
 - 다음 개선 후보는 남은 `input_unobserved=35`의 expected 재작성 가능 여부와 strict 저점 `zh_log_missing_winter_shopping_hat_queue_head_stall_20260621_001`의 queue/stage blockage다.
+
+## 2026-06-23 observed STT 기준 expected_final 정리
+
+목적:
+
+- `expected_final`이 replay input에는 unit coverage로 지지되지만 raw STT text 그대로 관측되지 않는 케이스를 정리한다.
+- 사람의 의역/교정 문장이 아니라, `sentence_finalize_age=3` 기준으로 3회 이상 반복 관측된 token-sentence를 expected 기준으로 둔다.
+- stable 후보 수와 expected 문장 수가 다른 케이스는 자동으로 늘리거나 줄이지 않고 review queue로 분리한다.
+
+조치:
+
+- `stable_candidate_count == expected_final_count`인 16건은 stable repeated token-sentence text로 `expected_final`을 재작성했다.
+- stable 후보 수와 expected 수가 다른 19건은 `sbd_case_review_queue/expected-final-definition-review.jsonl`로 이동했다.
+- review queue는 15건에서 34건으로 늘었다.
+
+validator 변화:
+
+```text
+이전:
+case_count=1012
+expected_final_case_count=1008
+input_unsupported_case_count=0
+input_unobserved_case_count=35
+stable_repeat_unsupported_case_count=0
+missing_source_trace_case_count=152
+
+정리 후:
+case_count=993
+expected_final_case_count=989
+input_unsupported_case_count=0
+input_unobserved_case_count=0
+stable_repeat_unsupported_case_count=0
+missing_source_trace_case_count=148
+```
+
+CUDA/SaT 벤치:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --model sat-3l-sm --device cuda --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/current-20260623-observed-cleanup-report.json
+```
+
+```text
+before observed cleanup:
+case_count=1012
+finalized=4614
+stage_start=8827
+finalized_per_stage_start=0.5227143990030588
+final_precision_avg=0.6219537087148238
+final_recall_avg=0.6877725890123175
+final_f1_avg=0.6313902856456678
+final_boundary_f1_avg=0.1804208774086494
+strict_logic_candidates=21
+strict_final_f1_avg=0.8999999999999999
+strict_final_boundary_f1_avg=0.7333333333333334
+case_definition_review_count=982
+logic_tuning_candidate_count=26
+
+after observed cleanup:
+case_count=993
+finalized=4503
+stage_start=8572
+finalized_per_stage_start=0.5253149790013999
+final_precision_avg=0.6196639276974105
+final_recall_avg=0.6861799131231209
+final_f1_avg=0.6298392008844929
+final_boundary_f1_avg=0.1822618587945775
+strict_logic_candidates=22
+strict_final_f1_avg=0.8772727272727273
+strict_final_boundary_f1_avg=0.7000000000000001
+case_definition_review_count=962
+logic_tuning_candidate_count=27
+```
+
+해석:
+
+- 전체 `final_f1_avg`는 `-0.00155` 하락했고 `final_boundary_f1_avg`는 `+0.00184` 상승했다.
+- strict 후보가 21건에서 22건으로 늘었고, 새 후보는 `ko_log_draft_20260620_avc_whisper_log_002756`이다.
+- 이 후보는 expected가 raw STT 반복 문장 기준으로 정리되면서 실제 누락 케이스로 드러났다. actual final은 `이거를 우리가 끌고 가겠다...` 구간을 확정하지 못했다.
+- 따라서 이번 변경은 앱 로직 성능 개선이 아니라 benchmark label 정화이며, 새 strict 저점 후보를 다음 로직 튜닝 근거로 본다.
