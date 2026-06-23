@@ -30138,3 +30138,26 @@ baseline_before_reclass_result=case_count=60, case_definition_review=16, final_f
 - strict F1은 `0.967 -> 0.951`로 낮아졌지만, 이는 easy duplicate 3건 제거와 subset 재구성의 영향이므로 앱 로직 악화로 해석하지 않는다.
 - staged reclass는 final 확정 성능을 과대 요구하던 replay-tail 케이스를 분리한 정리다.
 - 남은 7건은 자동 expected 수정 대상이 아니라 `extend replay tail`, `manual boundary review`, `mid-stream initial_final/recut` 검토 대상으로 유지한다.
+
+## 2026-06-24 남은 review 7건의 튜닝 증거 적합성
+
+확인:
+
+```text
+audit_tool=./.venv/bin/python tests/eval/dictation_ai/cases/audit_sbd_initial_final_context.py tests/eval/dictation_ai/sbd_cases --benchmark-report .tmp/eval/dictation-ai-sbd/current-20260624-after-staged-reclass-dedupe-report.json
+audit_candidate_count=0
+audit_review_case_count=0
+audit_duplicate_expected_case_count=0
+audit_nested_expected_case_count=0
+audit_partial_input_evidence_case_count=0
+audit_repeated_expected_group_count=0
+cuda_report_case_definition_review=7
+cuda_report_review_actions=extend_replay_tail_or_reclassify_staged_expectation:4, manual_boundary_review:2, add_initial_final_or_recut_mid_stream_case:1
+```
+
+해석:
+
+- audit 도구 기준으로는 expected text가 입력에서 빠졌거나, 중복 expected가 있거나, initial_final 후보가 명확한 케이스는 없다.
+- CUDA 리포트의 남은 7건은 입력/라벨 결함이 아니라 replay 종료 시점, 문장 경계 granularity, mid-stream recut 해석 문제다.
+- 따라서 이 7건을 근거로 confirmation, short CJK, queue age 같은 앱 로직 상수를 조정하지 않는다.
+- 다음 앱 로직 변경은 strict logic subset 또는 logic_tuning_candidate subset에서 동일 지표가 반복적으로 낮게 나올 때만 시도한다.
