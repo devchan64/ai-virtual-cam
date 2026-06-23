@@ -30710,3 +30710,40 @@ final_boundary_f1_avg=0.599
 - `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=1`은 case review 수를 늘리고 strict 후보 수와 F1을 낮춰 기각한다.
 - `CJK_CONFIRM_PRESERVE_RATIO_MIN=0.45`는 기준선과 동일해 기본값 변경 효과가 없다.
 - 현재 남은 병목은 단순 품질 gate 임계값 조정으로 개선되지 않는다. 다음 구조 검토는 boundary granularity와 replay-tail 해석을 분리한 뒤, `stage_age_quality_blocked`가 반복 근거가 있는 후보를 suppress하는 경우를 더 좁고 일반적인 조건으로 설명할 수 있을 때만 진행한다.
+
+## 2026-06-24 near-confirmed short CJK aged-final 허용 기각
+
+목적:
+
+- 이전의 `short_cjk` aged-final 전면 허용은 전체 challenge에서 false final을 크게 늘려 기각됐다.
+- 이번에는 더 좁게, 종결부호가 있고 `spaced_cjk`, `cjk_internal_gap`, `cjk_repeated_ngram`이 없으며 confirmation이 기본 요구치보다 1개만 부족한 짧은 CJK staged 후보만 aged final로 허용하는 실험을 했다.
+- 목표는 `stage_age_quality_blocked` low-final 6건 중 실제 반복 근거가 있는 짧은 문장 누락을 회수할 수 있는지 확인하는 것이었다.
+
+시도:
+
+```text
+patch=allow punctuated short_cjk aged final when staged_confirmations >= required_confirmations - 1
+report=.tmp/eval/dictation-ai-sbd/current-20260624-short-cjk-near-confirmed-report.json
+cases=57
+finalized=154
+case_review=15
+expected_definition_cleanup=0
+case_interpretation_review=15
+strict_logic_candidates=34
+stage_start=281
+finalized_per_stage_start=0.548
+final_precision_avg=0.819
+final_recall_avg=0.912
+final_f1_avg=0.854
+strict_final_f1_avg=0.916
+final_boundary_f1_avg=0.541
+case_exact_match=4
+staged_exact_match=24
+```
+
+결론:
+
+- 기준선 `final_f1_avg=0.913`, `strict_final_f1_avg=0.953`, `final_boundary_f1_avg=0.599`보다 모두 악화됐다.
+- confirmation이 1개 부족한 punctuated short CJK만 허용해도 false final 증가를 충분히 막지 못한다.
+- short CJK aged-final 완화는 이 수준의 구조 조건으로는 일반화할 수 없다. 앱 코드 패치는 원복하고 적용하지 않는다.
+- 다음 구조 실험은 short CJK 허용이 아니라, confirmed/revision/queue 소비 순서에서 이미 내용 회수는 되지만 boundary가 깨지는 케이스와 실제 content loss 케이스를 분리한 뒤 진행한다.
