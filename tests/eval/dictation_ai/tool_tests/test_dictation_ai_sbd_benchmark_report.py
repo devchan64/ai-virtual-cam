@@ -941,7 +941,7 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
             supported_low["top_metric_pairs"],
         )
 
-    def test_report_flags_expected_final_that_omits_supported_actual_sentence(self) -> None:
+    def test_report_flags_expected_final_that_omits_stable_actual_sentence(self) -> None:
         args = Namespace(
             model="sat-3l-sm",
             device="cuda",
@@ -953,6 +953,7 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
             id="case-omitted-actual",
             language="zh",
             chunks=[
+                "第一句到了。遗漏但完整的一句。第二句也到了。",
                 "第一句到了。遗漏但完整的一句。第二句也到了。",
                 "第一句到了。遗漏但完整的一句。第二句也到了。",
             ],
@@ -970,6 +971,7 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
                 "tags": ["missing-final"],
                 "expected_final": ["第一句到了。", "第二句也到了。"],
                 "chunks": [
+                    {"input": "第一句到了。遗漏但完整的一句。第二句也到了。"},
                     {"input": "第一句到了。遗漏但完整的一句。第二句也到了。"},
                     {"input": "第一句到了。遗漏但完整的一句。第二句也到了。"},
                 ],
@@ -1000,7 +1002,7 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
 
         self.assertEqual(
             report["cases"][0]["case_definition_flags"],
-            ["expected_final_omits_supported_actual_sentence"],
+            ["expected_final_omits_stable_actual_sentence"],
         )
         self.assertEqual(report["case_definition_action_summary"]["review_case_count"], 1)
         self.assertEqual(report["case_definition_action_summary"]["action_counts"], {"manual_boundary_review": 1})

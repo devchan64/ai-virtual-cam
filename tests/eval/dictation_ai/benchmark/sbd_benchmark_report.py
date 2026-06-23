@@ -499,44 +499,6 @@ def _has_end_marker(sentence: str) -> bool:
     return any(marker in normalized_text(sentence) for marker in ".!?。？！")
 
 
-def _has_supported_actual_final_omitted_from_expected(result: dict[str, Any]) -> bool:
-    expected_final = [
-        str(sentence).strip()
-        for sentence in result.get("expected_final", []) or []
-        if str(sentence).strip()
-    ]
-    actual_final = [
-        str(sentence).strip()
-        for sentence in result.get("actual_final", []) or []
-        if str(sentence).strip()
-    ]
-    if not expected_final or len(actual_final) <= len(expected_final):
-        return False
-    chunks = [
-        str(chunk.get("input", "") if isinstance(chunk, dict) else chunk).strip()
-        for chunk in result.get("chunks", [])
-        if str(chunk.get("input", "") if isinstance(chunk, dict) else chunk).strip()
-    ]
-    if not chunks:
-        return False
-    for actual in actual_final:
-        if not _has_end_marker(actual):
-            continue
-        expected_similarity = max(
-            (_sentence_support_score(actual, expected) for expected in expected_final),
-            default=0.0,
-        )
-        if expected_similarity >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY:
-            continue
-        input_support = max(
-            (_sentence_support_score(actual, chunk) for chunk in chunks),
-            default=0.0,
-        )
-        if input_support >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY:
-            return True
-    return False
-
-
 def _has_actual_final_supported_by_omitted_stable_candidate(result: dict[str, Any]) -> bool:
     expected_final = [
         str(sentence).strip()
@@ -1407,8 +1369,6 @@ def _case_primary_review_action(result: dict[str, Any]) -> str:
         return "rewrite_expected_final_to_final_sentence_boundary"
     if "repeated_expected_group" in definition_flags:
         return "deduplicate_or_justify_shifted_window_repeat"
-    if "expected_final_omits_supported_actual_sentence" in definition_flags:
-        return "manual_boundary_review"
     if "expected_final_omits_stable_actual_sentence" in definition_flags:
         return "manual_boundary_review"
     if _has_expected_final_staged_residue(result) and not _expected_final_matches_stable_repeat_evidence(result):
@@ -2180,16 +2140,6 @@ def _with_case_evidence_metadata(results: list[dict[str, Any]]) -> list[dict[str
             )
             if expected_group_counts[expected_group_key] > 1:
                 case_definition_flags.append("repeated_expected_group")
-        if (
-            not case_definition_flags
-            and not item["expected_quality_flags"]
-            and not item["case_context_flags"]
-            and dict(item["input_evidence"]).get("fully_supported")
-            and dict(item["input_evidence"]).get("observed_fully_supported", True)
-            and dict(item["input_evidence"]).get("stable_repeat_fully_supported", True)
-            and _has_supported_actual_final_omitted_from_expected(item)
-        ):
-            case_definition_flags.append("expected_final_omits_supported_actual_sentence")
         if (
             not case_definition_flags
             and not item["expected_quality_flags"]

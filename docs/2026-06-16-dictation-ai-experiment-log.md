@@ -28987,3 +28987,45 @@ checked_in_default_case_definition_review=7
 - `SENTENCE_CONFIRM_CHUNKS=3`은 전체 F1은 유지하면서 precision/strict F1을 올리지만 boundary F1이 내려갔다.
 - `SENTENCE_CONFIRM_CHUNKS=3`과 `SHORT_CJK_CONFIRM_EXTRA_CHUNKS=0` 조합은 전체 F1, strict F1, recall을 함께 개선했다.
 - 따라서 앱 기본값을 `SENTENCE_CONFIRM_CHUNKS=3`, `SHORT_CJK_CONFIRM_EXTRA_CHUNKS=0`으로 반영한다. 이는 “3회 반복 관측”이라는 핵심 원칙을 강화하고, 짧은 CJK에만 confirmation을 추가 요구하던 예외를 제거하는 방향이다.
+
+## 2026-06-24 expected 누락 판정의 stable 후보 기준 통일
+
+목적:
+
+- 3회 반복 기본값 반영 후 `expected_final_omits_supported_actual_sentence`가 3건 다시 잡혔다.
+- 확인 결과 단순히 actual final이 입력 chunk에 존재한다는 이유로 expected 누락으로 분류하고 있었고, prefix fragment/과확정 후보까지 case definition review로 빠지는 문제가 있었다.
+
+변경:
+
+- 단순 chunk support 기반 `expected_final_omits_supported_actual_sentence` 분류를 폐기했다.
+- expected 누락 의심은 stable candidate와 actual final이 token-sentence support 및 token ratio 기준을 함께 만족하는 `expected_final_omits_stable_actual_sentence`만 사용한다.
+- 이에 따라 앱의 prefix fragment/중간문장 과확정 후보가 strict 앱 로직 후보에서 제외되지 않는다.
+
+CUDA/SaT 확인:
+
+```text
+baseline_output=.tmp/eval/dictation-ai-sbd/current-20260624-confirm-3-default-after-case-fix-report.json
+baseline_case_definition_review=7
+baseline_logic_tuning_candidates=49
+baseline_strict_logic_candidates=39
+baseline_strict_final_f1_avg=0.886
+baseline_case_definition_flag_counts.expected_final_omits_supported_actual_sentence=3
+
+output=.tmp/eval/dictation-ai-sbd/current-20260624-stable-only-case-definition-report.json
+case_definition_review=5
+case_definition_review_ratio=0.089
+logic_tuning_candidates=51
+strict_logic_candidates=41
+final_precision_avg=0.897
+final_recall_avg=0.843
+final_f1_avg=0.858
+strict_final_f1_avg=0.871
+final_boundary_f1_avg=0.552
+case_definition_flag_counts={}
+```
+
+해석:
+
+- 전체 F1은 동일하다. 변경은 앱 로직이 아니라 벤치 리포트의 후보 분류 보정이다.
+- strict 후보가 39건에서 41건으로 늘고 strict F1이 낮아진 것은, 이전에 case definition 문제로 제외되던 실제 앱 과확정 후보가 다시 strict 후보로 들어왔기 때문이다.
+- 이후 앱 로직 개선은 이 strict 후보를 기준으로 보아야 한다.
