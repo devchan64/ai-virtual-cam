@@ -31782,3 +31782,73 @@ result:
 - cleanup 후보 10건 중 7건은 이미 `expected_staged`로 명시된 tail 후보였고, 한국어 2건은 staged 명시 누락이었다.
 - 남은 1건은 `zh_log_promo_bbq_short_token_sentence_echo_20260621_001`이다. actual final은 expected final과 일치하지만 입력 stable 후보에 짧은 감탄/반복/잡음 후보가 함께 있어 자동 라벨 수정하지 않는다.
 - 이 상태에서 앱 로직 튜닝은 `expected_definition_cleanup=1`을 제외한 logic tuning candidate를 기준으로 해석한다.
+
+## 2026-06-24 short token sentence expected 정리와 clean benchmark
+
+목적:
+
+- `zh_log_promo_bbq_short_token_sentence_echo_20260621_001`에서 3회 이상 반복되고 종결부호가 있는 짧은 문장 후보를 final-only 기대값 기준과 맞춘다.
+- 반복 ngram 또는 tail revision 후보는 final 기대값으로 올리지 않는다.
+
+변경:
+
+- `嘿嘿，这么好。`는 짧지만 반복 관측된 문장으로 보고 `expected_final`에 추가했다.
+- `好浓的猪手。`는 tail에서 후속 수정되는 후보라 `expected_staged`로 명시했다.
+- `哈哈哈哈。`는 `cjk_repeated_ngram` 성격이므로 final 기대값에서 제외했다.
+
+검증:
+
+```text
+case_validate=./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases \
+  tests/eval/dictation_ai/sbd_cases \
+  --require-expected-final \
+  --require-source-trace \
+  --require-input-evidence \
+  --require-observed-input-evidence \
+  --require-stable-repeat-evidence \
+  --max-drafts 0
+
+result:
+  case_count=57
+  expected_final_case_count=53
+  expected_no_final_case_count=4
+  stable_repeat_unsupported_case_count=0
+
+tool_test=./.venv/bin/python -m unittest \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_case_validator
+
+result:
+  Ran 87 tests
+  OK
+```
+
+CUDA benchmark:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output .tmp/eval/dictation-ai-sbd/current-20260624-expected-clean-report.json
+
+result:
+  final_f1_avg=0.910
+  strict_final_f1_avg=0.947
+  expected_definition_cleanup=0
+  case_interpretation_review=6
+  logic_tuning_candidates=47
+  strict_logic_candidates=38
+  strict_actionable_low_issue_kind_counts:
+    overfinal_or_extra_final=3
+    underfinal_missing_no_residue=3
+    short_fragment_sensitive=1
+    underfinal_boundary_or_revision=1
+  strict_actionable_low_underfinal_stable_missing_block_kind_counts:
+    stable_missing_after_compact_suppression=2
+    stable_missing_after_fragment_echo_suppression=1
+```
+
+해석:
+
+- active challenge replay의 `expected_final` 정의 cleanup은 0이 됐다.
+- 짧은 문장을 expected에 포함하면서 raw score는 소폭 낮아졌지만, 이는 앱 로직이 놓치는 short final 후보가 벤치에 드러난 것으로 해석한다.
+- 다음 앱 로직 변경은 아직 보류한다. strict low issue가 overfinal 3건과 underfinal 3건으로 갈라져 있어, 같은 원인군을 추가 수집한 뒤 일반 원칙으로 조정한다.
