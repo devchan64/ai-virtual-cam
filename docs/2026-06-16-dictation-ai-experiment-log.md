@@ -31852,3 +31852,46 @@ result:
 - active challenge replay의 `expected_final` 정의 cleanup은 0이 됐다.
 - 짧은 문장을 expected에 포함하면서 raw score는 소폭 낮아졌지만, 이는 앱 로직이 놓치는 short final 후보가 벤치에 드러난 것으로 해석한다.
 - 다음 앱 로직 변경은 아직 보류한다. strict low issue가 overfinal 3건과 underfinal 3건으로 갈라져 있어, 같은 원인군을 추가 수집한 뒤 일반 원칙으로 조정한다.
+
+## 2026-06-24 clean set short CJK 파라미터 sweep
+
+목적:
+
+- cleanup 0 상태의 active challenge replay에서 short CJK 관련 설정값 변경이 실제 성능 개선으로 이어지는지 확인한다.
+- 짧은 문장 누락을 해결하기 위해 `SHORT_CJK_CONFIRM_EXTRA_CHUNKS` 또는 `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS`를 조정할 근거가 있는지 본다.
+
+명령:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py run-sweep \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --include-baseline \
+  --param SHORT_CJK_CONFIRM_EXTRA_CHUNKS=0 \
+  --param SHORT_CJK_CONFIRM_EXTRA_CHUNKS=1 \
+  --param SHORT_CJK_CONFIRM_EXTRA_CHUNKS=2 \
+  --param SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=0 \
+  --param SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=1 \
+  --param SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=2 \
+  --output-dir .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-20260624-short-cjk-clean \
+  --summary-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-20260624-short-cjk-clean-summary.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/parameter-sweeps/current-20260624-short-cjk-clean-summary.md
+```
+
+결과:
+
+| variant | final_f1_avg | final_boundary_f1_avg | finalized_per_stage_start | 판단 |
+| --- | ---: | ---: | ---: | --- |
+| baseline | 0.9099 | 0.5950 | 0.4411 | 유지 |
+| `SHORT_CJK_CONFIRM_EXTRA_CHUNKS=0` | 0.9099 | 0.5950 | 0.4411 | baseline과 동일 |
+| `SHORT_CJK_CONFIRM_EXTRA_CHUNKS=1` | 0.8578 | 0.5511 | 0.3900 | 악화 |
+| `SHORT_CJK_CONFIRM_EXTRA_CHUNKS=2` | 0.8590 | 0.5511 | 0.3927 | 악화 |
+| `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=0` | 0.9099 | 0.5950 | 0.4411 | baseline과 동일 |
+| `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=1` | 0.8910 | 0.5589 | 0.4517 | 악화 |
+| `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=2` | 0.8296 | 0.5363 | 0.4710 | 악화 |
+
+해석:
+
+- clean set에서는 short CJK confirmation/hold 파라미터를 키우는 방식이 누락 개선이 아니라 전반 F1과 boundary F1 하락으로 나타난다.
+- `SHORT_CJK_CONFIRM_EXTRA_CHUNKS=0`, `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=0`은 현재 baseline과 동일하므로 기본값 변경 근거가 없다.
+- 현재 strict low underfinal은 `stable_missing_after_compact_suppression=2`, `stable_missing_after_fragment_echo_suppression=1`로 recent-final suppression 계열에 남아 있다.
+- compact suppression은 현재 별도 tuning manifest 축이 아니며, 바로 threshold knob를 추가하면 세부 규칙이 늘어 목표의 일반성이 떨어질 수 있다. 동일 blocker 케이스를 더 수집한 뒤, “recent final echo 억제가 stable repeated token-sentence를 삭제하지 않아야 한다”는 일반 원칙으로 다룬다.
