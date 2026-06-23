@@ -29962,3 +29962,30 @@ final_f1=0.800000 -> 1.000000
 - 12도 개선되지만 16부터 recall/final F1 개선 폭이 커지고 24와 주요 수치가 같았다. 따라서 최소 동일 개선 후보인 16을 기본값으로 채택한다.
 - 이 변경은 일반 CJK revision similarity를 느슨하게 하는 것이 아니라, prefix-growth revision에서 confirmation reset을 줄이는 구조적 완화다.
 - case definition review 수가 `20 -> 17`로 줄고 precision/recall/final F1이 함께 개선되어 현재 challenge replay 기준 채택 근거가 충분하다.
+
+## 2026-06-24 confirmed short CJK age-final 실험 폐기
+
+목적:
+
+- `SHORT_CJK_FINAL_UNITS` 전체 변경은 악화됐지만, 종결부호가 있고 2회 이상 confirmation된 짧은 CJK 문장만 age-final 허용하면 누락을 줄일 수 있는지 확인했다.
+- 이는 “짧은 문장도 final-only 번역 대상”이라는 계약과 “길이만으로 false final을 늘리지 않는다”는 제약 사이의 좁은 후보였다.
+
+검증:
+
+```text
+baseline_output=.tmp/eval/dictation-ai-sbd/current-20260624-prefix-growth-default-16-report.json
+baseline_final_f1_avg=0.877143
+baseline_strict_final_f1_avg=0.972
+baseline_final_boundary_f1_avg=0.588902
+
+candidate_output=.tmp/eval/dictation-ai-sbd/current-20260624-short-cjk-confirmed-age-final-report.json
+candidate_final_f1_avg=0.877143
+candidate_strict_final_f1_avg=0.972
+candidate_final_boundary_f1_avg=0.588902
+```
+
+해석:
+
+- 현재 reviewed challenge replay에서는 주요 지표 변화가 없다.
+- 전체 성능 개선 근거가 없으므로 앱 로직에는 반영하지 않는다.
+- 짧은 CJK 문장 누락은 단순 age-final 조건보다 stage/revision 흐름 또는 케이스 기대값 정의와 함께 계속 분리해서 본다.
