@@ -1560,7 +1560,7 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
         )
         self.assertEqual(
             summary["lifecycle_replay_summary"]["replay_state_owner_counts"],
-            {"tests.eval.dictation_ai.sbd_benchmark.LifecycleState": 1},
+            {"tests.eval.dictation_ai.benchmark.sbd_lifecycle_state.LifecycleState": 1},
         )
         self.assertEqual(
             summary["lifecycle_replay_summary"]["missing_runtime_signal_counts"][
@@ -1662,7 +1662,7 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
         )
         self.assertIn(
             "lifecycle_replay_state_owner_counts: "
-            "tests.eval.dictation_ai.sbd_benchmark.LifecycleState=1",
+            "tests.eval.dictation_ai.benchmark.sbd_lifecycle_state.LifecycleState=1",
             markdown,
         )
         self.assertIn("translation request/output linkage=1", markdown)
@@ -2576,7 +2576,7 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
             markdown,
         )
         self.assertIn(
-            "lifecycle_replay_state_owner: tests.eval.dictation_ai.sbd_benchmark.LifecycleState",
+            "lifecycle_replay_state_owner: tests.eval.dictation_ai.benchmark.sbd_lifecycle_state.LifecycleState",
             markdown,
         )
         self.assertIn("lifecycle_replayed_runtime_signals: stable_analysis.stable_internal_ratio", markdown)

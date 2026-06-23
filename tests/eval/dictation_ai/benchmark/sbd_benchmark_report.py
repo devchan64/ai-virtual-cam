@@ -2151,8 +2151,12 @@ def summarize_case_definition_health(
             "strict_logic_candidates are the preferred subset for conservative app-logic tuning."
         ),
         "expected_final_case_count": expected_final_count,
+        "case_review_count": review_case_count,
+        "case_review_ratio": review_ratio,
         "case_definition_review_count": review_case_count,
         "case_definition_review_ratio": review_ratio,
+        "expected_definition_cleanup_count": cleanup_count,
+        "expected_definition_cleanup_ratio": cleanup_ratio,
         "case_definition_cleanup_count": cleanup_count,
         "case_definition_cleanup_ratio": cleanup_ratio,
         "case_interpretation_review_count": interpretation_review_count,
@@ -2180,8 +2184,18 @@ def summarize_tuning_next_action(
     cleanup_count = int(case_definition_cleanup_queue_summary.get("case_count", 0))
     health_recommendation = str(case_definition_health_summary.get("recommendation", "unknown"))
     strict_count = int(case_definition_health_summary.get("strict_logic_candidate_count", 0))
-    review_count = int(case_definition_health_summary.get("case_definition_review_count", 0))
-    definition_cleanup_count = int(case_definition_health_summary.get("case_definition_cleanup_count", review_count))
+    review_count = int(
+        case_definition_health_summary.get(
+            "case_review_count",
+            case_definition_health_summary.get("case_definition_review_count", 0),
+        )
+    )
+    definition_cleanup_count = int(
+        case_definition_health_summary.get(
+            "expected_definition_cleanup_count",
+            case_definition_health_summary.get("case_definition_cleanup_count", review_count),
+        )
+    )
     interpretation_review_count = int(case_definition_health_summary.get("case_interpretation_review_count", 0))
     terminal_residue_count = int(terminal_expected_residue_summary.get("case_count", 0))
     missing_no_residue_count = int(missing_expected_without_terminal_residue_summary.get("case_count", 0))
@@ -2216,7 +2230,9 @@ def summarize_tuning_next_action(
         "priority": priority,
         "rationale": rationale,
         "health_recommendation": health_recommendation,
+        "case_review_count": review_count,
         "case_definition_review_count": review_count,
+        "expected_definition_cleanup_count": definition_cleanup_count,
         "case_definition_cleanup_count": definition_cleanup_count,
         "case_interpretation_review_count": interpretation_review_count,
         "strict_logic_candidate_count": strict_count,

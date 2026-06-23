@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from difflib import SequenceMatcher
 from typing import Any
 
+from src.app.dictation_node_sentence_candidate_commit_buffer import SentenceCandidateCommitBufferNode
+from src.app.dictation_pipeline_contracts import ActiveSentenceCandidate
 from src.app.sentence_boundary import normalized_text
 from src.app.dictation_pipeline_settings import (
-    FINAL_SENTENCE_MATCH_MIN_SIMILARITY,
     delta_suppressed_stage_max_chunks,
     max_staged_sentence_queue,
     no_text_stale_stage_suppress_chunks,
@@ -58,39 +58,57 @@ from tests.eval.dictation_ai.benchmark.sbd_lifecycle_state import (
     _stable_internal_ratio,
     _stable_overlap_source,
 )
+from tests.eval.dictation_ai.benchmark.sbd_lifecycle_scoring import (
+    score_boundary_offsets,
+    score_ordered_sequence,
+    score_sequence,
+)
 from tests.eval.dictation_ai.cases.sbd_case_loader import SbdCase
+
+
+def _commit_buffer_from_state(state: LifecycleState) -> SentenceCandidateCommitBufferNode:
+    node = SentenceCandidateCommitBufferNode(max_staged_sentence_queue())
+    active = ActiveSentenceCandidate(
+        sentence=state.staged_sentence,
+        confirmations=state.staged_confirmations,
+        age=state.staged_age,
+        forced=state.staged_forced,
+        deferredAgeChunk=state.staged_deferred_age_chunk,
+        deltaSuppressedChunks=state.staged_delta_suppressed_chunks,
+        deltaSuppressedChunkIndex=state.staged_delta_suppressed_chunk_index,
+    )
+    node.load_snapshot(active=active, queue_entries=state.staged_queue or ())
+    return node
+
+
+def _sync_state_from_commit_buffer(state: LifecycleState, node: SentenceCandidateCommitBufferNode) -> None:
+    state.staged_sentence = node.active.sentence
+    state.staged_confirmations = node.active.confirmations
+    state.staged_age = node.active.age
+    state.staged_forced = node.active.forced
+    state.staged_deferred_age_chunk = node.active.deferredAgeChunk
+    state.staged_delta_suppressed_chunks = node.active.deltaSuppressedChunks
+    state.staged_delta_suppressed_chunk_index = node.active.deltaSuppressedChunkIndex
+    assert state.staged_queue is not None
+    state.staged_queue.clear()
+    state.staged_queue.extend(node.queue_entries())
+
+
+def _count_segment_state(state: LifecycleState, segment_state: str, amount: int = 1) -> None:
+    state.count(f"segment_state_{segment_state}", amount)
 
 
 def _promote_next_staged_sentence(state: LifecycleState, chunk_index: int) -> None:
     if state.staged_sentence:
         return
-    assert state.staged_queue is not None
-    while state.staged_queue:
-        entry = state.staged_queue.popleft()
-        state.staged_sentence = str(entry["sentence"])
-        state.staged_confirmations = int(entry["confirmations"])
-        state.staged_age = int(entry["age"])
-        state.staged_forced = bool(entry["forced"])
-        deferred_age_chunk = int(entry["deferred_age_chunk"])
-        state.staged_deferred_age_chunk = chunk_index if deferred_age_chunk < 0 else deferred_age_chunk
-        if deferred_age_chunk >= 0:
-            state.staged_age = max(state.staged_age, chunk_index - deferred_age_chunk)
-        if state.staged_age > staged_queue_max_promotion_age_chunks():
-            state.staged_sentence = ""
-            state.staged_confirmations = 0
-            state.staged_age = 0
-            state.staged_forced = False
-            state.staged_deferred_age_chunk = -1
-            state.staged_delta_suppressed_chunks = 0
-            state.staged_delta_suppressed_chunk_index = -1
-            state.count("stage_queue_stale_promote_suppressed")
-            state.count("segment_state_suppressed")
-            continue
-        state.staged_delta_suppressed_chunks = 0
-        state.staged_delta_suppressed_chunk_index = -1
-        state.count("stage_queue_promote")
-        state.count("stage_start")
-        state.count("segment_state_staged")
+    node = _commit_buffer_from_state(state)
+    while node.promote_if_idle(
+        chunk_index=chunk_index,
+        max_promotion_age_chunks=staged_queue_max_promotion_age_chunks(),
+        count_metric=state.count,
+        count_segment_state=lambda name, amount=1: _count_segment_state(state, name, amount),
+    ):
+        _sync_state_from_commit_buffer(state, node)
         promoted_quality_flags = set(_final_sentence_diagnostic_flags(state.staged_sentence, state.language))
         if not _should_stage_boundary_candidate(state.staged_sentence, state.language):
             state.count("stage_queue_quality_suppressed")
@@ -104,6 +122,7 @@ def _promote_next_staged_sentence(state: LifecycleState, chunk_index: int) -> No
             state.staged_deferred_age_chunk = -1
             state.staged_delta_suppressed_chunks = 0
             state.staged_delta_suppressed_chunk_index = -1
+            node = _commit_buffer_from_state(state)
             continue
         promoted_sentence, recent_source, recent_reason = _recent_final_output_delta_with_reason(
             state.staged_sentence,
@@ -129,265 +148,33 @@ def _promote_next_staged_sentence(state: LifecycleState, chunk_index: int) -> No
         state.count("stage_queue_recent_final_suppressed")
         state.count(f"stage_queue_recent_final_suppressed_{recent_reason}")
         state.count("segment_state_suppressed")
+        node = _commit_buffer_from_state(state)
 
 
 def _prefer_queued_revision_for_active(state: LifecycleState, chunk_index: int, finalize_reason: str) -> bool:
-    if not state.staged_sentence:
-        return False
-    assert state.staged_queue is not None
-    index = 0
-    max_promotion_age = staged_queue_max_promotion_age_chunks()
-    while index < len(state.staged_queue):
-        entry = state.staged_queue[index]
-        deferred_age_chunk = int(entry["deferred_age_chunk"])
-        queued_age = int(entry["age"])
-        if deferred_age_chunk >= 0:
-            queued_age = max(queued_age, chunk_index - deferred_age_chunk)
-        entry["age"] = queued_age
-        if queued_age > max_promotion_age:
-            del state.staged_queue[index]
-            state.count("stage_queue_stale_promote_suppressed")
-            state.count("segment_state_suppressed")
-            continue
-        queued_sentence = str(entry["sentence"])
-        if not _sentences_are_revisions(state.staged_sentence, queued_sentence):
-            index += 1
-            continue
-        preferred = _prefer_sentence_revision(state.staged_sentence, queued_sentence)
-        if preferred == state.staged_sentence:
-            index += 1
-            continue
-        queued_confirmations = int(entry["confirmations"])
-        queued_forced = bool(entry["forced"]) or state.staged_forced
-        if (
-            _sentence_end_count(state.staged_sentence) > 0
-            and _sentence_end_count(preferred) <= _sentence_end_count(state.staged_sentence)
-            and queued_confirmations < _staged_sentence_required_confirmations(preferred, queued_forced)
-        ):
-            state.count("stage_queue_revision_preempt_deferred")
-            state.count(f"stage_queue_revision_preempt_deferred_{finalize_reason}")
-            index += 1
-            continue
-        entry["sentence"] = preferred
-        state.staged_sentence = str(entry["sentence"])
-        state.staged_confirmations = int(entry["confirmations"])
-        state.staged_age = int(entry["age"])
-        state.staged_forced = bool(entry["forced"])
-        state.staged_deferred_age_chunk = int(entry["deferred_age_chunk"])
-        state.staged_delta_suppressed_chunks = 0
-        state.staged_delta_suppressed_chunk_index = -1
-        del state.staged_queue[index]
-        state.count("stage_finalize_deferred_for_queue_revision")
-        state.count("stage_revision")
-        state.count("segment_state_revised")
-        return True
-    return False
+    node = _commit_buffer_from_state(state)
+    deferred = node.prefer_queued_revision_for_active(
+        chunk_index=chunk_index,
+        max_promotion_age_chunks=staged_queue_max_promotion_age_chunks(),
+        count_metric=state.count,
+        count_segment_state=lambda name, amount=1: _count_segment_state(state, name, amount),
+        finalize_reason=finalize_reason,
+    )
+    _sync_state_from_commit_buffer(state, node)
+    return deferred
 
 
 def _queue_staged_sentence(state: LifecycleState, candidate: str, forced: bool, chunk_index: int) -> None:
-    assert state.staged_queue is not None
-    for entry in state.staged_queue:
-        queued_sentence = str(entry["sentence"])
-        if not _sentences_are_revisions(queued_sentence, candidate):
-            continue
-        preferred = _prefer_sentence_revision(queued_sentence, candidate)
-        reset_age = _should_reset_revision_age(
-            queued_sentence,
-            preferred,
-            _stable_internal_ratio(state),
-            _stable_internal_chars(state),
-            _stable_overlap_source(state),
-        )
-        if reset_age:
-            # Runtime parity: unstable revision of the same queued utterance is not a new segment.
-            state.count("stage_queue_revision_token_sentence_deferred")
-            return
-        entry["sentence"] = preferred
-        entry["confirmations"] = _next_revision_confirmation_count(
-            queued_sentence,
-            preferred,
-            int(entry["confirmations"]),
-            _stable_internal_ratio(state),
-            _stable_internal_chars(state),
-            _stable_overlap_source(state),
-        )
-        entry["age"] = int(entry["age"]) + 1
-        entry["forced"] = bool(entry["forced"]) or forced
-        entry["deferred_age_chunk"] = chunk_index
-        state.count("stage_queue_revision")
-        state.count("stage_age_tick")
-        return
-    if len(state.staged_queue) >= max_staged_sentence_queue():
-        state.staged_queue.popleft()
-        state.count("stage_queue_drop_oldest")
-    state.staged_queue.append(
-        {
-            "sentence": candidate,
-            "confirmations": 1,
-            "age": 0,
-            "forced": forced,
-            "deferred_age_chunk": chunk_index,
-        }
+    node = _commit_buffer_from_state(state)
+    node.enqueue_or_revision(
+        candidate=candidate,
+        forced=forced,
+        chunk_index=chunk_index,
+        stable_analysis=state.stable_analysis,
+        count_metric=state.count,
+        count_segment_state=lambda name, amount=1: _count_segment_state(state, name, amount),
     )
-    state.count("stage_queue_enqueue")
-    state.count("segment_state_staged")
-
-
-def _boundary_offsets(sentences: list[str]) -> set[int]:
-    offsets: set[int] = set()
-    cursor = 0
-    for sentence in sentences:
-        normalized = normalized_text(sentence)
-        if not normalized:
-            continue
-        cursor += len(normalized)
-        offsets.add(cursor)
-        cursor += 1
-    return offsets
-
-
-def _score_boundary_offsets(expected: list[str], actual: list[str]) -> dict[str, Any]:
-    expected_normalized = [normalized_text(item) for item in expected if normalized_text(item)]
-    actual_normalized = [normalized_text(item) for item in actual if normalized_text(item)]
-    if not expected_normalized and not actual_normalized:
-        return {
-            "true_positive": 0,
-            "false_positive": 0,
-            "false_negative": 0,
-            "precision": 1.0,
-            "recall": 1.0,
-            "f1": 1.0,
-            "exact": True,
-        }
-    expected_offsets = _boundary_offsets(expected_normalized)
-    actual_offsets = _boundary_offsets(actual_normalized)
-    true_positive = len(expected_offsets & actual_offsets)
-    false_positive = len(actual_offsets - expected_offsets)
-    false_negative = len(expected_offsets - actual_offsets)
-    precision = true_positive / max(true_positive + false_positive, 1)
-    recall = true_positive / max(true_positive + false_negative, 1)
-    f1 = (2 * precision * recall / (precision + recall)) if precision + recall else 0.0
-    return {
-        "true_positive": true_positive,
-        "false_positive": false_positive,
-        "false_negative": false_negative,
-        "precision": precision,
-        "recall": recall,
-        "f1": f1,
-        "exact": actual_normalized == expected_normalized,
-    }
-
-
-def _sentence_similarity(left: str, right: str) -> float:
-    left_words = _word_units(left)
-    right_words = _word_units(right)
-    if left_words and right_words:
-        return SequenceMatcher(None, left_words, right_words, autojunk=False).ratio()
-    return SequenceMatcher(None, normalized_text(left), normalized_text(right), autojunk=False).ratio()
-
-
-def _score_sequence(expected: list[str], actual: list[str]) -> dict[str, Any]:
-    expected_normalized = [normalized_text(item) for item in expected if normalized_text(item)]
-    actual_normalized = [normalized_text(item) for item in actual if normalized_text(item)]
-    if not expected_normalized and not actual_normalized:
-        return {
-            "true_positive": 0,
-            "false_positive": 0,
-            "false_negative": 0,
-            "precision": 1.0,
-            "recall": 1.0,
-            "f1": 1.0,
-            "similarity_avg": 1.0,
-            "similarity_coverage": 1.0,
-            "match_min_similarity": FINAL_SENTENCE_MATCH_MIN_SIMILARITY,
-            "exact": True,
-        }
-    used_actual: set[int] = set()
-    matched_similarities: list[float] = []
-    for expected_sentence in expected_normalized:
-        best_index = -1
-        best_similarity = 0.0
-        for actual_index, actual_sentence in enumerate(actual_normalized):
-            if actual_index in used_actual:
-                continue
-            similarity = _sentence_similarity(expected_sentence, actual_sentence)
-            if similarity > best_similarity:
-                best_index = actual_index
-                best_similarity = similarity
-        if best_index >= 0 and best_similarity >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY:
-            used_actual.add(best_index)
-            matched_similarities.append(best_similarity)
-    true_positive = len(matched_similarities)
-    false_positive = len(actual_normalized) - len(used_actual)
-    false_negative = len(expected_normalized) - true_positive
-    precision = true_positive / max(true_positive + false_positive, 1)
-    recall = true_positive / max(true_positive + false_negative, 1)
-    f1 = (2 * precision * recall / (precision + recall)) if precision + recall else 0.0
-    similarity_avg = sum(matched_similarities) / max(true_positive, 1)
-    similarity_coverage = sum(matched_similarities) / max(len(expected_normalized), len(actual_normalized), 1)
-    return {
-        "true_positive": true_positive,
-        "false_positive": false_positive,
-        "false_negative": false_negative,
-        "precision": precision,
-        "recall": recall,
-        "f1": f1,
-        "similarity_avg": similarity_avg,
-        "similarity_coverage": similarity_coverage,
-        "match_min_similarity": FINAL_SENTENCE_MATCH_MIN_SIMILARITY,
-        "exact": actual_normalized == expected_normalized,
-    }
-
-
-def _score_ordered_sequence(expected: list[str], actual: list[str]) -> dict[str, Any]:
-    expected_normalized = [normalized_text(item) for item in expected if normalized_text(item)]
-    actual_normalized = [normalized_text(item) for item in actual if normalized_text(item)]
-    if not expected_normalized and not actual_normalized:
-        return {
-            "true_positive": 0,
-            "false_positive": 0,
-            "false_negative": 0,
-            "precision": 1.0,
-            "recall": 1.0,
-            "f1": 1.0,
-            "similarity_avg": 1.0,
-            "similarity_coverage": 1.0,
-            "match_min_similarity": FINAL_SENTENCE_MATCH_MIN_SIMILARITY,
-            "exact": True,
-        }
-    actual_index = 0
-    matched_similarities: list[float] = []
-    for expected_sentence in expected_normalized:
-        best_index = -1
-        best_similarity = 0.0
-        for index in range(actual_index, len(actual_normalized)):
-            similarity = _sentence_similarity(expected_sentence, actual_normalized[index])
-            if similarity > best_similarity:
-                best_index = index
-                best_similarity = similarity
-        if best_index >= 0 and best_similarity >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY:
-            actual_index = best_index + 1
-            matched_similarities.append(best_similarity)
-    true_positive = len(matched_similarities)
-    false_positive = len(actual_normalized) - true_positive
-    false_negative = len(expected_normalized) - true_positive
-    precision = true_positive / max(true_positive + false_positive, 1)
-    recall = true_positive / max(true_positive + false_negative, 1)
-    f1 = (2 * precision * recall / (precision + recall)) if precision + recall else 0.0
-    similarity_avg = sum(matched_similarities) / max(true_positive, 1)
-    similarity_coverage = sum(matched_similarities) / max(len(expected_normalized), len(actual_normalized), 1)
-    return {
-        "true_positive": true_positive,
-        "false_positive": false_positive,
-        "false_negative": false_negative,
-        "precision": precision,
-        "recall": recall,
-        "f1": f1,
-        "similarity_avg": similarity_avg,
-        "similarity_coverage": similarity_coverage,
-        "match_min_similarity": FINAL_SENTENCE_MATCH_MIN_SIMILARITY,
-        "exact": actual_normalized == expected_normalized,
-    }
+    _sync_state_from_commit_buffer(state, node)
 
 
 def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str, chunk_index: int) -> list[str]:

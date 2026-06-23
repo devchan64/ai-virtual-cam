@@ -41,7 +41,12 @@ def lifecycle_replay_contract() -> dict[str, object]:
             "src.app.dictation_transcript_logic._recent_final_output_delta",
         ],
         "runtime_state_owner": "src.app.dictation_node_sentence_candidate_commit_buffer.SentenceCandidateCommitBufferNode",
-        "replay_state_owner": "tests.eval.dictation_ai.sbd_benchmark.LifecycleState",
+        "replay_state_owner": "tests.eval.dictation_ai.benchmark.sbd_lifecycle_state.LifecycleState",
+        "shared_state_transitions": [
+            "staged queue enqueue/revision",
+            "staged queue promotion",
+            "queued revision pre-finalization preference",
+        ],
         "state_machine_parity": "partial",
         "paper_evidence_limit": (
             "structural changes must be rechecked on the full challenge replay with sat+cuda+float16; "

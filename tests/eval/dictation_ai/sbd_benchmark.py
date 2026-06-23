@@ -33,10 +33,12 @@ from tests.eval.dictation_ai.benchmark.sbd_lifecycle_replay import (
     LifecycleState,
     _finalize_staged_sentence,
     _run_lifecycle_case,
-    _score_boundary_offsets,
-    _score_ordered_sequence,
-    _score_sequence,
     _stage_completed_sentence,
+)
+from tests.eval.dictation_ai.benchmark.sbd_lifecycle_scoring import (
+    score_boundary_offsets,
+    score_ordered_sequence,
+    score_sequence,
 )
 from tests.eval.dictation_ai.benchmark.sbd_runtime_contract import force_offline_model_cache_env
 from tests.eval.dictation_ai.cases.validate_sbd_case_files import validate_case_files
@@ -162,10 +164,10 @@ def main() -> int:
         case_started = time.perf_counter()
         lifecycle = _run_lifecycle_case(case, detector)
         elapsed_ms = (time.perf_counter() - case_started) * 1000.0
-        final_score = _score_sequence(case.expected_final, lifecycle["actual_final"])
-        final_ordered_score = _score_ordered_sequence(case.expected_final, lifecycle["actual_final"])
-        final_boundary_score = _score_boundary_offsets(case.expected_final, lifecycle["actual_final"])
-        completed_score = _score_sequence(case.expected_completed, lifecycle["actual_completed_last"])
+        final_score = score_sequence(case.expected_final, lifecycle["actual_final"])
+        final_ordered_score = score_ordered_sequence(case.expected_final, lifecycle["actual_final"])
+        final_boundary_score = score_boundary_offsets(case.expected_final, lifecycle["actual_final"])
+        completed_score = score_sequence(case.expected_completed, lifecycle["actual_completed_last"])
         pending_exact = lifecycle["actual_pending"] == case.expected_pending
         staged_exact = lifecycle["actual_staged"] == case.expected_staged
         case_exact_match = final_score["exact"] and pending_exact and staged_exact
@@ -223,10 +225,10 @@ def main() -> int:
         "[dictation-ai-sbd-benchmark] "
         f"corpus_role={corpus_role} cases={len(results)} finalized={summary['finalized']} "
         f"claim_scope_key={evidence_protocol.get('claim_scope_key', '')} "
-        f"case_definition_review={case_definition_actions.get('review_case_count', 0)} "
-        f"case_definition_cleanup={case_definition_actions.get('case_definition_cleanup_count', 0)} "
+        f"case_review={case_definition_actions.get('review_case_count', 0)} "
+        f"expected_definition_cleanup={case_definition_actions.get('case_definition_cleanup_count', 0)} "
         f"case_interpretation_review={case_definition_actions.get('case_interpretation_review_count', 0)} "
-        f"case_definition_review_ratio={float(case_definition_health.get('case_definition_review_ratio', 0.0)):.3f} "
+        f"case_review_ratio={float(case_definition_health.get('case_review_ratio', 0.0)):.3f} "
         f"logic_tuning_candidates={case_definition_actions.get('logic_tuning_candidate_count', 0)} "
         f"strict_logic_candidates={strict_logic_summary.get('strict_case_count', 0)} "
         f"stage_start={summary['stage_start']} "

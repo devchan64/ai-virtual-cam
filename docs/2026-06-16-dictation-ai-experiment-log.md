@@ -30434,3 +30434,76 @@ final_boundary_f1_avg=0.592
 
 - 현재 남은 낮은 strict 후보는 단순 threshold sweep보다 active/queue 순서 소비와 boundary granularity 판단을 더 정밀하게 관찰해야 한다.
 - 다음 실험은 새로운 임계값을 추가하기보다, replay와 운영 루프의 lifecycle 중복 구현을 줄여 벤치가 앱 로직을 더 직접 검증하도록 정리하는 방향을 우선 검토한다.
+
+## 2026-06-24 replay queue 전이 공유화
+
+목적:
+
+- `dictation_pipeline_loop.py` 운영 경로는 `SentenceCandidateCommitBufferNode`로 staged queue를 관리하지만, `sbd_lifecycle_replay.py`는 queue enqueue/revision, promote, pre-finalization queued revision 선호 전이를 자체 구현하고 있었다.
+- threshold sweep 결과가 앱 로직 변경 근거가 되려면 replay가 운영 전이를 더 직접 공유해야 한다.
+- 이번 변경은 확정 정책을 바꾸지 않고, replay의 queue 전이만 앱 node를 경유하도록 정리했다.
+
+변경:
+
+```text
+app_shared_node=src/app/dictation_node_sentence_candidate_commit_buffer.py
+replay=tests/eval/dictation_ai/benchmark/sbd_lifecycle_replay.py
+contract=tests/eval/dictation_ai/benchmark/sbd_runtime_contract.py
+shared_state_transitions=staged queue enqueue/revision, staged queue promotion, queued revision pre-finalization preference
+state_machine_parity=partial
+```
+
+검증:
+
+```text
+test=./.venv/bin/python -m unittest tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_parameter_sweep tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_lifecycle tests.unit.test_dictation_pipeline_nodes
+test_result=OK, 123 tests
+validation=.tmp/eval/dictation-ai-sbd/validate-20260624-shared-commit-buffer-contract-summary.json
+validation_result=case_count:57, input_unsupported:0, input_unobserved:0, stable_repeat_unsupported:0
+cuda_report=.tmp/eval/dictation-ai-sbd/current-20260624-shared-commit-buffer-final-report.json
+case_count=57
+case_definition_cleanup=0
+case_interpretation_review=6
+final_precision_avg=0.924
+final_recall_avg=0.918
+final_f1_avg=0.913
+strict_final_f1_avg=0.953
+final_boundary_f1_avg=0.599
+```
+
+해석:
+
+- 핵심 지표는 `current-20260624-review-split-cli-report.json` baseline과 동일하다.
+- `stage_start`는 `305 -> 304`로 1 감소했지만, final precision/recall/F1 및 strict F1은 유지됐다.
+- replay는 여전히 full runtime loop와 동일하지 않다. audio timestamp latency와 translation request/output linkage가 빠져 있으므로 `state_machine_parity=partial`은 유지한다.
+- 다만 staged queue 전이는 앱 node와 공유하므로, 이후 queue 관련 최적화 실험은 이전보다 운영 로직과 더 가까운 근거가 된다.
+
+## 2026-06-24 expected_final 정의 review 해석 정리
+
+목적:
+
+- 현재 활성 challenge replay case에서 `expected_final`이 잘못 정의된 케이스가 남았는지 확인했다.
+- 기존 CLI의 `case_definition_review` 표현은 expected label cleanup 대상과 replay-tail/boundary granularity 해석 대상을 함께 연상시켜, "expected_final이 아직 틀렸다"는 오해를 만들 수 있었다.
+
+검증:
+
+```text
+validation=.tmp/eval/dictation-ai-sbd/validate-20260624-active-expected-final-summary.json
+validation_result=case_count:57, expected_final_case_count:53, input_unsupported:0, input_unobserved:0, stable_repeat_unsupported:0
+tool_tests=OK, 123 tests
+```
+
+최신 CUDA report 기준 해석:
+
+```text
+report=.tmp/eval/dictation-ai-sbd/current-20260624-review-terminology-report.json
+case_definition_cleanup=0
+case_interpretation_review=6
+review_actions=extend_replay_tail_or_reclassify_staged_expectation:3, manual_boundary_review:2, add_initial_final_or_recut_mid_stream_case:1
+```
+
+결론:
+
+- 활성 `sbd_cases` 안에서 `expected_final`이 replay input에 없거나 raw STT text로 관측되지 않거나, `sentence_finalize_age` 기준 stable repeat 근거가 없는 명백한 cleanup 대상은 현재 0건이다.
+- 남은 6건은 expected label cleanup이 아니라 replay 종료 시점의 staged/queue residue, mid-stream initial context, boundary granularity 해석 문제로 분리한다.
+- 따라서 benchmark CLI 출력은 `case_review`, `expected_definition_cleanup`, `case_interpretation_review`를 함께 보여주도록 정리했다. 기존 JSON 호환 키인 `case_definition_review_count`는 유지하지만, 실험 해석에서는 `expected_definition_cleanup_count`를 우선 확인한다.

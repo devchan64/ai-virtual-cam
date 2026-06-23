@@ -174,7 +174,11 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         )
         self.assertEqual(
             report["lifecycle_replay_contract"]["replay_state_owner"],
-            "tests.eval.dictation_ai.sbd_benchmark.LifecycleState",
+            "tests.eval.dictation_ai.benchmark.sbd_lifecycle_state.LifecycleState",
+        )
+        self.assertIn(
+            "staged queue promotion",
+            report["lifecycle_replay_contract"]["shared_state_transitions"],
         )
         self.assertIn(
             "src.app.dictation_transcript_logic._sentences_are_revisions",

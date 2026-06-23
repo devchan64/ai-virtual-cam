@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
-from typing import Any, Callable
+from typing import Any, Callable, Iterable, Mapping
 
 from src.app.dictation_pipeline_contracts import ActiveSentenceCandidate
 from src.app.dictation_transcript_logic import (
@@ -28,6 +28,24 @@ class SentenceCandidateCommitBufferNode:
 
     def queued_sentences(self) -> tuple[str, ...]:
         return tuple(str(entry["sentence"]) for entry in self._queue)
+
+    def queue_entries(self) -> tuple[dict[str, object], ...]:
+        return tuple(dict(entry) for entry in self._queue)
+
+    def load_snapshot(
+        self,
+        *,
+        active: ActiveSentenceCandidate,
+        queue_entries: Iterable[Mapping[str, object]],
+    ) -> None:
+        self.active.sentence = active.sentence
+        self.active.confirmations = active.confirmations
+        self.active.age = active.age
+        self.active.forced = active.forced
+        self.active.deferredAgeChunk = active.deferredAgeChunk
+        self.active.deltaSuppressedChunks = active.deltaSuppressedChunks
+        self.active.deltaSuppressedChunkIndex = active.deltaSuppressedChunkIndex
+        self._queue = deque(dict(entry) for entry in queue_entries)
 
     def prefer_queued_revision_for_active(
         self,
