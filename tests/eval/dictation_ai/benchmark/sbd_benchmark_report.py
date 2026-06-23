@@ -2147,11 +2147,58 @@ def _actual_extra_final_kinds(result: dict[str, Any]) -> list[str]:
     return kinds
 
 
+def _actual_extra_final_sentences(result: dict[str, Any]) -> list[str]:
+    expected = [str(item).strip() for item in result.get("expected_final", []) or [] if str(item).strip()]
+    actual = [str(item).strip() for item in result.get("actual_final", []) or [] if str(item).strip()]
+    if len(actual) <= len(expected) or not expected:
+        return []
+    unmatched_actual = set(range(len(actual)))
+    for expected_sentence in expected:
+        if not unmatched_actual:
+            break
+        best_index = max(
+            unmatched_actual,
+            key=lambda index: _sentence_support_score(actual[index], expected_sentence),
+        )
+        if _sentence_support_score(actual[best_index], expected_sentence) >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY:
+            unmatched_actual.remove(best_index)
+    return [actual[index] for index in sorted(unmatched_actual)]
+
+
 def _actual_extra_final_kind_counts(results: list[dict[str, Any]]) -> dict[str, int]:
     counts: Counter[str] = Counter()
     for result in results:
         if _strict_actionable_low_kind(result) == "overfinal_or_extra_final":
             counts.update(_actual_extra_final_kinds(result))
+    return dict(sorted(counts.items()))
+
+
+def _actual_extra_final_stability_kinds(result: dict[str, Any]) -> list[str]:
+    stable_candidates = [
+        str(candidate.get("text", "")).strip()
+        for candidate in dict(result.get("input_evidence", {}) or {}).get("stable_candidate_examples", [])
+        if str(candidate.get("text", "")).strip()
+    ]
+    kinds: list[str] = []
+    for sentence in _actual_extra_final_sentences(result):
+        best_stable = max(
+            (_sentence_support_score(sentence, stable) for stable in stable_candidates),
+            default=0.0,
+        )
+        if best_stable >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY:
+            kinds.append("actual_extra_stable_repeated_candidate")
+        elif best_stable > 0.0:
+            kinds.append("actual_extra_partial_stable_fragment")
+        else:
+            kinds.append("actual_extra_not_stably_repeated")
+    return kinds
+
+
+def _actual_extra_final_stability_kind_counts(results: list[dict[str, Any]]) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for result in results:
+        if _strict_actionable_low_kind(result) == "overfinal_or_extra_final":
+            counts.update(_actual_extra_final_stability_kinds(result))
     return dict(sorted(counts.items()))
 
 
@@ -2232,6 +2279,7 @@ def _strict_actionable_low_final_summary(strict_results: list[dict[str, Any]]) -
         "case_count": len(low_final),
         "issue_kind_counts": _strict_actionable_low_kind_counts(low_final),
         "overfinal_extra_kind_counts": _actual_extra_final_kind_counts(low_final),
+        "overfinal_extra_stability_kind_counts": _actual_extra_final_stability_kind_counts(low_final),
         "underfinal_missing_kind_counts": _strict_underfinal_missing_kind_counts(low_final),
         "metric_presence": {
             metric: _summarize_supported_low_metric_presence(low_final, metric)
@@ -2243,6 +2291,7 @@ def _strict_actionable_low_final_summary(strict_results: list[dict[str, Any]]) -
                 **_low_score_case_payload(result, "strict_actionable_low_final"),
                 "issue_kind": _strict_actionable_low_kind(result),
                 "overfinal_extra_kinds": _actual_extra_final_kinds(result),
+                "overfinal_extra_stability_kinds": _actual_extra_final_stability_kinds(result),
                 "underfinal_missing_kind": _strict_underfinal_missing_kind(result),
             }
             for result in sorted(
@@ -2287,6 +2336,7 @@ def _strict_mid_score_final_summary(strict_results: list[dict[str, Any]]) -> dic
         "actionable_case_count": len(actionable_mid),
         "issue_kind_counts": _strict_actionable_low_kind_counts(actionable_mid),
         "overfinal_extra_kind_counts": _actual_extra_final_kind_counts(actionable_mid),
+        "overfinal_extra_stability_kind_counts": _actual_extra_final_stability_kind_counts(actionable_mid),
         "underfinal_missing_kind_counts": _strict_underfinal_missing_kind_counts(actionable_mid),
         "metric_presence": {
             metric: _summarize_supported_low_metric_presence(actionable_mid, metric)
@@ -2298,6 +2348,7 @@ def _strict_mid_score_final_summary(strict_results: list[dict[str, Any]]) -> dic
                 **_low_score_case_payload(result, "strict_mid_score_final"),
                 "issue_kind": _strict_actionable_low_kind(result),
                 "overfinal_extra_kinds": _actual_extra_final_kinds(result),
+                "overfinal_extra_stability_kinds": _actual_extra_final_stability_kinds(result),
                 "underfinal_missing_kind": _strict_underfinal_missing_kind(result),
             }
             for result in sorted(

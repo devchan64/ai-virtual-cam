@@ -323,7 +323,7 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
                 "expected_final": ["第一句到了。", "第二句到了。"],
                 "chunks": [{"input": chunk} for chunk in case.chunks],
                 "initial_final": [],
-                "actual_final": ["第一句到了。", "第二句到了。", "后面太早出来了。"],
+                "actual_final": ["第一句到了。", "第二句到了。", "Later unrelated context."],
                 "actual_pending": "",
                 "actual_staged": "",
                 "actual_staged_queue": [],
@@ -353,7 +353,12 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(mid["actionable_case_count"], 1)
         self.assertEqual(mid["issue_kind_counts"], {"overfinal_or_extra_final": 1})
         self.assertEqual(mid["overfinal_extra_kind_counts"], {"actual_unexpected_or_later_context": 1})
+        self.assertEqual(mid["overfinal_extra_stability_kind_counts"], {"actual_extra_not_stably_repeated": 1})
         self.assertEqual(mid["examples"][0]["id"], "mid-score-overfinal")
+        self.assertEqual(
+            mid["examples"][0]["overfinal_extra_stability_kinds"],
+            ["actual_extra_not_stably_repeated"],
+        )
         self.assertEqual(report["strict_logic_candidate_summary"]["low_score_thresholds"]["0.65"]["case_count"], 0)
 
     def test_single_expected_final_can_be_strict_logic_candidate(self) -> None:

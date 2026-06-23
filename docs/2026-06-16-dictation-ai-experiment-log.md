@@ -31133,3 +31133,42 @@ structural_mid_score_final:
 - 앱 기본값은 변경하지 않는다.
 - 다음 모니터링/케이스 추가는 중간 점수 구간의 `overfinal_or_extra_final`, `underfinal_missing_no_residue`, `underfinal_boundary_or_revision`이 같은 형태로 반복되는지 확인하는 방향이 적절하다.
 - 0.65 미만 low-score만 보는 방식은 현재 단계의 최적화 후보 탐색에 부족하므로, 이후 리포트 해석에서는 `strict_logic_candidate_summary.mid_score_final`을 함께 본다.
+
+## 2026-06-24 over-final extra stability 분류 추가
+
+목적:
+
+- `overfinal_or_extra_final`은 앱이 후속 문장을 너무 빨리 확정한 경우와, benchmark `expected_final`이 stable 후속 문장을 빠뜨린 경우를 함께 포함할 수 있다.
+- actual extra final이 replay input의 `sentence_finalize_age` 기준 stable 후보로 설명되는지 분리해, 앱 로직 패치 후보와 케이스 정의 검토 후보를 더 명확히 구분했다.
+
+시도:
+
+```text
+report=.tmp/eval/dictation-ai-sbd/current-20260624-overfinal-stability-report.json
+cases=57
+strict_logic_candidates=38
+final_f1_avg=0.913
+strict_final_f1_avg=0.953
+
+strict_mid_score_final.overfinal_extra_stability_kind_counts:
+  actual_extra_not_stably_repeated=1
+  actual_extra_partial_stable_fragment=2
+  actual_extra_stable_repeated_candidate=1
+
+structural_report=.tmp/eval/dictation-ai-sbd/structural-preflight-20260624-overfinal-stability-report.json
+structural_mid_score_final.overfinal_extra_stability_kind_counts:
+  actual_extra_not_stably_repeated=1
+  actual_extra_partial_stable_fragment=2
+```
+
+해석:
+
+- structural subset의 over-final extra는 stable repeated candidate 누락보다 partial fragment 또는 non-stable extra final에 가깝다.
+- 이는 전역 expected rewrite보다 앱 lifecycle의 premature fragment final 가능성을 시사하지만, structural subset 기준 extra 총 3개라 아직 기본값 변경 근거로는 부족하다.
+- 전체 challenge에는 `actual_extra_stable_repeated_candidate=1`도 있어, 일부 케이스는 expected/window 정의 검토가 필요할 수 있다.
+
+결론:
+
+- 앱 로직 기본값은 변경하지 않는다.
+- 이후 over-final 최적화 검토는 `actual_extra_not_stably_repeated`와 `actual_extra_partial_stable_fragment`가 더 많은 로그 기반 케이스에서 반복되는지 확인한 뒤 진행한다.
+- `actual_extra_stable_repeated_candidate`는 앱 premature final보다 expected/window 정의 누락 후보로 먼저 본다.
