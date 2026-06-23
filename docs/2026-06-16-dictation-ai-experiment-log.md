@@ -30304,3 +30304,62 @@ clean_low_case_count_lt_0.65=0
 
 - 현재 CUDA 리포트는 앱 로직을 더 완화할 근거보다, boundary granularity/replay-tail 해석을 분리해야 한다는 근거가 강하다.
 - 다음 앱 로직 변경은 clean low-score 후보가 다시 나타나거나, strict logic subset에서 같은 lifecycle metric 조합이 반복될 때만 시도한다.
+
+## 2026-06-24 aged final confirmation gate 기각
+
+목적:
+
+- 낮은 점수 strict 후보 중 과확정 사례가 `stage_age_finalize`와 함께 나타나는지 확인했다.
+- 후보 원칙은 "age는 시간 경과 보조 신호이며, final 확정은 token-sentence confirmation 근거를 가져야 한다"였다.
+- 특정 문구/언어 규칙이 아니라 생명주기 확정 조건을 보수화하는 일반 규칙으로 검토했다.
+
+검토 케이스:
+
+```text
+case=zh_log_bbq_pork_grilling_queue_revision_final_defer_20260621_001
+symptom=expected_final 2개 대비 actual_final 4개
+baseline_final_f1=0.667
+baseline_metrics=stage_age_finalize:3, stage_replace_deferred:5, stage_queue_promote:3
+```
+
+시도 1: aged final에 full confirmation 요구
+
+```text
+report=.tmp/eval/dictation-ai-sbd/current-20260624-aged-confirm-gate-report.json
+case_count=57
+final_precision_avg=0.933
+final_recall_avg=0.707
+final_f1_avg=0.784
+strict_final_f1_avg=0.838
+final_boundary_f1_avg=0.374
+```
+
+시도 2: aged final에 최소 2 confirmation 요구
+
+```text
+report=.tmp/eval/dictation-ai-sbd/current-20260624-aged-min2-report.json
+case_count=57
+final_precision_avg=0.922
+final_recall_avg=0.894
+final_f1_avg=0.900
+strict_final_f1_avg=0.953
+final_boundary_f1_avg=0.544
+```
+
+기준 비교:
+
+```text
+baseline_report=.tmp/eval/dictation-ai-sbd/current-20260624-review-split-cli-report.json
+baseline_final_precision_avg=0.924
+baseline_final_recall_avg=0.918
+baseline_final_f1_avg=0.913
+baseline_strict_final_f1_avg=0.953
+baseline_final_boundary_f1_avg=0.599
+```
+
+해석:
+
+- full confirmation gate는 과확정을 줄이는 대신 recall을 크게 훼손했다.
+- 최소 2 confirmation gate도 baseline보다 final F1과 boundary F1이 낮아졌다.
+- 따라서 `stage_age_finalize` 자체를 confirmation 수로 강하게 막는 방향은 현재 challenge replay에서는 채택하지 않는다.
+- 다음 시도는 age final 차단이 아니라, queue/active 순서 보존이나 boundary granularity mismatch가 반복되는 clean 후보에서 다시 찾는다.
