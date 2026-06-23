@@ -31351,3 +31351,43 @@ draft_result:
 
 - 동일 원인군 수집 흐름은 `source audit -> priority source manifest -> review packet -> manual draft`까지 이어진다.
 - 다음 단계는 draft 전체를 자동 승격하는 것이 아니라, 상위 source에서 짧은 bounded window를 사람이 골라 `expected_final`을 작성하는 것이다.
+
+## 2026-06-24 priority lifecycle event 샘플 분리
+
+목적:
+
+- priority source의 전체 raw/final 샘플만으로는 왜 해당 로그가 선택됐는지 사람이 빠르게 판단하기 어렵다.
+- `stage_replace_deferred_per_stt_raw`처럼 특정 lifecycle 신호가 높은 로그는 해당 lifecycle event 자체를 별도로 보여줘야 짧은 bounded window를 고를 수 있다.
+
+시도:
+
+```text
+tool_test=./.venv/bin/python -m unittest \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_representative_review_packet_extractor \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_representative_case_draft_extractor \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_representative_source_selector \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_representative_source_audit
+tool_test_result=OK
+
+review_packet_command=./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py extract-review-packets \
+  .tmp/eval/dictation-ai-sbd/target-stage-replace-sources-20260624.json \
+  --output .tmp/eval/dictation-ai-sbd/target-stage-replace-packets-20260624.json \
+  --markdown-output .tmp/eval/dictation-ai-sbd/target-stage-replace-packets-20260624.md \
+  --max-lifecycle-events-per-source 20
+
+review_packet_result:
+  packet_count=3
+  ready_packet_count=3
+  priority_lifecycle_kind=stage_replace_deferred
+  priority_lifecycle_events_sample_count_per_packet=20
+```
+
+해석:
+
+- review packet markdown에 `priority_lifecycle_timestamp` 테이블이 추가되어, 우선순위 신호가 발생한 줄과 `staged_tail/candidate_tail`을 직접 볼 수 있다.
+- 이 정보는 자동 expected 생성이 아니라, 사람이 짧은 검토 window를 고르기 위한 문맥이다.
+
+결론:
+
+- 다음 수집 작업은 packet 전체를 읽는 대신 `priority_lifecycle_timestamp` 주변의 raw/final/transcript 흐름을 확인해 bounded case 후보를 고른다.
+- 이 단계에서도 앱 로직 변경은 하지 않는다. 동일 패턴의 사람이 확정한 케이스가 충분히 쌓인 뒤에만 일반 규칙을 검토한다.

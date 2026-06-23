@@ -11,6 +11,23 @@ from pathlib import Path
 
 REVIEW_PACKET_VERSION = 1
 REQUIRED_REVIEW_EVENT_KINDS = ("raw_chunks", "transcripts", "final_events", "performance_events")
+LIFECYCLE_EVENT_MARKERS = (
+    ("stage_replace_deferred", "stage 교체 보류"),
+    ("quality_block", "stage 후보 품질 차단"),
+    ("quality_block", "stage 보류 후보 품질 차단"),
+    ("stage_queue_promote", "stage 큐 승격"),
+    ("duplicate_suppressed", "중복 문장 무시"),
+)
+PRIORITY_METRIC_TO_LIFECYCLE_KIND = {
+    "stage_replace_deferred_per_stt_raw": "stage_replace_deferred",
+    "quality_block_per_stt_raw": "quality_block",
+    "duplicate_suppressed_per_stt_raw": "duplicate_suppressed",
+    "stage_queue_promote_per_stt_raw": "stage_queue_promote",
+    "stage_queue_recent_final_suppressed_per_stt_raw": "stage_queue_recent_final_suppressed",
+    "stage_queue_recent_final_delta_trimmed_per_stt_raw": "stage_queue_recent_final_delta_trimmed",
+    "finalize_delta_suppressed_stage_retained_per_stt_raw": "finalize_delta_suppressed_stage_retained",
+    "finalize_delta_suppressed_stage_dropped_per_stt_raw": "finalize_delta_suppressed_stage_dropped",
+}
 
 TIMESTAMP_RE = re.compile(r"^\[(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]")
 STT_RAW_RE = re.compile(r"Dictation AI stt_raw: \[(?P<language>[a-z]{2}) raw\] (?P<text>.*)$")
@@ -127,6 +144,32 @@ def _parse_performance_event(line: str) -> dict[str, object] | None:
     return record
 
 
+def _parse_lifecycle_event(line: str, *, text_limit: int) -> dict[str, object] | None:
+    matched_kind = ""
+    for kind, marker in LIFECYCLE_EVENT_MARKERS:
+        if marker in line:
+            matched_kind = kind
+            break
+    if not matched_kind:
+        return None
+    payload = line.split("Dictation AI status:", 1)[-1].strip()
+    values = _kv_payload(payload)
+    record: dict[str, object] = {
+        "timestamp": _timestamp(line),
+        "kind": matched_kind,
+        "chunk": values.get("chunk", ""),
+        "decision": values.get("decision", ""),
+        "staged_confirmations": values.get("staged_confirmations", ""),
+        "staged_age": values.get("staged_age", ""),
+        "queue_remaining": values.get("queue_remaining", ""),
+    }
+    for key in ("staged_tail", "candidate_tail", "text"):
+        value = _quoted_value(payload, key)
+        if value:
+            record[key] = _trim_text(value, limit=text_limit)
+    return record
+
+
 def _inside_source_window(timestamp: str, *, started_at: str, ended_at: str) -> bool:
     if not started_at and not ended_at:
         return True
@@ -150,6 +193,7 @@ def _collect_source_events(
     transcripts: list[dict[str, object]] = []
     final_events: list[dict[str, object]] = []
     performance_events: list[dict[str, object]] = []
+    lifecycle_events: list[dict[str, object]] = []
 
     with source_log.open("r", encoding="utf-8", errors="replace") as handle:
         for line_number, line in enumerate(handle, start=1):
@@ -193,12 +237,19 @@ def _collect_source_events(
             if performance_event is not None:
                 performance_event["line_number"] = line_number
                 performance_events.append(performance_event)
+                continue
+
+            lifecycle_event = _parse_lifecycle_event(line, text_limit=text_limit)
+            if lifecycle_event is not None:
+                lifecycle_event["line_number"] = line_number
+                lifecycle_events.append(lifecycle_event)
 
     return {
         "raw_chunks": raw_chunks,
         "transcripts": transcripts,
         "final_events": final_events,
         "performance_events": performance_events,
+        "lifecycle_events": lifecycle_events,
     }
 
 
@@ -229,6 +280,7 @@ def build_review_packets(
     max_transcripts_per_source: int,
     max_finals_per_source: int,
     max_performance_events_per_source: int,
+    max_lifecycle_events_per_source: int,
     text_limit: int = 220,
 ) -> dict[str, object]:
     packets: list[dict[str, object]] = []
@@ -250,6 +302,13 @@ def build_review_packets(
         )
         event_counts = {key: len(value) for key, value in events.items()}
         readiness = _review_readiness(event_counts)
+        priority_metric = source.get("priority_metric")
+        priority_lifecycle_kind = PRIORITY_METRIC_TO_LIFECYCLE_KIND.get(str(priority_metric or ""))
+        priority_lifecycle_events = [
+            event
+            for event in events["lifecycle_events"]
+            if priority_lifecycle_kind and event.get("kind") == priority_lifecycle_kind
+        ]
         packets.append(
             {
                 "id": source.get("id", ""),
@@ -264,10 +323,11 @@ def build_review_packets(
                 },
                 "sampling_unit": source.get("sampling_unit", ""),
                 "sampling_rule": source.get("sampling_rule", ""),
-                "priority_metric": source.get("priority_metric"),
+                "priority_metric": priority_metric,
                 "priority_rank": source.get("priority_rank"),
                 "priority_ratio": source.get("priority_ratio"),
                 "priority_marker_count": source.get("priority_marker_count"),
+                "priority_lifecycle_kind": priority_lifecycle_kind,
                 "runtime_candidates": _source_record_runtime(source),
                 "event_counts": event_counts,
                 "review_readiness": readiness,
@@ -280,6 +340,14 @@ def build_review_packets(
                 "performance_events_sample": _evenly_spaced(
                     events["performance_events"],
                     max_performance_events_per_source,
+                ),
+                "lifecycle_events_sample": _evenly_spaced(
+                    events["lifecycle_events"],
+                    max_lifecycle_events_per_source,
+                ),
+                "priority_lifecycle_events_sample": _evenly_spaced(
+                    priority_lifecycle_events,
+                    max_lifecycle_events_per_source,
                 ),
                 "review_status": "orientation_only_requires_manual_window_selection_and_expected_final",
                 "case_generation": False,
@@ -310,6 +378,7 @@ def build_review_packets(
             "max_transcripts_per_source": max_transcripts_per_source,
             "max_finals_per_source": max_finals_per_source,
             "max_performance_events_per_source": max_performance_events_per_source,
+            "max_lifecycle_events_per_source": max_lifecycle_events_per_source,
             "text_limit": text_limit,
         },
         "packet_count": len(packets),
@@ -365,6 +434,7 @@ def write_markdown_packets(payload: dict[str, object], path: Path) -> None:
                 f"- sampling_unit: `{packet.get('sampling_unit')}`",
                 f"- sampling_rule: `{packet.get('sampling_rule')}`",
                 f"- priority: metric=`{packet.get('priority_metric')}` rank=`{packet.get('priority_rank')}` ratio=`{packet.get('priority_ratio')}` count=`{packet.get('priority_marker_count')}`",
+                f"- priority_lifecycle_kind: `{packet.get('priority_lifecycle_kind')}`",
                 f"- runtime_candidates: `{runtime_candidates}`",
                 f"- source_window_filter: `{source_window_filter}`",
                 f"- event_counts: `{packet.get('event_counts')}`",
@@ -412,6 +482,66 @@ def write_markdown_packets(payload: dict[str, object], path: Path) -> None:
                     )
                     + " |"
                 )
+        lifecycle_sample = [event for event in list(packet.get("lifecycle_events_sample", [])) if isinstance(event, dict)]
+        priority_lifecycle_sample = [
+            event
+            for event in list(packet.get("priority_lifecycle_events_sample", []))
+            if isinstance(event, dict)
+        ]
+        if priority_lifecycle_sample:
+            lines.extend(
+                [
+                    "",
+                    "| priority_lifecycle_timestamp | line | kind | chunk | staged_age | staged_confirmations | staged_tail | candidate_tail |",
+                    "| --- | ---: | --- | ---: | ---: | ---: | --- | --- |",
+                ]
+            )
+            for event in priority_lifecycle_sample[:12]:
+                staged_tail = str(event.get("staged_tail", "")).replace("|", "\\|")
+                candidate_tail = str(event.get("candidate_tail", "")).replace("|", "\\|")
+                lines.append(
+                    "| "
+                    + " | ".join(
+                        [
+                            str(event.get("timestamp", "")),
+                            str(event.get("line_number", "")),
+                            str(event.get("kind", "")),
+                            str(event.get("chunk", "")),
+                            str(event.get("staged_age", "")),
+                            str(event.get("staged_confirmations", "")),
+                            staged_tail,
+                            candidate_tail,
+                        ]
+                    )
+                    + " |"
+                )
+        if lifecycle_sample:
+            lines.extend(
+                [
+                    "",
+                    "| lifecycle_timestamp | line | kind | chunk | staged_age | staged_confirmations | staged_tail | candidate_tail |",
+                    "| --- | ---: | --- | ---: | ---: | ---: | --- | --- |",
+                ]
+            )
+            for event in lifecycle_sample[:12]:
+                staged_tail = str(event.get("staged_tail", "")).replace("|", "\\|")
+                candidate_tail = str(event.get("candidate_tail", "")).replace("|", "\\|")
+                lines.append(
+                    "| "
+                    + " | ".join(
+                        [
+                            str(event.get("timestamp", "")),
+                            str(event.get("line_number", "")),
+                            str(event.get("kind", "")),
+                            str(event.get("chunk", "")),
+                            str(event.get("staged_age", "")),
+                            str(event.get("staged_confirmations", "")),
+                            staged_tail,
+                            candidate_tail,
+                        ]
+                    )
+                    + " |"
+                )
         lines.append("")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines), encoding="utf-8")
@@ -428,6 +558,7 @@ def main() -> int:
     parser.add_argument("--max-transcripts-per-source", type=int, default=60)
     parser.add_argument("--max-finals-per-source", type=int, default=60)
     parser.add_argument("--max-performance-events-per-source", type=int, default=30)
+    parser.add_argument("--max-lifecycle-events-per-source", type=int, default=40)
     parser.add_argument("--text-limit", type=int, default=220)
     args = parser.parse_args()
 
@@ -439,6 +570,7 @@ def main() -> int:
             max_transcripts_per_source=args.max_transcripts_per_source,
             max_finals_per_source=args.max_finals_per_source,
             max_performance_events_per_source=args.max_performance_events_per_source,
+            max_lifecycle_events_per_source=args.max_lifecycle_events_per_source,
             text_limit=args.text_limit,
         )
     except (OSError, json.JSONDecodeError, ValueError) as exc:
