@@ -170,6 +170,46 @@ strict_final_f1_avg=0.942
 - queue 크기 10도 의미 있는 개선 없이 boundary regression 케이스만 생긴다.
 - 현재 queue/stage 상수 변경만으로는 일반화 가능한 개선 근거가 없다. 다음 개선은 새 threshold보다, `stage_candidate_quality_blocked`가 실제 완결 후보를 막는지와 case definition 문제인지 더 분리하는 방향이 우선이다.
 
+### 2026-06-23 stable-repeat case 보정 후 CJK prefix-growth confirmation 보존
+
+배경:
+
+- `expected_final`을 stable token-sentence 3회 이상 반복 후보 기준으로 정리한 뒤, strict logic 후보가 `0 -> 24`로 다시 확보됐다.
+- 새 strict 저점에는 `stage_revision_token_sentence_deferred`, `stage_age_quality_blocked`, `candidate_recent_final_delta_trimmed`, `candidate_delta_trimmed`가 반복됐다.
+- `zh_log_pork_belly_rice_queue_replacement_missing_20260621_001`에서는 `然后呢，帮我烤的师傅还。` 같은 짧은 prefix 후보가 `然后呢，帮我烤的师傅还懂那个微碗饭。`처럼 같은 token-sentence prefix를 유지하며 확장됐지만, 길이 차이 때문에 confirmation/age가 reset되어 queue churn과 fragment final이 발생했다.
+
+패치:
+
+- `CJK_REVISION_MAX_LENGTH_DELTA`를 넓히지 않았다. 이 값은 두 후보를 같은 revision 계열로 묶는 범위를 바꾸므로, 전체 완화 시 unrelated 후보까지 같은 문장으로 묶일 위험이 있다.
+- 대신 `CJK_CONFIRM_PRESERVE_PREFIX_GROWTH_MAX_DELTA=8`을 추가해, 이전 후보 전체가 다음 후보의 prefix로 유지되는 CJK prefix-growth revision에서만 confirmation reset을 피한다.
+- 이 변경은 revision matching 범위를 넓히는 것이 아니라, 이미 revision으로 판정된 후보의 confirmation 보존 여부만 완화한다.
+
+검증:
+
+```text
+단일 케이스:
+zh_log_pork_belly_rice_queue_replacement_missing_20260621_001
+final_f1_avg: 0.400 -> 0.667
+
+전체 challenge replay:
+cases=1027
+final_f1_avg: 0.6207735617 -> 0.6212942956
+final_precision_avg: 0.5907005153 -> 0.5904889109
+final_recall_avg: 0.7025303160 -> 0.7035239534
+strict_final_f1_avg: 0.7988095238 -> 0.8099206349
+final_boundary_f1_avg: 0.1631177479 -> 0.1618191823
+case_exact_match: 27 -> 26
+staged_exact_match: 355 -> 353
+finalized: 5109 -> 5120
+stage_start: 9263 -> 9234
+```
+
+해석:
+
+- strict logic 후보 평균은 개선됐고, prefix-growth 재현 케이스도 개선됐다.
+- 전체 평균 개선은 작고 boundary/case exact는 소폭 하락하므로, 이 패치는 boundary 개선이 아니라 prefix-growth revision의 confirmation reset 완화로 해석한다.
+- 특정 중국어 문구나 음식명 규칙은 추가하지 않았다. 조건은 token-sentence prefix 보존과 length delta 상한만 사용한다.
+
 모델 선정 기준:
 
 | 흐름 | 선정 모델 | 탈락/보류 모델 | 선정 이유 |

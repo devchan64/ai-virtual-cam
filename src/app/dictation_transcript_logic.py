@@ -13,6 +13,7 @@ from src.app.dictation_pipeline_settings import (
     PENDING_OVERRUN_CHUNKS,
     cjk_confirm_preserve_common_run_min as _cjk_confirm_preserve_common_run_min,
     cjk_confirm_preserve_coverage_min as _cjk_confirm_preserve_coverage_min,
+    cjk_confirm_preserve_prefix_growth_max_delta as _cjk_confirm_preserve_prefix_growth_max_delta,
     cjk_confirm_preserve_ratio_min as _cjk_confirm_preserve_ratio_min,
     cjk_revision_common_run_min as _cjk_revision_common_run_min,
     cjk_revision_coverage_min as _cjk_revision_coverage_min,
@@ -558,6 +559,14 @@ def _should_preserve_revision_confirmation_by_token_sentence(previous: str, pref
     if not previous_words or not preferred_words:
         return False
     ratio, common_run, coverage, length_delta = _revision_token_sentence_similarity(previous_words, preferred_words)
+    if (
+        _has_cjk_words(previous_words)
+        and _has_cjk_words(preferred_words)
+        and previous_words == preferred_words[: len(previous_words)]
+        and common_run == len(previous_words)
+        and length_delta <= _cjk_confirm_preserve_prefix_growth_max_delta()
+    ):
+        return True
     if length_delta > _cjk_revision_max_length_delta():
         return False
     return ratio >= _cjk_confirm_preserve_ratio_min() or (

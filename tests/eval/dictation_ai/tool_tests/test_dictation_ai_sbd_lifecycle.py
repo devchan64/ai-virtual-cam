@@ -3,8 +3,10 @@ import unittest
 from src.app.sentence_boundary import SentenceBoundaryResult
 from src.app.dictation_transcript_logic import (
     _final_sentence_diagnostic_flags,
+    _next_revision_confirmation_count,
     _prefer_sentence_revision,
     _recent_final_output_delta,
+    _should_reset_revision_age,
     _should_stage_boundary_candidate,
 )
 from src.app.stable_token_detection import analyze_stable_window
@@ -391,6 +393,13 @@ class DictationAiSbdLifecycleTest(unittest.TestCase):
         )
         self.assertEqual(state.metrics["stage_revision_token_sentence_deferred"], 1)
         self.assertNotIn("finalized", state.metrics)
+
+    def test_cjk_prefix_growth_preserves_revision_confirmation(self) -> None:
+        previous = "然后呢，帮我烤的师傅还。"
+        preferred = "然后呢，帮我烤的师傅还懂那个微碗饭。"
+
+        self.assertFalse(_should_reset_revision_age(previous, preferred))
+        self.assertEqual(_next_revision_confirmation_count(previous, preferred, 1), 2)
 
     def test_deferred_revision_extension_blocks_aged_fragment_final(self) -> None:
         state = LifecycleState(

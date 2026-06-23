@@ -171,6 +171,12 @@ CJK_REVISION_FALLBACK_RATIO_MIN = 0.70
 CJK_CONFIRM_PRESERVE_RATIO_MIN = 0.50
 CJK_CONFIRM_PRESERVE_COMMON_RUN_MIN = 3
 CJK_CONFIRM_PRESERVE_COVERAGE_MIN = 0.70
+
+# CJK prefix-growth revision은 앞 후보 전체가 다음 후보의 prefix로 유지되는
+# 경우다. 일반 revision equivalence의 길이 차이를 넓히면 unrelated 후보까지
+# 같은 문장으로 묶일 수 있으므로, 여기서는 confirmation reset 방지에만 별도
+# 완화 한계를 둔다.
+CJK_CONFIRM_PRESERVE_PREFIX_GROWTH_MAX_DELTA = 8
 REVISION_TAIL_COMMON_RUN_MIN = 8
 REVISION_TAIL_BEST_J_MAX = 3
 REVISION_PREFIX_RUN_MIN = 5
@@ -259,6 +265,13 @@ def cjk_confirm_preserve_common_run_min() -> int:
 
 def cjk_confirm_preserve_coverage_min() -> float:
     return _dictation_env_float("CJK_CONFIRM_PRESERVE_COVERAGE_MIN", CJK_CONFIRM_PRESERVE_COVERAGE_MIN)
+
+
+def cjk_confirm_preserve_prefix_growth_max_delta() -> int:
+    return _dictation_env_int(
+        "CJK_CONFIRM_PRESERVE_PREFIX_GROWTH_MAX_DELTA",
+        CJK_CONFIRM_PRESERVE_PREFIX_GROWTH_MAX_DELTA,
+    )
 
 
 def revision_tail_common_run_min() -> int:
