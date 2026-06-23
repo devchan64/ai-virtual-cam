@@ -446,7 +446,7 @@ class DictationPipelineNodeTest(unittest.TestCase):
         self.assertEqual(node.active.deferredAgeChunk, 11)
         self.assertEqual(metrics["stage_queue_revision"], 1)
 
-    def test_commit_buffer_defers_queue_revision_when_token_sentence_would_reset_age(self) -> None:
+    def test_commit_buffer_suppresses_queue_revision_when_token_sentence_would_reset_age(self) -> None:
         metrics: dict[str, int] = {}
         states: dict[str, int] = {}
 
@@ -485,18 +485,12 @@ class DictationPipelineNodeTest(unittest.TestCase):
                 count_segment_state=count_state,
             )
 
-        self.assertEqual(
-            node.queued_sentences(),
-            (
-                "old queued token sentence.",
-                "new token sentence.",
-            ),
-        )
+        self.assertEqual(node.queued_sentences(), ("old queued token sentence.",))
         self.assertEqual(metrics["stage_queue_revision_token_sentence_deferred"], 1)
-        self.assertEqual(metrics["stage_queue_enqueue"], 2)
+        self.assertEqual(metrics["stage_queue_enqueue"], 1)
         self.assertNotIn("stage_queue_revision", metrics)
 
-    def test_commit_buffer_prefers_queued_revision_before_active_final(self) -> None:
+    def test_commit_buffer_does_not_preempt_active_final_with_weak_queue_revision(self) -> None:
         metrics: dict[str, int] = {}
         states: dict[str, int] = {}
 
@@ -538,14 +532,15 @@ class DictationPipelineNodeTest(unittest.TestCase):
                 count_segment_state=count_state,
             )
 
-        self.assertTrue(deferred)
-        self.assertEqual(node.active.sentence, "short fragment with stable tail.")
-        self.assertEqual(len(node), 0)
-        self.assertEqual(metrics["stage_finalize_deferred_for_queue_revision"], 1)
-        self.assertEqual(metrics["stage_revision"], 1)
-        self.assertEqual(states["revised"], 1)
+        self.assertFalse(deferred)
+        self.assertEqual(node.active.sentence, "short fragment.")
+        self.assertEqual(node.queued_sentences(), ("short fragment with stable tail.",))
+        self.assertEqual(metrics["stage_queue_revision_preempt_deferred"], 1)
+        self.assertNotIn("stage_finalize_deferred_for_queue_revision", metrics)
+        self.assertNotIn("stage_revision", metrics)
+        self.assertNotIn("revised", states)
 
-    def test_commit_buffer_prefers_queued_cjk_revision_with_stale_prefix(self) -> None:
+    def test_commit_buffer_does_not_preempt_active_final_with_weak_cjk_queue_revision(self) -> None:
         metrics: dict[str, int] = {}
         states: dict[str, int] = {}
 
@@ -580,12 +575,13 @@ class DictationPipelineNodeTest(unittest.TestCase):
             count_segment_state=count_state,
         )
 
-        self.assertTrue(deferred)
-        self.assertEqual(node.active.sentence, "你自己去，我要去饭店休息。")
-        self.assertEqual(len(node), 0)
-        self.assertEqual(metrics["stage_finalize_deferred_for_queue_revision"], 1)
-        self.assertEqual(metrics["stage_revision"], 1)
-        self.assertEqual(states["revised"], 1)
+        self.assertFalse(deferred)
+        self.assertEqual(node.active.sentence, "晚上民众的部分你自己去我要。")
+        self.assertEqual(node.queued_sentences(), ("你自己去，我要去饭店休息。",))
+        self.assertEqual(metrics["stage_queue_revision_preempt_deferred"], 1)
+        self.assertNotIn("stage_finalize_deferred_for_queue_revision", metrics)
+        self.assertNotIn("stage_revision", metrics)
+        self.assertNotIn("revised", states)
 
     def test_commit_buffer_drops_stale_queued_revision_before_active_final(self) -> None:
         metrics: dict[str, int] = {}

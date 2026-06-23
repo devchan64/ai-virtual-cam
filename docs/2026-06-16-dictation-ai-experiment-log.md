@@ -29241,3 +29241,53 @@ recent_extension_full_on_internal_case_definition_review=25
 - 문장 내부 확장으로 보이는 경우 suffix 대신 full token-sentence를 유지하는 후보는 recall은 오르지만 precision과 boundary F1이 크게 낮아진다.
 - 따라서 recent-final extension delta를 전역적으로 끄거나 단순 길이 임계값만 올리는 방식은 일반 원칙으로 채택하지 않는다.
 - 다음 개선은 recent-final extension 자체보다, early final이 append-only 이후 fragment를 만들기 전에 active staged 확정/보류 판단을 더 잘 설명하는 구조적 신호를 찾는 방향이 맞다.
+
+## 2026-06-24 staged queue stale promotion age 기본값 재검증
+
+목적:
+
+- `expected_final` 직접 rewrite 대상이 정리된 최신 reviewed challenge에서 stale staged queue 후보가 final로 늦게 승격되는지 재검증한다.
+- 생성순서 보존은 유지하되, 현재 sliding window와 멀어진 queue 후보는 다음 replay 근거로 다시 관측될 때 stage에 재진입하게 두는 최소 생명주기 규칙을 검토한다.
+
+기준:
+
+```text
+baseline_output=.tmp/eval/dictation-ai-sbd/current-20260624-review-cases-list-report.json
+baseline_final_precision_avg=0.896944
+baseline_final_recall_avg=0.843056
+baseline_final_f1_avg=0.858439
+baseline_final_boundary_f1_avg=0.551786
+baseline_strict_final_f1_avg=0.942693
+baseline_strict_final_boundary_f1_avg=0.693186
+baseline_case_definition_review=22
+baseline_finalized=137
+baseline_stage_start=344
+```
+
+채택 후보:
+
+```text
+output=.tmp/eval/dictation-ai-sbd/current-20260624-queue-promotion-age-1-default-report.json
+STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=1
+final_precision_avg=0.905278
+final_recall_avg=0.839722
+final_f1_avg=0.861111
+final_boundary_f1_avg=0.558108
+strict_final_f1_avg=0.961270
+strict_final_boundary_f1_avg=0.653413
+case_definition_review=20
+finalized=134
+stage_start=329
+```
+
+해석:
+
+- 전체 challenge 기준 precision, final F1, boundary F1이 함께 상승했고 `case_definition_review`가 22에서 20으로 줄었다.
+- recall과 finalized 수는 소폭 줄었지만, stale queue 후보가 늦게 final로 승격되는 문제를 줄이는 방향과 일치한다.
+- strict 후보군에서는 final F1이 상승했지만 strict boundary F1은 하락했다. 이 값은 후속 boundary granularity 검토 리스크로 남긴다.
+- 이전 queue age 3/4/8/10 sweep은 case definition 감사와 report 보강 이전 기준이므로, 최신 reviewed challenge 기준으로 `1`을 앱 기본값에 반영한다.
+
+반영:
+
+- `src/app/dictation_pipeline_settings.py`의 `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS` 기본값을 `6 -> 1`로 변경했다.
+- 관련 유닛테스트는 오래된 queue revision이 active final을 선점하거나 reset-age revision을 별도 queue 후보로 늘린다는 기대를 제거하고, 현재 생명주기 원칙에 맞게 정리했다.

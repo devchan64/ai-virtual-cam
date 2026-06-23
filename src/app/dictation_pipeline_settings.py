@@ -91,10 +91,12 @@ RECENT_FINAL_NO_END_SUFFIX_ECHO_COVERAGE_MIN = 0.35
 # 줄 수 있지만 stale 후보 churn은 늘어난다.
 MAX_STAGED_SENTENCE_QUEUE = 20
 
-# queued stage 후보가 너무 늦게 승격되면 현재 sliding window와 의미상 멀어진
-# stale 문장이 final로 나갈 수 있다. 6 chunk는 오래된 queue 후보만 폐기해
-# 생성순서 보존과 stale final 억제 사이의 절충을 둔다.
-STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS = 6
+# queued stage 후보가 늦게 승격되면 현재 sliding window와 의미상 멀어진
+# stale 문장이 final로 나갈 수 있다. 최신 reviewed challenge에서는 1 chunk
+# 초과 queue 후보를 폐기하는 쪽이 stale final을 줄이고 전체 boundary F1과
+# strict final F1을 개선했다. 생성순서는 유지하되, 오래 밀린 후보는 다음
+# replay 근거로 다시 관측될 때만 stage에 재진입하게 둔다.
+STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS = 1
 
 # empty/no-speech STT chunk는 final 확정 근거가 아니다. 이 임계값은 no-text
 # chunk가 반복될 때 미확정 staged 후보를 폐기하는 데만 쓰며, 이 값만으로
