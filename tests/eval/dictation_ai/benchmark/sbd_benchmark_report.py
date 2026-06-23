@@ -258,6 +258,7 @@ EXPECTED_SHORT_SUPPORTED_BY_LONGER_MIN_UNITS = 5
 EXPECTED_SHORT_SUPPORTED_BY_LONGER_MAX_UNITS = 8
 EXPECTED_SHORT_SUPPORTED_BY_LONGER_MIN_SIMILARITY = 0.80
 OMITTED_STABLE_ACTUAL_MIN_SIMILARITY = 0.70
+OMITTED_STABLE_ACTUAL_MIN_RATIO = 0.70
 COMBINED_RESIDUE_MATCH_MIN_SIMILARITY = 0.70
 
 
@@ -271,6 +272,14 @@ def _sentence_support_score(sentence: str, chunk: str) -> float:
         coverage = common_run / max(len(sentence_words), 1)
         return max(ratio, coverage)
     return SequenceMatcher(None, normalized_text(sentence), normalized_text(chunk), autojunk=False).ratio()
+
+
+def _sentence_token_ratio(left: str, right: str) -> float:
+    left_words = _word_units(left)
+    right_words = _word_units(right)
+    if left_words and right_words:
+        return SequenceMatcher(None, left_words, right_words, autojunk=False).ratio()
+    return SequenceMatcher(None, normalized_text(left), normalized_text(right), autojunk=False).ratio()
 
 
 def _expected_sentences_are_revision_variants(left: str, right: str) -> bool:
@@ -555,7 +564,10 @@ def _has_actual_final_supported_by_omitted_stable_candidate(result: dict[str, An
         for actual in actual_final:
             if max((_sentence_support_score(actual, expected) for expected in expected_final), default=0.0) >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY:
                 continue
-            if _sentence_support_score(stable, actual) >= OMITTED_STABLE_ACTUAL_MIN_SIMILARITY:
+            if (
+                _sentence_support_score(stable, actual) >= OMITTED_STABLE_ACTUAL_MIN_SIMILARITY
+                and _sentence_token_ratio(stable, actual) >= OMITTED_STABLE_ACTUAL_MIN_RATIO
+            ):
                 return True
     return False
 

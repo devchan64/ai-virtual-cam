@@ -585,6 +585,72 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         )
         self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
 
+    def test_omitted_stable_candidate_embedded_in_long_actual_is_not_definition_review(self) -> None:
+        args = Namespace(
+            model="sat-3l-sm",
+            device="cuda",
+            compute_type="float16",
+            min_final_f1=0.0,
+            fail_on_regression=False,
+        )
+        case = SbdCase(
+            id="embedded-stable-actual",
+            language="ko",
+            chunks=[
+                "첫 번째 문장입니다.",
+                "첫 번째 문장입니다. 근데 이제 다음은 이런.",
+                "근데 이제 다음은 이런.",
+                "근데 이제 다음은 이런. 오염된 이전 문장이 다시 섞였습니다.",
+            ],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=["첫 번째 문장입니다."],
+            expected_staged="",
+            tags=("duplicate-final",),
+            sentence_finalize_age=3,
+        )
+        results = [
+            {
+                "id": case.id,
+                "language": case.language,
+                "tags": list(case.tags),
+                "expected_final": case.expected_final,
+                "chunks": [{"input": chunk} for chunk in case.chunks],
+                "initial_final": [],
+                "actual_final": [
+                    "첫 번째 문장입니다.",
+                    "근데 이제 다음은 이런. 오염된 이전 문장이 다시 섞였습니다.",
+                ],
+                "actual_pending": "",
+                "actual_staged": "",
+                "actual_staged_queue": [],
+                "final_score": _score(0.5, 1.0, 0.6666666667),
+                "final_ordered_score": _score(0.5, 1.0, 0.6666666667),
+                "final_boundary_score": _score(0.5, 1.0, 0.6666666667),
+                "completed_last_score": _score(0.0, 0.0, 0.0),
+                "pending_exact": True,
+                "staged_exact": True,
+                "case_exact_match": False,
+                "metrics": {"finalized": 2, "stage_start": 2},
+            }
+        ]
+
+        report = build_benchmark_report(
+            args=args,
+            case_sources=["cases.jsonl"],
+            corpus_role="challenge-replay",
+            cases=[case],
+            results=results,
+            metric_totals={"finalized": 2, "stage_start": 2},
+            elapsed_ms=1.0,
+        )
+
+        self.assertEqual(report["cases"][0]["case_definition_flags"], [])
+        self.assertEqual(
+            report["case_definition_action_summary"]["action_counts"],
+            {"recut_or_relabel_stable_candidate_mismatch": 1},
+        )
+
     def test_report_marks_boundary_zero_high_final_as_metric_sensitivity(self) -> None:
         args = Namespace(
             model="sat-3l-sm",

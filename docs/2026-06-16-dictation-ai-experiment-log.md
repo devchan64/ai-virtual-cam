@@ -28869,3 +28869,48 @@ case_definition_flag_counts.short_expected_supported_by_longer_sentence=1
 - `ko_log_draft_20260620_avc_whisper_log_002902`, `zh_log_premature_luohansi_final_prefix_fragment_20260621_001`가 안정 후보 기반 expected 누락 의심으로 분리됐다.
 - 전체 성능은 변하지 않는다. 이 변경은 앱 로직 개선이 아니라, expected 정의 오류 가능성이 있는 케이스를 strict 앱 튜닝 후보에서 제외하는 리포트 개선이다.
 - 현재 남은 `case_definition_review=10`은 모두 고쳤다는 뜻이 아니라, 앱 로직 후보와 케이스 정의 후보를 더 엄격히 나누기 위한 다음 리뷰 대상이다.
+
+## 2026-06-24 stable actual expected 누락 과분류 보정 및 케이스 수정
+
+목적:
+
+- `expected_final_omits_stable_actual_sentence`가 짧은 안정 후보가 긴 actual final 안에 포함된 경우까지 잡는 문제가 있었다.
+- 이 경우는 expected 누락이 아니라, 안정 fragment가 오염된 actual final에 포함된 것일 수 있다.
+
+변경:
+
+- stable candidate와 actual final 비교에 token-sentence support뿐 아니라 token ratio 0.70 이상 조건을 추가했다.
+- `ko_log_draft_20260620_avc_whisper_log_002902`는 expected 누락 플래그에서 제외됐다. 이 케이스는 fragment 포함/오염 actual 문제로 보고 일반 case review에 남긴다.
+- `ko_log_draft_20260620_avc_whisper_log_002756`은 긴 expected 내부의 부분 문장 `라는 좀 이런 태세의 전환.`을 별도 final expected에서 제거했다.
+- `zh_log_premature_luohansi_final_prefix_fragment_20260621_001`은 안정 반복 후보를 기준으로 겹치는 prefix expected를 정리했다.
+
+CUDA/SaT 확인:
+
+```text
+ratio_filter_output=.tmp/eval/dictation-ai-sbd/current-20260624-omitted-stable-actual-ratio-review-report.json
+ratio_filter_case_definition_review=9
+ratio_filter_logic_tuning_candidates=47
+ratio_filter_strict_logic_candidates=38
+ratio_filter_strict_final_f1_avg=0.846
+ratio_filter_case_definition_flag_counts.expected_final_omits_stable_actual_sentence=1
+ratio_filter_case_definition_flag_counts.short_expected_supported_by_longer_sentence=1
+
+case_fix_output=.tmp/eval/dictation-ai-sbd/current-20260624-expected-final-case-fix-report.json
+case_fix_case_definition_review=8
+case_fix_case_definition_review_ratio=0.143
+case_fix_logic_tuning_candidates=48
+case_fix_strict_logic_candidates=39
+case_fix_final_precision_avg=0.896
+case_fix_final_recall_avg=0.808
+case_fix_final_f1_avg=0.833
+case_fix_strict_final_f1_avg=0.837
+case_fix_final_boundary_f1_avg=0.560
+case_fix_case_definition_flag_counts={}
+```
+
+해석:
+
+- 명시적인 expected_final 정의 플래그는 0건으로 정리됐다.
+- 전체 `final_f1_avg`는 0.825에서 0.833으로 올랐고, `case_definition_review`는 10에서 8로 줄었다.
+- `strict_final_f1_avg`는 strict 후보 구성이 바뀌면서 0.846에서 0.837로 낮아졌다. 이는 앱 성능 저하가 아니라, 기존에 제외되던 케이스 일부가 다시 strict 후보로 들어온 영향으로 해석한다.
+- 남은 8건은 expected_final 문자열만 즉시 수정할 문제가 아니라 `initial_final`/재절단/수동 경계 리뷰 성격이다.
