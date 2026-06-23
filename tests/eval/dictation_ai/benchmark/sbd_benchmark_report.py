@@ -1687,6 +1687,8 @@ def summarize_case_definition_action_items(results: list[dict[str, Any]]) -> dic
             ),
         )
     ]
+    cleanup_case_ids = [str(result.get("id")) for result in definition_cleanup_results]
+    interpretation_review_case_ids = [str(result.get("id")) for result in interpretation_review_results]
     return {
         "interpretation": (
             "These are prioritized case-definition review actions, not automatic deletion rules. "
@@ -1715,6 +1717,12 @@ def summarize_case_definition_action_items(results: list[dict[str, Any]]) -> dic
         "review_case_count": len(review_results),
         "case_definition_cleanup_count": len(definition_cleanup_results),
         "case_interpretation_review_count": len(interpretation_review_results),
+        "expected_final_definition_status": (
+            "cleanup_required" if definition_cleanup_results else "no_cleanup_candidates"
+        ),
+        "expected_final_definition_review_complete": not definition_cleanup_results,
+        "case_definition_cleanup_case_ids": cleanup_case_ids,
+        "case_interpretation_review_case_ids": interpretation_review_case_ids,
         "logic_tuning_candidate_count": logic_tuning_candidate_count,
         "action_counts": dict(sorted(action_counts.items())),
         "language_counts": dict(sorted(language_counts.items())),

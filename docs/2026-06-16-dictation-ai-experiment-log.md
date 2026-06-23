@@ -30951,3 +30951,48 @@ strict_actionable_low_issue_kind_counts:
 - 현재 벤치 근거에서는 앱 로직 전역 변경보다 같은 세부 원인의 추가 사례 수집이 우선이다.
 - 이 상태에서 앱 코드를 바꾸면 핵심 원칙이 아니라 소수 케이스 대응 규칙이 될 가능성이 높다.
 - 다음 모니터링/케이스 추가는 `overfinal_or_extra_final`, `prefix_expected_lost_after_later_progress`, `short_quality_blocked_missing` 중 같은 세부 원인이 반복되는지 확인하는 방향으로 진행한다.
+
+## 2026-06-24 expected_final 정의 상태 분리
+
+목적:
+
+- `case_review`는 expected 정의 오류와 replay tail/경계 해석 보류를 함께 포함하므로, 사람이 보기에 "expected_final을 아직 더 고쳐야 한다"로 오해될 수 있다.
+- benchmark report에 expected 정의 cleanup 대상과 interpretation review 대상을 명시적으로 분리해, 앱 로직 튜닝 근거로 쓸 수 있는 케이스 범위를 더 분명히 했다.
+
+시도:
+
+```text
+report=.tmp/eval/dictation-ai-sbd/current-20260624-expected-definition-status-report.json
+cases=57
+finalized=131
+case_review=6
+expected_definition_cleanup=0
+case_interpretation_review=6
+final_f1_avg=0.913
+strict_final_f1_avg=0.953
+final_boundary_f1_avg=0.599
+
+case_definition_action_summary.expected_final_definition_status=no_cleanup_candidates
+case_definition_action_summary.expected_final_definition_review_complete=true
+case_definition_action_summary.case_definition_cleanup_case_ids=[]
+
+case_definition_action_summary.case_interpretation_review_case_ids:
+  ko_log_draft_20260620_avc_whisper_log_002943
+  ko_log_draft_20260620_avc_whisper_log_002962
+  zh_log_draft_20260620_avc_whisper_log_11_000950
+  zh_log_seaworld_market_bike_scan_fragment_suppression_20260621_001
+  zh_log_missing_chongqing_vendor_plaza_layer_20260621_001
+  zh_log_missing_winter_shopping_hat_queue_head_stall_20260621_001
+```
+
+해석:
+
+- 현재 자동 분류 기준에서는 `expected_final` 정의를 즉시 수정해야 하는 cleanup 대상이 없다.
+- 남은 6건은 `initial_final`이 필요한 중간 스트림, replay tail 부족, staged residue, 문장 경계 단위 해석이 섞인 케이스다.
+- 따라서 이 6건은 삭제하거나 앱 로직 변경 근거로 바로 쓰지 않고, 리플레이 구간/초기 final/경계 단위 해석을 먼저 검토한다.
+
+결론:
+
+- "3회 이상 반복된 유사 token-sentence를 expected_final 후보로 둔다"는 케이스 정의 원칙은 유지한다.
+- expected 정의 cleanup은 현재 완료 상태로 보고, 남은 항목은 case interpretation review로 추적한다.
+- 앱 로직 튜닝은 `logic_tuning_candidate` 및 `strict_logic_candidate` subset을 우선 근거로 사용한다.

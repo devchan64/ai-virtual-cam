@@ -1606,6 +1606,21 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
             {"remove_or_recut_expected_outside_replay_input": 1},
         )
         self.assertEqual(
+            report["case_definition_action_summary"]["expected_final_definition_status"],
+            "cleanup_required",
+        )
+        self.assertFalse(
+            report["case_definition_action_summary"]["expected_final_definition_review_complete"]
+        )
+        self.assertEqual(
+            report["case_definition_action_summary"]["case_definition_cleanup_case_ids"],
+            ["partial-input-low"],
+        )
+        self.assertEqual(
+            report["case_definition_action_summary"]["case_interpretation_review_case_ids"],
+            [],
+        )
+        self.assertEqual(
             report["case_definition_action_summary"]["by_action"][
                 "remove_or_recut_expected_outside_replay_input"
             ]["examples"][0]["id"],
@@ -2519,6 +2534,18 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(report["case_definition_health_summary"]["case_definition_review_count"], 1)
         self.assertEqual(report["case_definition_health_summary"]["case_definition_cleanup_count"], 0)
         self.assertEqual(report["case_definition_health_summary"]["case_interpretation_review_count"], 1)
+        self.assertEqual(
+            report["case_definition_action_summary"]["expected_final_definition_status"],
+            "no_cleanup_candidates",
+        )
+        self.assertTrue(
+            report["case_definition_action_summary"]["expected_final_definition_review_complete"]
+        )
+        self.assertEqual(report["case_definition_action_summary"]["case_definition_cleanup_case_ids"], [])
+        self.assertEqual(
+            report["case_definition_action_summary"]["case_interpretation_review_case_ids"],
+            ["stable-staged-residue"],
+        )
         self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
 
     def test_fragment_expected_final_is_reported_as_rewrite_action(self) -> None:
