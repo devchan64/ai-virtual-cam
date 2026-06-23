@@ -29214,6 +29214,22 @@ recent_final_extension_suffix_8_final_f1_avg=0.854
 recent_final_extension_suffix_8_strict_final_f1_avg=0.954
 recent_final_extension_suffix_8_final_boundary_f1_avg=0.547
 recent_final_extension_suffix_8_case_definition_review=23
+
+boundary_preserved_recent_extension_output=.tmp/eval/dictation-ai-sbd/current-20260624-boundary-preserved-recent-extension-report.json
+boundary_preserved_recent_extension_final_precision_avg=0.897
+boundary_preserved_recent_extension_final_recall_avg=0.844
+boundary_preserved_recent_extension_final_f1_avg=0.860
+boundary_preserved_recent_extension_strict_final_f1_avg=0.954
+boundary_preserved_recent_extension_final_boundary_f1_avg=0.546
+boundary_preserved_recent_extension_case_definition_review=23
+
+recent_extension_full_on_internal_output=.tmp/eval/dictation-ai-sbd/current-20260624-recent-extension-full-on-internal-report.json
+recent_extension_full_on_internal_final_precision_avg=0.875
+recent_extension_full_on_internal_final_recall_avg=0.864
+recent_extension_full_on_internal_final_f1_avg=0.857
+recent_extension_full_on_internal_strict_final_f1_avg=0.951
+recent_extension_full_on_internal_final_boundary_f1_avg=0.538
+recent_extension_full_on_internal_case_definition_review=25
 ```
 
 해석:
@@ -29221,5 +29237,7 @@ recent_final_extension_suffix_8_case_definition_review=23
 - confirmation 4는 전체 F1, strict F1, boundary F1을 모두 낮춰 채택하지 않는다.
 - recent-final extension 전체 비활성화는 final F1과 strict F1을 소폭 올리지만 boundary F1을 낮추고 case_definition_review를 늘린다.
 - suffix 최소 길이 8도 strict F1은 올리지만 전체 precision/recall/F1과 boundary F1을 낮춘다.
+- recent final의 token prefix 뒤에 실제 문장 경계가 있을 때만 suffix를 회수하는 후보는 전체 비활성화와 같은 수치로, boundary F1과 review count가 악화된다.
+- 문장 내부 확장으로 보이는 경우 suffix 대신 full token-sentence를 유지하는 후보는 recall은 오르지만 precision과 boundary F1이 크게 낮아진다.
 - 따라서 recent-final extension delta를 전역적으로 끄거나 단순 길이 임계값만 올리는 방식은 일반 원칙으로 채택하지 않는다.
 - 다음 개선은 recent-final extension 자체보다, early final이 append-only 이후 fragment를 만들기 전에 active staged 확정/보류 판단을 더 잘 설명하는 구조적 신호를 찾는 방향이 맞다.
