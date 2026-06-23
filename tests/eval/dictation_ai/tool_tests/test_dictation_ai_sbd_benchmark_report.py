@@ -854,7 +854,9 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(strict_summary["strict_case_count"], 1)
         sensitivity = strict_summary["boundary_metric_sensitivity"]
         self.assertEqual(sensitivity["case_count"], 1)
+        self.assertEqual(sensitivity["boundary_shift_kind_counts"], {"actual_contains_expected": 1})
         self.assertEqual(sensitivity["examples"][0]["id"], "case-boundary-sensitive")
+        self.assertEqual(sensitivity["examples"][0]["boundary_shift_kind"], "actual_contains_expected")
         self.assertEqual(strict_summary["actionable_low_final"]["case_count"], 0)
 
     def test_report_summarizes_low_score_review_needed_cases(self) -> None:

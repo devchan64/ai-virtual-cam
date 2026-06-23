@@ -2004,6 +2004,7 @@ def _strict_boundary_metric_sensitivity_summary(strict_results: list[dict[str, A
         payload = _boundary_zero_high_final_payload(result)
         payload["expected_final_count"] = len(result.get("expected_final", []) or [])
         payload["actual_final_count"] = len(result.get("actual_final", []) or [])
+        payload["boundary_shift_kind"] = _strict_boundary_shift_kind(result)
         sensitive.append(payload)
     return {
         "interpretation": (
@@ -2015,6 +2016,9 @@ def _strict_boundary_metric_sensitivity_summary(strict_results: list[dict[str, A
         "min_ordered_f1": BOUNDARY_ZERO_HIGH_FINAL_F1,
         "max_boundary_f1": BOUNDARY_GRANULARITY_MAX_BOUNDARY_F1,
         "case_count": len(sensitive),
+        "boundary_shift_kind_counts": dict(
+            sorted(Counter(str(item.get("boundary_shift_kind") or "unknown") for item in sensitive).items())
+        ),
         "examples": sorted(
             sensitive,
             key=lambda item: (
@@ -2024,6 +2028,49 @@ def _strict_boundary_metric_sensitivity_summary(strict_results: list[dict[str, A
             ),
         )[:CASE_EXEMPLAR_LIMIT],
     }
+
+
+def _token_sequence_contains(haystack: list[str], needle: list[str]) -> bool:
+    if not needle or len(needle) > len(haystack):
+        return False
+    return any(haystack[index : index + len(needle)] == needle for index in range(0, len(haystack) - len(needle) + 1))
+
+
+def _strict_boundary_pair_shift_kind(expected: str, actual: str) -> str:
+    expected_words = _word_units(normalized_text(expected))
+    actual_words = _word_units(normalized_text(actual))
+    if not expected_words or not actual_words:
+        return "empty"
+    if expected_words == actual_words:
+        return "exact_text"
+    if _token_sequence_contains(actual_words, expected_words):
+        return "actual_contains_expected"
+    if _token_sequence_contains(expected_words, actual_words):
+        return "actual_fragment_of_expected"
+    matcher = SequenceMatcher(None, expected_words, actual_words, autojunk=False)
+    common_run = max((block.size for block in matcher.get_matching_blocks()), default=0)
+    expected_coverage = common_run / max(len(expected_words), 1)
+    actual_coverage = common_run / max(len(actual_words), 1)
+    if expected_coverage >= 0.80 and actual_coverage >= 0.80:
+        return "high_overlap_revision"
+    if expected_coverage >= 0.80:
+        return "actual_has_extra_boundary_text"
+    if actual_coverage >= 0.80:
+        return "actual_lost_boundary_text"
+    return "low_overlap"
+
+
+def _strict_boundary_shift_kind(result: dict[str, Any]) -> str:
+    expected = [str(item).strip() for item in result.get("expected_final", []) or [] if str(item).strip()]
+    actual = [str(item).strip() for item in result.get("actual_final", []) or [] if str(item).strip()]
+    if len(expected) != len(actual):
+        return "segment_count_mismatch"
+    pair_kinds = [_strict_boundary_pair_shift_kind(left, right) for left, right in zip(expected, actual)]
+    non_exact = [kind for kind in pair_kinds if kind != "exact_text"]
+    if not non_exact:
+        return "exact_text_boundary_offset"
+    counts = Counter(non_exact)
+    return counts.most_common(1)[0][0]
 
 
 def _strict_actionable_low_final_summary(strict_results: list[dict[str, Any]]) -> dict[str, Any]:
