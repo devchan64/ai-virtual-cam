@@ -30363,3 +30363,74 @@ baseline_final_boundary_f1_avg=0.599
 - 최소 2 confirmation gate도 baseline보다 final F1과 boundary F1이 낮아졌다.
 - 따라서 `stage_age_finalize` 자체를 confirmation 수로 강하게 막는 방향은 현재 challenge replay에서는 채택하지 않는다.
 - 다음 시도는 age final 차단이 아니라, queue/active 순서 보존이나 boundary granularity mismatch가 반복되는 clean 후보에서 다시 찾는다.
+
+## 2026-06-24 strict 후보 실패 유형 재분류와 queue sweep 기각
+
+strict logic subset 재분류:
+
+```text
+report=.tmp/eval/dictation-ai-sbd/current-20260624-review-split-cli-report.json
+strict_case_count=38
+strict_final_f1_avg=0.953
+count_equal_cases=32
+count_equal_avg_f1=0.990
+overfinal_cases=3
+overfinal_avg_f1=0.756
+underfinal_cases=3
+underfinal_avg_f1=0.756
+low_case_common_metrics=stage_age_quality_blocked:7, stage_queue_enqueue:6, stage_queue_promote:6, stage_age_finalize:5
+```
+
+해석:
+
+- strict subset의 대부분은 이미 안정적이며, 낮은 점수는 7건에 집중된다.
+- 낮은 점수 7건은 overfinal/underfinal이 균형 있게 섞여 있어 단일 방향의 threshold 강화/완화로 개선하기 어렵다.
+- 모든 낮은 점수 케이스에 `stage_age_quality_blocked`가 나타나지만, aged final confirmation gate 실험이 recall을 크게 낮췄으므로 age 차단 강화는 채택하지 않는다.
+
+시도 1: recent final fragment echo suppression 완화
+
+```text
+env=AVC_DICTATION_RECENT_FINAL_FRAGMENT_ECHO_COVERAGE_MIN=0.75
+report=.tmp/eval/dictation-ai-sbd/current-20260624-fragment-echo-coverage075-report.json
+final_precision_avg=0.924
+final_recall_avg=0.918
+final_f1_avg=0.913
+strict_final_f1_avg=0.953
+final_boundary_f1_avg=0.599
+
+env=AVC_DICTATION_RECENT_FINAL_FRAGMENT_ECHO_COVERAGE_MIN=0.90
+report=.tmp/eval/dictation-ai-sbd/current-20260624-fragment-echo-coverage090-report.json
+final_precision_avg=0.924
+final_recall_avg=0.918
+final_f1_avg=0.913
+strict_final_f1_avg=0.953
+final_boundary_f1_avg=0.599
+```
+
+해석:
+
+- fragment echo coverage 임계값을 올려도 전체/strict 지표가 움직이지 않았다.
+- 현재 낮은 점수 케이스의 주 병목은 이 임계값이 아니다.
+
+시도 2: staged queue promotion age 완화
+
+```text
+env=AVC_DICTATION_STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=2
+report=.tmp/eval/dictation-ai-sbd/current-20260624-queue-promotion-age2-report.json
+final_precision_avg=0.916
+final_recall_avg=0.925
+final_f1_avg=0.914
+strict_final_f1_avg=0.938
+final_boundary_f1_avg=0.592
+```
+
+해석:
+
+- 전체 final F1은 `0.913 -> 0.914`로 미세 상승했지만 strict F1은 `0.953 -> 0.938`로 하락했다.
+- queue를 더 오래 보존하면 일부 recall은 얻지만 clean logic subset의 precision/boundary 품질을 훼손한다.
+- 따라서 `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS=2`는 기본값으로 승격하지 않는다.
+
+결론:
+
+- 현재 남은 낮은 strict 후보는 단순 threshold sweep보다 active/queue 순서 소비와 boundary granularity 판단을 더 정밀하게 관찰해야 한다.
+- 다음 실험은 새로운 임계값을 추가하기보다, replay와 운영 루프의 lifecycle 중복 구현을 줄여 벤치가 앱 로직을 더 직접 검증하도록 정리하는 방향을 우선 검토한다.
