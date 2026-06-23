@@ -2112,6 +2112,106 @@ def summarize_strict_logic_candidate_results(cases: list[SbdCase], results: list
     }
 
 
+def _stage_age_quality_block_payload(result: dict[str, Any]) -> dict[str, Any]:
+    final_score = dict(result.get("final_score", {}))
+    ordered_score = dict(result.get("final_ordered_score", final_score))
+    boundary_score = dict(result.get("final_boundary_score", {}))
+    metrics = dict(result.get("metrics", {}))
+    input_evidence = dict(result.get("input_evidence", {}) or {})
+    residues = _terminal_residue_texts(result)
+    return {
+        "id": result.get("id"),
+        "language": result.get("language"),
+        "tags": list(result.get("tags", [])),
+        "final_f1": float(final_score.get("f1", 0.0)),
+        "final_ordered_f1": float(ordered_score.get("f1", 0.0)),
+        "final_boundary_f1": float(boundary_score.get("f1", 0.0)),
+        "stage_age_quality_blocked": int(metrics.get("stage_age_quality_blocked", 0)),
+        "stage_candidate_quality_blocked": int(metrics.get("stage_candidate_quality_blocked", 0)),
+        "stage_queue_promote": int(metrics.get("stage_queue_promote", 0)),
+        "stage_revision_token_sentence_deferred": int(metrics.get("stage_revision_token_sentence_deferred", 0)),
+        "candidate_duplicate_suppressed": int(metrics.get("candidate_duplicate_suppressed", 0)),
+        "candidate_recent_final_delta_trimmed": int(metrics.get("candidate_recent_final_delta_trimmed", 0)),
+        "stable_repeat_count": int(input_evidence.get("stable_repeat_count", 0) or 0),
+        "stable_candidate_count": int(input_evidence.get("stable_candidate_count", 0) or 0),
+        "expected_final_count": len(result.get("expected_final", []) or []),
+        "actual_final_count": len(result.get("actual_final", []) or []),
+        "terminal_residue_count": len(residues),
+        "actual_staged_preview": _text_preview(result.get("actual_staged")),
+        "actual_staged_queue_preview": _first_text_preview(result.get("actual_staged_queue")),
+        "actual_pending_preview": _text_preview(result.get("actual_pending")),
+        "expected_final_preview": _first_text_preview(result.get("expected_final")),
+        "actual_final_preview": _first_text_preview(result.get("actual_final")),
+    }
+
+
+def summarize_stage_age_quality_blocked_strict_candidates(
+    cases: list[SbdCase],
+    results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    cases_by_id = {case.id: case for case in cases}
+    strict_blocked = [
+        result
+        for result in results
+        if (case := cases_by_id.get(str(result.get("id")))) is not None
+        and _strict_logic_candidate(case, result)
+        and int(dict(result.get("metrics", {})).get("stage_age_quality_blocked", 0)) > 0
+    ]
+    low_final = [
+        result
+        for result in strict_blocked
+        if float(dict(result.get("final_score", {})).get("f1", 0.0)) < BOUNDARY_ZERO_HIGH_FINAL_F1
+    ]
+    boundary_sensitive = [
+        result
+        for result in strict_blocked
+        if float(dict(result.get("final_score", {})).get("f1", 0.0)) >= BOUNDARY_ZERO_HIGH_FINAL_F1
+        and float(dict(result.get("final_ordered_score", result.get("final_score", {}))).get("f1", 0.0))
+        >= BOUNDARY_ZERO_HIGH_FINAL_F1
+        and float(dict(result.get("final_boundary_score", {})).get("f1", 0.0))
+        <= BOUNDARY_GRANULARITY_MAX_BOUNDARY_F1
+    ]
+    metric_presence = {
+        metric: _summarize_supported_low_metric_presence(low_final, metric)
+        for metric in SUPPORTED_LOW_BOTTLENECK_METRICS
+        if any(int(dict(result.get("metrics", {})).get(metric, 0)) > 0 for result in low_final)
+    }
+    return {
+        "interpretation": (
+            "Strict logic candidates where a staged sentence reached the age quality-block limit. "
+            "Use low_final_cases to inspect likely app-lifecycle loss, and boundary_sensitive_cases to avoid "
+            "mistaking content-preserving boundary differences for missing-final logic failures."
+        ),
+        "case_count": len(strict_blocked),
+        "low_final_case_count": len(low_final),
+        "boundary_sensitive_case_count": len(boundary_sensitive),
+        "metric_presence_in_low_final": metric_presence,
+        "low_final_cases": [
+            _stage_age_quality_block_payload(result)
+            for result in sorted(
+                low_final,
+                key=lambda result: (
+                    float(dict(result.get("final_score", {})).get("f1", 0.0)),
+                    float(dict(result.get("final_boundary_score", {})).get("f1", 0.0)),
+                    -int(dict(result.get("metrics", {})).get("stage_age_quality_blocked", 0)),
+                    str(result.get("id")),
+                ),
+            )[:CASE_EXEMPLAR_LIMIT]
+        ],
+        "boundary_sensitive_cases": [
+            _stage_age_quality_block_payload(result)
+            for result in sorted(
+                boundary_sensitive,
+                key=lambda result: (
+                    float(dict(result.get("final_boundary_score", {})).get("f1", 0.0)),
+                    -float(dict(result.get("final_score", {})).get("f1", 0.0)),
+                    str(result.get("id")),
+                ),
+            )[:CASE_EXEMPLAR_LIMIT]
+        ],
+    }
+
+
 def summarize_case_definition_health(
     *,
     results: list[dict[str, Any]],
@@ -2976,6 +3076,7 @@ def build_benchmark_report(
     collection_strata_summary = summarize_results_by_collection_strata(results)
     source_trace_strata_summary = summarize_results_by_source_trace_strata(results)
     strict_logic_candidate_summary = summarize_strict_logic_candidate_results(cases, results)
+    stage_age_quality_block_summary = summarize_stage_age_quality_blocked_strict_candidates(cases, results)
     case_definition_health_summary = summarize_case_definition_health(
         results=results,
         case_definition_action_summary=case_definition_action_summary,
@@ -3100,6 +3201,7 @@ def build_benchmark_report(
         "collection_strata_summary": collection_strata_summary,
         "source_trace_strata_summary": source_trace_strata_summary,
         "strict_logic_candidate_summary": strict_logic_candidate_summary,
+        "stage_age_quality_block_summary": stage_age_quality_block_summary,
         "case_exemplar_summary": case_exemplar_summary,
         "language_summary": language_summary,
         "tag_summary": tag_summary,
