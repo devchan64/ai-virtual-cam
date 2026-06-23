@@ -29533,3 +29533,40 @@ stable_repeat_unsupported_case_count=0
 - 따라서 최신 CUDA report의 `case_definition_cleanup_queue_count=0`은 검증 결과와 일치한다.
 - 남은 `case_definition_review_count=20`은 즉시 expected label 오류로 보지 않는다. 대부분 replay tail, mid-stream initial context, boundary granularity 해석 문제로 분리한다.
 - 다음 튜닝은 전체 challenge 평균보다 `strict_logic_candidate_summary`와 `boundary_granularity_summary`를 우선한다. strict subset은 이미 `strict_final_f1_avg=0.964444`이므로, 낮은 전체 평균을 쫓아 세부 규칙을 늘리는 변경은 보류한다.
+
+## 2026-06-24 short CJK quality-block hold 실험 폐기
+
+목적:
+
+- strict subset의 `zh_log_draft_20260620_avc_whisper_log_11_000820`에서 `哦。 -> 哦，还有泡菜。 -> 哦，还有泡菜，还有葱。` prefix-growth 후보가 final 직전 quality block으로 삭제되는 현상을 확인했다.
+- 가설은 clean short CJK stage가 required confirmation 직전이면 quality block을 한 chunk 늦추는 것이 누락을 줄일 수 있다는 것이었다.
+
+실험:
+
+```text
+baseline_output=.tmp/eval/dictation-ai-sbd/current-20260624-mixed-latin-prefix-prefer-rerun-report.json
+baseline_final_f1_avg=0.862698
+baseline_strict_final_f1_avg=0.964444
+baseline_final_boundary_f1_avg=0.564458
+baseline_case_definition_review=20
+
+env_sweep=AVC_DICTATION_SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=1
+env_sweep_output=.tmp/eval/dictation-ai-sbd/current-20260624-short-cjk-hold-1-report.json
+env_sweep_final_f1_avg=0.831
+env_sweep_strict_final_f1_avg=0.935
+env_sweep_final_boundary_f1_avg=0.509
+env_sweep_case_definition_review=25
+
+targeted_patch_output=.tmp/eval/dictation-ai-sbd/current-20260624-near-confirmed-short-cjk-hold-report.json
+targeted_patch_final_f1_avg=0.857
+targeted_patch_strict_final_f1_avg=0.957
+targeted_patch_final_boundary_f1_avg=0.555
+targeted_patch_case_definition_review=21
+```
+
+해석:
+
+- 단순 hold=1은 일부 누락 케이스를 개선하지만 전체 final F1, strict final F1, boundary F1을 모두 악화시켰다.
+- near-confirmed short CJK에만 한 chunk 기회를 주는 좁은 패치도 baseline보다 나빴다.
+- 이 문제는 개별 케이스에서는 그럴듯하지만 보편 정책으로 채택할 수 없다. short CJK 품질 block 완화는 현재 폐기한다.
+- 관련 코드 변경은 반영하지 않았다.
