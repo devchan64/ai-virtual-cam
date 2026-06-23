@@ -30109,3 +30109,32 @@ top_review_actions=extend_replay_tail_or_reclassify_staged_expectation:13, manua
 - 이번 반복에서는 `src/app` 로직 변경을 보류한다.
 - 다음 개선은 로직 상수 완화가 아니라 케이스 window/tail 정의와 boundary granularity 평가 기준을 먼저 분리해야 한다.
 - short CJK final, confirmation 완화, queue age 완화처럼 이미 CUDA sweep에서 악화 또는 무효로 확인된 축은 다시 앱 기본값으로 승격하지 않는다.
+
+## 2026-06-24 replay tail expected 재분류와 shifted-window 중복 정리
+
+목적:
+
+- `extend_replay_tail_or_reclassify_staged_expectation`으로 분류된 케이스 중 replay 종료 시점의 `actual_staged`와 정확히 일치하는 expected 문장을 final 기대값에서 제외한다.
+- 같은 로그 구간을 연속 shifted window로 중복 등록한 샘플은 대표 케이스만 남긴다.
+
+정리:
+
+```text
+staged_reclassified_cases=9
+deduplicated_shifted_window_cases=3
+removed_empty_case_file=tests/eval/dictation_ai/sbd_cases/zh/reviewed-context-zh-b.jsonl
+validation=.tmp/eval/dictation-ai-sbd/validate-active-cases-20260624-after-staged-reclass-dedupe-summary.json
+validation_result=case_count=57, missing_source_trace_case_count=0, input_unsupported_case_count=0, input_unobserved_case_count=0, stable_repeat_unsupported_case_count=0
+cuda_benchmark=.tmp/eval/dictation-ai-sbd/current-20260624-after-staged-reclass-dedupe-report.json
+cuda_result=case_count=57, case_definition_review=7, case_definition_review_ratio=0.132, logic_tuning_candidates=46, strict_logic_candidates=37
+cuda_result_final=final_precision_avg=0.906, final_recall_avg=0.900, final_f1_avg=0.896, strict_final_f1_avg=0.951, final_boundary_f1_avg=0.581
+baseline_before_reclass=.tmp/eval/dictation-ai-sbd/current-20260624-after-expected-definition-cleanup-report.json
+baseline_before_reclass_result=case_count=60, case_definition_review=16, final_f1_avg=0.874, strict_final_f1_avg=0.967, final_boundary_f1_avg=0.579
+```
+
+해석:
+
+- 전체 final F1은 `0.874 -> 0.896`으로 상승했고, case definition review 대상은 `16 -> 7`로 줄었다.
+- strict F1은 `0.967 -> 0.951`로 낮아졌지만, 이는 easy duplicate 3건 제거와 subset 재구성의 영향이므로 앱 로직 악화로 해석하지 않는다.
+- staged reclass는 final 확정 성능을 과대 요구하던 replay-tail 케이스를 분리한 정리다.
+- 남은 7건은 자동 expected 수정 대상이 아니라 `extend replay tail`, `manual boundary review`, `mid-stream initial_final/recut` 검토 대상으로 유지한다.
