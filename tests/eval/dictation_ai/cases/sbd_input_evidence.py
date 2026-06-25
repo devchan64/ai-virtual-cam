@@ -11,6 +11,7 @@ from src.app.sentence_boundary import normalized_text, sentence_end_count, split
 
 MIN_INPUT_EVIDENCE_COVERAGE = 0.60
 MIN_REPEAT_SIMILARITY = 0.70
+MIN_STABLE_REPEAT_SIMILARITY = 0.92
 DEFAULT_REPEAT_OBSERVATIONS = SENTENCE_CONFIRM_MAX_AGE_CHUNKS
 OBSERVED_TEXT_RE = re.compile(r"[0-9A-Za-z가-힣\u3400-\u9fff]+")
 STABLE_CANDIDATE_EXAMPLE_LIMIT = 5
@@ -78,10 +79,22 @@ def chunk_sentence_candidates(chunk_input: str) -> list[str]:
     pending = normalized_text(result.pending)
     if pending and has_observed_text_units(pending):
         candidates.append(pending)
+    if candidates and _has_trailing_ellipsis(chunk_input):
+        candidates = candidates[:-1]
     normalized_input = normalized_text(chunk_input)
-    if not candidates and normalized_input and has_observed_text_units(normalized_input):
+    if (
+        not candidates
+        and normalized_input
+        and has_observed_text_units(normalized_input)
+        and not _has_trailing_ellipsis(chunk_input)
+    ):
         candidates.append(normalized_input)
     return candidates
+
+
+def _has_trailing_ellipsis(text: str) -> bool:
+    stripped = text.rstrip()
+    return stripped.endswith("...") or stripped.endswith("…")
 
 
 def chunk_input_sentence_candidates(chunk_inputs: list[str]) -> list[str]:
@@ -107,7 +120,7 @@ def expected_sentence_repeat_count(sentence: str, sentence_candidates: list[str]
     return sum(
         1
         for candidate in sentence_candidates
-        if expected_sentence_candidate_similarity(sentence, candidate) >= MIN_REPEAT_SIMILARITY
+        if expected_sentence_candidate_similarity(sentence, candidate) >= MIN_STABLE_REPEAT_SIMILARITY
     )
 
 
@@ -117,7 +130,7 @@ def expected_sentence_stable_group_count(sentence: str, stable_candidates: list[
         text = str(candidate.get("text", "")).strip()
         if not text:
             continue
-        if expected_sentence_candidate_similarity(sentence, text) >= MIN_REPEAT_SIMILARITY:
+        if expected_sentence_candidate_similarity(sentence, text) >= MIN_STABLE_REPEAT_SIMILARITY:
             best_count = max(best_count, int(candidate.get("count", 0)))
     return best_count
 
@@ -139,18 +152,44 @@ def stable_repeated_sentence_candidates(
         if not text or not has_observed_text_units(text):
             continue
         for group in groups:
-            if expected_sentence_candidate_similarity(str(group["text"]), text) < MIN_REPEAT_SIMILARITY:
+            if expected_sentence_candidate_similarity(str(group["text"]), text) < MIN_STABLE_REPEAT_SIMILARITY:
                 continue
             group["count"] = int(group["count"]) + 1
             group["last_index"] = index
-            if stable_candidate_representative_score(text) >= stable_candidate_representative_score(str(group["text"])):
-                group["text"] = text
+            variants = group.setdefault("_variants", {})
+            variant = variants.setdefault(text, {"count": 0, "first_index": index})
+            variant["count"] = int(variant["count"]) + 1
+            group["text"] = _stable_group_representative(variants)
             break
         else:
-            groups.append({"text": text, "count": 1, "first_index": index, "last_index": index})
+            groups.append(
+                {
+                    "text": text,
+                    "count": 1,
+                    "first_index": index,
+                    "last_index": index,
+                    "_variants": {text: {"count": 1, "first_index": index}},
+                }
+            )
     stable = [group for group in groups if int(group["count"]) >= min_observations]
+    for group in stable:
+        group.pop("_variants", None)
     stable.sort(key=lambda group: (int(group["first_index"]), -int(group["count"]), str(group["text"])))
     return stable
+
+
+def _stable_group_representative(variants: dict[str, dict[str, int]]) -> str:
+    if not variants:
+        return ""
+    return max(
+        variants,
+        key=lambda text: (
+            int(variants[text].get("count", 0)),
+            stable_candidate_representative_score(text),
+            -int(variants[text].get("first_index", 0)),
+            text,
+        ),
+    )
 
 
 def case_repeat_observations(case: dict[str, Any]) -> int:
