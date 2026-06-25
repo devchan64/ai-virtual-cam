@@ -26,5 +26,9 @@
 이후 3건은 전체 `expected_final` 대신 `sentence_finalize_age`회 이상 반복 근거가 있는 부분 문장만 남겨
 승격했다. 이 케이스에는 `expected-final-recut-to-stable-subset`과 `chunks-reused` 태그를 붙인다.
 
-남은 4건은 stable 후보가 없고, 사람이 기대한 문장도 1회 또는 2회 관측에 그친다. 이 항목은 원 로그에서
+기존 잔여 4건은 stable 후보가 없고, 사람이 기대한 문장도 1회 또는 2회 관측에 그친다. 이 항목은 원 로그에서
 더 긴 window로 다시 자르거나, 사람이 다른 평가 목적을 명시하기 전까지 분석용 케이스로 사용하지 않는다.
+
+2026-06-25에 1건을 추가로 제외했다. 이 케이스는 stable 반복 근거는 있지만 stable 후보가
+`expected_final` 경계를 가로지르고 STT revision variant를 포함해, replay 시작점이나 expected 경계를
+다시 정하기 전에는 앱 로직 튜닝 근거로 쓰지 않는다. 현재 review queue는 총 5건이다.

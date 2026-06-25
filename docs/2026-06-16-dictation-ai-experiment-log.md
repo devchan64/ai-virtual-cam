@@ -32500,3 +32500,56 @@ HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
 - 따라서 이번 검토에서는 앱 로직 변경을 채택하지 않는다.
 - 남은 review queue 4건은 현재 기계 검증 기준으로 승격 불가다. 새 케이스가 필요하면 원 로그에서 더 긴 bounded window를 다시 잘라 `sentence_finalize_age=3` token-sentence 반복 근거가 생기도록 재작성해야 한다.
 - 다음 로직 개선 후보는 전역 조기 final 차단이 아니라, `stage_finalize_before_replace`가 실제 반복 근거 없이 late-context extra final을 만드는 좁은 조건을 더 분리해 찾는 것이다.
+
+## 2026-06-25 stable candidate/expected boundary cleanup 1건 제외
+
+목적:
+
+- `case_definition_cleanup_queue_summary.case_count=1`로 남아 있던 active case를 검토했다.
+- 대상 케이스는 `zh_log_restaurant_branch_market_premature_short_final_20260621_001`이며, stable 반복 후보가 `expected_final` 경계를 가로지르고 STT revision variant를 포함했다.
+- 단순히 `expected_final`을 추가하면 중복 라벨이 되므로 active app-logic tuning 근거에서 제외하고 review queue로 이동했다.
+- 동시에 stable 후보가 adjacent `expected_final`의 token sequence로 이미 설명되는 경우는 `expected_final_omits_stable_candidate`로 오판하지 않도록 report helper를 보강했다.
+
+명령:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report
+
+./.venv/bin/python tests/eval/dictation_ai/cases/validate_sbd_case_files.py \
+  tests/eval/dictation_ai/sbd_cases \
+  --require-expected-final \
+  --require-input-evidence \
+  --require-observed-input-evidence \
+  --require-stable-repeat-evidence
+
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+  ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output .tmp/eval/dictation-ai-sbd/full-after-cleanup-case-removal-cuda.json
+```
+
+결과:
+
+- report tool test: 50건 통과
+- active case validation 통과
+  - `case_count=1019`
+  - `expected_final_case_count=1015`
+  - `expected_no_final_case_count=4`
+  - `stable_repeat_unsupported_case_count=0`
+- CUDA benchmark:
+  - `cases=1019`
+  - `finalized=4249`
+  - `stage_start=7648`
+  - `final_precision_avg=0.651`
+  - `final_recall_avg=0.666`
+  - `final_f1_avg=0.640`
+  - `strict_final_f1_avg=0.925`
+  - `case_definition_cleanup_queue_count=0`
+  - `tuning_next_action_summary.priority=inspect_clean_low_app_logic_candidates`
+
+해석:
+
+- active challenge replay에서 즉시 처리해야 할 stable candidate/expected mismatch cleanup queue는 해소됐다.
+- 전체 final 지표는 기존 기준과 사실상 유지됐고, 문제 케이스 1건은 review queue로 보존했다.
+- 다음 단계는 전체 case-definition review 총량을 앱 로직 문제로 오해하지 않고, `strict_actionable_low_final_case_count=11`의 공통 lifecycle metric을 기준으로 app logic 후보를 검토하는 것이다.

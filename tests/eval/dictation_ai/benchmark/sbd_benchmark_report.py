@@ -471,6 +471,21 @@ def _find_word_subsequence(words: list[str], needle: list[str]) -> int:
     return -1
 
 
+def _stable_candidate_explained_by_expected_sequence(stable: str, expected_units: list[str]) -> bool:
+    stable_words = _word_units(stable)
+    if not stable_words or len(expected_units) < 2:
+        return False
+    for start in range(0, len(expected_units) - 1):
+        sequence_words: list[str] = []
+        for end in range(start, len(expected_units)):
+            sequence_words.extend(_word_units(expected_units[end]))
+            if end == start:
+                continue
+            if _find_word_subsequence(sequence_words, stable_words) >= 0:
+                return True
+    return False
+
+
 def _prefix_before_expected_sentence(chunk: str, sentence: str) -> str:
     normalized_chunk = normalized_text(chunk)
     normalized_sentence = normalized_text(sentence)
@@ -589,6 +604,8 @@ def _has_actual_final_supported_by_omitted_stable_candidate(result: dict[str, An
     if not expected_final or not actual_final or not stable_examples:
         return False
     for stable in stable_examples:
+        if _stable_candidate_explained_by_expected_sequence(stable, expected_final):
+            continue
         if max((_sentence_support_score(stable, expected) for expected in expected_final), default=0.0) >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY:
             continue
         stable_flags = set(_final_sentence_diagnostic_flags(stable, str(result.get("language") or "")))
@@ -635,6 +652,8 @@ def _has_omitted_stable_candidate(result: dict[str, Any]) -> bool:
     for stable in stable_candidates:
         stable_flags = set(_final_sentence_diagnostic_flags(stable, str(result.get("language") or "")))
         if stable_flags.intersection({"empty", "spaced_cjk", "cjk_repeated_ngram", "repeated_word_ngram"}):
+            continue
+        if _stable_candidate_explained_by_expected_sequence(stable, expected_final):
             continue
         if max((_sentence_support_score(stable, expected) for expected in expected_units), default=0.0) < FINAL_SENTENCE_MATCH_MIN_SIMILARITY:
             if max((_sentence_support_score(stable, actual) for actual in actual_final), default=0.0) >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY:

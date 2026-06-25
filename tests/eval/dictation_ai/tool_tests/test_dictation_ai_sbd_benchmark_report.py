@@ -1035,6 +1035,74 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         )
         self.assertEqual(report["case_definition_action_summary"]["case_definition_cleanup_count"], 1)
 
+    def test_stable_candidate_spanning_adjacent_expected_is_not_omitted(self) -> None:
+        args = Namespace(
+            model="sat-3l-sm",
+            device="cuda",
+            compute_type="float16",
+            min_final_f1=0.0,
+            fail_on_regression=False,
+        )
+        case = SbdCase(
+            id="adjacent-expected-stable-candidate",
+            language="zh",
+            chunks=[
+                "我的父母呢，他们讲他们想要吃饭，所以我就找了一家餐厅。这一家餐厅呢，它是有很多分店的。",
+                "我的父母呢，他们讲他们想要吃饭，所以我就找了一家餐厅。这一家餐厅呢，它是有很多分店的。",
+                "我的父母呢，他们讲他们想要吃饭，所以我就找了一家餐厅。这一家餐厅呢，它是有很多分店的。",
+                "就找了一家餐厅，这一家餐厅呢，它是有很多分店的。",
+                "就找了一家餐厅，这一家餐厅呢，它是有很多分店的。",
+                "就找了一家餐厅，这一家餐厅呢，它是有很多分店的。",
+            ],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=[
+                "我的父母呢，他们讲他们想要吃饭，所以我就找了一家餐厅。",
+                "这一家餐厅呢，它是有很多分店的。",
+            ],
+            expected_staged="",
+            tags=("missing-final",),
+            sentence_finalize_age=3,
+        )
+        results = [
+            {
+                "id": case.id,
+                "language": case.language,
+                "tags": list(case.tags),
+                "expected_final": case.expected_final,
+                "chunks": [{"input": chunk} for chunk in case.chunks],
+                "initial_final": [],
+                "actual_final": [
+                    "我的父母呢，他们讲他们想要吃饭，所以我就找了一家餐厅。",
+                    "这一家餐厅呢，它是有很多分店的。",
+                ],
+                "actual_pending": "",
+                "actual_staged": "",
+                "actual_staged_queue": [],
+                "final_score": _score(1.0, 1.0, 1.0),
+                "final_ordered_score": _score(1.0, 1.0, 1.0),
+                "final_boundary_score": _score(1.0, 1.0, 1.0),
+                "completed_last_score": _score(1.0, 1.0, 1.0),
+                "pending_exact": True,
+                "staged_exact": True,
+                "case_exact_match": True,
+                "metrics": {"finalized": 2, "stage_start": 2},
+            }
+        ]
+
+        report = build_benchmark_report(
+            args=args,
+            case_sources=["cases.jsonl"],
+            corpus_role="challenge-replay",
+            cases=[case],
+            results=results,
+            metric_totals={"finalized": 2, "stage_start": 2},
+            elapsed_ms=1.0,
+        )
+
+        self.assertEqual(report["cases"][0]["case_definition_flags"], [])
+        self.assertEqual(report["case_definition_action_summary"]["case_definition_cleanup_count"], 0)
+
     def test_report_marks_boundary_zero_high_final_as_metric_sensitivity(self) -> None:
         args = Namespace(
             model="sat-3l-sm",
