@@ -31,4 +31,13 @@
 
 2026-06-25에 1건을 추가로 제외했다. 이 케이스는 stable 반복 근거는 있지만 stable 후보가
 `expected_final` 경계를 가로지르고 STT revision variant를 포함해, replay 시작점이나 expected 경계를
-다시 정하기 전에는 앱 로직 튜닝 근거로 쓰지 않는다. 현재 review queue는 총 5건이다.
+다시 정하기 전에는 앱 로직 튜닝 근거로 쓰지 않는다.
+
+이후 해당 케이스는 `chunks`의 안정 prefix만 재사용하고 후반 tail을 제거해
+`expected-final-recut-to-stable-prefix` 케이스로 승격했다. 승격 기준은 prefix 구간에서
+`sentence_finalize_age=3`회 이상 반복된 stable token-sentence 후보 3개가 `expected_final`과
+순서대로 대응되는지이다.
+
+현재 review queue는 총 4건이다. 남은 4건은 모두 현재 chunks 안에서 `sentence_finalize_age`회 이상
+반복된 stable token-sentence 후보가 없으므로, 원 로그에서 더 긴 window를 다시 자르거나 별도 평가
+목적을 정의하기 전까지 분석용 케이스로 승격하지 않는다.
