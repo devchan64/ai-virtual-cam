@@ -32553,3 +32553,64 @@ HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
 - active challenge replay에서 즉시 처리해야 할 stable candidate/expected mismatch cleanup queue는 해소됐다.
 - 전체 final 지표는 기존 기준과 사실상 유지됐고, 문제 케이스 1건은 review queue로 보존했다.
 - 다음 단계는 전체 case-definition review 총량을 앱 로직 문제로 오해하지 않고, `strict_actionable_low_final_case_count=11`의 공통 lifecycle metric을 기준으로 app logic 후보를 검토하는 것이다.
+
+## 2026-06-25 short CJK final 완화 sweep 폐기
+
+목적:
+
+- strict app-logic 후보에서 짧은 CJK 문장이 `stage_age_quality_blocked`로 누락되는 패턴을 확인했다.
+- `SHORT_CJK_FINAL_UNITS`를 낮추고, 짧은 mixed-script 후보는 `SHORT_MIXED_LATIN_ZH_*`로 계속 차단하는 조합이 보편적 개선인지 검토했다.
+
+명령:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+  ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases .tmp/eval/dictation-ai-sbd/strict-actionable-after-cleanup-13.jsonl \
+  --output .tmp/eval/dictation-ai-sbd/strict-after-cleanup-baseline-cuda.json
+
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+  AVC_DICTATION_SHORT_CJK_FINAL_UNITS=6 \
+  AVC_DICTATION_SHORT_MIXED_LATIN_ZH_CJK_UNITS=8 \
+  AVC_DICTATION_SHORT_MIXED_LATIN_ZH_TOTAL_UNITS=9 \
+  ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases .tmp/eval/dictation-ai-sbd/strict-actionable-after-cleanup-13.jsonl \
+  --output .tmp/eval/dictation-ai-sbd/strict-after-cleanup-short-cjk6-mixed9-cuda.json
+
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+  AVC_DICTATION_SHORT_CJK_FINAL_UNITS=8 \
+  AVC_DICTATION_SHORT_MIXED_LATIN_ZH_CJK_UNITS=8 \
+  AVC_DICTATION_SHORT_MIXED_LATIN_ZH_TOTAL_UNITS=9 \
+  ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases .tmp/eval/dictation-ai-sbd/strict-actionable-after-cleanup-13.jsonl \
+  --output .tmp/eval/dictation-ai-sbd/strict-after-cleanup-short-cjk8-mixed9-cuda.json
+
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+  AVC_DICTATION_SHORT_CJK_FINAL_UNITS=6 \
+  AVC_DICTATION_SHORT_MIXED_LATIN_ZH_CJK_UNITS=8 \
+  AVC_DICTATION_SHORT_MIXED_LATIN_ZH_TOTAL_UNITS=9 \
+  ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output .tmp/eval/dictation-ai-sbd/full-short-cjk6-mixed9-cuda.json
+```
+
+결과:
+
+- strict 13건 baseline: `final_precision_avg=0.762`, `final_recall_avg=0.824`, `final_f1_avg=0.747`, `strict_final_f1_avg=0.717`
+- strict 13건 `SHORT_CJK_FINAL_UNITS=6`, mixed limit 8/9: `final_precision_avg=0.762`, `final_recall_avg=0.878`, `final_f1_avg=0.781`, `strict_final_f1_avg=0.722`
+- strict 13건 `SHORT_CJK_FINAL_UNITS=8`, mixed limit 8/9: `final_precision_avg=0.762`, `final_recall_avg=0.840`, `final_f1_avg=0.756`, `strict_final_f1_avg=0.717`
+- 전체 1019건 `SHORT_CJK_FINAL_UNITS=6`, mixed limit 8/9:
+  - `finalized=4483`
+  - `stage_start=7662`
+  - `final_precision_avg=0.627`
+  - `final_recall_avg=0.667`
+  - `final_f1_avg=0.628`
+  - `strict_final_f1_avg=0.895`
+- 전체 baseline 1019건은 `finalized=4249`, `final_precision_avg=0.651`, `final_recall_avg=0.666`, `final_f1_avg=0.640`, `strict_final_f1_avg=0.925`였다.
+
+해석:
+
+- short CJK 완화는 strict subset에서는 누락 2건을 회복하지만, 전체 challenge replay에서는 finalized 수를 크게 늘리고 precision/F1을 낮췄다.
+- mixed-script 짧은 후보 차단을 함께 넓혀도 전체 과잉 final 증가를 막지 못했다.
+- 따라서 `SHORT_CJK_FINAL_UNITS` 기본값은 변경하지 않는다.
+- 짧은 문장 누락은 상수 완화보다, 반복 근거가 충분한 짧은 후보만 final로 승격하는 더 좁은 lifecycle 조건을 찾아야 한다.
