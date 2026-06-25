@@ -32445,3 +32445,58 @@ HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_
 - STT raw가 흔들리는 source도 포함되어 있어, 사람이 bounded window를 좁히고 `expected_final`을 직접 확정하기 전에는 앱 로직 튜닝 케이스로 승격하지 않는다.
 - 따라서 이번 단계에서는 benchmark case를 추가하지 않고, 동일 issue kind case 수집 후보 source만 확보했다.
 - 다음 유효한 진행은 `packets-*-current.md`의 bounded window 중 STT가 비교적 안정적인 구간을 사람이 확정해 `sbd_cases/{zh}/`에 작은 replay case로 승격하는 것이다.
+
+## 2026-06-25 review queue 잔여 케이스와 replacement 조기 final 보수화 검토
+
+목적:
+
+- `sbd_case_review_queue/expected-final-definition-review.jsonl`에 남은 4건을 chunks 재사용 원칙으로 추가 승격할 수 있는지 확인했다.
+- strict/actionable subset에서 관측된 과잉 final을 줄이기 위해 replacement 직전 `next_completed` final을 보수화할 수 있는지 검토했다.
+
+명령:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/cases/validate_sbd_case_files.py \
+  tests/eval/dictation_ai/sbd_cases \
+  --require-expected-final \
+  --require-input-evidence \
+  --require-observed-input-evidence \
+  --require-stable-repeat-evidence
+
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+  ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases .tmp/eval/dictation-ai-sbd/strict-actionable-13.jsonl \
+  --output .tmp/eval/dictation-ai-sbd/strict-actionable-13-baseline-cuda.json
+
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+  ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases .tmp/eval/dictation-ai-sbd/strict-actionable-13.jsonl \
+  --output .tmp/eval/dictation-ai-sbd/strict-actionable-13-no-early-replace-final-cuda.json
+
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+  ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --output .tmp/eval/dictation-ai-sbd/full-no-early-replace-final-cuda.json
+```
+
+결과:
+
+- active case validation은 통과했다.
+  - `case_count=1020`
+  - `expected_final_case_count=1016`
+  - `expected_no_final_case_count=4`
+  - `stable_repeat_unsupported_case_count=0`
+- review queue 잔여 4건 중 `ko_log_duplicate_driving_speed_fragment_20260617_001`은 사람이 보기에는 "이게 정상 속도입니다" 반복이 있으나, validator의 token-sentence stable-repeat 기준에서는 `stable_repeat=0/1`로 판정되어 승격하지 않았다.
+- replacement 직전 조기 final 보수화 패치는 strict/actionable 13건에서는 소폭 개선됐다.
+  - baseline strict subset: `final_f1_avg=0.747`, `strict_final_f1_avg=0.717`
+  - no-early-replace-final strict subset: `final_f1_avg=0.753`, `strict_final_f1_avg=0.724`
+- 동일 패치를 전체 challenge replay 1020건에 적용하면 recall 손실이 더 커져 폐기했다.
+  - baseline full: `final_precision_avg=0.651`, `final_recall_avg=0.666`, `final_f1_avg=0.640`
+  - no-early-replace-final full: `final_precision_avg=0.660`, `final_recall_avg=0.647`, `final_f1_avg=0.633`
+
+해석:
+
+- replacement 직전 `next_completed` final을 전역으로 막는 규칙은 중복 final 일부를 줄이지만, clean한 한국어 케이스에서 필요한 final까지 막았다.
+- 따라서 이번 검토에서는 앱 로직 변경을 채택하지 않는다.
+- 남은 review queue 4건은 현재 기계 검증 기준으로 승격 불가다. 새 케이스가 필요하면 원 로그에서 더 긴 bounded window를 다시 잘라 `sentence_finalize_age=3` token-sentence 반복 근거가 생기도록 재작성해야 한다.
+- 다음 로직 개선 후보는 전역 조기 final 차단이 아니라, `stage_finalize_before_replace`가 실제 반복 근거 없이 late-context extra final을 만드는 좁은 조건을 더 분리해 찾는 것이다.
