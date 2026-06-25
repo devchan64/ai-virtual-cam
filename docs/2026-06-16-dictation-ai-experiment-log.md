@@ -32614,3 +32614,79 @@ HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
 - mixed-script 짧은 후보 차단을 함께 넓혀도 전체 과잉 final 증가를 막지 못했다.
 - 따라서 `SHORT_CJK_FINAL_UNITS` 기본값은 변경하지 않는다.
 - 짧은 문장 누락은 상수 완화보다, 반복 근거가 충분한 짧은 후보만 final로 승격하는 더 좁은 lifecycle 조건을 찾아야 한다.
+
+## 2026-06-25 review queue prefix 재사용 승격과 next_completed 조기 final 차단 기각
+
+목적:
+
+- `sbd_case_review_queue/expected-final-definition-review.jsonl`에 남은 케이스 중 chunks를 재사용해
+  분석용 케이스로 승격할 수 있는 항목을 다시 확인했다.
+- 동시에 strict low 후보의 주된 증상인 overfinal을 줄이기 위해 `next_completed` 경로의 조기 final을
+  더 보수적으로 만드는 조건이 보편 개선인지 확인했다.
+
+케이스 정리:
+
+- `zh_log_restaurant_branch_market_premature_short_final_20260621_001`는 전체 chunks를 그대로 쓰면
+  후반 tail에서 overlapping revision candidate가 생겨 expected 경계를 흐렸다.
+- chunk 0-13의 stable prefix만 재사용하면 `sentence_finalize_age=3` 기준 stable token-sentence 후보
+  3개가 expected 3문장과 순서대로 대응했다.
+- 새 active case:
+  - `zh_log_restaurant_branch_market_premature_short_final_20260621_001_recut_stable_prefix`
+  - tags: `expected-final-recut-to-stable-prefix`, `chunks-reused`
+- review queue는 5건에서 4건으로 줄었다. 남은 4건은 현재 chunks 안에서 3회 반복 stable 후보가 없어
+  원 로그를 더 길게 다시 자르기 전에는 분석용 케이스로 승격하지 않는다.
+
+검증:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/cases/validate_sbd_case_files.py \
+  tests/eval/dictation_ai/sbd_cases \
+  --require-expected-final \
+  --require-input-evidence \
+  --require-observed-input-evidence \
+  --require-stable-repeat-evidence
+```
+
+- `case_count=1020`
+- `expected_final_case_count=1016`
+- `stable_repeat_unsupported_case_count=0`
+
+CUDA baseline:
+
+```text
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+  ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases tests/eval/dictation_ai/sbd_cases \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/full-after-review-queue-recut-cuda.json
+```
+
+- `case_count=1020`
+- `finalized=4253`
+- `stage_start=7657`
+- `final_precision_avg=0.651`
+- `final_recall_avg=0.666`
+- `final_f1_avg=0.640`
+- `strict_logic_candidate_count=42`
+- `case_definition_cleanup_queue_count=0`
+
+조기 final 차단 실험:
+
+- strict low 11건 baseline:
+  - `finalized=30`
+  - `final_precision_avg=0.688`
+  - `final_recall_avg=0.833`
+  - `final_f1_avg=0.712`
+- `next_completed` 경로에서 required confirmation 미만 final을 차단한 후보:
+  - strict low 11건: `finalized=29`, `final_precision_avg=0.697`, `final_recall_avg=0.833`, `final_f1_avg=0.719`
+  - 전체 1020건: `finalized=4048`, `final_precision_avg=0.660`, `final_recall_avg=0.647`, `final_f1_avg=0.633`, `strict_final_f1_avg=0.891`
+
+해석:
+
+- strict low subset에서는 overfinal이 1건 줄어 소폭 개선됐지만, 전체 challenge replay에서는 recall과
+  strict F1이 크게 하락했다.
+- `next_completed` 조기 final을 required confirmation 기준으로 전역 차단하는 규칙은 채택하지 않는다.
+- 현재 overfinal은 단순 confirmation 조건보다 case boundary, queue stale, recent-final suppression,
+  stage age final이 얽힌 증상으로 본다. 다음 실험은 전체 기준에서 recall을 잃지 않는 더 좁은 lifecycle
+  원칙이 보일 때만 앱 로직으로 승격한다.
