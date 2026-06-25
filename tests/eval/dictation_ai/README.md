@@ -13,14 +13,14 @@
 | Paper audit | `paper/` | 논문 claim scope, 수치, reference, readiness gate 검증 |
 | Representative workflow | `representative/` | 운영 로그에서 representative 후보를 뽑고 사람이 검토한 case로 승격 |
 | Structural workflow | `structural/` | challenge replay 병목 case를 exploratory structural preflight subset으로 선정 |
-| Tool contract tests | `tool_tests/` | 위 평가 도구의 입출력 계약 테스트. 성능 근거가 아니다. |
+| Benchmark feature tests | `tool_tests/` | SBD 벤치의 주요 실행/케이스/리포트/sweep 기능 테스트. 성능 근거가 아니다. |
 
 ## 배치 규칙
 
 - `tests/eval/dictation_ai/` 루트에는 `sbd_benchmark.py` 단일 entrypoint만 둔다.
 - 구현 코드는 `benchmark/`, `cases/`, `sweeps/`, `paper/`, `representative/`, `structural/` 중 하나에 둔다.
 - 새 보조 모듈이나 실행 스크립트는 루트에 추가하지 않는다. 필요하면 하위 도메인 모듈을 만들고 `sbd_benchmark.py` subcommand에 연결한다.
-- `tool_tests/`는 평가 도구의 계약 테스트만 둔다. 앱 코드 품질관리 유닛테스트는 `tests/unit/`에 둔다.
+- `tool_tests/`는 SBD 벤치 주요 기능 테스트만 둔다. 앱 코드 품질관리 유닛테스트는 `tests/unit/`에 둔다.
 - benchmark 성능 근거는 `tool_tests` 통과가 아니라 `sbd_benchmark.py`를 실제 `sat + cuda + float16`로 실행한 report만 사용한다.
 - challenge replay, representative replay, structural preflight 결과를 같은 표로 합치지 않는다. corpus role과 evidence protocol이 다르면 별도 해석한다.
 - `sbd_case_review_queue/`는 폐기한다. 재검토 대상은 별도 queue 디렉터리에 쌓지 않고, 백업 corpus에서 `language`, `chunks`, `expected_final`만 가진 record를 다시 만든다.
