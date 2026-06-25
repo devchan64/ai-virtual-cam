@@ -46,6 +46,8 @@ from tests.eval.dictation_ai.cases.validate_sbd_case_files import validate_case_
 _SUBCOMMANDS: dict[str, str] = {
     "validate-cases": "tests.eval.dictation_ai.cases.validate_sbd_case_files:main",
     "audit-initial-final-context": "tests.eval.dictation_ai.cases.audit_sbd_initial_final_context:main",
+    "build-expected-final-cases": "tests.eval.dictation_ai.cases.build_sbd_expected_final_cases:main",
+    "export-gpt-case-review-packets": "tests.eval.dictation_ai.cases.export_sbd_gpt_case_review_packets:main",
     "run-sweep": "tests.eval.dictation_ai.sweeps.run_sbd_parameter_sweep:main",
     "refresh-sweep": "tests.eval.dictation_ai.sweeps.refresh_sbd_parameter_sweep_summary:main",
     "summarize-evidence": "tests.eval.dictation_ai.sweeps.summarize_sbd_evidence_reports:main",
@@ -121,7 +123,7 @@ def main() -> int:
         default=_default_case_inputs(),
         help=(
             "One or more JSONL files, directories containing JSONL files, or glob patterns. "
-            "By default, reviewed challenge sbd_cases/{en,ko,zh}/*.jsonl files are loaded."
+            "Defaults to the rebuilt sbd_predicted_cases challenge replay corpus when present."
         ),
     )
     parser.add_argument("--model", default=SBD_BENCHMARK_MODEL)

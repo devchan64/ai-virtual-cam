@@ -2873,10 +2873,10 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
 
     def test_paper_evidence_mode_requires_reviewed_finalization_case_target(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp) / "sbd_cases"
+            root = Path(tmp) / "sbd_predicted_cases"
             language_dir = root / "ko"
             language_dir.mkdir(parents=True)
-            cases = language_dir / "reviewed-context-ko-a.jsonl"
+            cases = language_dir / "predicted-ko-000.jsonl"
             cases.write_text(
                 json.dumps(
                     {
@@ -2897,7 +2897,7 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
 
     def test_paper_evidence_representative_requires_explicit_case_target(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp) / "sbd_representative_cases"
+            root = Path(tmp) / "representative_cases"
             root.mkdir(parents=True)
             cases = root / "representative.jsonl"
             review_packets = Path(tmp) / "review-packets.json"

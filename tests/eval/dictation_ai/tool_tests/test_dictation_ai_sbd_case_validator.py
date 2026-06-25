@@ -441,16 +441,16 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
         self.assertEqual(summary["sources"], [str(group_dir / "reviewed-group.jsonl")])
 
     def test_challenge_root_only_loads_language_shards(self) -> None:
-        self.assertEqual(SBD_CHALLENGE_CASE_DIR.name, "sbd_cases")
+        self.assertEqual(SBD_CHALLENGE_CASE_DIR.name, "sbd_predicted_cases")
         self.assertEqual(SBD_CHALLENGE_CASE_DIR.parent.name, "dictation_ai")
         with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir) / "sbd_cases"
+            root = Path(tmpdir) / "sbd_predicted_cases"
             language_dir = root / "ko"
             ignored_dir = root / "auto-groups"
             language_dir.mkdir(parents=True)
             ignored_dir.mkdir()
             self._write_payload(
-                language_dir / "reviewed-context-ko-a.jsonl",
+                language_dir / "predicted-ko-000.jsonl",
                 {
                     "id": "case-a",
                     "language": "ko",
@@ -475,7 +475,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
 
         self.assertEqual(summary["case_count"], 1)
         self.assertEqual(summary["corpus_role"], "challenge-replay")
-        self.assertEqual(summary["sources"], [str(language_dir / "reviewed-context-ko-a.jsonl")])
+        self.assertEqual(summary["sources"], [str(language_dir / "predicted-ko-000.jsonl")])
 
     def test_rejects_empty_case_input(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -487,7 +487,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
 
     def test_representative_root_requires_sampling_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir) / "sbd_representative_cases"
+            root = Path(tmpdir) / "representative_cases"
             root.mkdir()
             self._write_payload(
                 root / "cases.jsonl",
@@ -516,7 +516,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
 
     def test_representative_root_reports_valid_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir) / "sbd_representative_cases"
+            root = Path(tmpdir) / "representative_cases"
             root.mkdir()
             case_file = root / "cases.jsonl"
             self._write_payload(case_file, self._representative_payload())
@@ -542,7 +542,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
 
     def test_representative_root_rejects_unsupported_sampling_unit(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir) / "sbd_representative_cases"
+            root = Path(tmpdir) / "representative_cases"
             root.mkdir()
             payload = self._representative_payload()
             payload["sampling_unit"] = "failure-cluster"
@@ -554,7 +554,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
 
     def test_representative_root_requires_language(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir) / "sbd_representative_cases"
+            root = Path(tmpdir) / "representative_cases"
             root.mkdir()
             payload = self._representative_payload()
             payload["language"] = ""
@@ -566,7 +566,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
 
     def test_representative_root_requires_chunks_not_text_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir) / "sbd_representative_cases"
+            root = Path(tmpdir) / "representative_cases"
             root.mkdir()
             payload = self._representative_payload()
             payload["text"] = "안녕하세요."
@@ -579,7 +579,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
 
     def test_representative_root_requires_runtime_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir) / "sbd_representative_cases"
+            root = Path(tmpdir) / "representative_cases"
             root.mkdir()
             payload = self._representative_payload()
             del payload["stt_backend"]
@@ -591,7 +591,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
 
     def test_representative_root_requires_reviewed_expected_final_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir) / "sbd_representative_cases"
+            root = Path(tmpdir) / "representative_cases"
             root.mkdir()
             payload = self._representative_payload()
             payload["expected_final"] = []
@@ -603,7 +603,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
 
     def test_representative_draft_allows_missing_expected_final_only_when_allowed(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir) / "sbd_representative_cases"
+            root = Path(tmpdir) / "representative_cases"
             root.mkdir()
             payload = self._representative_payload()
             payload["expected_final"] = []
@@ -645,7 +645,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
 
     def test_representative_root_requires_review_packet_traceability(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir) / "sbd_representative_cases"
+            root = Path(tmpdir) / "representative_cases"
             root.mkdir()
             payload = self._representative_payload()
             del payload["review_packet_id"]
@@ -657,7 +657,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
 
     def test_representative_root_requires_expected_final_reviewer(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir) / "sbd_representative_cases"
+            root = Path(tmpdir) / "representative_cases"
             root.mkdir()
             payload = self._representative_payload()
             payload["expected_final_reviewed_by"] = ""
@@ -669,7 +669,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
 
     def test_representative_file_input_requires_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir) / "sbd_representative_cases"
+            root = Path(tmpdir) / "representative_cases"
             root.mkdir()
             case_file = root / "cases.jsonl"
             self._write_payload(case_file, self._representative_payload())
@@ -683,7 +683,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
 
     def test_representative_review_packet_link_validation_accepts_matching_packet(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir) / "sbd_representative_cases"
+            root = Path(tmpdir) / "representative_cases"
             root.mkdir()
             case_file = root / "cases.jsonl"
             review_packet_file = Path(tmpdir) / "review-packets.json"
@@ -711,7 +711,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
 
     def test_representative_review_packet_link_rejects_unknown_packet_id(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir) / "sbd_representative_cases"
+            root = Path(tmpdir) / "representative_cases"
             root.mkdir()
             case_file = root / "cases.jsonl"
             review_packet_file = Path(tmpdir) / "review-packets.json"
@@ -726,7 +726,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
 
     def test_representative_review_packet_link_rejects_source_log_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir) / "sbd_representative_cases"
+            root = Path(tmpdir) / "representative_cases"
             root.mkdir()
             case_file = root / "cases.jsonl"
             review_packet_file = Path(tmpdir) / "review-packets.json"
@@ -739,7 +739,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
 
     def test_representative_review_packet_link_rejects_language_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir) / "sbd_representative_cases"
+            root = Path(tmpdir) / "representative_cases"
             root.mkdir()
             case_file = root / "cases.jsonl"
             review_packet_file = Path(tmpdir) / "review-packets.json"
@@ -752,7 +752,7 @@ class DictationAiSbdCaseValidatorTest(unittest.TestCase):
 
     def test_representative_review_packet_link_rejects_source_range_outside_packet_window(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir) / "sbd_representative_cases"
+            root = Path(tmpdir) / "representative_cases"
             root.mkdir()
             case_file = root / "cases.jsonl"
             review_packet_file = Path(tmpdir) / "review-packets.json"

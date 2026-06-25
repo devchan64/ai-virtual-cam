@@ -176,7 +176,7 @@ def _methodology_decision(
                 "command": (
                     "HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 "
                     "./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py "
-                    "--cases tests/eval/dictation_ai/sbd_cases --device cuda --compute-type float16 "
+                    "--cases tests/eval/dictation_ai/sbd_predicted_cases --device cuda --compute-type float16 "
                     "--output .tmp/eval/dictation-ai-sbd/current-contract-challenge-replay.json"
                 ),
             }
@@ -232,13 +232,13 @@ def _methodology_decision(
                     f"--output {structural_result_path}"
                 ),
                 "promotion_requirement": (
-                    "rerun the full 1113-case challenge replay with sat+cuda+float16 before using "
-                    "any structural preflight result as paper evidence"
+                    "rerun the full sbd_predicted_cases challenge replay with sat+cuda+float16 "
+                    "before using any structural preflight result as paper evidence"
                 ),
                 "full_challenge_replay_command": (
                     "HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 "
                     "./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py "
-                    "--cases tests/eval/dictation_ai/sbd_cases --device cuda --compute-type float16 "
+                    "--cases tests/eval/dictation_ai/sbd_predicted_cases --device cuda --compute-type float16 "
                     "--paper-evidence --output .tmp/eval/dictation-ai-sbd/structural-lifecycle-full-challenge-replay.json"
                 ),
             }
@@ -399,7 +399,7 @@ def main() -> int:
     parser.add_argument(
         "--representative-cases",
         type=Path,
-        default=Path("tests/eval/dictation_ai/sbd_representative_cases"),
+        default=Path(".tmp/eval/dictation-ai-sbd/representative-cases"),
     )
     parser.add_argument(
         "--review-packets",

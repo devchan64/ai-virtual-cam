@@ -22,7 +22,11 @@ from src.app.dictation_pipeline_settings import (
     dictation_tuning_manifest,
     dictation_tuning_protocol,
 )
-from tests.eval.dictation_ai.cases.sbd_case_paths import build_evidence_protocol, corpus_interpretation
+from tests.eval.dictation_ai.cases.sbd_case_paths import (
+    SBD_CHALLENGE_CASE_DIR,
+    build_evidence_protocol,
+    corpus_interpretation,
+)
 from tests.eval.dictation_ai.sweeps.sbd_parameter_sweep_report import (
     METRIC_KEYS,
     attach_baseline_deltas,
@@ -35,9 +39,7 @@ from tests.eval.dictation_ai.benchmark.sbd_runtime_contract import OFFLINE_MODEL
 from tests.eval.dictation_ai.cases.validate_sbd_case_files import enforce_case_thresholds, validate_case_files
 
 
-DEFAULT_CASES = (
-    Path("tests/eval/dictation_ai/sbd_cases"),
-)
+DEFAULT_CASES: tuple[Path, ...] = (SBD_CHALLENGE_CASE_DIR,)
 DEFAULT_OUTPUT_DIR = Path(".tmp/eval/dictation-ai-sbd/parameter-sweeps")
 @dataclass(frozen=True)
 class SweepParameter:

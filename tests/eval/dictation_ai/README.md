@@ -7,8 +7,8 @@
 | 도메인 | 현재 파일 | 역할 |
 | --- | --- | --- |
 | Benchmark core | `sbd_benchmark.py`, `benchmark/` | 단일 실행 엔트리, 실제 `sat + cuda + float16` SBD replay 실행과 report/runtime contract 생성 |
-| Case corpus | `cases/`, `sbd_cases/`, `sbd_representative_cases/` | challenge/representative/structural case 로딩, 검증, 해석 계약 |
-| Case review queue | `sbd_case_review_queue/` | active challenge replay에서 제외한 expected_final 정의 재검토 대기열 |
+| Case corpus | `cases/`, `sbd_predicted_cases/`, `representative_cases/` | challenge/representative/structural case 로딩, 검증, 해석 계약. 기존 `sbd_cases/` challenge corpus는 폐기됨 |
+| Case rebuild | `cases/` | 백업 case의 `language`, `chunks`만 사용해 반복 token-sentence 근거로 `expected_final`을 예측하거나 검토 후보 record를 생성 |
 | Parameter sweep/evidence | `sweeps/` | 파라미터 sweep 실행, complete evidence report 검증, 논문 표준 summary 생성 |
 | Paper audit | `paper/` | 논문 claim scope, 수치, reference, readiness gate 검증 |
 | Representative workflow | `representative/` | 운영 로그에서 representative 후보를 뽑고 사람이 검토한 case로 승격 |
@@ -23,16 +23,20 @@
 - `tool_tests/`는 평가 도구의 계약 테스트만 둔다. 앱 코드 품질관리 유닛테스트는 `tests/unit/`에 둔다.
 - benchmark 성능 근거는 `tool_tests` 통과가 아니라 `sbd_benchmark.py`를 실제 `sat + cuda + float16`로 실행한 report만 사용한다.
 - challenge replay, representative replay, structural preflight 결과를 같은 표로 합치지 않는다. corpus role과 evidence protocol이 다르면 별도 해석한다.
-- `sbd_case_review_queue/`는 기본 benchmark 입력이 아니다. 여기에 있는 케이스는 `expected_final`, replay window, `initial_final`, source trace를 고친 뒤에만 `sbd_cases/`로 되돌린다.
-- `evidence_disposition=exclude_from_logic_tuning_until_fixed`로 분리된 케이스는 삭제된 것이 아니다. active 평균과 앱 로직 튜닝 근거에서만 제외하며, `_review_queue`의 action/reason/input evidence를 보고 라벨이나 window를 다시 확정한다.
+- `sbd_case_review_queue/`는 폐기한다. 재검토 대상은 별도 queue 디렉터리에 쌓지 않고, 백업 corpus에서 `language`, `chunks`, `expected_final`만 가진 record를 다시 만든다.
+- `sbd_predicted_cases/{en,ko,zh}/`는 백업 chunks에서 3회 이상 반복되는 token-sentence 후보로 `expected_final`을 예측한 challenge replay corpus다. 파일명은 기존 `sbd_cases/` shard명을 승계하지 않는다.
+- SBD benchmark report의 `actual_final`, `completed`, `staged`, action summary는 case 정답 생성 근거로 사용하지 않는다. report는 새 기준 corpus가 만들어진 뒤 앱 로직 평가에만 사용한다.
+- `evidence_disposition=exclude_from_logic_tuning_until_fixed`로 분리된 케이스는 active 평균과 앱 로직 튜닝 근거에서 제외한다. 다만 재구축 시에는 report action이 아니라 원 case의 `chunks`에서 반복 관측된 token-sentence 근거만 기준으로 삼는다.
 - structural preflight는 앱 lifecycle 병목을 보기 위한 도구이므로 `expected_final` 정의 품질 review 후보와 replay 입력 근거가 일부만 있거나 약한 후보를 기본적으로 제외한다. case 정의 문제를 일부러 보려면 `--expected-quality include` 또는 `only`, 입력 근거 문제를 보려면 `--input-evidence include` 또는 `weak-only`를 명시한다.
 
 ## 단일 엔트리
 
-기본 benchmark는 기존처럼 실행한다.
+기존 `sbd_cases/` challenge corpus는 폐기되었다. 기본 benchmark 입력은 새로 재구축한
+`sbd_predicted_cases/`이며, 레코드는 `language`, `chunks`, `expected_final`만 가진다.
+다른 corpus를 실행할 때는 `--cases`로 명시 입력을 넘긴다.
 
 ```text
-./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py --cases tests/eval/dictation_ai/sbd_cases
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py
 ```
 
 보조 작업은 같은 엔트리의 subcommand로 실행한다.
@@ -40,9 +44,32 @@
 ```text
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py commands
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases --help
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py build-expected-final-cases --help
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py export-gpt-case-review-packets --help
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py audit-initial-final-context --help
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py run-sweep --help
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py paper-readiness --help
+```
+
+정식 challenge replay 입력은 `sbd_predicted_cases/{en,ko,zh}/predicted-*.jsonl`이다.
+이 corpus는 `chunks`에서 의미가 비슷한 token-sentence가 기본 age 3회 이상 반복된 완성 문장을
+`expected_final`로 예측해 만든다. 다시 생성해야 할 때는 새 source JSONL을 명시해서
+`build-expected-final-cases`를 실행한다. 이 명령은 SBD benchmark 결과와 기존 `expected_final`을
+사용하지 않는다.
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py build-expected-final-cases \
+  path/to/source-chunks.jsonl \
+  --replace
+```
+
+검토용 빈 record만 만들 때는 `export-gpt-case-review-packets`를 사용한다. 이 record도 SBD
+benchmark 결과와 기존 `expected_final`을 포함하지 않고 `language`, `chunks`, 빈 `expected_final`만 담는다.
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py export-gpt-case-review-packets \
+  path/to/source-chunks.jsonl \
+  --output .tmp/eval/dictation-ai-sbd/gpt-case-review-packets.jsonl
 ```
 
 중간 스트림에서 시작한 challenge case가 이전 final/committed 상태 없이 재생되는지 확인할 때는
@@ -170,7 +197,7 @@ expected-quality flag가 없는 케이스, replay input evidence가 충분하고
 
 ```text
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py audit-initial-final-context \
-  tests/eval/dictation_ai/sbd_cases \
+  tests/eval/dictation_ai/sbd_predicted_cases \
   --benchmark-report .tmp/eval/dictation-ai-sbd/current-20260622-short-cjk-hold-0-default.json \
   --summary-output .tmp/eval/dictation-ai-sbd/case-definition-action-audit.json \
   --action-output .tmp/eval/dictation-ai-sbd/case-definition-action-items.jsonl

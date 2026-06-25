@@ -258,9 +258,7 @@ def validate_case_files(
                 if not line or line.startswith("#"):
                     continue
                 payload = json.loads(line)
-                case_id = str(payload.get("id") or "").strip()
-                if not case_id:
-                    raise ValueError(f"{path}:{line_no} missing case id")
+                case_id = str(payload.get("id") or f"{path.name}:{line_no}").strip()
                 previous = seen_ids.get(case_id)
                 if previous is not None:
                     raise ValueError(f"duplicate SBD case id {case_id!r}: {previous} and {path}:{line_no}")

@@ -8,14 +8,14 @@
 
 ## 현재 결론
 
-현재 1223건 `tests/eval/dictation_ai/sbd_cases/{en,ko,zh}/` 집합은 일반 운영 평균을 대표하지 않는다. 이 집합은 운영 로그에서 확정 누락, 중복 확정, boundary mismatch, staged residue가 반복 관측된 구간을 모은 failure-enriched challenge replay corpus다.
+기존 `tests/eval/dictation_ai/sbd_cases/` 집합은 폐기했다. 원인은 `expected_final`이 오직 `chunks`의 반복 유사 문장 분석으로 작성되지 않고, SBD benchmark 결과나 과거 수집 도구 산출물의 영향을 받은 케이스가 섞였기 때문이다. 새 challenge replay 입력은 폐기 전 source chunks에서 반복 token-sentence 근거로 `expected_final`을 예측해 만든 `tests/eval/dictation_ai/sbd_predicted_cases/`다. 재구축에 사용한 임시 backup source는 정식 입력이 아니므로 보관하지 않는다.
 
-따라서 이 corpus는 다음 목적에는 유효하다.
+따라서 새 challenge corpus는 다음 절차를 통과한 뒤에만 유효하다.
 
-- 같은 입력 집합에서 revision lifecycle 변경 전후 trade-off 비교
-- 실패 증상별 회귀 감지
-- 파라미터 후보의 채택/기각 근거 정리
-- `raw STT`, `SBD 후보`, `revision lifecycle`, `final-only sink`의 실패 축 분리
+- `chunks`만 보고 반복되는 유사 token-sentence 완성 문장을 `expected_final`로 작성한다.
+- SBD benchmark 결과의 `actual_final`, `completed`, `staged`는 정답 작성 근거로 쓰지 않는다.
+- 새 corpus를 실제 `sat + cuda + float16`로 다시 실행해 failure lifecycle trade-off를 측정한다.
+- 같은 입력 집합에서 revision lifecycle 변경 전후 trade-off를 비교한다.
 
 다음 주장은 현재 corpus만으로는 하지 않는다.
 
@@ -39,7 +39,7 @@
 | 단계 | 유지할 이유 | 산출물 | 논문 해석 |
 | --- | --- | --- | --- |
 | 로그 관측 | 실제 앱에서 반복된 확정 누락, 중복 확정, 문장 파괴를 식별한다. | 실패 후보, representative source 후보 | 문제 정의와 사례 근거 |
-| challenge replay | 같은 실패 입력 집합에서 lifecycle 변경 전후를 재현 가능하게 비교한다. | 1223건 reviewed case, CUDA/SaT benchmark report | failure lifecycle trade-off |
+| challenge replay | 같은 실패 입력 집합에서 lifecycle 변경 전후를 재현 가능하게 비교한다. | `sbd_predicted_cases/`와 CUDA/SaT benchmark report | failure lifecycle trade-off |
 | structural lifecycle check | threshold로 설명되지 않는 queue/revision/no-end/boundary 병목을 검증한다. | 구조 변경 전후 counter와 metric delta | 새 개선 후보의 제한적 근거 |
 | representative/translation replay | 운영 평균과 downstream 번역 안정성을 별도로 검증한다. | 사람이 확정한 representative case, final/translation 연결 report | 준비 전까지 보류 |
 
@@ -218,7 +218,7 @@
   --paper docs/paper/ko-revision-aware-realtime-stt.md \
   --source-audit .tmp/eval/dictation-ai-sbd/representative-source-audit.json \
   --review-packet-validation .tmp/eval/dictation-ai-sbd/representative-source-review-packets.validation.json \
-  --representative-cases tests/eval/dictation_ai/sbd_representative_cases \
+  --representative-cases .tmp/eval/dictation-ai-sbd/representative-cases \
   --review-packets .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json \
   --representative-draft-validation .tmp/eval/dictation-ai-sbd/representative-case-drafts.validation.json \
   --structural-preflight-validation .tmp/eval/dictation-ai-sbd/structural-lifecycle-cases.validation.json \
@@ -280,7 +280,7 @@ review packet은 manifest의 `source_started_at`과 `source_ended_at` 범위 안
 
 | 단계 | 목적 | 입력 | 통과 기준 | 금지 해석 |
 | --- | --- | --- | --- | --- |
-| 1. challenge replay | 실패 재현과 lifecycle trade-off 비교 | `sbd_cases/{en,ko,zh}`의 reviewed case | 같은 case set baseline 대비 언어별/태그별 악화가 설명 가능해야 한다. | 운영 평균 품질, 보편 threshold 최적성 |
+| 1. challenge replay | 실패 재현과 lifecycle trade-off 비교 | source chunks에서 반복 token-sentence 근거로 예측한 `sbd_predicted_cases/` | 같은 case set baseline 대비 언어별/태그별 악화가 설명 가능해야 한다. | 운영 평균 품질, 보편 threshold 최적성 |
 | 2. structural lifecycle check | threshold로 설명되지 않는 queue/revision 병목 검증 | challenge replay 중 queue/residue/exemplar가 큰 case와 전체 challenge set | `final_f1`뿐 아니라 queue residue, deferred replacement, boundary F1이 같은 방향으로 개선되어야 한다. | 특정 문구/언어 예외 규칙 채택 |
 | 3. representative replay | 운영 평균 추정 | 시간/세션 단위 sampled case | sampling metadata와 expected final이 모두 있고, challenge 결과와 별도 표로 제시되어야 한다. | 실패 corpus 평균과의 직접 합산 |
 
@@ -310,15 +310,15 @@ review packet은 manifest의 `source_started_at`과 `source_ended_at` 범위 안
 
 - subset 평균을 논문 성능 수치로 쓰지 않는다.
 - 구조 변경 전후의 counter 움직임을 빠르게 확인하는 용도로만 쓴다.
-- 개선 후보가 보이면 같은 변경을 전체 `sbd_cases/{en,ko,zh}` challenge replay에서 `sat + cuda + float16`로 재실행한다.
+- 개선 후보가 보이면 같은 변경을 새로 작성한 전체 challenge replay에서 `sat + cuda + float16`로 재실행한다.
 - subset이 특정 언어에 치우칠 수 있으므로 언어별 ad-hoc 규칙의 근거로 쓰지 않는다.
 
 ## Corpus 역할
 
 | corpus | 위치 | 목적 | 평균값 해석 |
 | --- | --- | --- | --- |
-| `challenge-replay` | `tests/eval/dictation_ai/sbd_cases/{en,ko,zh}/` | 실패 재현, 회귀 추적, lifecycle 튜닝 | 실패 중심 입력에서의 회수/경계/잔류 |
-| `representative` | `tests/eval/dictation_ai/sbd_representative_cases/` | 운영 평균 추정 | 시간/세션 표본의 평균 품질 |
+| `challenge-replay` | 새 reviewed corpus 경로 | 실패 재현, 회귀 추적, lifecycle 튜닝 | 실패 중심 입력에서의 회수/경계/잔류 |
+| `representative` | `.tmp/eval/dictation-ai-sbd/representative-cases/` | 운영 평균 추정 | 시간/세션 표본의 평균 품질 |
 | `exploratory` | 명시 입력 경로 | 탐색, 임시 분석 | 논문 수치로 직접 쓰지 않음 |
 
 `challenge-replay`와 `representative` 평균은 한 표에서 섞지 않는다. 파라미터 후보는 먼저 challenge replay에서 실패군 악화 여부를 확인하고, representative corpus가 준비되면 운영 평균 악화 여부를 별도로 확인한다.
@@ -455,7 +455,7 @@ validator는 packet version, manifest 선택 수와 언어별 선택 수, packet
   --dry-run
 ```
 
-현재 비어 있는 draft 그대로는 이 명령이 실패해야 정상이다. 승격 도구는 `expected_final`을 자동 생성하지 않고, 검증을 통과한 reviewed case만 `tests/eval/dictation_ai/sbd_representative_cases/{en,ko,zh}/reviewed-representative-{language}-{hash}.jsonl`로 저장한다.
+현재 비어 있는 draft 그대로는 이 명령이 실패해야 정상이다. 승격 도구는 `expected_final`을 자동 생성하지 않고, 검증을 통과한 reviewed case만 `.tmp/eval/dictation-ai-sbd/representative-cases/{en,ko,zh}/reviewed-representative-{language}-{hash}.jsonl`로 저장한다.
 
 source audit과 review packet 검증 뒤에는 follow-up readiness audit으로 다음 병목을 명시한다.
 
@@ -463,7 +463,7 @@ source audit과 review packet 검증 뒤에는 follow-up readiness audit으로 �
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py followup-readiness \
   --source-audit .tmp/eval/dictation-ai-sbd/representative-source-audit.json \
   --review-packet-validation .tmp/eval/dictation-ai-sbd/representative-source-review-packets.validation.json \
-  --representative-cases tests/eval/dictation_ai/sbd_representative_cases \
+  --representative-cases .tmp/eval/dictation-ai-sbd/representative-cases \
   --review-packets .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json \
   --representative-draft-validation .tmp/eval/dictation-ai-sbd/representative-case-drafts.validation.json \
   --summary-output .tmp/eval/dictation-ai-sbd/followup-readiness.json
@@ -475,7 +475,7 @@ source audit과 review packet 검증 뒤에는 follow-up readiness audit으로 �
 
 ```text
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py validate-cases \
-  tests/eval/dictation_ai/sbd_representative_cases \
+  .tmp/eval/dictation-ai-sbd/representative-cases \
   --max-drafts 0 \
   --review-packets .tmp/eval/dictation-ai-sbd/representative-source-review-packets.json
 ```
@@ -513,7 +513,7 @@ Translation replay는 SBD/finalization replay와 다른 실험이다. SBD replay
 
 ```text
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
-  --cases tests/eval/dictation_ai/sbd_cases \
+  --cases tests/eval/dictation_ai/sbd_predicted_cases \
   --device cuda \
   --compute-type float16
 ```

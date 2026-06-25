@@ -61,8 +61,8 @@
 - 테스트 없이 가상장치 생성/검증 로직의 분기, 기본값, 권한/릴레이 경로를 변경하지 않는다.
 - `tests/unit/`은 앱 코드의 품질관리 유닛테스트만 둔다. 받아쓰기 AI 논문/벤치/케이스 관리 도구의 계약 테스트는 `tests/eval/dictation_ai/tool_tests/`에 둔다.
 - `tests/eval/dictation_ai/` 루트에는 `sbd_benchmark.py` 단일 평가 entrypoint만 둔다. 새 구현/보조 모듈은 `tests/eval/dictation_ai/README.md`의 도메인 경계를 먼저 확인하고 하위 도메인에 배치한 뒤, 필요하면 `sbd_benchmark.py` subcommand로 연결한다.
-- 받아쓰기 AI 로그 기반 challenge replay 케이스는 `tests/eval/dictation_ai/sbd_cases/{en,ko,zh}/` 아래에 언어별, case id 해시 shard JSONL로 누적하고 `tests/eval/dictation_ai/sbd_benchmark.py`로 검증한다.
-- 일반 운영 평균을 보기 위한 representative corpus는 `tests/eval/dictation_ai/sbd_representative_cases/`에 별도로 두고, challenge replay 평균과 섞어 해석하지 않는다.
+- 받아쓰기 AI 로그 기반 challenge replay 케이스의 기존 `tests/eval/dictation_ai/sbd_cases/` corpus는 폐기되었다. 새 challenge replay 입력은 `tests/eval/dictation_ai/sbd_predicted_cases/{en,ko,zh}/`에 두며, 레코드는 `language`, `chunks`, `expected_final`만 가진다. `expected_final`은 SBD 벤치 출력이 아니라 백업 chunks의 반복 token-sentence 근거로 예측한다.
+- 일반 운영 평균을 보기 위한 representative corpus는 `.tmp/eval/dictation-ai-sbd/representative-cases/`에 별도로 두고, challenge replay 평균과 섞어 해석하지 않는다.
 - 받아쓰기 AI 논문/실험 해석은 `docs/2026-06-21-dictation-ai-experiment-protocol.md`의 corpus 역할, 지표, 파라미터 채택 기준을 따른다.
 - 받아쓰기 AI 파라미터 sweep 결과를 논문/실험일지 근거로 정리할 때는 `summary.json`의 `corpus_role`과 `evidence_summary`를 우선 확인하고, full `tag_summary`는 세부 진단용으로 사용한다.
 - 받아쓰기 AI SBD 벤치마크는 반드시 실제 `sat + cuda + float16`로만 실행한다. mock/smoke/CPU 벤치는 성능 근거로 사용하지 않는다.

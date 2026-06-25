@@ -7,8 +7,11 @@ from typing import Any, Iterable
 
 
 SBD_CASE_ROOT = Path(__file__).resolve().parents[1]
-SBD_CHALLENGE_CASE_DIR = SBD_CASE_ROOT / "sbd_cases"
-SBD_REPRESENTATIVE_CASE_DIR = SBD_CASE_ROOT / "sbd_representative_cases"
+# Rebuilt challenge corpus. Records keep only language/chunks/expected_final and
+# are generated from chunks-only repeated token-sentence evidence, not from SBD
+# benchmark output.
+SBD_CHALLENGE_CASE_DIR = SBD_CASE_ROOT / "sbd_predicted_cases"
+SBD_REPRESENTATIVE_CASE_DIR = SBD_CASE_ROOT / "representative_cases"
 SBD_CHALLENGE_LANGUAGES = ("en", "ko", "zh")
 REPRESENTATIVE_REQUIRED_FIELDS = (
     "corpus_role",

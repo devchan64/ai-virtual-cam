@@ -14,6 +14,8 @@ class DictationAiSbdEntrypointTest(unittest.TestCase):
             set(sbd_benchmark._SUBCOMMANDS),
             {
                 "audit-initial-final-context",
+                "build-expected-final-cases",
+                "export-gpt-case-review-packets",
                 "extract-representative-drafts",
                 "extract-review-packets",
                 "followup-readiness",

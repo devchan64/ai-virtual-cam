@@ -39,7 +39,7 @@ def _case(case_id: str, *, queue_len: int, boundary_f1: float, queue_revision: i
             "source_log": ".tmp/logs/avc-whisper.log",
             "source_chunk": 1,
             "review_group_id": "group-a",
-            "review_source_file": "tests/eval/dictation_ai/sbd_cases/en/reviewed-context-en-a.jsonl",
+            "review_source_file": "tests/eval/dictation_ai/sbd_predicted_cases/en/predicted-en-000.jsonl",
         },
         "case_definition_flags": [],
     }

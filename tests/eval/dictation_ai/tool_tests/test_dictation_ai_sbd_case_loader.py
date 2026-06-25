@@ -73,10 +73,10 @@ class DictationAiSbdCaseLoaderTest(unittest.TestCase):
     def test_default_case_inputs_use_reviewed_case_directory_when_present(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            reviewed = root / "sbd_cases"
+            reviewed = root / "sbd_predicted_cases"
             language_dir = reviewed / "en"
             language_dir.mkdir(parents=True)
-            self._write_case(language_dir / "reviewed-context-en-a.jsonl", "reviewed-case")
+            self._write_case(language_dir / "predicted-en-000.jsonl", "reviewed-case")
 
             with patch(
                 "tests.eval.dictation_ai.cases.sbd_case_paths.SBD_CHALLENGE_CASE_DIR",
@@ -92,7 +92,7 @@ class DictationAiSbdCaseLoaderTest(unittest.TestCase):
     def test_default_case_inputs_ignore_non_language_grouped_cases(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            reviewed = root / "sbd_cases"
+            reviewed = root / "sbd_predicted_cases"
             group_dir = reviewed / "auto-groups"
             group_dir.mkdir(parents=True)
             self._write_case(group_dir / "reviewed-group.jsonl", "reviewed-case")
@@ -108,12 +108,12 @@ class DictationAiSbdCaseLoaderTest(unittest.TestCase):
     def test_explicit_challenge_root_ignores_non_language_grouped_cases(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            reviewed = root / "sbd_cases"
+            reviewed = root / "sbd_predicted_cases"
             language_dir = reviewed / "en"
             group_dir = reviewed / "auto-groups"
             language_dir.mkdir(parents=True)
             group_dir.mkdir()
-            self._write_case(language_dir / "reviewed-context-en-a.jsonl", "reviewed-case")
+            self._write_case(language_dir / "predicted-en-000.jsonl", "reviewed-case")
             self._write_case(group_dir / "reviewed-group.jsonl", "ignored-case")
 
             with patch(
@@ -123,13 +123,13 @@ class DictationAiSbdCaseLoaderTest(unittest.TestCase):
                 cases, sources = load_cases([reviewed])
 
         self.assertEqual([case.id for case in cases], ["reviewed-case"])
-        self.assertEqual(sources, [str(language_dir / "reviewed-context-en-a.jsonl")])
+        self.assertEqual(sources, [str(language_dir / "predicted-en-000.jsonl")])
 
     def test_case_corpus_role_marks_challenge_and_representative_roots(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            challenge = root / "sbd_cases"
-            representative = root / "sbd_representative_cases"
+            challenge = root / "sbd_predicted_cases"
+            representative = root / "representative_cases"
             challenge_file = challenge / "en" / "case.jsonl"
             representative_file = representative / "case.jsonl"
 
@@ -145,7 +145,7 @@ class DictationAiSbdCaseLoaderTest(unittest.TestCase):
 
     def test_default_case_inputs_empty_when_reviewed_directory_has_no_jsonl(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            reviewed = Path(tmpdir) / "sbd_cases"
+            reviewed = Path(tmpdir) / "sbd_predicted_cases"
             reviewed.mkdir()
 
             with patch("tests.eval.dictation_ai.cases.sbd_case_paths.SBD_CHALLENGE_CASE_DIR", reviewed):
@@ -232,7 +232,7 @@ class DictationAiSbdCaseLoaderTest(unittest.TestCase):
 
     def test_representative_benchmark_input_requires_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir) / "sbd_representative_cases"
+            root = Path(tmpdir) / "representative_cases"
             root.mkdir()
             path = root / "cases.jsonl"
             self._write_case(path, "representative-case")
@@ -243,7 +243,7 @@ class DictationAiSbdCaseLoaderTest(unittest.TestCase):
 
     def test_representative_benchmark_input_accepts_reviewed_case(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir) / "sbd_representative_cases"
+            root = Path(tmpdir) / "representative_cases"
             root.mkdir()
             path = root / "cases.jsonl"
             payload = {
@@ -288,7 +288,7 @@ class DictationAiSbdCaseLoaderTest(unittest.TestCase):
 
     def test_representative_benchmark_input_rejects_unsupported_sampling_unit(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir) / "sbd_representative_cases"
+            root = Path(tmpdir) / "representative_cases"
             root.mkdir()
             path = root / "cases.jsonl"
             payload = {

@@ -424,10 +424,10 @@ class DictationAiPaperReadinessAuditTest(unittest.TestCase):
         self.assertIn(str(Path(tmpdir) / "structural-result.json"), available_experiments[2]["preflight_command"])
         self.assertIn("--paper-evidence", available_experiments[2]["full_challenge_replay_command"])
         self.assertIn(
-            "tests/eval/dictation_ai/sbd_cases",
+            "tests/eval/dictation_ai/sbd_predicted_cases",
             available_experiments[2]["full_challenge_replay_command"],
         )
-        self.assertIn("full 1113-case challenge replay", available_experiments[2]["promotion_requirement"])
+        self.assertIn("rerun the full sbd_predicted_cases challenge replay", available_experiments[2]["promotion_requirement"])
         self.assertIn(
             "operating_average_quality",
             result["methodology_decision"]["blocked_claims"],

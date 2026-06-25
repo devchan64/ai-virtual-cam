@@ -254,7 +254,7 @@ def main() -> int:
     parser.add_argument(
         "--representative-cases",
         type=Path,
-        default=Path("tests/eval/dictation_ai/sbd_representative_cases"),
+        default=Path(".tmp/eval/dictation-ai-sbd/representative-cases"),
     )
     parser.add_argument(
         "--review-packets",
