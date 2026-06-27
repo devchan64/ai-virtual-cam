@@ -159,3 +159,15 @@
 - 분할 조건은 접속어 문자열 자체가 아니라 종결 경계 존재, `no_end_marker`, internal stability, pending tail 길이, deferred revision 여부, later completed extension 부재 같은 구조 신호만 사용한다.
 - 성능 평가는 전체 평균 `final_f1_avg`보다 strict logic candidate subset, `underfinal_boundary_or_revision`, `boundary_granularity`, `stage_replace_deferred`, `stage_revision_token_sentence_deferred` 변화로 먼저 판단한다.
 - 소절 분할 완화는 `overfinal_or_extra_final`을 늘릴 위험이 있으므로, 전역 완화가 아니라 strict subset에서 근거가 확인된 경로에만 단계적으로 적용한다.
+
+### 소절 관리 패턴 작성 방법
+
+- 소절 관리 문서는 특정 문구를 어떻게 자를지 적는 문서가 아니라, 어떤 구조 병목을 어떤 파라미터 축으로 다룰지 적는 문서로 작성한다.
+- 시작점은 예시 문장 모음이 아니라 로그 증상 분류다. 먼저 `긴 문장 과결합`, `미확정 소절 잔류`, `조기 final`, `recent-final echo`, `queue residue` 중 어디에 속하는지 정한다.
+- 증상을 정한 뒤에는 곧바로 문구 규칙을 추가하지 않고, 현재 계측값을 상위 축에 매핑한다. 예를 들어 `stage_replace_deferred`, `stage_revision_token_sentence_deferred`, `stage_finalize_right_context`, `stage_candidate_quality_blocked`, `stage_age_hold` 중 무엇이 주원인인지 먼저 적는다.
+- 그 다음에만 파라미터 후보를 고른다. 소절 관리에서 우선 검토할 축은 `SENTENCE_CONFIRM_CHUNKS`, `SHORT_NO_END_FRAGMENT_UNITS`, `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS`, `DELTA_SUPPRESSED_STAGE_MAX_CHUNKS`, recent-final compact/echo 계열, revision similarity/confirmation preserve 계열이다.
+- 문서에는 "이 문장을 자르기 위해 값을 바꾼다"가 아니라 "이 축을 바꾸면 어떤 구조 병목이 줄어야 한다"를 적는다. 예: `SHORT_NO_END_FRAGMENT_UNITS` 완화는 no-end 품질 차단 완화, `STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS` 조정은 stale queue head 감소, `SENTENCE_CONFIRM_CHUNKS` 조정은 premature final 대 recall trade-off 검토다.
+- 후보 파라미터는 한 번에 한 축만 바꾼다. 두 개 이상을 동시에 조정한 결과는 원인 해석 문서가 아니라 탐색 메모로만 남긴다.
+- 채택 기준은 예시 문장 성공 여부가 아니라, strict subset과 상위 lifecycle metric의 동시 개선이다. `final_f1_avg`만 오르고 `boundary_f1`, `stage_age_quality_blocked`, `stage_replace_deferred`, 언어별 precision이 악화되면 채택하지 않는다.
+- 기각 기준도 함께 적는다. 이미 sweep이나 실험일지에서 악화가 확인된 축은 같은 목적의 새 예외 패치 대신 "왜 재시도하지 않는지"를 명시한다.
+- 따라서 소절 관리 패턴의 기본 형식은 `증상 -> 상위 메커니즘 -> 파라미터 축 -> 예상 trade-off -> sweep 결과 -> 채택/기각`이다.
