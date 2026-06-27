@@ -44,6 +44,7 @@ from src.app.dictation_transcript_logic import (
     _should_reset_revision_age,
     _should_split_terminal_tail_revision,
     _should_stage_boundary_candidate,
+    _split_closed_sentence_appended_revision,
     _should_suppress_delta_final,
     _strip_prior_pending_prefix_from_final,
     _strip_prior_pending_prefix_revision,
@@ -557,6 +558,18 @@ def _stage_completed_sentence(
                 state.count("stage_age_finalize")
                 reason = "aged_forced" if state.staged_forced else "aged"
             else:
+                split_revision = _split_closed_sentence_appended_revision(previous, state.staged_sentence, language)
+                if split_revision is not None:
+                    preserved_sentence, tail_sentence = split_revision
+                    tail_forced = state.staged_forced or forced
+                    state.count("stage_revision_closed_sentence_split")
+                    state.staged_sentence = preserved_sentence
+                    finalized = _finalize_staged_sentence(state, language, "next_completed", chunk_index)
+                    if tail_sentence:
+                        _queue_staged_sentence(state, tail_sentence, tail_forced, chunk_index)
+                        if not state.staged_sentence:
+                            _promote_next_staged_sentence(state, chunk_index)
+                    return finalized
                 state.count("stage_finalize_before_replace")
                 reason = "next_completed"
             return _finalize_staged_sentence(state, language, reason, chunk_index)

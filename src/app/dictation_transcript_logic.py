@@ -1877,6 +1877,56 @@ def _is_cjk_prefixed_truncated_revision(left: str, right: str) -> bool:
     return first.size >= 6 and len(right_suffix_units) >= 3
 
 
+_TERMINAL_END_MARK_RE = re.compile(r"[.!?。？！]+$")
+
+
+def _strip_terminal_end_markers(text: str) -> str:
+    return _TERMINAL_END_MARK_RE.sub("", _normalized_text(text)).rstrip()
+
+
+def _split_closed_sentence_appended_revision(previous: str, preferred: str, language: str) -> tuple[str, str] | None:
+    normalized_previous = _normalized_text(previous)
+    normalized_preferred = _normalized_text(preferred)
+    normalized_language = str(language or "").strip().lower()
+    previous_words = _word_units(normalized_previous)
+    preferred_words = _word_units(normalized_preferred)
+    cjk_like_text = (
+        normalized_language in {"ko", "zh", "ja"}
+        or _is_cjk_text(normalized_previous)
+        or _is_cjk_text(normalized_preferred)
+        or _has_hangul_words(previous_words)
+        or _has_hangul_words(preferred_words)
+    )
+    if (
+        not normalized_previous
+        or not normalized_preferred
+        or normalized_previous == normalized_preferred
+        or not cjk_like_text
+    ):
+        return None
+    if _boundary_sentence_end_count(normalized_previous) == 0 or _boundary_sentence_end_count(normalized_preferred) == 0:
+        return None
+    if _boundary_sentence_end_count(normalized_previous) != _boundary_sentence_end_count(normalized_preferred):
+        return None
+    previous_core = _strip_terminal_end_markers(normalized_previous)
+    if not previous_core or previous_core == normalized_previous:
+        return None
+    if normalized_preferred.startswith(normalized_previous):
+        return None
+    if not normalized_preferred.startswith(previous_core):
+        return None
+    suffix = normalized_preferred[len(previous_core) :].strip()
+    suffix_words = _word_units(suffix)
+    if len(suffix_words) < 4:
+        return None
+    suffix_flags = set(_final_sentence_diagnostic_flags(suffix, language))
+    if suffix_flags.intersection({"empty", "spaced_cjk", "cjk_internal_gap", "cjk_repeated_ngram", "repeated_word_ngram"}):
+        return None
+    if _boundary_sentence_end_count(suffix) == 0 and "no_end_marker" in suffix_flags:
+        return None
+    return normalized_previous, suffix
+
+
 def _prefer_sentence_revision(left: str, right: str) -> str:
     right = _trim_repeated_cjk_revision_prefix(left, right)
     left_words = _word_units(left)

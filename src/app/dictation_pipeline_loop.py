@@ -55,6 +55,7 @@ from src.app.dictation_transcript_logic import (
     _should_reset_revision_age,
     _should_split_terminal_tail_revision,
     _should_stage_boundary_candidate,
+    _split_closed_sentence_appended_revision,
     _should_suppress_delta_final,
     _should_translate_final_sentence,
     _stable_window_text,
@@ -759,6 +760,25 @@ def run_transcribe_loop(
                     count_metric("stage_age_finalize")
                     reason = "aged_forced" if active_stage.forced else "aged"
                 else:
+                    split_revision = _split_closed_sentence_appended_revision(staged_before, active_stage.sentence, detected)
+                    if split_revision is not None:
+                        preserved_sentence, tail_sentence = split_revision
+                        tail_forced = active_stage.forced or forced
+                        count_metric("stage_revision_closed_sentence_split")
+                        active_stage.sentence = preserved_sentence
+                        finalized = finalize_staged_sentence(detected, "next_completed")
+                        if tail_sentence:
+                            queue_staged_sentence(tail_sentence, tail_forced)
+                            if not active_stage.sentence:
+                                promote_next_staged_sentence(detected)
+                        worker._emit(
+                            "status",
+                            "받아쓰기 AI stage 리비전 분할 보존: "
+                            f"chunk={chunks} preserved_tail={_diagnostic_tail(preserved_sentence)} "
+                            f"tail_tail={_diagnostic_tail(tail_sentence)}",
+                            display=False,
+                        )
+                        return finalized
                     count_metric("stage_finalize_before_replace")
                     reason = "next_completed"
                 return finalize_staged_sentence(detected, reason)
