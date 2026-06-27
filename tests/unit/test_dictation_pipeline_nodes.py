@@ -35,9 +35,7 @@ from src.app.dictation_pipeline_settings import (
     dictation_tuning_protocol,
 )
 from src.app.dictation_transcript_logic import (
-    _prefix_growth_finalize_reason,
     _prefer_sentence_revision,
-    _split_closed_sentence_appended_revision,
     _strip_prior_pending_prefix_from_final,
     _strip_prior_pending_prefix_revision,
     _should_translate_final_sentence,
@@ -340,54 +338,6 @@ class DictationPipelineNodeTest(unittest.TestCase):
         )
 
         self.assertEqual(final, "I went to the store")
-
-    def test_split_closed_sentence_appended_revision_preserves_closed_cjk_sentence(self) -> None:
-        split = _split_closed_sentence_appended_revision(
-            "대통령 같은 경우는 재정지출 확대가 우려된다 하면서 자본이탈의 악재로 작용할 수 있으니 기준금리를 올려서라도 우리 화폐를 좀 방어해야 될 상황입니다.",
-            "대통령 같은 경우는 재정지출 확대가 우려된다 하면서 자본이탈의 악재로 작용할 수 있으니 기준금리를 올려서라도 우리 화폐를 좀 방어해야 될 상황입니다 라고 하면서 나름대로 국민들에게.",
-            "ko",
-        )
-
-        self.assertEqual(
-            split,
-            (
-                "대통령 같은 경우는 재정지출 확대가 우려된다 하면서 자본이탈의 악재로 작용할 수 있으니 기준금리를 올려서라도 우리 화폐를 좀 방어해야 될 상황입니다.",
-                "라고 하면서 나름대로 국민들에게.",
-            ),
-        )
-
-    def test_split_closed_sentence_appended_revision_skips_non_cjk_open_clause(self) -> None:
-        split = _split_closed_sentence_appended_revision(
-            "This is already complete.",
-            "This is already complete and keeps going with a longer clause.",
-            "en",
-        )
-
-        self.assertIsNone(split)
-
-    def test_prefix_growth_finalize_reason_confirms_repeated_cjk_clause(self) -> None:
-        reason = _prefix_growth_finalize_reason(
-            "이런 느낌의 문구들이 나오는 저 전광판이에요.",
-            "이런 느낌의 문구들이 나오는 저 전광판이에요. 처음에 나도 마마가 왜 이렇게 있어?",
-            3,
-            2,
-            False,
-            3,
-        )
-
-        self.assertEqual(reason, "confirmed")
-
-    def test_prefix_growth_finalize_reason_ages_open_cjk_clause(self) -> None:
-        reason = _prefix_growth_finalize_reason(
-            "이런 느낌의 문구들이 나오는 저 큰 전광판이에요 정말",
-            "이런 느낌의 문구들이 나오는 저 큰 전광판이에요 정말 처음에 나도 마마가 왜 이렇게 있어?",
-            2,
-            3,
-            False,
-            3,
-        )
-
-        self.assertEqual(reason, "aged")
 
     def test_cjk_revision_keeps_longer_tail_when_prefix_is_same(self) -> None:
         preferred = _prefer_sentence_revision(

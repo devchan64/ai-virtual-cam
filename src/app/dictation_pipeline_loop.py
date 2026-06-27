@@ -33,7 +33,6 @@ from src.app.dictation_transcript_logic import (
     _pending_overrun_reason,
     _pending_text_diagnostic_flags,
     _prefer_sentence_revision,
-    _prefix_growth_finalize_reason,
     _recent_final_output_delta,
     _replacement_decision_reason,
     _revision_internal_stability_bucket,
@@ -47,7 +46,6 @@ from src.app.dictation_transcript_logic import (
     _should_confirm_staged_sentence,
     _should_defer_token_sentence_revision,
     _should_defer_unconfirmed_replacement,
-    _should_finalize_confirmed_before_prefix_drop_revision,
     _should_finalize_before_replacement,
     _should_finalize_with_right_context,
     _should_finalize_replaced_sentence,
@@ -56,7 +54,6 @@ from src.app.dictation_transcript_logic import (
     _should_reset_revision_age,
     _should_split_terminal_tail_revision,
     _should_stage_boundary_candidate,
-    _split_closed_sentence_appended_revision,
     _should_suppress_delta_final,
     _should_translate_final_sentence,
     _stable_window_text,
@@ -593,32 +590,6 @@ def run_transcribe_loop(
             return finalized
         is_revision = _sentences_are_revisions(active_stage.sentence, candidate)
         if is_revision:
-            if _should_finalize_confirmed_before_prefix_drop_revision(
-                active_stage.sentence,
-                candidate,
-                active_stage.confirmations,
-                active_stage.forced,
-            ):
-                count_metric("stage_confirmed_before_prefix_drop_revision")
-                return finalize_staged_sentence(detected, "confirmed")
-            prefix_growth_finalize_reason = _prefix_growth_finalize_reason(
-                active_stage.sentence,
-                candidate,
-                active_stage.confirmations,
-                active_stage.age,
-                active_stage.forced,
-                sentence_finalize_age,
-            )
-            if prefix_growth_finalize_reason is not None:
-                count_metric("stage_finalize_before_prefix_growth_revision")
-                if prefix_growth_finalize_reason == "confirmed":
-                    count_metric("stage_confirmed_before_prefix_growth_revision")
-                else:
-                    count_metric("stage_age_finalize_before_prefix_growth_revision")
-                return finalize_staged_sentence(
-                    detected,
-                    "confirmed_forced" if prefix_growth_finalize_reason == "confirmed" and active_stage.forced else prefix_growth_finalize_reason,
-                )
             count_metric("stage_revision")
             count_segment_state("revised")
             staged_before = active_stage.sentence
@@ -779,25 +750,6 @@ def run_transcribe_loop(
                     count_metric("stage_age_finalize")
                     reason = "aged_forced" if active_stage.forced else "aged"
                 else:
-                    split_revision = _split_closed_sentence_appended_revision(staged_before, active_stage.sentence, detected)
-                    if split_revision is not None:
-                        preserved_sentence, tail_sentence = split_revision
-                        tail_forced = active_stage.forced or forced
-                        count_metric("stage_revision_closed_sentence_split")
-                        active_stage.sentence = preserved_sentence
-                        finalized = finalize_staged_sentence(detected, "next_completed")
-                        if tail_sentence:
-                            queue_staged_sentence(tail_sentence, tail_forced)
-                            if not active_stage.sentence:
-                                promote_next_staged_sentence(detected)
-                        worker._emit(
-                            "status",
-                            "받아쓰기 AI stage 리비전 분할 보존: "
-                            f"chunk={chunks} preserved_tail={_diagnostic_tail(preserved_sentence)} "
-                            f"tail_tail={_diagnostic_tail(tail_sentence)}",
-                            display=False,
-                        )
-                        return finalized
                     count_metric("stage_finalize_before_replace")
                     reason = "next_completed"
                 return finalize_staged_sentence(detected, reason)

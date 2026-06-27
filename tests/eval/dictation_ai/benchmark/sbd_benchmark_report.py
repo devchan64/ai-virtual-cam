@@ -34,59 +34,18 @@ LIFECYCLE_BOTTLENECK_METRICS = (
     "finalized",
     "stage_replace",
     "stage_replace_deferred",
-    "stage_queue_enqueue",
     "stage_queue_revision",
-    "stage_queue_revision_token_sentence_deferred",
     "stage_queue_promote",
-    "stage_queue_recent_final_suppressed",
-    "stage_queue_recent_final_delta_trimmed",
-    "stage_finalize_deferred_for_queue_revision",
-    "stage_finalize_right_context",
-    "stage_finalize_before_replace",
     "stage_age_hold",
-    "stage_age_tick",
     "stage_age_finalize",
     "stage_age_quality_blocked",
-    "stage_age_no_text_skipped",
-    "stage_confirm_deferred_later_extension",
     "stage_revision",
-    "stage_revision_changed",
-    "stage_revision_age_reset",
     "stage_revision_token_sentence_deferred",
-    "stage_revision_terminal_tail_split",
-    "stage_revision_candidate_quality_blocked",
-    "stage_queue_quality_suppressed",
     "stage_candidate_quality_blocked",
-    "stage_candidate_quality_no_end_marker",
-    "stage_candidate_quality_short_no_end_fragment",
-    "stage_candidate_quality_short_no_end_fragment_with_later_completed",
-    "stage_candidate_quality_trailing_ellipsis",
-    "stage_blocked_short_no_end_aged_active_stage",
-    "stage_blocked_short_no_end_active_stage_quality_suppressed",
-    "stage_no_text_stale_suppressed",
-    "stage_replace_deferred_same_chunk",
-    "stage_replaced_unconfirmed",
-    "final_quality_no_end_marker",
     "pending_overrun",
-    "pending_overrun_reason_long_no_boundary",
-    "pending_quality_repeated_word_ngram",
-    "pending_quality_cjk_repeated_ngram",
-    "pending_quality_overrun_long_no_boundary",
     "candidate_delta_trimmed",
-    "candidate_delta_trimmed_cjk",
     "candidate_recent_final_delta_trimmed",
     "candidate_duplicate_suppressed",
-    "candidate_pending_prefix_mixed_suppressed",
-    "candidate_prior_pending_prefix_trimmed",
-    "candidate_prior_pending_recent_final_mixed_suppressed",
-    "finalize_attempt",
-    "finalize_delta_fragment_preserved",
-    "finalize_delta_suppressed",
-    "finalize_delta_suppressed_stage_dropped",
-    "finalize_delta_suppressed_stage_retained",
-    "finalize_duplicate_suppressed",
-    "finalize_recent_delta_trimmed",
-    "finalize_recent_echo_suppressed",
 )
 DEFERRED_REPLACEMENT_REASONS = frozenset(
     {
@@ -118,38 +77,17 @@ LIFECYCLE_FOCUS_TAG_MARKERS = (
     "terminal-tail",
 )
 CASE_EXEMPLAR_METRICS = (
-    "stage_queue_revision",
-    "stage_queue_revision_token_sentence_deferred",
-    "stage_queue_promote",
-    "stage_queue_recent_final_suppressed",
-    "stage_finalize_deferred_for_queue_revision",
-    "stage_revision_age_reset",
-    "stage_revision_token_sentence_deferred",
-    "stage_queue_quality_suppressed",
     "stage_replace_deferred",
-    "stage_replace_deferred_same_chunk",
+    "stage_queue_revision",
+    "stage_queue_promote",
+    "stage_revision_token_sentence_deferred",
     "stage_age_hold",
     "stage_age_quality_blocked",
-    "stage_confirm_deferred_later_extension",
     "stage_candidate_quality_blocked",
-    "stage_candidate_quality_no_end_marker",
-    "stage_candidate_quality_short_no_end_fragment",
-    "stage_candidate_quality_short_no_end_fragment_with_later_completed",
-    "stage_candidate_quality_trailing_ellipsis",
-    "stage_blocked_short_no_end_aged_active_stage",
-    "stage_blocked_short_no_end_active_stage_quality_suppressed",
     "pending_overrun",
-    "pending_quality_repeated_word_ngram",
-    "pending_quality_overrun_long_no_boundary",
     "candidate_delta_trimmed",
-    "candidate_delta_trimmed_cjk",
     "candidate_recent_final_delta_trimmed",
     "candidate_duplicate_suppressed",
-    "candidate_pending_prefix_mixed_suppressed",
-    "candidate_prior_pending_prefix_trimmed",
-    "candidate_prior_pending_recent_final_mixed_suppressed",
-    "finalize_delta_fragment_preserved",
-    "finalize_recent_echo_suppressed",
 )
 CASE_EXEMPLAR_LIMIT = 8
 CASE_EXEMPLAR_PREVIEW_CHARS = 160
@@ -3396,20 +3334,7 @@ def summarize_lifecycle_bottlenecks(results: list[dict[str, Any]], metric_totals
 
 
 def _lifecycle_metric_keys(metric_totals: dict[str, int]) -> list[str]:
-    keys = set(LIFECYCLE_BOTTLENECK_METRICS)
-    for key, value in metric_totals.items():
-        if not int(value):
-            continue
-        if key.startswith(
-            (
-                "stage_candidate_quality_",
-                "final_quality_",
-                "pending_quality_",
-                "stage_replace_decision_",
-            )
-        ):
-            keys.add(key)
-    return sorted(keys)
+    return sorted(LIFECYCLE_BOTTLENECK_METRICS)
 
 
 def _summarize_metric_presence(results: list[dict[str, Any]], metric_keys: tuple[str, ...]) -> dict[str, dict[str, Any]]:

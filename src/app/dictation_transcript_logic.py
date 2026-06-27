@@ -1836,70 +1836,6 @@ def _is_prefix_dropped_revision(left: str, right: str) -> bool:
     return first.size >= 8 and right_coverage >= 0.70
 
 
-def _should_finalize_confirmed_before_prefix_drop_revision(
-    staged_sentence: str,
-    candidate: str,
-    staged_confirmations: int,
-    staged_forced: bool,
-) -> bool:
-    if not _should_confirm_staged_sentence(staged_sentence, staged_confirmations, staged_forced):
-        return False
-    if not _is_prefix_dropped_revision(staged_sentence, candidate):
-        return False
-    flags = set(_final_sentence_diagnostic_flags(staged_sentence, "zh" if _is_cjk_text(staged_sentence) else ""))
-    return not flags.intersection({"empty", "spaced_cjk", "cjk_repeated_ngram", "repeated_word_ngram"})
-
-
-def _prefix_growth_finalize_reason(
-    staged_sentence: str,
-    candidate: str,
-    staged_confirmations: int,
-    staged_age: int,
-    staged_forced: bool,
-    base_age: int | None = None,
-) -> str | None:
-    normalized_staged = _normalized_text(staged_sentence)
-    normalized_candidate = _normalized_text(candidate)
-    staged_words = _word_units(normalized_staged)
-    candidate_words = _word_units(normalized_candidate)
-    if (
-        not staged_words
-        or len(staged_words) >= len(candidate_words)
-        or len(staged_words) < 4
-        or candidate_words[: len(staged_words)] != staged_words
-        or len(candidate_words) - len(staged_words) < 2
-    ):
-        return None
-    cjk_like_text = (
-        _is_cjk_text(normalized_staged)
-        or _is_cjk_text(normalized_candidate)
-        or _has_hangul_words(staged_words)
-        or _has_hangul_words(candidate_words)
-    )
-    if not cjk_like_text:
-        return None
-    flags = set(_final_sentence_diagnostic_flags(normalized_staged, "zh" if _is_cjk_text(normalized_staged) else "ko"))
-    if flags.intersection(
-        {
-            "empty",
-            "spaced_cjk",
-            "cjk_internal_gap",
-            "cjk_repeated_ngram",
-            "repeated_word_ngram",
-            "low_value_cjk_fragment",
-            "trailing_ellipsis",
-        }
-    ):
-        return None
-    if _should_confirm_staged_sentence(normalized_staged, staged_confirmations, staged_forced):
-        return "confirmed"
-    if "no_end_marker" not in flags or "short_no_end_fragment" in flags:
-        return None
-    if staged_age < _sentence_max_age_chunks(staged_forced, base_age):
-        return None
-    return "aged"
-
-
 def _is_cjk_prefixed_truncated_revision(left: str, right: str) -> bool:
     normalized_left = _normalized_text(left)
     normalized_right = _normalized_text(right)
@@ -1925,56 +1861,6 @@ def _is_cjk_prefixed_truncated_revision(left: str, right: str) -> bool:
     if not all(_has_cjk_words([word]) for word in left_prefix_units):
         return False
     return first.size >= 6 and len(right_suffix_units) >= 3
-
-
-_TERMINAL_END_MARK_RE = re.compile(r"[.!?。？！]+$")
-
-
-def _strip_terminal_end_markers(text: str) -> str:
-    return _TERMINAL_END_MARK_RE.sub("", _normalized_text(text)).rstrip()
-
-
-def _split_closed_sentence_appended_revision(previous: str, preferred: str, language: str) -> tuple[str, str] | None:
-    normalized_previous = _normalized_text(previous)
-    normalized_preferred = _normalized_text(preferred)
-    normalized_language = str(language or "").strip().lower()
-    previous_words = _word_units(normalized_previous)
-    preferred_words = _word_units(normalized_preferred)
-    cjk_like_text = (
-        normalized_language in {"ko", "zh", "ja"}
-        or _is_cjk_text(normalized_previous)
-        or _is_cjk_text(normalized_preferred)
-        or _has_hangul_words(previous_words)
-        or _has_hangul_words(preferred_words)
-    )
-    if (
-        not normalized_previous
-        or not normalized_preferred
-        or normalized_previous == normalized_preferred
-        or not cjk_like_text
-    ):
-        return None
-    if _boundary_sentence_end_count(normalized_previous) == 0 or _boundary_sentence_end_count(normalized_preferred) == 0:
-        return None
-    if _boundary_sentence_end_count(normalized_previous) != _boundary_sentence_end_count(normalized_preferred):
-        return None
-    previous_core = _strip_terminal_end_markers(normalized_previous)
-    if not previous_core or previous_core == normalized_previous:
-        return None
-    if normalized_preferred.startswith(normalized_previous):
-        return None
-    if not normalized_preferred.startswith(previous_core):
-        return None
-    suffix = normalized_preferred[len(previous_core) :].strip()
-    suffix_words = _word_units(suffix)
-    if len(suffix_words) < 4:
-        return None
-    suffix_flags = set(_final_sentence_diagnostic_flags(suffix, language))
-    if suffix_flags.intersection({"empty", "spaced_cjk", "cjk_internal_gap", "cjk_repeated_ngram", "repeated_word_ngram"}):
-        return None
-    if _boundary_sentence_end_count(suffix) == 0 and "no_end_marker" in suffix_flags:
-        return None
-    return normalized_previous, suffix
 
 
 def _prefer_sentence_revision(left: str, right: str) -> str:

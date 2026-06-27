@@ -22,7 +22,6 @@ from src.app.dictation_transcript_logic import (
     _pending_overrun_reason,
     _pending_text_diagnostic_flags,
     _prefer_sentence_revision,
-    _prefix_growth_finalize_reason,
     _recent_final_output_delta_with_reason,
     _replacement_decision_reason,
     _revision_internal_stability_bucket,
@@ -36,7 +35,6 @@ from src.app.dictation_transcript_logic import (
     _should_confirm_staged_sentence,
     _should_defer_token_sentence_revision,
     _should_defer_unconfirmed_replacement,
-    _should_finalize_confirmed_before_prefix_drop_revision,
     _should_finalize_before_replacement,
     _should_finalize_with_right_context,
     _should_finalize_replaced_sentence,
@@ -45,7 +43,6 @@ from src.app.dictation_transcript_logic import (
     _should_reset_revision_age,
     _should_split_terminal_tail_revision,
     _should_stage_boundary_candidate,
-    _split_closed_sentence_appended_revision,
     _should_suppress_delta_final,
     _strip_prior_pending_prefix_from_final,
     _strip_prior_pending_prefix_revision,
@@ -412,34 +409,6 @@ def _stage_completed_sentence(
         return finalized
 
     if _sentences_are_revisions(state.staged_sentence, candidate):
-        if _should_finalize_confirmed_before_prefix_drop_revision(
-            state.staged_sentence,
-            candidate,
-            state.staged_confirmations,
-            state.staged_forced,
-        ):
-            state.count("stage_confirmed_before_prefix_drop_revision")
-            return _finalize_staged_sentence(state, language, "confirmed", chunk_index)
-        prefix_growth_finalize_reason = _prefix_growth_finalize_reason(
-            state.staged_sentence,
-            candidate,
-            state.staged_confirmations,
-            state.staged_age,
-            state.staged_forced,
-            sentence_finalize_age,
-        )
-        if prefix_growth_finalize_reason is not None:
-            state.count("stage_finalize_before_prefix_growth_revision")
-            if prefix_growth_finalize_reason == "confirmed":
-                state.count("stage_confirmed_before_prefix_growth_revision")
-            else:
-                state.count("stage_age_finalize_before_prefix_growth_revision")
-            return _finalize_staged_sentence(
-                state,
-                language,
-                "confirmed_forced" if prefix_growth_finalize_reason == "confirmed" and state.staged_forced else prefix_growth_finalize_reason,
-                chunk_index,
-            )
         state.count("stage_revision")
         state.count("segment_state_revised")
         previous = state.staged_sentence
@@ -579,18 +548,6 @@ def _stage_completed_sentence(
                 state.count("stage_age_finalize")
                 reason = "aged_forced" if state.staged_forced else "aged"
             else:
-                split_revision = _split_closed_sentence_appended_revision(previous, state.staged_sentence, language)
-                if split_revision is not None:
-                    preserved_sentence, tail_sentence = split_revision
-                    tail_forced = state.staged_forced or forced
-                    state.count("stage_revision_closed_sentence_split")
-                    state.staged_sentence = preserved_sentence
-                    finalized = _finalize_staged_sentence(state, language, "next_completed", chunk_index)
-                    if tail_sentence:
-                        _queue_staged_sentence(state, tail_sentence, tail_forced, chunk_index)
-                        if not state.staged_sentence:
-                            _promote_next_staged_sentence(state, chunk_index)
-                    return finalized
                 state.count("stage_finalize_before_replace")
                 reason = "next_completed"
             return _finalize_staged_sentence(state, language, reason, chunk_index)

@@ -267,29 +267,14 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(report["lifecycle_bottleneck_summary"]["metrics"]["stage_start"], 2)
         self.assertEqual(report["lifecycle_bottleneck_summary"]["metrics"]["stage_age_hold"], 2)
         self.assertEqual(report["lifecycle_bottleneck_summary"]["metrics"]["pending_overrun"], 1)
-        self.assertEqual(
-            report["lifecycle_bottleneck_summary"]["metrics"]["pending_quality_repeated_word_ngram"],
-            1,
-        )
-        self.assertIn(
-            "stage_candidate_quality_repeated_word_ngram",
-            report["lifecycle_bottleneck_summary"]["metric_keys"],
-        )
-        self.assertEqual(
-            report["lifecycle_bottleneck_summary"]["metrics"]["stage_replace_decision_open_latin_clause"],
-            1,
-        )
+        self.assertEqual(report["lifecycle_bottleneck_summary"]["replacement_decision_counts"], {"open_latin_clause": 1})
+        self.assertEqual(report["lifecycle_bottleneck_summary"]["quality_block_reason_counts"], {"repeated_word_ngram": 1})
         stage_age_hold_presence = report["lifecycle_bottleneck_summary"]["metric_presence_summary"]["stage_age_hold"]
         self.assertEqual(stage_age_hold_presence["total_count"], 2)
         self.assertEqual(stage_age_hold_presence["case_count_present"], 1)
         self.assertEqual(stage_age_hold_presence["case_count_absent"], 0)
         self.assertEqual(stage_age_hold_presence["final_f1_avg_present"], 1.0)
         self.assertEqual(stage_age_hold_presence["low_final_f1_present_count"], 0)
-        dynamic_presence = report["lifecycle_bottleneck_summary"]["metric_presence_summary"][
-            "stage_candidate_quality_repeated_word_ngram"
-        ]
-        self.assertEqual(dynamic_presence["total_count"], 1)
-        self.assertEqual(dynamic_presence["case_count_present"], 1)
         self.assertEqual(
             report["lifecycle_bottleneck_summary"]["by_language"]["ko"]["expected_final_count"],
             2,
@@ -3653,7 +3638,7 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
 
         self.assertIn("stage_replace_deferred", summary["metric_keys"])
         self.assertEqual(summary["metrics"]["stage_start"], 3)
-        self.assertEqual(summary["metrics"]["final_quality_no_end_marker"], 1)
+        self.assertNotIn("final_quality_no_end_marker", summary["metrics"])
         self.assertEqual(summary["replacement_decision_counts"], {"unconfirmed": 2})
         self.assertEqual(summary["deferred_replacement_decision_counts"], {"unconfirmed": 2})
         self.assertEqual(
