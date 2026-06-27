@@ -645,6 +645,15 @@ def _pactl_short_entries(kind: str) -> list[tuple[str, str, str]]:
     return items
 
 
+def _format_pulse_runtime_entry_names(entries: list[tuple[str, str, str]], *, limit: int = 8) -> str:
+    names = [entry_name for _idx, entry_name, _rest in entries if entry_name.strip()]
+    if not names:
+        return "(none)"
+    preview = names[:limit]
+    suffix = "" if len(names) <= limit else f" ... (+{len(names) - limit} more)"
+    return ", ".join(preview) + suffix
+
+
 def _validate_pulse_runtime_device(kind: str, device_name: str) -> None:
     if platform.system() != "Linux":
         return
@@ -661,10 +670,25 @@ def _validate_pulse_runtime_device(kind: str, device_name: str) -> None:
             "pactl list short returned no entries"
         )
         return
+    runtime_kind = "source" if kind == "input" else "sink"
     names = [entry_name for _idx, entry_name, _rest in entries if entry_name.strip()]
     if name not in names:
+        available_names = _format_pulse_runtime_entry_names(entries)
+        virtual_hint = ""
+        if "ai-virtual-cam" in name:
+            expected_partner = "ai-virtual-cam-mic / ai-virtual-cam.monitor" if kind == "input" else "ai-virtual-cam"
+            virtual_hint = (
+                " 가상 오디오 힌트: "
+                f"input에는 source/monitor ID를, output에는 sink ID를 써야 합니다. expected={expected_partner}."
+            )
+        _log(
+            "audio runtime validation failed: "
+            f"kind={kind} runtime_kind={runtime_kind} requested='{name}' "
+            f"available={available_names}{virtual_hint}"
+        )
         raise ValueError(
             f"audio {kind} device가 Pulse runtime에 존재하지 않습니다: '{name}'. "
+            f"runtime {runtime_kind} 목록={available_names}. "
             f"config에서 Pulse 장치 ID(source/sink)를 다시 선택하세요."
         )
 
@@ -715,4 +739,3 @@ def _get_audio_sink_module_ids(name: str) -> list[str]:
 
 def _get_audio_source_module_ids(name: str) -> list[str]:
     return _get_module_ids("module-remap-source", "source_name", name)
-

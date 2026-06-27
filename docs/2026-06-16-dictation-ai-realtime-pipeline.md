@@ -22,6 +22,7 @@
 - 노드 내부 상태는 해당 노드만 소유한다. 다른 노드는 출력 계약만 소비한다.
 - 전사 창과 번역은 sink다. sink는 final 계약만 소비하고 확정 정책에 개입하지 않는다.
 - regex/ad-hoc 문장 보정, VAD/silence final trigger, CPU/backend fallback은 운영 파이프라인 기준에서 제외한다.
+- 소절 단위 분할은 전역 기본 정책으로 두지 않는다. 긴 문장 과결합은 `next_completed` 직전의 제한된 revision/finalize 경로에서만 구조적으로 완화한다.
 
 ## 파이프라인
 
@@ -91,6 +92,7 @@
 - CJK 문자 사이에 삽입된 STT 공백 artefact는 후보 품질 판단 전에 제거한다. 이는 문장 재작성이나 overlap 접합이 아니라 no-space 문자의 표준화이며, Latin/숫자 token 경계는 유지한다.
 - 언어 설정과 후보 script가 일치하지 않는 상황은 진단 플래그로만 기록한다. STT window에서 반복 관측되고 token-sentence 확정 조건을 만족한 후보를 언어별 예외만으로 final 차단하지 않는다.
 - revision 후보 비교에서 한 후보가 명확한 종결 경계를 가진 prefix 문장이고 다른 후보가 그 뒤에 짧은 tail을 붙여 하나의 문장처럼 만든 경우, 더 긴 문자열보다 종결 경계를 보존한 후보를 우선한다.
+- CJK 긴 문장 과결합은 접속어 사전이나 언어별 ad-hoc 소절 규칙으로 자르지 않는다. 대신 active staged 후보가 이미 충분한 종결 경계와 안정성을 갖고 있고, 뒤 revision이 무종결 tail을 덧붙인 상태에서 `next_completed`로 조기 확정되려는 경우에만 staged 본문 보존 또는 제한적 분할을 검토한다.
 - 미확정 replacement는 기존 후보를 삭제하지 않고 새 후보를 candidate buffer에 보류한다. 앞 후보는 확정, revision 대체, 품질/중복 suppress 중 하나로 정리된 뒤에 다음 후보로 넘어간다. 단, 미확정 replacement와 충돌 중인 앞 후보는 age만으로 final 승격하지 않고, age 한계 전에는 즉시 suppress하지 않는다.
 - 짧은 CJK staged 후보가 replacement와 충돌할 때는 추가 hold를 기본 적용하지 않는다. 1223건 replay에서는 짧은 active head가 뒤의 completed sentence queue 소비를 막는 사례가 많아 `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=0`이 가장 좋았다. 이 값은 짧은 문장을 즉시 final로 보내는 규칙이 아니라, 확정 불가능한 짧은 head가 오래 남아 생성순서 queue를 막지 않게 하는 suppress/promote 정책이다.
 - 현재 chunk에서 candidate buffer로부터 승격된 staged 후보는 같은 chunk 안의 후속 replacement로 즉시 final 확정하지 않는다. 최소 다음 STT window에서 재평가해 stale queue burst가 false final로 소비되는 경로를 막는다.
@@ -125,6 +127,21 @@
 | 커밋 품질 | `finalized_per_stage_start`, `segment_state_final`, `segment_state_suppressed`, `final_quality_*`, `candidate_recent_final_delta_trimmed`, `finalize_delta_suppressed_stage_retained`, `finalize_delta_suppressed_stage_dropped`, `finalize_delta_fragment_preserved` | final 전환 비율과 suppressed 사유로 중복/오염 후보 차단 여부를 본다. 최근 final prefix 뒤의 긴 suffix가 회수되는지와 짧은 echo 보정이 억제되는지도 함께 본다. delta가 broken fragment로 계산되면 active staged 후보를 잠시 유지하되, 반복 보류가 누락을 만들면 폐기하고 다음 후보로 진행한다. 단, 독립 staged 문장이 committed-text delta 때문에 종결부 없는 조각으로 바뀌는 경우는 `finalize_delta_fragment_preserved`로 관측하고 staged 원문을 보존한다. |
 | final-only sink | `translation_skip_final_quality`, 번역 입력의 `final=true` 여부 | 번역 sink가 `CommittedTranscriptEvent` 외 입력을 소비하지 않는지 본다. |
 
+지표 일반화 원칙:
+
+- 새 지표는 특정 문구나 언어별 접속어 이름이 아니라 `경계 감지`, `revision 보류`, `queue 순서`, `품질 차단`, `recent-final 억제`, `delta 보존`처럼 구조적 병목 축으로 묶는다.
+- 세부 원인 지표는 유지하되, 비교/튜닝 우선순위는 per-case 원시 카운트보다 축별 aggregate와 strict subset case presence를 먼저 본다.
+- 소절 관련 개선 전에는 `underfinal_boundary_or_revision` 같은 증상 이름보다, 해당 증상을 만든 상위 메커니즘(`stage_replace_deferred`, `stage_revision_token_sentence_deferred`, `stage_candidate_quality_blocked`, `stage_finalize_before_replace`)을 먼저 최적화 대상으로 삼는다.
+
+소절 개선 전 우선 최적화 대상:
+
+- `revision 보류/대기`: `stage_replace_deferred`, `stage_revision_token_sentence_deferred`, `stage_queue_revision`
+- `조기 확정`: `stage_finalize_before_replace`, `stage_confirm_deferred_later_extension`, `stage_finalize_right_context`
+- `품질 차단으로 인한 교착`: `stage_candidate_quality_blocked`, `stage_age_quality_blocked`, `stage_age_hold`
+- `경계 민감도`: `underfinal_boundary_or_revision`, `boundary_granularity`, `strict_boundary_sensitive_case_count`
+
+이 순서는 소절 분할을 전역 완화하기 전에, 현재 파이프라인이 어디서 긴 revision을 과하게 유지하거나 반대로 너무 이르게 확정하는지 일반화된 구조 신호로 먼저 좁히기 위한 것이다.
+
 ### 불변 계약
 
 - final transcript는 append-only이며 되돌리지 않는다.
@@ -134,3 +151,11 @@
 - 외부 번역 backend 사용 시 Whisper는 `task=transcribe`만 수행하고 번역은 외부 번역 경로가 담당한다.
 - 모델/장치/설정 오류는 자동 폴백하지 않고 실패한다. CUDA/float16 요구 경로에서 CPU fallback은 허용하지 않는다.
 - 운영 파라미터와 모델/장치 허용값은 계약 기본값 문서를 따른다.
+
+### 소절 경계 계획
+
+- 목표는 CJK 발화의 모든 소절을 더 잘게 자르는 것이 아니라, `stage 리비전 -> pending tail 연장 -> next_completed 확정` 경로에서 생기는 과결합 final을 줄이는 것이다.
+- 분할 검토 위치는 active staged 후보의 revision 채택 직후와 `next_completed` 직전으로 제한한다. candidate 해석 단계에서 언어별 접속어 규칙으로 completed 후보를 쪼개지 않는다.
+- 분할 조건은 접속어 문자열 자체가 아니라 종결 경계 존재, `no_end_marker`, internal stability, pending tail 길이, deferred revision 여부, later completed extension 부재 같은 구조 신호만 사용한다.
+- 성능 평가는 전체 평균 `final_f1_avg`보다 strict logic candidate subset, `underfinal_boundary_or_revision`, `boundary_granularity`, `stage_replace_deferred`, `stage_revision_token_sentence_deferred` 변화로 먼저 판단한다.
+- 소절 분할 완화는 `overfinal_or_extra_final`을 늘릴 위험이 있으므로, 전역 완화가 아니라 strict subset에서 근거가 확인된 경로에만 단계적으로 적용한다.

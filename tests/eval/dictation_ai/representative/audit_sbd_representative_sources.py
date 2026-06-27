@@ -15,7 +15,7 @@ LANGUAGE_RE = re.compile(r"\[(?P<language>[a-z]{2}) raw\]|language=(?P<language_
 KV_RE = re.compile(r"\b(?P<key>[A-Za-z_][A-Za-z0-9_]*)=(?P<value>[^\s,]+)")
 TRANSCRIPT_SEGMENT_RE = re.compile(r"Dictation AI transcript:\s+\[[a-z]{2}#(?P<segment_id>\d+)\]")
 TRANSLATION_SEGMENT_RE = re.compile(r"Dictation AI translation:\s+\[[a-z]{2}->[a-z]{2}#(?P<segment_id>\d+)\]")
-LOG_GLOB = "avc-whisper.log*"
+LOG_GLOB = "avc-whisper*.log*"
 TARGET_COLLECTION_RANKING_METRICS = (
     "stage_queue_promote_per_stt_raw",
     "stage_replace_deferred_per_stt_raw",

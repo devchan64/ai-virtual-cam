@@ -67,6 +67,99 @@ from src.app.transcript_revision import (
     revision_lifecycle_context as _revision_lifecycle_context,
 )
 from src.app.translation_model import TranslationRequest
+
+
+_RUNTIME_STABILITY_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "lifecycle",
+        (
+            "replace",
+            "replaced_unconfirmed",
+            "revision",
+            "revision_changed",
+            "finalized",
+            "stage_start",
+            "finalized_per_stage_start",
+            "replace_unconfirmed_rate",
+        ),
+    ),
+    (
+        "queue",
+        (
+            "stage_queue_enqueue",
+            "stage_queue_promote",
+            "stage_queue_revision",
+            "stage_queue_revision_token_sentence_deferred",
+            "stage_replace_deferred_same_chunk",
+            "stage_queue_len",
+        ),
+    ),
+    (
+        "finalize",
+        (
+            "finalize_before_replace",
+            "age_finalize",
+            "age_quality_blocked",
+            "age_no_text_skipped",
+            "no_text_stale_suppressed",
+            "unconfirmed_replacement_suppressed",
+        ),
+    ),
+    (
+        "suppression",
+        (
+            "duplicate_suppressed",
+            "finalize_delta_suppressed_stage_retained",
+            "finalize_delta_suppressed_stage_dropped",
+            "finalize_delta_fragment_preserved",
+            "delta_trimmed",
+        ),
+    ),
+    (
+        "quality",
+        (
+            "stage_candidate_quality_blocked",
+            "stage_candidate_quality",
+            "final_quality",
+            "translation_skip",
+            "raw_without_final",
+        ),
+    ),
+    (
+        "state",
+        (
+            "segment_state_pending",
+            "segment_state_staged",
+            "segment_state_final",
+            "segment_state_suppressed",
+            "segment_state_revised",
+        ),
+    ),
+    (
+        "stability",
+        (
+            "stable_prefix_chars",
+            "unstable_tail_chars",
+            "stable_internal_chars",
+            "stable_internal_ratio",
+            "stable_token_ratio",
+            "input_queue_size_peak",
+            "input_queue_backlog",
+            "decision_count",
+        ),
+    ),
+)
+
+
+def _format_runtime_stability_groups(metrics: dict[str, object]) -> str:
+    sections: list[str] = []
+    for label, keys in _RUNTIME_STABILITY_GROUPS:
+        parts = [f"{key}={metrics[key]}" for key in keys if key in metrics]
+        if parts:
+            sections.append(f"{label}[{' '.join(parts)}]")
+    return " ".join(sections)
+
+
 def run_transcribe_loop(
     worker: Any,
     model: Any,
@@ -1239,46 +1332,11 @@ def run_transcribe_loop(
             stage_replaced_unconfirmed_count = chunk_lifecycle_metrics.get("stage_replaced_unconfirmed", 0)
             stage_revision_count = chunk_lifecycle_metrics.get("stage_revision", 0)
             stage_revision_changed_count = chunk_lifecycle_metrics.get("stage_revision_changed", 0)
-            stage_revision_reset_count = chunk_lifecycle_metrics.get("stage_revision_confirmation_reset", 0)
-            stage_revision_preserved_internal_count = chunk_lifecycle_metrics.get(
-                "stage_revision_confirmation_preserved_internal",
-                0,
-            )
-            stage_revision_internal_high_count = chunk_lifecycle_metrics.get(
-                "stage_revision_internal_stability_high",
-                0,
-            )
-            stage_revision_internal_mid_count = chunk_lifecycle_metrics.get(
-                "stage_revision_internal_stability_mid",
-                0,
-            )
-            stage_revision_internal_low_count = chunk_lifecycle_metrics.get(
-                "stage_revision_internal_stability_low",
-                0,
-            )
             stage_queue_enqueue_count = chunk_lifecycle_metrics.get("stage_queue_enqueue", 0)
             stage_queue_promote_count = chunk_lifecycle_metrics.get("stage_queue_promote", 0)
             stage_queue_revision_count = chunk_lifecycle_metrics.get("stage_queue_revision", 0)
             stage_queue_revision_token_sentence_deferred_count = chunk_lifecycle_metrics.get(
                 "stage_queue_revision_token_sentence_deferred",
-                0,
-            )
-            stage_finalize_deferred_for_queue_revision_count = chunk_lifecycle_metrics.get(
-                "stage_finalize_deferred_for_queue_revision",
-                0,
-            )
-            stage_queue_quality_suppressed_count = chunk_lifecycle_metrics.get("stage_queue_quality_suppressed", 0)
-            stage_queue_drop_oldest_count = chunk_lifecycle_metrics.get("stage_queue_drop_oldest", 0)
-            stage_queue_stale_promote_suppressed_count = chunk_lifecycle_metrics.get(
-                "stage_queue_stale_promote_suppressed",
-                0,
-            )
-            stage_queue_recent_final_suppressed_count = chunk_lifecycle_metrics.get(
-                "stage_queue_recent_final_suppressed",
-                0,
-            )
-            stage_queue_recent_final_delta_trimmed_count = chunk_lifecycle_metrics.get(
-                "stage_queue_recent_final_delta_trimmed",
                 0,
             )
             stage_replace_deferred_same_chunk_count = chunk_lifecycle_metrics.get(
@@ -1297,8 +1355,6 @@ def run_transcribe_loop(
             stage_start_count = chunk_lifecycle_metrics.get("stage_start", 0)
             finalize_count = chunk_lifecycle_metrics.get("finalized", 0)
             duplicate_suppressed_count = chunk_lifecycle_metrics.get("candidate_duplicate_suppressed", 0)
-            prior_pending_prefix_trimmed_count = chunk_lifecycle_metrics.get("candidate_prior_pending_prefix_trimmed", 0)
-            recent_echo_suppressed_count = chunk_lifecycle_metrics.get("finalize_recent_echo_suppressed", 0)
             delta_suppressed_stage_retained_count = chunk_lifecycle_metrics.get(
                 "finalize_delta_suppressed_stage_retained",
                 0,
@@ -1320,14 +1376,6 @@ def run_transcribe_loop(
                 for key, value in chunk_lifecycle_metrics.items()
                 if key.startswith("stage_candidate_quality_") and key != "stage_candidate_quality_blocked"
             )
-            stage_candidate_quality_cjk_internal_gap_count = chunk_lifecycle_metrics.get(
-                "stage_candidate_quality_cjk_internal_gap",
-                0,
-            )
-            stage_candidate_quality_mixed_latin_count = chunk_lifecycle_metrics.get(
-                "stage_candidate_quality_mixed_latin_zh",
-                0,
-            )
             segment_state_pending_count = chunk_lifecycle_metrics.get("segment_state_pending", 0)
             segment_state_staged_count = chunk_lifecycle_metrics.get("segment_state_staged", 0)
             segment_state_final_count = chunk_lifecycle_metrics.get("segment_state_final", 0)
@@ -1336,72 +1384,61 @@ def run_transcribe_loop(
             final_quality_count = sum(
                 value for key, value in chunk_lifecycle_metrics.items() if key.startswith("final_quality_")
             )
-            revision_confirmation_observed_count = (
-                stage_revision_reset_count + stage_revision_preserved_internal_count
-            )
             input_queue_size_peak = chunk_lifecycle_metrics.get("input_queue_size_peak", 0)
             input_queue_backlog_count = chunk_lifecycle_metrics.get("input_queue_backlog_chunk", 0)
             raw_without_final_count = 1 if raw_window_text and not final_segments else 0
             if raw_without_final_count:
                 count_metric("raw_without_final")
             translation_skip_count = chunk_lifecycle_metrics.get("translation_skip_final_quality", 0)
+            runtime_stability_metrics = {
+                "replace": stage_replace_count,
+                "replaced_unconfirmed": stage_replaced_unconfirmed_count,
+                "revision": stage_revision_count,
+                "revision_changed": stage_revision_changed_count,
+                "finalized": finalize_count,
+                "stage_start": stage_start_count,
+                "finalized_per_stage_start": f"{finalize_count / max(stage_start_count, 1):.2f}",
+                "replace_unconfirmed_rate": f"{stage_replaced_unconfirmed_count / max(stage_replace_count, 1):.2f}",
+                "stage_queue_enqueue": stage_queue_enqueue_count,
+                "stage_queue_promote": stage_queue_promote_count,
+                "stage_queue_revision": stage_queue_revision_count,
+                "stage_queue_revision_token_sentence_deferred": stage_queue_revision_token_sentence_deferred_count,
+                "stage_replace_deferred_same_chunk": stage_replace_deferred_same_chunk_count,
+                "stage_queue_len": len(commit_buffer_node),
+                "finalize_before_replace": stage_finalize_before_replace_count,
+                "age_finalize": stage_age_finalize_count,
+                "age_quality_blocked": stage_age_quality_blocked_count,
+                "age_no_text_skipped": stage_age_no_text_skipped_count,
+                "no_text_stale_suppressed": stage_no_text_stale_suppressed_count,
+                "unconfirmed_replacement_suppressed": stage_unconfirmed_replacement_suppressed_count,
+                "duplicate_suppressed": duplicate_suppressed_count,
+                "finalize_delta_suppressed_stage_retained": delta_suppressed_stage_retained_count,
+                "finalize_delta_suppressed_stage_dropped": delta_suppressed_stage_dropped_count,
+                "finalize_delta_fragment_preserved": delta_fragment_preserved_count,
+                "delta_trimmed": delta_trimmed_count,
+                "stage_candidate_quality_blocked": stage_candidate_quality_blocked_count,
+                "stage_candidate_quality": stage_candidate_quality_count,
+                "segment_state_pending": segment_state_pending_count,
+                "segment_state_staged": segment_state_staged_count,
+                "segment_state_final": segment_state_final_count,
+                "segment_state_suppressed": segment_state_suppressed_count,
+                "segment_state_revised": segment_state_revised_count,
+                "final_quality": final_quality_count,
+                "translation_skip": translation_skip_count,
+                "raw_without_final": raw_without_final_count,
+                "stable_prefix_chars": stable_prefix_chars,
+                "unstable_tail_chars": unstable_tail_chars,
+                "stable_internal_chars": stable_internal_chars,
+                "stable_internal_ratio": f"{stable_internal_ratio_per_1000 / 1000:.3f}",
+                "stable_token_ratio": f"{stable_token_ratio_per_1000 / 1000:.3f}",
+                "input_queue_size_peak": input_queue_size_peak,
+                "input_queue_backlog": input_queue_backlog_count,
+                "decision_count": stage_decision_count,
+            }
             worker._emit(
                 "status",
                 "받아쓰기 AI 안정성 지표: "
-                f"chunk={chunks} replace={stage_replace_count} replaced_unconfirmed={stage_replaced_unconfirmed_count} "
-                f"revision={stage_revision_count} revision_changed={stage_revision_changed_count} "
-                f"revision_reset={stage_revision_reset_count} "
-                f"revision_preserved_internal={stage_revision_preserved_internal_count} finalized={finalize_count} "
-                f"revision_internal_high={stage_revision_internal_high_count} "
-                f"revision_internal_mid={stage_revision_internal_mid_count} "
-                f"revision_internal_low={stage_revision_internal_low_count} "
-                f"stage_queue_enqueue={stage_queue_enqueue_count} "
-                f"stage_queue_promote={stage_queue_promote_count} "
-                f"stage_queue_revision={stage_queue_revision_count} "
-                f"stage_queue_revision_token_sentence_deferred={stage_queue_revision_token_sentence_deferred_count} "
-                f"stage_finalize_deferred_for_queue_revision={stage_finalize_deferred_for_queue_revision_count} "
-                f"stage_queue_quality_suppressed={stage_queue_quality_suppressed_count} "
-                f"stage_queue_drop_oldest={stage_queue_drop_oldest_count} "
-                f"stage_queue_stale_promote_suppressed={stage_queue_stale_promote_suppressed_count} "
-                f"stage_queue_recent_final_suppressed={stage_queue_recent_final_suppressed_count} "
-                f"stage_queue_recent_final_delta_trimmed={stage_queue_recent_final_delta_trimmed_count} "
-                f"stage_replace_deferred_same_chunk={stage_replace_deferred_same_chunk_count} "
-                f"stage_queue_len={len(commit_buffer_node)} "
-                f"finalize_before_replace={stage_finalize_before_replace_count} "
-                f"age_finalize={stage_age_finalize_count} "
-                f"age_quality_blocked={stage_age_quality_blocked_count} "
-                f"age_no_text_skipped={stage_age_no_text_skipped_count} "
-                f"no_text_stale_suppressed={stage_no_text_stale_suppressed_count} "
-                f"unconfirmed_replacement_suppressed={stage_unconfirmed_replacement_suppressed_count} "
-                f"stage_start={stage_start_count} "
-                f"duplicate_suppressed={duplicate_suppressed_count} "
-                f"prior_pending_prefix_trimmed={prior_pending_prefix_trimmed_count} "
-                f"recent_echo_suppressed={recent_echo_suppressed_count} "
-                f"finalize_delta_suppressed_stage_retained={delta_suppressed_stage_retained_count} "
-                f"finalize_delta_suppressed_stage_dropped={delta_suppressed_stage_dropped_count} "
-                f"finalize_delta_fragment_preserved={delta_fragment_preserved_count} "
-                f"delta_trimmed={delta_trimmed_count} "
-                f"stable_prefix_chars={stable_prefix_chars} unstable_tail_chars={unstable_tail_chars} "
-                f"stable_internal_chars={stable_internal_chars} "
-                f"stable_internal_ratio={stable_internal_ratio_per_1000 / 1000:.3f} "
-                f"stable_token_ratio={stable_token_ratio_per_1000 / 1000:.3f} "
-                f"stage_candidate_quality_blocked={stage_candidate_quality_blocked_count} "
-                f"stage_candidate_quality={stage_candidate_quality_count} "
-                f"stage_candidate_quality_cjk_internal_gap={stage_candidate_quality_cjk_internal_gap_count} "
-                f"stage_candidate_quality_mixed_latin_zh={stage_candidate_quality_mixed_latin_count} "
-                f"segment_state_pending={segment_state_pending_count} "
-                f"segment_state_staged={segment_state_staged_count} "
-                f"segment_state_final={segment_state_final_count} "
-                f"segment_state_suppressed={segment_state_suppressed_count} "
-                f"segment_state_revised={segment_state_revised_count} "
-                f"final_quality={final_quality_count} translation_skip={translation_skip_count} "
-                f"raw_without_final={raw_without_final_count} "
-                f"finalized_per_stage_start={finalize_count / max(stage_start_count, 1):.2f} "
-                f"revision_preserve_rate={stage_revision_preserved_internal_count / max(revision_confirmation_observed_count, 1):.2f} "
-                f"replace_unconfirmed_rate={stage_replaced_unconfirmed_count / max(stage_replace_count, 1):.2f} "
-                f"input_queue_size_peak={input_queue_size_peak} "
-                f"input_queue_backlog={input_queue_backlog_count} "
-                f"decision_count={stage_decision_count}",
+                f"chunk={chunks} {_format_runtime_stability_groups(runtime_stability_metrics)}",
                 display=False,
             )
             worker._emit(

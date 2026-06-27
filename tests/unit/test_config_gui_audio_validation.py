@@ -561,6 +561,30 @@ class ConfigGuiAudioValidationTest(unittest.TestCase):
                     "ai-virtual-cam",
                 )
 
+    def test_resolve_and_validate_audio_runtime_devices_reports_runtime_sink_list(self) -> None:
+        with mock.patch.object(self.audio_devices.platform, "system", return_value="Linux"), mock.patch.object(
+            self.audio_devices,
+            "_pactl_short_entries",
+            side_effect=lambda kind: [
+                ("1", "alsa_input.usb-mic", "module"),
+            ]
+            if kind == "source"
+            else [
+                ("2", "alsa_output.real-speaker", "module"),
+                ("3", "alsa_output.backup-speaker", "module"),
+            ],
+        ), mock.patch.object(self.audio_devices, "_log") as log_mock:
+            with self.assertRaisesRegex(ValueError, "runtime sink 목록=alsa_output.real-speaker, alsa_output.backup-speaker"):
+                self.audio_devices._resolve_and_validate_audio_runtime_devices(
+                    "alsa_input.usb-mic",
+                    "ai-virtual-cam",
+                )
+
+        log_mock.assert_called_once()
+        self.assertIn("kind=output", log_mock.call_args.args[0])
+        self.assertIn("requested='ai-virtual-cam'", log_mock.call_args.args[0])
+        self.assertIn("available=alsa_output.real-speaker, alsa_output.backup-speaker", log_mock.call_args.args[0])
+
 
     def test_capture_window_geometry_uses_window_manager_geometry(self) -> None:
         root = types.SimpleNamespace(

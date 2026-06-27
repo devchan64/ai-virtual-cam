@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 import threading
+from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import TextIO
@@ -63,10 +64,15 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def _timestamped_log_filename(name: str) -> str:
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    return f"{name}-{timestamp}.log"
+
+
 def install_rotating_stdout_log(name: str) -> Path:
     log_dir = _repo_root() / ".tmp" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / f"{name}.log"
+    log_path = log_dir / _timestamped_log_filename(name)
 
     logger = logging.getLogger(f"avc.rotating.{name}")
     logger.setLevel(logging.INFO)
