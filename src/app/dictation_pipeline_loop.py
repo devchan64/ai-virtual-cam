@@ -33,6 +33,7 @@ from src.app.dictation_transcript_logic import (
     _pending_overrun_reason,
     _pending_text_diagnostic_flags,
     _prefer_sentence_revision,
+    _prefix_growth_finalize_reason,
     _recent_final_output_delta,
     _replacement_decision_reason,
     _revision_internal_stability_bucket,
@@ -600,6 +601,24 @@ def run_transcribe_loop(
             ):
                 count_metric("stage_confirmed_before_prefix_drop_revision")
                 return finalize_staged_sentence(detected, "confirmed")
+            prefix_growth_finalize_reason = _prefix_growth_finalize_reason(
+                active_stage.sentence,
+                candidate,
+                active_stage.confirmations,
+                active_stage.age,
+                active_stage.forced,
+                sentence_finalize_age,
+            )
+            if prefix_growth_finalize_reason is not None:
+                count_metric("stage_finalize_before_prefix_growth_revision")
+                if prefix_growth_finalize_reason == "confirmed":
+                    count_metric("stage_confirmed_before_prefix_growth_revision")
+                else:
+                    count_metric("stage_age_finalize_before_prefix_growth_revision")
+                return finalize_staged_sentence(
+                    detected,
+                    "confirmed_forced" if prefix_growth_finalize_reason == "confirmed" and active_stage.forced else prefix_growth_finalize_reason,
+                )
             count_metric("stage_revision")
             count_segment_state("revised")
             staged_before = active_stage.sentence

@@ -35,6 +35,7 @@ from src.app.dictation_pipeline_settings import (
     dictation_tuning_protocol,
 )
 from src.app.dictation_transcript_logic import (
+    _prefix_growth_finalize_reason,
     _prefer_sentence_revision,
     _split_closed_sentence_appended_revision,
     _strip_prior_pending_prefix_from_final,
@@ -363,6 +364,30 @@ class DictationPipelineNodeTest(unittest.TestCase):
         )
 
         self.assertIsNone(split)
+
+    def test_prefix_growth_finalize_reason_confirms_repeated_cjk_clause(self) -> None:
+        reason = _prefix_growth_finalize_reason(
+            "이런 느낌의 문구들이 나오는 저 전광판이에요.",
+            "이런 느낌의 문구들이 나오는 저 전광판이에요. 처음에 나도 마마가 왜 이렇게 있어?",
+            3,
+            2,
+            False,
+            3,
+        )
+
+        self.assertEqual(reason, "confirmed")
+
+    def test_prefix_growth_finalize_reason_ages_open_cjk_clause(self) -> None:
+        reason = _prefix_growth_finalize_reason(
+            "이런 느낌의 문구들이 나오는 저 큰 전광판이에요 정말",
+            "이런 느낌의 문구들이 나오는 저 큰 전광판이에요 정말 처음에 나도 마마가 왜 이렇게 있어?",
+            2,
+            3,
+            False,
+            3,
+        )
+
+        self.assertEqual(reason, "aged")
 
     def test_cjk_revision_keeps_longer_tail_when_prefix_is_same(self) -> None:
         preferred = _prefer_sentence_revision(

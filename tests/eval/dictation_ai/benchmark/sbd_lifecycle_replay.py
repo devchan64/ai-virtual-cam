@@ -22,6 +22,7 @@ from src.app.dictation_transcript_logic import (
     _pending_overrun_reason,
     _pending_text_diagnostic_flags,
     _prefer_sentence_revision,
+    _prefix_growth_finalize_reason,
     _recent_final_output_delta_with_reason,
     _replacement_decision_reason,
     _revision_internal_stability_bucket,
@@ -419,6 +420,26 @@ def _stage_completed_sentence(
         ):
             state.count("stage_confirmed_before_prefix_drop_revision")
             return _finalize_staged_sentence(state, language, "confirmed", chunk_index)
+        prefix_growth_finalize_reason = _prefix_growth_finalize_reason(
+            state.staged_sentence,
+            candidate,
+            state.staged_confirmations,
+            state.staged_age,
+            state.staged_forced,
+            sentence_finalize_age,
+        )
+        if prefix_growth_finalize_reason is not None:
+            state.count("stage_finalize_before_prefix_growth_revision")
+            if prefix_growth_finalize_reason == "confirmed":
+                state.count("stage_confirmed_before_prefix_growth_revision")
+            else:
+                state.count("stage_age_finalize_before_prefix_growth_revision")
+            return _finalize_staged_sentence(
+                state,
+                language,
+                "confirmed_forced" if prefix_growth_finalize_reason == "confirmed" and state.staged_forced else prefix_growth_finalize_reason,
+                chunk_index,
+            )
         state.count("stage_revision")
         state.count("segment_state_revised")
         previous = state.staged_sentence

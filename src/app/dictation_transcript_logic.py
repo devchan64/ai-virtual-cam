@@ -1850,6 +1850,56 @@ def _should_finalize_confirmed_before_prefix_drop_revision(
     return not flags.intersection({"empty", "spaced_cjk", "cjk_repeated_ngram", "repeated_word_ngram"})
 
 
+def _prefix_growth_finalize_reason(
+    staged_sentence: str,
+    candidate: str,
+    staged_confirmations: int,
+    staged_age: int,
+    staged_forced: bool,
+    base_age: int | None = None,
+) -> str | None:
+    normalized_staged = _normalized_text(staged_sentence)
+    normalized_candidate = _normalized_text(candidate)
+    staged_words = _word_units(normalized_staged)
+    candidate_words = _word_units(normalized_candidate)
+    if (
+        not staged_words
+        or len(staged_words) >= len(candidate_words)
+        or len(staged_words) < 4
+        or candidate_words[: len(staged_words)] != staged_words
+        or len(candidate_words) - len(staged_words) < 2
+    ):
+        return None
+    cjk_like_text = (
+        _is_cjk_text(normalized_staged)
+        or _is_cjk_text(normalized_candidate)
+        or _has_hangul_words(staged_words)
+        or _has_hangul_words(candidate_words)
+    )
+    if not cjk_like_text:
+        return None
+    flags = set(_final_sentence_diagnostic_flags(normalized_staged, "zh" if _is_cjk_text(normalized_staged) else "ko"))
+    if flags.intersection(
+        {
+            "empty",
+            "spaced_cjk",
+            "cjk_internal_gap",
+            "cjk_repeated_ngram",
+            "repeated_word_ngram",
+            "low_value_cjk_fragment",
+            "trailing_ellipsis",
+        }
+    ):
+        return None
+    if _should_confirm_staged_sentence(normalized_staged, staged_confirmations, staged_forced):
+        return "confirmed"
+    if "no_end_marker" not in flags or "short_no_end_fragment" in flags:
+        return None
+    if staged_age < _sentence_max_age_chunks(staged_forced, base_age):
+        return None
+    return "aged"
+
+
 def _is_cjk_prefixed_truncated_revision(left: str, right: str) -> bool:
     normalized_left = _normalized_text(left)
     normalized_right = _normalized_text(right)
