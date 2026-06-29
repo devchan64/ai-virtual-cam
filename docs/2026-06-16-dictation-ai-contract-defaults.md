@@ -150,6 +150,7 @@ macOS/Windows, CPU 실행, `auto`에서 CPU로 암묵 전환되는 경로는 운
 
 - 최신 checked-in challenge replay 기준선은 reviewed `sbd_predicted_cases/` 815건이다.
 - 이 기준선은 실제 `sat + cuda + float16`에서 `final_precision_avg=0.609`, `final_recall_avg=0.798`, `final_f1_avg=0.665`, `final_boundary_f1_avg=0.131`을 기록했다.
+- 다만 `final_boundary_f1_avg`는 exact boundary-offset raw diagnostic으로만 남긴다. 계약 해석과 파라미터 채택 판단은 `final_f1_avg` 중심으로 하고, 경계 보조 축은 `boundary_granularity_adjusted_f1_avg`로 해석한다.
 - strict logic candidate subset은 `final_f1_avg` 약 `0.866` 수준으로, 현재 병목이 전체 SBD 후보 부족보다 lifecycle 소비와 경계 보존에 더 가깝다는 해석을 뒷받침한다.
 
 ## 번역 계약

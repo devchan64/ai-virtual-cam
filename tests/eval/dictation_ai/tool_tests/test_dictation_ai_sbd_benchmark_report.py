@@ -90,6 +90,7 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
                 "actual_staged_queue": [],
                 "final_score": _score(1.0, 1.0, 1.0, exact=True),
                 "final_boundary_score": _score(1.0, 1.0, 1.0, exact=True),
+                "boundary_granularity_adjusted_score": _score(1.0, 1.0, 1.0, exact=True),
                 "completed_last_score": _score(1.0, 1.0, 1.0),
                 "pending_exact": True,
                 "staged_exact": True,
@@ -198,6 +199,7 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertNotIn("min_final_f1", report["summary"])
         self.assertEqual(report["summary"]["final_f1_avg"], 1.0)
         self.assertEqual(report["summary"]["finalized_per_stage_start"], 1.0)
+        self.assertEqual(report["summary"]["boundary_granularity_adjusted_f1_avg"], 1.0)
         self.assertEqual(report["evidence_strata_summary"]["all_cases"]["case_count"], 1)
         self.assertEqual(report["evidence_strata_summary"]["lifecycle_focus"]["case_count"], 1)
         self.assertEqual(report["evidence_strata_summary"]["input_contamination_review"]["case_count"], 0)

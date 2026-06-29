@@ -182,6 +182,10 @@ shifted-window 반복이므로 distinct lifecycle failure가 있는지 사람이
 순서가 충분히 맞아도 STT 표기 차이, punctuation 차이, label boundary 차이 때문에 0점이 될 수 있다.
 이 경우 report의 `boundary_zero_high_final_summary`를 같이 확인한다. 여기에 잡힌 케이스는 먼저
 metric sensitivity 또는 label boundary 검토 대상으로 보고, 곧바로 앱 로직 실패로 보지 않는다.
+`boundary_granularity_adjusted_f1_avg`는 이 exact boundary 지표를 대체하는 보정 진단 축이다. final 문장
+내용과 순서가 충분히 맞을 때 `1:N` 분할과 `N:1` 병합의 연속 구간 매칭을 허용해 점수를 계산한다. 따라서
+actual final이 expected보다 더 잘게 나뉘었거나, 반대로 인접 expected가 하나로 합쳐졌더라도 내용 회수와
+순서가 보존된 경우는 pure boundary failure로 과대 해석하지 않는다.
 `boundary_granularity_summary`는 expected content recall은 높지만 actual final이 expected보다 더 잘게
 나뉘어 boundary 점수가 낮은 케이스를 보여준다. 이 케이스는 missing-final 병목이 아니라 label boundary
 또는 허용 가능한 과분할 여부를 먼저 검토한다.

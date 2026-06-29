@@ -36,6 +36,7 @@ from tests.eval.dictation_ai.benchmark.sbd_lifecycle_replay import (
     _stage_completed_sentence,
 )
 from tests.eval.dictation_ai.benchmark.sbd_lifecycle_scoring import (
+    score_boundary_granularity_adjusted,
     score_boundary_offsets,
     score_ordered_sequence,
     score_sequence,
@@ -206,6 +207,10 @@ def main() -> int:
         final_score = score_sequence(case.expected_final, lifecycle["actual_final"])
         final_ordered_score = score_ordered_sequence(case.expected_final, lifecycle["actual_final"])
         final_boundary_score = score_boundary_offsets(case.expected_final, lifecycle["actual_final"])
+        boundary_granularity_adjusted_score = score_boundary_granularity_adjusted(
+            case.expected_final,
+            lifecycle["actual_final"],
+        )
         completed_score = score_sequence(case.expected_completed, lifecycle["actual_completed_last"])
         pending_exact = lifecycle["actual_pending"] == case.expected_pending
         staged_exact = lifecycle["actual_staged"] == case.expected_staged
@@ -230,6 +235,7 @@ def main() -> int:
                 "final_score": final_score,
                 "final_ordered_score": final_ordered_score,
                 "final_boundary_score": final_boundary_score,
+                "boundary_granularity_adjusted_score": boundary_granularity_adjusted_score,
                 "completed_last_score": completed_score,
                 "pending_exact": pending_exact,
                 "staged_exact": staged_exact,
@@ -278,7 +284,7 @@ def main() -> int:
         f"final_f1_avg={summary['final_f1_avg']:.3f} "
         f"strict_final_f1_avg={float(strict_summary.get('final_f1_avg', 0.0)):.3f} "
         f"final_similarity_coverage_avg={summary['final_similarity_coverage_avg']:.3f} "
-        f"final_boundary_f1_avg={summary['final_boundary_f1_avg']:.3f} "
+        f"boundary_diag_f1_avg={summary['final_boundary_f1_avg']:.3f} "
         f"short_cases={length_strata['short_case_count']} "
         f"short_missing_final_rate={length_strata['short_missing_final_rate']:.3f} "
         f"short_duplicate_suppression_rate={length_strata['short_duplicate_suppression_rate']:.3f} "

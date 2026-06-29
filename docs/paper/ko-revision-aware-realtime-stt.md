@@ -6,7 +6,7 @@
 
 ## 초록
 
-실시간 음성 전사(automatic speech recognition, ASR) 모델은 스트리밍 또는 준스트리밍 환경에서 매 입력 윈도우마다 부분 가설(partial hypothesis)을 재작성한다. 본 연구의 관심사는 raw STT 정확도 자체를 개선하는 것이 아니라, SBD(sentence boundary detection)와 revision-aware lifecycle을 이용해 흔들리는 partial hypothesis를 어떤 확정문장(final sentence)으로 처리할 것인가라는 방법론을 분석하는 것이다. 이를 위해 원시 ASR 가설(raw ASR hypothesis), 문장 경계 검출(sentence boundary detection), 리비전 생명주기(revision lifecycle), final-only sink 계약을 분리 계측하는 분석 틀을 정리한다. 특히 한국어, 영어, 중국어 환경에서 문맥 윈도우(context window) 길이와 확정 단위(commit unit)의 상호작용을 추적하고, 긴 문맥이 원시 STT 가설을 더 안정적으로 만들 수 있는 동시에 최종 전사(final transcript) 갱신을 늦출 수 있음을 운영 로그와 텍스트 벤치마크 기반으로 관찰한다. 최신 challenge replay 기준선은 reviewed `sbd_predicted_cases/` 815건을 실제 `sat + cuda + float16` 경로로 재생한 결과이며, `final_precision_avg=0.614`, `final_recall_avg=0.786`, `final_f1_avg=0.666`, `final_boundary_f1_avg=0.136`을 기록했다. 이 수치는 내용 회수와 경계 보존이 분리된 병목임을 보여주며, 현재 잔여 실패가 SBD 후보 생성 자체보다 lifecycle 소비와 경계 보존에 더 가깝다는 해석을 지지한다. 재현 정보와 근거 기록은 부록에 정리한다.
+실시간 음성 전사(automatic speech recognition, ASR) 모델은 스트리밍 또는 준스트리밍 환경에서 매 입력 윈도우마다 부분 가설(partial hypothesis)을 재작성한다. 본 연구의 관심사는 raw STT 정확도 자체를 개선하는 것이 아니라, SBD(sentence boundary detection)와 revision-aware lifecycle을 이용해 흔들리는 partial hypothesis를 어떤 확정문장(final sentence)으로 처리할 것인가라는 방법론을 분석하는 것이다. 이를 위해 원시 ASR 가설(raw ASR hypothesis), 문장 경계 검출(sentence boundary detection), 리비전 생명주기(revision lifecycle), final-only sink 계약을 분리 계측하는 분석 틀을 정리한다. 특히 한국어, 영어, 중국어 환경에서 문맥 윈도우(context window) 길이와 확정 단위(commit unit)의 상호작용을 추적하고, 긴 문맥이 원시 STT 가설을 더 안정적으로 만들 수 있는 동시에 최종 전사(final transcript) 갱신을 늦출 수 있음을 운영 로그와 텍스트 벤치마크 기반으로 관찰한다. 최신 challenge replay 기준선은 reviewed `sbd_predicted_cases/` 815건을 실제 `sat + cuda + float16` 경로로 재생한 결과이며, 핵심 지표인 `final_f1_avg=0.666`과 `final_recall_avg=0.786`을 기록했다. 기존 `final_boundary_f1_avg=0.136`은 exact boundary-offset에 과도하게 민감해 본래 의도를 훼손하는 지표로 판단했고, 대신 `boundary_granularity_adjusted_f1_avg`를 분절 granularity 보정 진단 축으로 추가했다. 재현 정보와 근거 기록은 부록에 정리한다.
 
 본 연구의 기여는 세 가지다. 첫째, 실시간 ASR 출력의 불안정성을 단순 UI 문제가 아니라 SBD 기반 확정문장 처리 문제로 모델링한다. 둘째, 중복 증폭(duplicate amplification), 확정 누락(missing final), 확정 지연의 대리 신호(candidate age, staged residue), pending overrun, replacement churn을 분리한 평가 지표를 정리한다. 셋째, 다국어 실시간 전사 시스템에서 SBD 후보 생성과 revision-aware lifecycle 소비를 분리해 해석해야 한다는 방법론적 근거를 남긴다. 본문은 완성된 범용 해법을 제안하기보다, SBD 라이프사이클 기반 확정문장 처리의 병목과 trade-off를 보수적으로 정리하는 데 초점을 둔다.
 
@@ -26,7 +26,7 @@
 | 가설 | 상태 | 본 문서에서의 처리 |
 | --- | --- | --- |
 | partial hypothesis와 final transcript를 분리하지 않으면 중복/누락이 발생한다. | 유지 | 운영 로그와 challenge replay의 실패 유형으로 제시한다. |
-| SBD 후보와 final lifecycle은 별도 계층으로 평가해야 한다. | 유지 | `final_f1`, `final_boundary_f1`, lifecycle counter, staged residue를 분리 지표로 둔다. |
+| SBD 후보와 final lifecycle은 별도 계층으로 평가해야 한다. | 유지 | 핵심 지표 `final_f1`과 분절 보정 경계 진단 `boundary_granularity_adjusted_f1`, lifecycle counter, staged residue를 분리한다. |
 | 단일 threshold 튜닝으로 목표 품질을 달성할 수 있다. | 축소 | parameter sweep과 구조 실험 모두에서 대부분 trade-off 또는 국소 개선에 머물렀음을 보고한다. |
 | failure-enriched challenge replay 평균을 운영 평균으로 볼 수 있다. | 폐기 | challenge replay와 representative corpus를 분리하는 이유로 설명한다. |
 | final-only sink가 번역 안정성을 높인다. | 보류 | 시스템 목표와 문헌 배경으로 제시하되, translation replay 전에는 성능 주장으로 쓰지 않는다. |
@@ -125,9 +125,9 @@ Whisper 계열 모델은 강력한 오프라인 전사 성능을 보이지만, �
 
 본 연구의 평가는 공개 ASR benchmark가 아니라 failure-enriched challenge replay를 대상으로 한다. 입력은 reviewed `sbd_predicted_cases/`이며, 각 케이스는 source `chunks`만을 근거로 `expected_final`을 정리한 텍스트 replay 샘플이다. 따라서 이 평가는 운영 평균 품질이나 raw STT 정확도를 재는 실험이 아니라, 같은 실패 입력 집합에서 SBD 후보 생성과 lifecycle 소비 규칙이 어떤 trade-off를 만드는지 비교하는 실험이다.
 
-평가 지표는 세 계층으로 나뉜다. 첫째, `RecognitionHypothesis`는 raw STT 가설의 품질을 본다. 둘째, `SentenceCandidateSet`은 SBD가 `completed/pending` 후보를 어떤 경계와 순서로 생성하는지 본다. 셋째, `CommittedTranscriptEvent`는 후보가 age, revision 유사도, candidate queue, recent final memory를 거쳐 final-only sink로 소비되는지 본다. 정량 지표로는 `final_precision`, `final_recall`, `final_f1`, `final_boundary_f1`, `finalized_per_stage_start`, `staged_exact_match`, 그리고 `stage_replace_deferred`, `stage_queue_revision` 같은 lifecycle counter를 사용한다.
+평가 지표는 세 계층으로 나뉜다. 첫째, `RecognitionHypothesis`는 raw STT 가설의 품질을 본다. 둘째, `SentenceCandidateSet`은 SBD가 `completed/pending` 후보를 어떤 경계와 순서로 생성하는지 본다. 셋째, `CommittedTranscriptEvent`는 후보가 age, revision 유사도, candidate queue, recent final memory를 거쳐 final-only sink로 소비되는지 본다. 정량 지표의 중심은 최종 문장 유사도를 보는 `final_precision`, `final_recall`, `final_f1`이다. `boundary_granularity_adjusted_f1`은 final 내용과 순서가 맞을 때 `1:N` 분할과 `N:1` 병합의 연속 구간 매칭을 허용하는 보정 경계 진단 지표다. 기존 `final_boundary_f1`는 exact boundary-offset에 과도하게 민감해 핵심 지표에서 제외한다. 그 외 `finalized_per_stage_start`, `staged_exact_match`, `stage_replace_deferred`, `stage_queue_revision` 같은 lifecycle counter를 함께 본다.
 
-이 설계의 목적은 단일 평균 점수 최적화가 아니라 실패 유형 분해다. 따라서 한 파라미터가 전체 `final_f1`을 약간 올리더라도 boundary F1이나 queue residue를 악화시키면 채택하지 않는다. 또한 현재 challenge replay는 failure-enriched corpus이므로, 여기서 얻은 평균을 제품 전체 평균 품질로 일반화하지 않는다.
+이 설계의 목적은 단일 평균 점수 최적화가 아니라 실패 유형 분해다. 따라서 한 파라미터는 우선 `final_f1`과 관련 recall/precision에서 평가하고, `boundary_granularity_adjusted_f1`을 통해 분절 granularity mismatch와 실제 lifecycle 실패를 분리한다. 기존 `final_boundary_f1`는 exact 경계 민감도 확인용 raw diagnostic으로만 남기고, 채택 판단의 중심에서 제외한다. 또한 현재 challenge replay는 failure-enriched corpus이므로, 여기서 얻은 평균을 제품 전체 평균 품질로 일반화하지 않는다.
 
 동시에 현재 파이프라인의 긍정적 특성도 별도 축으로 계측해야 한다. 실제 운영 관찰에서는 긴 문장에서 경계 오류와 소비 지연이 남아 있지만, 짧은 문장과 짧은 소절은 비교적 빠르게 소비되는 경우가 많고, 소비 누락과 중복 소비도 대체로 억제되는 것으로 보인다. 따라서 후속 분석은 병목 지표와 함께 "짧은 문장을 얼마나 빠르고 안정적으로 확정하는가"를 직접 보여주는 지표를 둬야 한다.
 
@@ -137,7 +137,7 @@ Whisper 계열 모델은 강력한 오프라인 전사 성능을 보이지만, �
 - `short_final_precision`: 짧은 정답 문장 집합에서 조기 확정이 중복 또는 오확정으로 붕괴하지 않은 비율
 - `short_duplicate_suppression_rate`: 짧은 문장에서 동일 의미 후보의 반복 확정 없이 한 번만 소비된 비율
 - `short_missing_final_rate`: 짧은 문장에서 staged 진입 후 최종 확정 없이 소실된 비율
-- `short_boundary_f1`: 짧은 문장에서 경계 보존이 유지되는 정도
+- `short_boundary_granularity_adjusted_f1`: 짧은 문장에서 분절 granularity 차이를 보정한 경계 진단 지표
 - `short_finalized_per_stage_start`: 짧은 후보가 staged에 진입한 뒤 실제 final로 소비되는 비율
 - `short_stage_age_to_final`: 짧은 후보가 `stage_start`에서 `finalized`까지 도달하는 관찰 횟수의 분포
 - `short_queue_bypass_rate`: 짧은 후보가 장기 queue residue 없이 active staged에서 바로 소비되는 비율
@@ -149,7 +149,7 @@ Whisper 계열 모델은 강력한 오프라인 전사 성능을 보이지만, �
 
 - `long_final_recall`: 긴 정답 문장에서 최종 확정 누락 없이 회수된 비율
 - `long_merge_error_rate`: 서로 다른 소절이나 문장이 하나의 final로 과병합된 비율
-- `long_boundary_f1`: 긴 문장에서 경계 보존이 유지되는 정도
+- `long_boundary_granularity_adjusted_f1`: 긴 문장에서 분절 granularity 차이를 보정한 경계 진단 지표
 - `long_stage_age_to_final`: 긴 후보가 확정되기까지 필요한 관찰 횟수의 분포
 - `long_replace_deferred_rate`: 긴 후보에서 `stage_replace_deferred`가 얼마나 자주 발생하는지 보는 비율
 - `long_queue_residue_rate`: 긴 후보가 종료 시점까지 queue에 남는 비율
@@ -158,7 +158,7 @@ Whisper 계열 모델은 강력한 오프라인 전사 성능을 보이지만, �
 
 ## 8. 결과
 
-최신 기준선은 reviewed `sbd_predicted_cases/` 815건을 실제 `sat + cuda + float16` 경로로 재생한 결과이며, `final_precision_avg=0.614`, `final_recall_avg=0.786`, `final_f1_avg=0.666`, `final_boundary_f1_avg=0.136`을 기록했다. 이 기준선은 SBD가 문장 후보를 충분히 생성하더라도, lifecycle 소비 단계에서 후보 교체와 queue 잔류가 계속 병목이 될 수 있음을 보여준다.
+최신 기준선은 reviewed `sbd_predicted_cases/` 815건을 실제 `sat + cuda + float16` 경로로 재생한 결과이며, 핵심 지표 `final_precision_avg=0.614`, `final_recall_avg=0.786`, `final_f1_avg=0.666`을 기록했다. `boundary_granularity_adjusted_f1_avg`는 final 내용과 순서가 맞는 split/merge granularity mismatch를 분리해 해석하기 위한 보조 진단 수치다. 반면 `final_boundary_f1_avg=0.136`은 exact boundary-offset raw diagnostic으로만 남긴다. 이 기준선은 SBD가 문장 후보를 충분히 생성하더라도, lifecycle 소비 단계에서 후보 교체와 queue 잔류가 계속 병목이 될 수 있음을 보여준다.
 
 | 조건 | cases | final precision | final recall | final F1 | boundary F1 |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -167,9 +167,9 @@ Whisper 계열 모델은 강력한 오프라인 전사 성능을 보이지만, �
 | same-chunk tail merge `max_tail_units=6` | 815 | 0.617 | 0.791 | 0.670 | 0.136 |
 | same-chunk tail merge `max_tail_units=8` | 815 | 0.617 | 0.789 | 0.669 | 0.137 |
 
-현재 결과는 전면적으로 부정적이라고 보기 어렵다. `final_recall_avg=0.786`과 `final_f1_avg=0.666`은 failure-enriched challenge replay에서도 적지 않은 내용 회수가 일어나고 있음을 보여준다. 이는 파이프라인이 최소한 일부 후보를 빠르게 소비하고 있다는 긍정 신호로 읽을 수 있다. 특히 운영 관찰상 짧은 문장에서는 소비 누락과 중복 소비가 대체로 억제되고 있다는 점을 고려하면, 전체 평균은 긴 문장 병목 때문에 짧은 문장 strata의 강점을 충분히 드러내지 못할 수 있다.
+현재 결과는 전면적으로 부정적이라고 보기 어렵다. 핵심 지표 `final_recall_avg=0.786`과 `final_f1_avg=0.666`은 failure-enriched challenge replay에서도 적지 않은 내용 회수가 일어나고 있음을 보여준다. 이는 파이프라인이 최소한 일부 후보를 빠르게 소비하고 있다는 긍정 신호로 읽을 수 있다. 특히 운영 관찰상 짧은 문장에서는 소비 누락과 중복 소비가 대체로 억제되고 있다는 점을 고려하면, 전체 평균은 긴 문장 병목 때문에 짧은 문장 strata의 강점을 충분히 드러내지 못할 수 있다.
 
-핵심 관찰은 세 가지다. 첫째, 내용 회수율과 경계 품질은 분리된다. baseline에서도 `final_f1_avg=0.666`에 비해 `final_boundary_f1_avg=0.136`이 크게 낮아, 내용이 일부 회수되더라도 문장 단위는 쉽게 무너진다. 둘째, 현재 기준선은 짧은 문장 또는 짧은 소절의 빠른 소비, 누락 억제, 중복 억제와 긴 문장의 경계 붕괴를 한 평균 안에 함께 담고 있어, 긍정 신호가 과소해석될 수 있다. 셋째, 국소 구조 실험은 일부 subset에서 개선 신호를 보여도 전체 replay에서는 경계 엄격도나 queue churn을 악화시킬 수 있다. 예를 들어 same-chunk tail merge는 일부 한국어 residue 사례를 줄였지만 전체 기준선의 안정적 대안으로는 채택되지 않았다.
+핵심 관찰은 세 가지다. 첫째, 핵심 품질 지표는 final 문장 유사도다. baseline의 `final_f1_avg=0.666`은 failure-enriched replay에서도 내용 회수가 적지 않음을 보여준다. 둘째, exact boundary raw diagnostic인 `final_boundary_f1_avg`는 본래 의도를 훼손할 정도로 granularity mismatch에 민감하므로 채택 판단의 중심 지표에서 제외한다. 대신 `boundary_granularity_adjusted_f1`를 통해 내용과 순서가 맞는 split/merge를 pure failure와 분리해 본다. 셋째, 현재 기준선은 짧은 문장 또는 짧은 소절의 빠른 소비, 누락 억제, 중복 억제와 긴 문장의 경계 붕괴를 한 평균 안에 함께 담고 있어, 긍정 신호가 과소해석될 수 있다. 예를 들어 same-chunk tail merge는 일부 한국어 residue 사례를 줄였지만 전체 기준선의 안정적 대안으로는 채택되지 않았다.
 
 ## 9. 결과 해석
 
@@ -201,7 +201,7 @@ Whisper 계열 모델은 강력한 오프라인 전사 성능을 보이지만, �
 
 본 연구는 다국어 실시간 전사 및 번역 시스템에서 리비전 인지 확정 계층을 별도 분석 대상으로 다뤄야 함을 보였다. STT 모델의 원시 가설, 문장 경계 검출, 확정 생명주기, final-only sink 계약은 서로 다른 실패 원인을 갖기 때문에 분리 평가되어야 한다. 특히 긴 문맥은 STT 안정성을 높일 수 있지만 final transcript 지연과 긴 문장 확정 문제를 유발할 수 있다. 따라서 실시간 전사 시스템은 문맥 윈도우와 확정 단위를 분리하고, 중복 억제와 리비전 생명주기를 명시적으로 계측하는 편이 타당하다.
 
-현재 구현은 실패 중심 입력에서 재현 가능한 기준선으로 읽는 편이 타당하다. 최신 815건 challenge replay 기준에서 내용 회수 F1은 0.666이고 boundary F1은 0.136이다. 이 격차는 실시간 전사 품질을 STT 정확도 하나로 설명할 수 없음을 보여준다. 잔여 실패는 queue residue, staged replacement/deferred, same-chunk completed tail이 lifecycle 안에서 적절히 소비되지 못하는 구간에 집중되어 있으며, 이는 단순 큐 한도보다 staged replacement/deferred와 boundary 후보 품질이 더 직접적인 병목임을 시사한다. 따라서 현재 결론은 언어별 ad-hoc 규칙 추가보다 active staged 소비, candidate queue 정리, no-end fragment 처리, recent final memory의 일반 정책을 보수적으로 검증해야 한다는 데 머문다.
+현재 구현은 실패 중심 입력에서 재현 가능한 기준선으로 읽는 편이 타당하다. 최신 815건 challenge replay 기준에서 핵심 품질 지표인 내용 회수 F1은 0.666이다. exact boundary raw diagnostic인 `final_boundary_f1_avg=0.136`은 동일 내용의 분절 granularity 차이까지 엄격하게 감점하므로, 이제 핵심 판단 지표로 사용하지 않는다. 대신 `boundary_granularity_adjusted_f1`를 통해 split-final과 merge-final의 허용 가능한 granularity drift를 분리하고, 그 뒤에도 남는 잔여 실패를 queue residue, staged replacement/deferred, same-chunk completed tail 소비 문제로 해석한다. 따라서 현재 결론은 언어별 ad-hoc 규칙 추가보다 active staged 소비, candidate queue 정리, no-end fragment 처리, recent final memory의 일반 정책을 보수적으로 검증해야 한다는 데 머문다.
 
 동시에 현재 결과는 짧은 문장 소비에 관한 긍정적 가설도 남긴다. failure-enriched challenge replay에서도 내용 회수 지표가 완전히 낮지 않다는 점은, 파이프라인이 모든 구간에서 실패하는 것이 아니라 특정 길이와 특정 revision 조건 이후에 주로 무너진다는 뜻일 수 있다. 특히 짧은 문장 strata에서는 빠른 확정성뿐 아니라 소비 누락과 중복 소비 억제도 별도 강점으로 검증할 필요가 있다. 따라서 다음 단계는 전체 평균을 반복 해석하는 대신, 짧은 문장 strata의 빠른 확정성, 누락 억제, 중복 억제와 긴 문장 strata의 경계 붕괴를 분리 계측하는 것이다.
 

@@ -1039,6 +1039,7 @@ def _boundary_granularity_payload(result: dict[str, Any]) -> dict[str, Any]:
     final_score = dict(result.get("final_score", {}))
     ordered_score = dict(result.get("final_ordered_score", final_score))
     boundary_score = dict(result.get("final_boundary_score", {}))
+    adjusted_boundary_score = dict(result.get("boundary_granularity_adjusted_score", {}))
     expected_final = list(result.get("expected_final", []) or [])
     actual_final = list(result.get("actual_final", []) or [])
     return {
@@ -1050,6 +1051,7 @@ def _boundary_granularity_payload(result: dict[str, Any]) -> dict[str, Any]:
         "final_f1": float(final_score.get("f1", 0.0)),
         "final_ordered_f1": float(ordered_score.get("f1", final_score.get("f1", 0.0))),
         "final_boundary_f1": float(boundary_score.get("f1", 0.0)),
+        "boundary_granularity_adjusted_f1": float(adjusted_boundary_score.get("f1", 0.0)),
         "expected_final_count": len(expected_final),
         "actual_final_count": len(actual_final),
         "expected_final_preview": _first_text_preview(expected_final),
@@ -1113,7 +1115,7 @@ def summarize_boundary_granularity_cases(results: list[dict[str, Any]]) -> dict[
 def _average_scores(results: list[dict[str, Any]], key: str) -> dict[str, float]:
     if not results:
         return {"precision": 0.0, "recall": 0.0, "f1": 0.0, "similarity_coverage": 0.0}
-    fallback_key = "final_score" if key == "final_ordered_score" else key
+    fallback_key = "final_score" if key in {"final_ordered_score", "boundary_granularity_adjusted_score"} else key
     scores = [dict(result.get(key) or result.get(fallback_key, {})) for result in results]
     return {
         "precision": sum(float(score["precision"]) for score in scores) / len(scores),
@@ -1226,6 +1228,7 @@ def _summarize_result_group(group_results: list[dict[str, Any]]) -> dict[str, An
     final_score_avg = _average_scores(group_results, "final_score")
     final_ordered_score_avg = _average_scores(group_results, "final_ordered_score")
     final_boundary_score_avg = _average_scores(group_results, "final_boundary_score")
+    boundary_granularity_adjusted_avg = _average_scores(group_results, "boundary_granularity_adjusted_score")
     completed_last_score_avg = _average_scores(group_results, "completed_last_score")
     metrics_total: dict[str, int] = {}
     for result in group_results:
@@ -1252,6 +1255,9 @@ def _summarize_result_group(group_results: list[dict[str, Any]]) -> dict[str, An
         "final_boundary_precision_avg": final_boundary_score_avg["precision"],
         "final_boundary_recall_avg": final_boundary_score_avg["recall"],
         "final_boundary_f1_avg": final_boundary_score_avg["f1"],
+        "boundary_granularity_adjusted_precision_avg": boundary_granularity_adjusted_avg["precision"],
+        "boundary_granularity_adjusted_recall_avg": boundary_granularity_adjusted_avg["recall"],
+        "boundary_granularity_adjusted_f1_avg": boundary_granularity_adjusted_avg["f1"],
         "completed_last_precision_avg": completed_last_score_avg["precision"],
         "completed_last_recall_avg": completed_last_score_avg["recall"],
         "completed_last_f1_avg": completed_last_score_avg["f1"],
@@ -3552,6 +3558,7 @@ def build_benchmark_report(
     final_score_avg = _average_scores(results, "final_score")
     final_ordered_score_avg = _average_scores(results, "final_ordered_score")
     final_boundary_score_avg = _average_scores(results, "final_boundary_score")
+    boundary_granularity_adjusted_avg = _average_scores(results, "boundary_granularity_adjusted_score")
     completed_last_score_avg = _average_scores(results, "completed_last_score")
     language_summary = summarize_results_by_language(results)
     tag_summary = summarize_results_by_tag(results)
@@ -3662,6 +3669,9 @@ def build_benchmark_report(
             "final_boundary_precision_avg": final_boundary_score_avg["precision"],
             "final_boundary_recall_avg": final_boundary_score_avg["recall"],
             "final_boundary_f1_avg": final_boundary_score_avg["f1"],
+            "boundary_granularity_adjusted_precision_avg": boundary_granularity_adjusted_avg["precision"],
+            "boundary_granularity_adjusted_recall_avg": boundary_granularity_adjusted_avg["recall"],
+            "boundary_granularity_adjusted_f1_avg": boundary_granularity_adjusted_avg["f1"],
             "completed_last_precision_avg": completed_last_score_avg["precision"],
             "completed_last_recall_avg": completed_last_score_avg["recall"],
             "completed_last_f1_avg": completed_last_score_avg["f1"],

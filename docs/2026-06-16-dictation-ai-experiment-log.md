@@ -45,6 +45,8 @@
 - 문장 경계는 regex가 아니라 SaT/wtpsplit 기반 SBD를 후보 생성기로 사용한다.
 - final 확정은 단일 모델 출력이 아니라 staged confirmation, `sentenceFinalizeAge`, 중복 억제, revision lifecycle로 결정한다.
 - 번역은 final transcript만 대상으로 한다.
+- 핵심 품질 지표는 final 문장 유사도 기반 `final_f1_avg`와 그 precision/recall이며, `final_boundary_f1_avg`는 exact boundary-offset을 보는 보조 진단 지표로만 해석한다.
+- `final_boundary_f1_avg`는 본래 의도를 훼손하는 exact raw diagnostic으로 판단해 채택 지표에서 제외했다. 대신 `boundary_granularity_adjusted_f1_avg`를 split/merge granularity 보정 진단 축으로 추가했다.
 
 ## 2026-06-30 길이 strata 벤치로 짧은 문장/긴 문장 가설 확인
 
@@ -59,7 +61,8 @@
 - `tests/eval/dictation_ai/benchmark/sbd_benchmark_report.py`에 `length_strata_summary`를 추가했다.
 - strata는 `expected_final` token 수 기준으로 `short_sentences`, `medium_sentences`, `long_sentences`로 나눴다.
 - 짧은 문장 축에는 `missing_final_rate`, `duplicate_suppression_rate`, `queue_bypass_rate`를, 긴 문장 축에는 `missing_final_rate`, `merge_error_rate`, `queue_bypass_rate`를 핵심 지표로 뒀다.
-- `tests/eval/dictation_ai/sbd_benchmark.py` summary line에도 short/long 지표를 직접 노출했다.
+- `tests/eval/dictation_ai/sbd_benchmark.py` summary line에도 `final_f1_avg` 중심의 short/long 지표를 직접 노출하고, boundary는 `boundary_diag_f1_avg` 보조 진단 축으로만 남겼다.
+- 이후 경계 해석은 `boundary_diag_f1_avg` 단독 수치보다 `boundary_granularity_adjusted_f1_avg`와 `boundary_granularity_summary`를 같이 본다.
 - `tests/eval/dictation_ai/paper/audit_length_strata_hypothesis.py`를 추가해 기준 리포트가 이 가설을 충족하는지 자동 판정하도록 했다.
 
 실행:
@@ -88,7 +91,7 @@ cases=815
 final_precision_avg=0.614
 final_recall_avg=0.786
 final_f1_avg=0.666
-final_boundary_f1_avg=0.136
+boundary_diag_f1_avg=0.136
 short_cases=59
 short_missing_final_rate=0.000
 short_duplicate_suppression_rate=0.932
@@ -111,6 +114,7 @@ hypothesis_supported=true
 - 짧은 문장 strata에서는 `duplicate_suppression_rate=0.932`로 중복 소비도 대체로 잘 억제됐다.
 - 짧은 문장 strata의 `queue_bypass_rate=0.831`은 많은 후보가 장기 queue residue 없이 빠르게 소비된다는 해석을 지지한다.
 - 긴 문장 strata에서는 `missing_final_rate=0.153`, `long_merge_error_rate=0.289`로 소비 누락과 오병합이 분명히 더 크게 남았다.
+- 이 구간의 핵심 판정은 `final_f1_avg=0.666`과 strata별 누락/중복/병합 지표에 둔다. `boundary_diag_f1_avg=0.136`은 동일 내용을 더 짧거나 길게 분절한 경우에도 감점되는 exact 경계 진단 값이므로, 앱의 주 품질 판단 기준으로 사용하지 않는다. 이후 경계 해석은 `boundary_granularity_adjusted_f1_avg`와 `boundary_granularity_summary`로 split-final/merge-final 허용 범위를 함께 본다.
 - 따라서 현재 벤치는 "짧은 문장은 비교적 잘 소비되고, 긴 문장은 누락/병합 병목이 크다"는 가설을 지지한다.
 
 제한:

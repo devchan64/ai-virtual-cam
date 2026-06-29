@@ -93,7 +93,7 @@
 
 ## 반복 실험의 현재 판정
 
-현재까지의 반복 실험은 받아쓰기 AI 로직 변경 지점을 직접 찾은 것이 아니라, 단일 파라미터 튜닝으로 설명 가능한 개선축이 대부분 닫혔음을 확인한 것으로 해석한다. 표준 complete paper-evidence package 기준으로 report 23개, 고유 parameter axis 12개가 있고, `hypothesis_status_counts={유지:2, 축소:2, 폐기:8}`이다. baseline은 1113건 challenge replay에서 `final_precision_avg=0.601920572081`, `final_recall_avg=0.439944451819`, `final_f1_avg=0.483242163472`, `final_boundary_f1_avg=0.107749021040`, `finalized_per_stage_start=0.711599858106`로 일관된다.
+현재까지의 반복 실험은 받아쓰기 AI 로직 변경 지점을 직접 찾은 것이 아니라, 단일 파라미터 튜닝으로 설명 가능한 개선축이 대부분 닫혔음을 확인한 것으로 해석한다. 표준 complete paper-evidence package 기준으로 report 23개, 고유 parameter axis 12개가 있고, `hypothesis_status_counts={유지:2, 축소:2, 폐기:8}`이다. baseline은 1113건 challenge replay에서 `final_precision_avg=0.601920572081`, `final_recall_avg=0.439944451819`, `final_f1_avg=0.483242163472`, `final_boundary_f1_avg=0.107749021040`, `finalized_per_stage_start=0.711599858106`로 일관된다. 다만 `final_boundary_f1_avg`는 exact boundary-offset에 과도하게 민감해 채택 판단의 핵심 지표에서 제외했고, 이후 문서에서는 `boundary_granularity_adjusted_f1_avg`를 split/merge granularity 보정 진단 축으로 사용한다.
 
 축별 결과는 다음처럼 읽는다.
 
@@ -158,7 +158,7 @@
 | 주장 | 현재 근거 | 현재 판정 | 추가 필요 증거 |
 | --- | --- | --- | --- |
 | partial hypothesis와 final transcript를 분리해야 한다. | 운영 로그 사례, 1113건 challenge replay, Whisper-Streaming/incremental ASR 문헌 | 사용 가능 | representative에서도 같은 실패축이 관측되는지 확인 |
-| SBD 후보와 final lifecycle은 별도 계층으로 평가해야 한다. | `final_f1_avg=0.483`, `final_boundary_f1_avg=0.108`, lifecycle counter, queue residue strata | 사용 가능 | representative replay의 boundary/queue strata |
+| SBD 후보와 final lifecycle은 별도 계층으로 평가해야 한다. | `final_f1_avg=0.483`, `boundary_granularity_adjusted_f1_avg`, lifecycle counter, queue residue strata | 사용 가능 | representative replay의 boundary/queue strata |
 | threshold 단일 튜닝은 중심 개선축이 아니다. | complete evidence report 23개, 고유 parameter axis 12개, `hypothesis_status_counts={유지:2, 축소:2, 폐기:8}` | 사용 가능 | 새 구조 변경 후에도 닫힌 축이 다시 열리는지 확인 |
 | current baseline은 실패 중심 입력에서 재현 가능한 기준선이다. | 기존 `sat + cuda + float16` complete report 23개. 현재 evidence 계약에서는 `lifecycle_replay_contract.replayed_runtime_signals`가 추가되어 이 report들은 재실행 후보로 분류된다. | 보류 | 최신 계약으로 complete report 재생성 |
 | 운영 평균 품질을 개선했다. | 없음. representative root에는 아직 정식 JSONL case 없음 | 사용 금지 | 사람이 확정한 representative case와 validator summary |
@@ -288,7 +288,8 @@ review packet은 manifest의 `source_started_at`과 `source_ended_at` 범위 안
 
 - 어떤 lifecycle counter가 병목이라고 판단했는가?
 - 변경 후 해당 counter가 줄었는가, 아니면 다른 counter로 이동했는가?
-- `final_f1_avg` 개선이 `final_precision_avg` 또는 `final_boundary_f1_avg` 하락으로 상쇄되지 않는가?
+- `final_f1_avg` 개선이 `final_precision_avg` 하락으로 상쇄되지 않는가?
+- `boundary_granularity_adjusted_f1_avg` 기준으로 split/merge granularity drift를 허용해도 구조 병목이 남는가?
 - `lifecycle_without_input_review`에서도 같은 결론이 유지되는가?
 - representative corpus가 준비되면 운영 평균에서 같은 방향이 유지되는지 확인할 수 있는가?
 
@@ -332,7 +333,7 @@ review packet은 manifest의 `source_started_at`과 `source_ended_at` 범위 안
 | `lifecycle_without_input_review` | lifecycle focus 중 입력 잔류/무음/화자 전환 검토 태그가 없는 케이스 | final lifecycle 구조 변경의 더 깨끗한 비교 보조 지표 |
 | `input_contamination_review` | `audio-residual`, `no-speech`, `no-text`, `speaker-transition` 검토 태그가 있는 케이스 | raw input/source 검토 대상으로 분리, lifecycle 개선 근거로 직접 사용하지 않음 |
 
-2026-06-21 기준 기존 실제 CUDA report 재분석에서는 `input_contamination_review=5/1113`으로 작다. 따라서 현재 낮은 `final_f1_avg`와 `final_boundary_f1_avg`는 입력 오염 대량 혼입이 아니라 lifecycle focus 자체의 난도로 해석한다. 다만 논문 결과표에는 `all_cases`와 함께 `lifecycle_without_input_review`, `input_contamination_review` 규모를 표시한다.
+2026-06-21 기준 기존 실제 CUDA report 재분석에서는 `input_contamination_review=5/1113`으로 작다. 따라서 현재 낮은 `final_f1_avg`와 exact boundary raw diagnostic `final_boundary_f1_avg`는 입력 오염 대량 혼입이 아니라 lifecycle focus 자체의 난도로 해석한다. 다만 채택 판단은 `final_f1_avg`와 `boundary_granularity_adjusted_f1_avg`를 중심으로 두고, 논문 결과표에는 `all_cases`와 함께 `lifecycle_without_input_review`, `input_contamination_review` 규모를 표시한다.
 
 ## Representative 수집 기준
 
@@ -582,11 +583,15 @@ Representative corpus를 단독 `sbd_benchmark.py`로 실행할 때도 report의
 - `final_precision_avg`
 - `final_recall_avg`
 - `final_f1_avg`
-- `final_boundary_f1_avg`
+- `boundary_granularity_adjusted_f1_avg`
 - `finalized_per_stage_start`
 - `pending_exact_match`
 - `staged_exact_match`
 - lifecycle counter
+
+폐기된 raw diagnostic:
+
+- `final_boundary_f1_avg`
 
 해석 보조:
 
@@ -607,7 +612,7 @@ Representative corpus를 단독 `sbd_benchmark.py`로 실행할 때도 report의
 `final_f1_avg`가 올라도 다음 신호가 있으면 기본값 채택 근거로 보지 않는다.
 
 - `final_precision_avg` 하락이 큰 경우
-- `final_boundary_f1_avg` 하락이 동반되는 경우
+- `boundary_granularity_adjusted_f1_avg` 하락이 동반되는 경우
 - 특정 언어의 final F1 또는 precision이 하락하는 경우
 - `missing-final`, `stage-queue`, `duplicate-final`, `no-end-marker`, `cjk-internal-gap` 같은 핵심 실패 태그에서 precision/boundary가 악화되는 경우
 - staged residue나 empty final이 의미 있게 증가하는 경우
