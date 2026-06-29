@@ -165,6 +165,10 @@ EXPECTED_SHORT_SUPPORTED_BY_LONGER_MIN_SIMILARITY = 0.80
 OMITTED_STABLE_ACTUAL_MIN_SIMILARITY = 0.70
 OMITTED_STABLE_ACTUAL_MIN_RATIO = 0.70
 COMBINED_RESIDUE_MATCH_MIN_SIMILARITY = 0.70
+SHORT_SENTENCE_MAX_UNITS = 8
+SHORT_CASE_MAX_TOTAL_UNITS = 12
+LONG_SENTENCE_MIN_UNITS = 12
+LONG_CASE_MIN_TOTAL_UNITS = 18
 
 
 def _sentence_support_score(sentence: str, chunk: str) -> float:
@@ -1120,6 +1124,104 @@ def _average_scores(results: list[dict[str, Any]], key: str) -> dict[str, float]
     }
 
 
+def _expected_sentence_unit_counts(result: dict[str, Any]) -> list[int]:
+    counts: list[int] = []
+    for sentence in result.get("expected_final", []) or []:
+        text = str(sentence).strip()
+        if not text:
+            continue
+        counts.append(len(_word_units(text)))
+    return counts
+
+
+def _is_short_sentence_result(result: dict[str, Any]) -> bool:
+    counts = _expected_sentence_unit_counts(result)
+    if not counts:
+        return False
+    return max(counts) <= SHORT_SENTENCE_MAX_UNITS and sum(counts) <= SHORT_CASE_MAX_TOTAL_UNITS
+
+
+def _is_long_sentence_result(result: dict[str, Any]) -> bool:
+    counts = _expected_sentence_unit_counts(result)
+    if not counts:
+        return False
+    return max(counts) >= LONG_SENTENCE_MIN_UNITS or sum(counts) >= LONG_CASE_MIN_TOTAL_UNITS
+
+
+def _has_missing_final(result: dict[str, Any]) -> bool:
+    expected_final = list(result.get("expected_final", []) or [])
+    if not expected_final:
+        return False
+    return len(list(result.get("actual_final", []) or [])) < len(expected_final)
+
+
+def _has_duplicate_final_consumption(result: dict[str, Any]) -> bool:
+    actual_final = [
+        normalized_text(sentence)
+        for sentence in result.get("actual_final", []) or []
+        if normalized_text(sentence)
+    ]
+    if len(actual_final) < 2:
+        return False
+    if len(set(actual_final)) != len(actual_final):
+        return True
+    expected_final = [
+        str(sentence).strip()
+        for sentence in result.get("expected_final", []) or []
+        if str(sentence).strip()
+    ]
+    if not expected_final:
+        return False
+    matched_expected_indices: list[int] = []
+    for actual in actual_final:
+        similarities = [
+            _sentence_support_score(expected, actual)
+            for expected in expected_final
+        ]
+        if not similarities:
+            continue
+        best_index = max(range(len(similarities)), key=lambda index: similarities[index])
+        if similarities[best_index] >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY:
+            matched_expected_indices.append(best_index)
+    return len(matched_expected_indices) != len(set(matched_expected_indices))
+
+
+def _has_merge_error(result: dict[str, Any]) -> bool:
+    expected_final = [
+        str(sentence).strip()
+        for sentence in result.get("expected_final", []) or []
+        if str(sentence).strip()
+    ]
+    actual_final = [
+        str(sentence).strip()
+        for sentence in result.get("actual_final", []) or []
+        if str(sentence).strip()
+    ]
+    if len(expected_final) < 2 or not actual_final:
+        return False
+    if len(actual_final) < len(expected_final):
+        return True
+    for actual in actual_final:
+        supported = sum(
+            1 for expected in expected_final
+            if _sentence_support_score(expected, actual) >= FINAL_SENTENCE_MATCH_MIN_SIMILARITY
+        )
+        if supported >= 2:
+            return True
+    return False
+
+
+def _stage_age_to_final(result: dict[str, Any]) -> float:
+    metrics = dict(result.get("metrics", {}) or {})
+    finalized = int(metrics.get("finalized", 0))
+    if finalized <= 0:
+        return 0.0
+    holds = int(metrics.get("stage_age_hold", 0))
+    quality_blocked = int(metrics.get("stage_age_quality_blocked", 0))
+    finalize = int(metrics.get("stage_age_finalize", 0))
+    return (holds + quality_blocked + finalize) / max(finalized, 1)
+
+
 def _summarize_result_group(group_results: list[dict[str, Any]]) -> dict[str, Any]:
     final_score_avg = _average_scores(group_results, "final_score")
     final_ordered_score_avg = _average_scores(group_results, "final_ordered_score")
@@ -1170,6 +1272,41 @@ def _summarize_result_group(group_results: list[dict[str, Any]]) -> dict[str, An
         ),
         "metrics": metrics_total,
     }
+
+
+def _summarize_length_stratum(group_results: list[dict[str, Any]]) -> dict[str, Any]:
+    summary = _summarize_result_group(group_results)
+    case_count = len(group_results)
+    queue_bypass_count = sum(
+        1
+        for result in group_results
+        if int(dict(result.get("metrics", {})).get("stage_start", 0)) > 0
+        and not result.get("actual_staged_queue")
+    )
+    replace_deferred_count = sum(
+        1 for result in group_results if int(dict(result.get("metrics", {})).get("stage_replace_deferred", 0)) > 0
+    )
+    missing_final_count = sum(1 for result in group_results if _has_missing_final(result))
+    duplicate_consumption_count = sum(1 for result in group_results if _has_duplicate_final_consumption(result))
+    merge_error_count = sum(1 for result in group_results if _has_merge_error(result))
+    ages = [_stage_age_to_final(result) for result in group_results if _stage_age_to_final(result) > 0.0]
+    summary.update(
+        {
+            "missing_final_count": missing_final_count,
+            "missing_final_rate": missing_final_count / max(case_count, 1),
+            "duplicate_consumption_count": duplicate_consumption_count,
+            "duplicate_consumption_rate": duplicate_consumption_count / max(case_count, 1),
+            "duplicate_suppression_rate": (case_count - duplicate_consumption_count) / max(case_count, 1),
+            "merge_error_count": merge_error_count,
+            "merge_error_rate": merge_error_count / max(case_count, 1),
+            "queue_bypass_count": queue_bypass_count,
+            "queue_bypass_rate": queue_bypass_count / max(case_count, 1),
+            "replace_deferred_case_count": replace_deferred_count,
+            "replace_deferred_rate": replace_deferred_count / max(case_count, 1),
+            "stage_age_to_final_avg": sum(ages) / max(len(ages), 1),
+        }
+    )
+    return summary
 
 
 def summarize_results_by_language(results: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -1289,6 +1426,27 @@ def summarize_results_by_case_definition_strata(results: list[dict[str, Any]]) -
     return {
         "clean_case_definition": _summarize_result_group(clean_definition),
         "case_definition_review": _summarize_result_group(definition_review),
+    }
+
+
+def summarize_results_by_length_strata(results: list[dict[str, Any]]) -> dict[str, Any]:
+    short_results = [result for result in results if _is_short_sentence_result(result)]
+    long_results = [result for result in results if _is_long_sentence_result(result)]
+    medium_results = [
+        result for result in results
+        if result not in short_results and result not in long_results
+    ]
+    return {
+        "criteria": {
+            "short_sentence_max_units": SHORT_SENTENCE_MAX_UNITS,
+            "short_case_max_total_units": SHORT_CASE_MAX_TOTAL_UNITS,
+            "long_sentence_min_units": LONG_SENTENCE_MIN_UNITS,
+            "long_case_min_total_units": LONG_CASE_MIN_TOTAL_UNITS,
+        },
+        "all_cases": _summarize_length_stratum(results),
+        "short_sentences": _summarize_length_stratum(short_results),
+        "medium_sentences": _summarize_length_stratum(medium_results),
+        "long_sentences": _summarize_length_stratum(long_results),
     }
 
 
@@ -3402,6 +3560,7 @@ def build_benchmark_report(
     input_evidence_strata_summary = summarize_results_by_input_evidence_strata(results)
     context_strata_summary = summarize_results_by_context_strata(results)
     case_definition_strata_summary = summarize_results_by_case_definition_strata(results)
+    length_strata_summary = summarize_results_by_length_strata(results)
     case_definition_action_summary = summarize_case_definition_action_items(results)
     case_definition_cleanup_queue_summary = summarize_case_definition_cleanup_queue(results)
     case_definition_file_summary = summarize_case_definition_files(results)
@@ -3531,6 +3690,7 @@ def build_benchmark_report(
         "input_evidence_strata_summary": input_evidence_strata_summary,
         "context_strata_summary": context_strata_summary,
         "case_definition_strata_summary": case_definition_strata_summary,
+        "length_strata_summary": length_strata_summary,
         "case_definition_action_summary": case_definition_action_summary,
         "case_definition_cleanup_queue_summary": case_definition_cleanup_queue_summary,
         "case_definition_health_summary": case_definition_health_summary,

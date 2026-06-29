@@ -1,6 +1,6 @@
 # 받아쓰기 AI 평가 도메인
 
-이 디렉터리는 받아쓰기 AI의 실험, 벤치마크, 논문 근거 관리 도구를 둔다. 앱 런타임 품질관리 유닛테스트가 아니라, 로그 기반 case replay와 논문 evidence package를 관리하기 위한 평가 영역이다.
+이 디렉터리는 받아쓰기 AI의 실험, 벤치마크, 연구 근거 관리 도구를 둔다. 앱 런타임 품질관리 유닛테스트가 아니라, 로그 기반 case replay와 연구 evidence package를 관리하기 위한 평가 영역이다.
 
 ## 도메인 경계
 
@@ -9,8 +9,8 @@
 | Benchmark core | `sbd_benchmark.py`, `benchmark/` | 단일 실행 엔트리, 실제 `sat + cuda + float16` SBD replay 실행과 report/runtime contract 생성 |
 | Case corpus | `cases/`, `sbd_predicted_cases/`, `representative_cases/` | challenge/representative/structural case 로딩, 검증, 해석 계약. 기존 `sbd_cases/` challenge corpus는 폐기됨 |
 | Case rebuild | `cases/` | 백업 case의 `language`, `chunks`만 사용해 반복 token-sentence 근거로 `expected_final`을 예측하거나 검토 후보 record를 생성 |
-| Parameter sweep/evidence | `sweeps/` | 파라미터 sweep 실행, complete evidence report 검증, 논문 표준 summary 생성 |
-| Paper audit | `paper/` | 논문 claim scope, 수치, reference, readiness gate 검증 |
+| Parameter sweep/evidence | `sweeps/` | 파라미터 sweep 실행, complete evidence report 검증, 연구 표준 summary 생성 |
+| Paper audit | `paper/` | 연구 claim scope, 수치, reference, readiness gate 검증 |
 | Representative workflow | `representative/` | 운영 로그에서 representative 후보를 뽑고 사람이 검토한 case로 승격 |
 | Structural workflow | `structural/` | challenge replay 병목 case를 exploratory structural preflight subset으로 선정 |
 | Benchmark feature tests | `tool_tests/` | SBD 벤치의 주요 실행/케이스/리포트/sweep 기능 테스트. 성능 근거가 아니다. |
@@ -48,8 +48,25 @@
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py export-gpt-case-review-packets --help
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py audit-initial-final-context --help
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py run-sweep --help
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py paper-baseline-recheck --help
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py paper-readiness --help
 ```
+
+연구 본문이 인용하는 최신 challenge replay 기준선을 다시 확인할 때는 `paper-baseline-recheck`를 사용한다.
+이 명령은 reviewed `sbd_predicted_cases/`를 실제 `sat + cuda + float16`로 다시 실행하고,
+현재 연구가 인용하는 815건 baseline 수치와 일치하는지 검사한다. 비교군이 필요하면 `--compare`로
+`AVC_DICTATION_*` override를 함께 넘겨 baseline 대비 delta를 같은 JSON summary에 남긴다.
+summary에는 실행 시점 code `HEAD`와 `tests/eval/dictation_ai/sbd_predicted_cases` 마지막 변경 커밋도
+함께 기록해, 연구 수치가 어느 샘플 정의 기준에서 나온 것인지 추적 가능하게 남긴다.
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py paper-baseline-recheck \
+  --compare confirm2:SENTENCE_CONFIRM_CHUNKS=2 \
+  --compare short4:SHORT_NO_END_FRAGMENT_UNITS=4
+```
+
+이 summary는 연구 기준선 재확인과 비교군 수치 검토용이며, 새 기본값 채택 판단은 여전히 전체
+challenge replay 해석과 strict/lifecycle metric을 함께 본다.
 
 정식 challenge replay 입력은 `sbd_predicted_cases/{en,ko,zh}/predicted-*.jsonl`이다.
 이 corpus는 `chunks`에서 의미가 비슷한 token-sentence가 기본 age 3회 이상 반복된 완성 문장을
@@ -219,7 +236,7 @@ raw STT 기준 expected 재작성, 반복 case 정당화 여부를 사람이 검
 
 같은 원인군 challenge case를 더 모을 때는 source audit의 `target_collection_source_ranking`을
 `select-representative-sources --priority-metric`으로 연결한다. 이 출력은 검토할 로그 파일
-manifest일 뿐이며, benchmark case나 논문 근거가 아니다. 회전 로그는 `sentence_finalize_age` 같은
+manifest일 뿐이며, benchmark case나 연구 근거가 아니다. 회전 로그는 `sentence_finalize_age` 같은
 전사 루프 시작 메타데이터가 같은 파일 안에 없을 수 있으므로, priority 수집 manifest를 만들 때는
 필요하면 `--allow-missing-runtime-metadata --allow-mixed-runtime`을 사용하고 case 승격 전 원 로그
 문맥에서 런타임을 다시 확인한다.

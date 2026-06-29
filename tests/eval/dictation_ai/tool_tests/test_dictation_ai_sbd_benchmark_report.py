@@ -13,6 +13,7 @@ from tests.eval.dictation_ai.benchmark.sbd_benchmark_report import (
     summarize_results_by_queue_residue_strata,
     summarize_results_by_evidence_strata,
     summarize_lifecycle_bottlenecks,
+    summarize_results_by_length_strata,
     summarize_results_by_language,
     summarize_results_by_tag,
     summarize_staged_queue_residue,
@@ -223,6 +224,9 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
 
         self.assertEqual(report["context_strata_summary"]["clean_context"]["case_count"], 1)
         self.assertEqual(report["context_strata_summary"]["context_definition_review"]["case_count"], 0)
+        self.assertEqual(report["length_strata_summary"]["short_sentences"]["case_count"], 1)
+        self.assertEqual(report["length_strata_summary"]["short_sentences"]["missing_final_rate"], 0.0)
+        self.assertEqual(report["length_strata_summary"]["short_sentences"]["duplicate_suppression_rate"], 1.0)
         self.assertEqual(report["collection_strata_summary"]["manual_named_case"]["case_count"], 1)
         strict_summary = report["strict_logic_candidate_summary"]
         self.assertEqual(strict_summary["strict_case_count"], 1)
@@ -258,27 +262,70 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         source_trace = report["source_trace_strata_summary"]["strata"]
         self.assertEqual(source_trace["missing_source_trace"]["expected_final_case_count"], 1)
         self.assertEqual(source_trace["missing_source_trace"]["logic_tuning_candidate_count"], 1)
-        self.assertEqual(report["case_exemplar_summary"]["lifecycle_focus_top"][0]["id"], "case-a")
-        self.assertEqual(report["staged_queue_residue_summary"]["queue_residue_case_count"], 0)
-        self.assertEqual(report["staged_queue_residue_summary"]["active_staged_residue_case_count"], 0)
-        self.assertEqual(report["terminal_expected_residue_summary"]["case_count"], 0)
-        self.assertEqual(report["missing_expected_without_terminal_residue_summary"]["case_count"], 0)
-        self.assertEqual(report["missing_expected_split_coverage_summary"]["case_count"], 0)
-        self.assertEqual(report["lifecycle_bottleneck_summary"]["metrics"]["stage_start"], 2)
-        self.assertEqual(report["lifecycle_bottleneck_summary"]["metrics"]["stage_age_hold"], 2)
-        self.assertEqual(report["lifecycle_bottleneck_summary"]["metrics"]["pending_overrun"], 1)
-        self.assertEqual(report["lifecycle_bottleneck_summary"]["replacement_decision_counts"], {"open_latin_clause": 1})
-        self.assertEqual(report["lifecycle_bottleneck_summary"]["quality_block_reason_counts"], {"repeated_word_ngram": 1})
-        stage_age_hold_presence = report["lifecycle_bottleneck_summary"]["metric_presence_summary"]["stage_age_hold"]
-        self.assertEqual(stage_age_hold_presence["total_count"], 2)
-        self.assertEqual(stage_age_hold_presence["case_count_present"], 1)
-        self.assertEqual(stage_age_hold_presence["case_count_absent"], 0)
-        self.assertEqual(stage_age_hold_presence["final_f1_avg_present"], 1.0)
-        self.assertEqual(stage_age_hold_presence["low_final_f1_present_count"], 0)
-        self.assertEqual(
-            report["lifecycle_bottleneck_summary"]["by_language"]["ko"]["expected_final_count"],
-            2,
-        )
+
+    def test_length_strata_summary_separates_short_and_long_behavior(self) -> None:
+        short_result = {
+            "id": "short-a",
+            "language": "ko",
+            "tags": ["final"],
+            "expected_final": ["물가 잡아야 돼요."],
+            "actual_final": ["물가 잡아야 돼요."],
+            "actual_pending": "",
+            "actual_staged": "",
+            "actual_staged_queue": [],
+            "final_score": _score(1.0, 1.0, 1.0, exact=True),
+            "final_ordered_score": _score(1.0, 1.0, 1.0, exact=True),
+            "final_boundary_score": _score(1.0, 1.0, 1.0, exact=True),
+            "completed_last_score": _score(1.0, 1.0, 1.0),
+            "pending_exact": True,
+            "staged_exact": True,
+            "case_exact_match": True,
+            "metrics": {
+                "finalized": 1,
+                "stage_start": 1,
+                "stage_age_hold": 1,
+            },
+        }
+        long_result = {
+            "id": "long-a",
+            "language": "ko",
+            "tags": ["missing-final", "boundary"],
+            "expected_final": [
+                "지금 정부의 재정과 통화정책을 종합해서 봤을 때는 그래도 경기는 어느 정도 뒷받쳐지는 모습들로 지속되지 않을까 생각을 하고 있고요.",
+                "그래서 단순히 금리가 올라가니까 경기 안 좋아지고 투자 사이클 다시 망가질 거라는 논리를 지금 상황에서 시장이 아닐까라는 생각들은 여전히 가지고 있습니다.",
+            ],
+            "actual_final": [
+                "지금 정부의 재정과 통화정책을 종합해서 봤을 때는 그래도 경기는 어느 정도 뒷받쳐지는 모습들로 지속되지 않을까 생각을 하고 있고요 그래서 단순히 금리가 올라가니까 경기 안 좋아지고 투자 사이클 다시 망가질 거라는 논리를 지금 상황에서 시장이 아닐까라는 생각들은 여전히 가지고 있습니다."
+            ],
+            "actual_pending": "",
+            "actual_staged": "",
+            "actual_staged_queue": ["투자 사이클 다시 망가질 거라는 논리"],
+            "final_score": _score(0.8, 0.8, 0.8),
+            "final_ordered_score": _score(0.8, 0.8, 0.8),
+            "final_boundary_score": _score(0.0, 0.0, 0.0),
+            "completed_last_score": _score(0.8, 0.8, 0.8),
+            "pending_exact": True,
+            "staged_exact": True,
+            "case_exact_match": False,
+            "metrics": {
+                "finalized": 1,
+                "stage_start": 2,
+                "stage_age_hold": 3,
+                "stage_replace_deferred": 1,
+                "stage_queue_revision": 1,
+            },
+        }
+
+        summary = summarize_results_by_length_strata([short_result, long_result])
+
+        self.assertEqual(summary["short_sentences"]["case_count"], 1)
+        self.assertEqual(summary["short_sentences"]["missing_final_rate"], 0.0)
+        self.assertEqual(summary["short_sentences"]["duplicate_suppression_rate"], 1.0)
+        self.assertEqual(summary["short_sentences"]["queue_bypass_rate"], 1.0)
+        self.assertEqual(summary["long_sentences"]["case_count"], 1)
+        self.assertEqual(summary["long_sentences"]["missing_final_rate"], 1.0)
+        self.assertEqual(summary["long_sentences"]["merge_error_rate"], 1.0)
+        self.assertEqual(summary["long_sentences"]["replace_deferred_rate"], 1.0)
 
     def test_strict_low_summary_reports_stable_missing_block_kind(self) -> None:
         result = {

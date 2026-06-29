@@ -43,34 +43,55 @@ from tests.eval.dictation_ai.benchmark.sbd_lifecycle_scoring import (
 from tests.eval.dictation_ai.benchmark.sbd_runtime_contract import force_offline_model_cache_env
 from tests.eval.dictation_ai.cases.validate_sbd_case_files import validate_case_files
 
-_SUBCOMMANDS: dict[str, str] = {
-    "validate-cases": "tests.eval.dictation_ai.cases.validate_sbd_case_files:main",
-    "audit-initial-final-context": "tests.eval.dictation_ai.cases.audit_sbd_initial_final_context:main",
-    "build-expected-final-cases": "tests.eval.dictation_ai.cases.build_sbd_expected_final_cases:main",
-    "export-gpt-case-review-packets": "tests.eval.dictation_ai.cases.export_sbd_gpt_case_review_packets:main",
-    "run-sweep": "tests.eval.dictation_ai.sweeps.run_sbd_parameter_sweep:main",
-    "refresh-sweep": "tests.eval.dictation_ai.sweeps.refresh_sbd_parameter_sweep_summary:main",
-    "summarize-evidence": "tests.eval.dictation_ai.sweeps.summarize_sbd_evidence_reports:main",
-    "validate-evidence": "tests.eval.dictation_ai.sweeps.validate_sbd_evidence_report:main",
-    "paper-claim-scope": "tests.eval.dictation_ai.paper.audit_paper_claim_scope:main",
-    "paper-evidence-numbers": "tests.eval.dictation_ai.paper.audit_paper_evidence_numbers:main",
-    "paper-readiness": "tests.eval.dictation_ai.paper.audit_paper_readiness:main",
-    "paper-reference-scope": "tests.eval.dictation_ai.paper.audit_paper_reference_scope:main",
-    "followup-readiness": "tests.eval.dictation_ai.paper.audit_sbd_followup_readiness:main",
-    "representative-sources": "tests.eval.dictation_ai.representative.audit_sbd_representative_sources:main",
-    "select-representative-sources": "tests.eval.dictation_ai.representative.select_sbd_representative_sources:main",
-    "extract-review-packets": "tests.eval.dictation_ai.representative.extract_sbd_representative_review_packets:main",
-    "validate-review-packets": "tests.eval.dictation_ai.representative.validate_sbd_representative_review_packets:main",
-    "extract-representative-drafts": "tests.eval.dictation_ai.representative.extract_sbd_representative_case_drafts:main",
-    "promote-representative-cases": "tests.eval.dictation_ai.representative.promote_sbd_representative_cases:main",
-    "select-structural-cases": "tests.eval.dictation_ai.structural.select_sbd_structural_cases:main",
-}
+def _build_subcommand_targets() -> dict[str, str]:
+    case_commands = {
+        "validate-cases": "tests.eval.dictation_ai.cases.validate_sbd_case_files:main",
+        "audit-initial-final-context": "tests.eval.dictation_ai.cases.audit_sbd_initial_final_context:main",
+        "build-expected-final-cases": "tests.eval.dictation_ai.cases.build_sbd_expected_final_cases:main",
+        "export-gpt-case-review-packets": "tests.eval.dictation_ai.cases.export_sbd_gpt_case_review_packets:main",
+    }
+    sweep_commands = {
+        "run-sweep": "tests.eval.dictation_ai.sweeps.run_sbd_parameter_sweep:main",
+        "refresh-sweep": "tests.eval.dictation_ai.sweeps.refresh_sbd_parameter_sweep_summary:main",
+        "summarize-evidence": "tests.eval.dictation_ai.sweeps.summarize_sbd_evidence_reports:main",
+        "validate-evidence": "tests.eval.dictation_ai.sweeps.validate_sbd_evidence_report:main",
+    }
+    paper_commands = {
+        "length-strata-hypothesis": "tests.eval.dictation_ai.paper.audit_length_strata_hypothesis:main",
+        "paper-claim-scope": "tests.eval.dictation_ai.paper.audit_paper_claim_scope:main",
+        "paper-evidence-numbers": "tests.eval.dictation_ai.paper.audit_paper_evidence_numbers:main",
+        "paper-baseline-recheck": "tests.eval.dictation_ai.paper.recheck_paper_challenge_baseline:main",
+        "paper-readiness": "tests.eval.dictation_ai.paper.audit_paper_readiness:main",
+        "paper-reference-scope": "tests.eval.dictation_ai.paper.audit_paper_reference_scope:main",
+        "followup-readiness": "tests.eval.dictation_ai.paper.audit_sbd_followup_readiness:main",
+    }
+    representative_commands = {
+        "representative-sources": "tests.eval.dictation_ai.representative.audit_sbd_representative_sources:main",
+        "select-representative-sources": "tests.eval.dictation_ai.representative.select_sbd_representative_sources:main",
+        "extract-review-packets": "tests.eval.dictation_ai.representative.extract_sbd_representative_review_packets:main",
+        "validate-review-packets": "tests.eval.dictation_ai.representative.validate_sbd_representative_review_packets:main",
+        "extract-representative-drafts": "tests.eval.dictation_ai.representative.extract_sbd_representative_case_drafts:main",
+        "promote-representative-cases": "tests.eval.dictation_ai.representative.promote_sbd_representative_cases:main",
+    }
+    structural_commands = {
+        "select-structural-cases": "tests.eval.dictation_ai.structural.select_sbd_structural_cases:main",
+    }
+    return (
+        case_commands
+        | sweep_commands
+        | paper_commands
+        | representative_commands
+        | structural_commands
+    )
+
+
+_SUBCOMMAND_TARGETS: dict[str, str] = _build_subcommand_targets()
 
 
 def _print_subcommands() -> None:
     print("usage: sbd_benchmark.py [benchmark options] | <subcommand> [options]\n")
     print("subcommands:")
-    for name in sorted(_SUBCOMMANDS):
+    for name in sorted(_SUBCOMMAND_TARGETS):
         print(f"  {name}")
 
 
@@ -81,7 +102,7 @@ def _dispatch_subcommand() -> int | None:
     if subcommand in {"commands", "subcommands"}:
         _print_subcommands()
         return 0
-    target = _SUBCOMMANDS.get(subcommand)
+    target = _SUBCOMMAND_TARGETS.get(subcommand)
     if target is None:
         return None
 
@@ -112,6 +133,22 @@ def _validate_real_ai_cuda_args(args: argparse.Namespace) -> None:
             "Dictation AI SBD benchmark must use the production CUDA precision: "
             f"--compute-type=float16 required, got {args.compute_type!r}."
         )
+
+
+def _length_strata_summary_fields(report: dict[str, Any]) -> dict[str, float]:
+    strata = dict(report.get("length_strata_summary", {}) or {})
+    short_summary = dict(strata.get("short_sentences", {}) or {})
+    long_summary = dict(strata.get("long_sentences", {}) or {})
+    return {
+        "short_case_count": int(short_summary.get("case_count", 0)),
+        "short_missing_final_rate": float(short_summary.get("missing_final_rate", 0.0)),
+        "short_duplicate_suppression_rate": float(short_summary.get("duplicate_suppression_rate", 0.0)),
+        "short_queue_bypass_rate": float(short_summary.get("queue_bypass_rate", 0.0)),
+        "long_case_count": int(long_summary.get("case_count", 0)),
+        "long_missing_final_rate": float(long_summary.get("missing_final_rate", 0.0)),
+        "long_merge_error_rate": float(long_summary.get("merge_error_rate", 0.0)),
+        "long_queue_bypass_rate": float(long_summary.get("queue_bypass_rate", 0.0)),
+    }
 
 
 def main() -> int:
@@ -217,6 +254,7 @@ def main() -> int:
         ),
     )
     summary = dict(report["summary"])
+    length_strata = _length_strata_summary_fields(report)
     evidence_protocol = dict(report.get("evidence_protocol", {}))
     case_definition_actions = dict(report.get("case_definition_action_summary", {}))
     case_definition_health = dict(report.get("case_definition_health_summary", {}))
@@ -241,6 +279,14 @@ def main() -> int:
         f"strict_final_f1_avg={float(strict_summary.get('final_f1_avg', 0.0)):.3f} "
         f"final_similarity_coverage_avg={summary['final_similarity_coverage_avg']:.3f} "
         f"final_boundary_f1_avg={summary['final_boundary_f1_avg']:.3f} "
+        f"short_cases={length_strata['short_case_count']} "
+        f"short_missing_final_rate={length_strata['short_missing_final_rate']:.3f} "
+        f"short_duplicate_suppression_rate={length_strata['short_duplicate_suppression_rate']:.3f} "
+        f"short_queue_bypass_rate={length_strata['short_queue_bypass_rate']:.3f} "
+        f"long_cases={length_strata['long_case_count']} "
+        f"long_missing_final_rate={length_strata['long_missing_final_rate']:.3f} "
+        f"long_merge_error_rate={length_strata['long_merge_error_rate']:.3f} "
+        f"long_queue_bypass_rate={length_strata['long_queue_bypass_rate']:.3f} "
         f"case_exact_match={summary['case_exact_match']} "
         f"pending_exact_match={summary['pending_exact_match']} "
         f"staged_exact_match={summary['staged_exact_match']} "

@@ -11,7 +11,7 @@ from tests.eval.dictation_ai import sbd_benchmark
 class DictationAiSbdEntrypointTest(unittest.TestCase):
     def test_subcommand_inventory_covers_eval_domains(self) -> None:
         self.assertEqual(
-            set(sbd_benchmark._SUBCOMMANDS),
+            set(sbd_benchmark._SUBCOMMAND_TARGETS),
             {
                 "audit-initial-final-context",
                 "build-expected-final-cases",
@@ -19,6 +19,8 @@ class DictationAiSbdEntrypointTest(unittest.TestCase):
                 "extract-representative-drafts",
                 "extract-review-packets",
                 "followup-readiness",
+                "length-strata-hypothesis",
+                "paper-baseline-recheck",
                 "paper-claim-scope",
                 "paper-evidence-numbers",
                 "paper-readiness",
@@ -49,6 +51,7 @@ class DictationAiSbdEntrypointTest(unittest.TestCase):
             self.assertIn("subcommands:", output.getvalue())
             self.assertIn("run-sweep", output.getvalue())
             self.assertIn("paper-readiness", output.getvalue())
+            self.assertIn("paper-baseline-recheck", output.getvalue())
         finally:
             sys.argv = original_argv
 
@@ -75,6 +78,35 @@ class DictationAiSbdEntrypointTest(unittest.TestCase):
             self.assertEqual(sys.argv, ["sbd_benchmark.py", "run-sweep", "--dry-run"])
         finally:
             sys.argv = original_argv
+
+    def test_length_strata_summary_fields_extracts_short_and_long_metrics(self) -> None:
+        fields = sbd_benchmark._length_strata_summary_fields(
+            {
+                "length_strata_summary": {
+                    "short_sentences": {
+                        "case_count": 59,
+                        "missing_final_rate": 0.0,
+                        "duplicate_suppression_rate": 0.9322,
+                        "queue_bypass_rate": 0.8305,
+                    },
+                    "long_sentences": {
+                        "case_count": 705,
+                        "missing_final_rate": 0.1532,
+                        "merge_error_rate": 0.2894,
+                        "queue_bypass_rate": 0.7348,
+                    },
+                }
+            }
+        )
+
+        self.assertEqual(fields["short_case_count"], 59)
+        self.assertEqual(fields["short_missing_final_rate"], 0.0)
+        self.assertEqual(fields["short_duplicate_suppression_rate"], 0.9322)
+        self.assertEqual(fields["short_queue_bypass_rate"], 0.8305)
+        self.assertEqual(fields["long_case_count"], 705)
+        self.assertEqual(fields["long_missing_final_rate"], 0.1532)
+        self.assertEqual(fields["long_merge_error_rate"], 0.2894)
+        self.assertEqual(fields["long_queue_bypass_rate"], 0.7348)
 
 
 if __name__ == "__main__":

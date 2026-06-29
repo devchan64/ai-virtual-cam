@@ -32772,3 +32772,65 @@ HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
   운영 로직으로 채택하지 않는다.
 - 이 결과는 `소절 분리를 전역 기본 정책으로 두지 않고`, 같은 chunk 안의 clause/tail 결합처럼
   구조적으로 좁은 lifecycle 원칙만 벤치로 검토한다는 기준을 재확인한 사례로 남긴다.
+
+## 2026-06-29 paper-baseline-recheck 재계측
+
+배경:
+
+- challenge replay 입력 정리 이후 논문 본문이 직접 인용하는 기준선은 reviewed
+  `tests/eval/dictation_ai/sbd_predicted_cases/` 815건이다.
+- 기존 tail-merge 실험 기록에는 같은 815건으로 보이는 과거 수치가 남아 있었지만, 현재 checked-in
+  corpus와 paper 근거는 `paper-baseline-recheck` 절차로 다시 확인해야 했다.
+
+실행:
+
+- 명령:
+  - `HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py paper-baseline-recheck --compare confirm2:SENTENCE_CONFIRM_CHUNKS=2 --compare short4:SHORT_NO_END_FRAGMENT_UNITS=4`
+- 실행 조건:
+  - 실제 `sat + cuda + float16`
+  - baseline과 비교군 `confirm2`, `short4`를 같은 reviewed 815건 corpus에서 동시 재실행
+  - 재계측 code `HEAD=bc1e0be34c3c548fdfd1037df9acb72aff3505c6`
+  - 샘플 기준 commit=`db5c712c3ea994bafab37dc4b395a3f061eab440`
+  - 샘플 기준 의미: `tests/eval/dictation_ai/sbd_predicted_cases` 마지막 변경 커밋
+
+결과:
+
+- baseline:
+  - `case_count=815`
+  - `final_precision_avg=0.614`
+  - `final_recall_avg=0.786`
+  - `final_f1_avg=0.666`
+  - `strict_final_f1_avg=0.866`
+  - `final_boundary_f1_avg=0.136`
+- `confirm2` (`SENTENCE_CONFIRM_CHUNKS=2`):
+  - `final_precision_avg=0.589`
+  - `final_recall_avg=0.800`
+  - `final_f1_avg=0.657`
+  - `strict_final_f1_avg=0.796`
+  - `final_boundary_f1_avg=0.119`
+- `short4` (`SHORT_NO_END_FRAGMENT_UNITS=4`):
+  - `final_precision_avg=0.615`
+  - `final_recall_avg=0.786`
+  - `final_f1_avg=0.665`
+  - `strict_final_f1_avg=0.822`
+  - `final_boundary_f1_avg=0.138`
+
+비교:
+
+- baseline은 논문 초안에 남아 있던 과거 815건 수치 `0.609 / 0.798 / 0.665 / 0.131`과 일치하지 않았다.
+- 새 baseline은 precision과 boundary는 소폭 상승했지만 recall은 낮아졌고, strict subset 값은
+  `0.866`으로 유지됐다.
+- `confirm2`는 recall만 약간 올렸지만 precision, strict F1, boundary F1을 함께 악화시켰다.
+- `short4`는 precision/boundary가 거의 같거나 미세 개선이지만 strict F1을 `0.866 -> 0.822`로
+  크게 낮춰 채택 근거가 되지 못했다.
+
+해석:
+
+- 현재 논문과 문서가 직접 인용해야 하는 815건 기준선은 `paper-baseline-recheck`의
+  `0.614 / 0.786 / 0.666 / 0.136`이다.
+- 이 기준선은 "현재 코드에서 우연히 한번 나온 값"이 아니라, `HEAD=bc1e0be` code와
+  `sample basis=db5c712` case corpus 조합에서 다시 재현한 값으로 기록한다.
+- `SENTENCE_CONFIRM_CHUNKS`와 `SHORT_NO_END_FRAGMENT_UNITS`는 여전히 상위 lifecycle 병목을
+  해결하는 안정적 개선축이 아니라 trade-off 축으로 남는다.
+- 따라서 현재 checked-in 기본값을 유지하되, 이후 구조 실험도 이 recheck baseline을 기준으로만
+  비교한다.
