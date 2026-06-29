@@ -32690,3 +32690,85 @@ HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
 - 현재 overfinal은 단순 confirmation 조건보다 case boundary, queue stale, recent-final suppression,
   stage age final이 얽힌 증상으로 본다. 다음 실험은 전체 기준에서 recall을 잃지 않는 더 좁은 lifecycle
   원칙이 보일 때만 앱 로직으로 승격한다.
+
+## 2026-06-29 CJK same-chunk tail merge 실험
+
+배경:
+
+- `predicted-ko-000.jsonl:91` 같은 한국어 residue 케이스에서는 같은 chunk 안에
+  `그리고 그쪽으로 더 기술적인 투자가 될 수밖에 없고 이쪽으로 모멘텀이 모이니까`
+  와 `이거를 우리가 끌고 가겠다.`가 따로 `completed`로 들어오지만, baseline lifecycle은 이를
+  하나의 닫힌 final 후보로 소비하지 못하고 긴 revision residue로 남겼다.
+- SBD 모델 교체, SaT split 파라미터 조정, fragment revision 실험은 한국어 소절 병목에 유의미한
+  개선 근거를 만들지 못했다.
+
+실험:
+
+- 벤치 replay에서만 `same-chunk tail merge` 실험 경로를 추가해, active staged 후보가 한국어 clause이고
+  같은 chunk의 바로 다음 `completed`가 짧은 닫힌 tail일 때 두 후보를 합친 뒤 `next_completed` 경로로
+  소비할 수 있는지 확인했다.
+- tail 길이 상한은 `4 / 6 / 8`로 비교했다.
+
+한국어 shard 결과 (`tests/eval/dictation_ai/sbd_predicted_cases/ko/predicted-ko-000.jsonl`):
+
+- baseline:
+  - `final_precision_avg=0.511`
+  - `final_recall_avg=0.782`
+  - `final_f1_avg=0.588`
+  - `strict_final_f1_avg=0.722`
+  - `final_boundary_f1_avg=0.158`
+- `same-chunk tail merge`, `max_tail_units=8`:
+  - `final_precision_avg=0.523`
+  - `final_recall_avg=0.805`
+  - `final_f1_avg=0.608`
+  - `strict_final_f1_avg=0.722`
+  - `final_boundary_f1_avg=0.165`
+
+전체 challenge replay 결과:
+
+- baseline:
+  - `final_precision_avg=0.609`
+  - `final_recall_avg=0.798`
+  - `final_f1_avg=0.665`
+  - `strict_final_f1_avg=0.866`
+  - `final_boundary_f1_avg=0.131`
+- `same-chunk tail merge`, `max_tail_units=4`:
+  - `final_precision_avg=0.615`
+  - `final_recall_avg=0.788`
+  - `final_f1_avg=0.668`
+  - `strict_final_f1_avg=0.854`
+  - `final_boundary_f1_avg=0.136`
+- `same-chunk tail merge`, `max_tail_units=6`:
+  - `final_precision_avg=0.617`
+  - `final_recall_avg=0.791`
+  - `final_f1_avg=0.670`
+  - `strict_final_f1_avg=0.854`
+  - `final_boundary_f1_avg=0.136`
+- `same-chunk tail merge`, `max_tail_units=8`:
+  - `final_precision_avg=0.617`
+  - `final_recall_avg=0.789`
+  - `final_f1_avg=0.669`
+  - `strict_final_f1_avg=0.854`
+  - `final_boundary_f1_avg=0.137`
+
+언어별 관찰:
+
+- merge가 실제로 발생한 케이스는 `ko`, `zh`에 집중됐다.
+- `ko`에서는 `predicted-ko-000.jsonl:44`, `:68`, `:69`, `:89`, `:91`, `predicted-ko-001.jsonl:31`
+  같은 residue 케이스에서 final F1이 개선됐다.
+- 반면 `zh`에서는 일부 케이스가 개선됐지만 `predicted-zh-001.jsonl:47`, `predicted-zh-002.jsonl:47`
+  처럼 final F1이나 strict exact가 악화되는 케이스가 섞여 있었다.
+
+해석:
+
+- 이 규칙은 한국어 `same-chunk clause + closed tail` residue 병목에는 실제로 도움이 됐다.
+- 하지만 전체 replay에서는 `final_f1_avg`, `final_boundary_f1_avg` 개선과 맞바꿔
+  `strict_final_f1_avg=0.866 -> 0.854` 하락이 남았다.
+- 한국어 전용으로 더 좁히는 실험도 시작했지만 채택 판단 전 단계에서 중단했다.
+
+결론:
+
+- `same-chunk tail merge`는 한국어 residue 개선 신호는 있었지만, 전체 strict 회귀를 해소하지 못해
+  운영 로직으로 채택하지 않는다.
+- 이 결과는 `소절 분리를 전역 기본 정책으로 두지 않고`, 같은 chunk 안의 clause/tail 결합처럼
+  구조적으로 좁은 lifecycle 원칙만 벤치로 검토한다는 기준을 재확인한 사례로 남긴다.

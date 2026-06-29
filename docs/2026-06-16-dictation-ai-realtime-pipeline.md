@@ -94,7 +94,7 @@
 - revision 후보 비교에서 한 후보가 명확한 종결 경계를 가진 prefix 문장이고 다른 후보가 그 뒤에 짧은 tail을 붙여 하나의 문장처럼 만든 경우, 더 긴 문자열보다 종결 경계를 보존한 후보를 우선한다.
 - CJK 긴 문장 과결합은 접속어 사전이나 언어별 ad-hoc 소절 규칙으로 자르지 않는다. 대신 active staged 후보가 이미 충분한 종결 경계와 안정성을 갖고 있고, 뒤 revision이 무종결 tail을 덧붙인 상태에서 `next_completed`로 조기 확정되려는 경우에만 staged 본문 보존 또는 제한적 분할을 검토한다.
 - 미확정 replacement는 기존 후보를 삭제하지 않고 새 후보를 candidate buffer에 보류한다. 앞 후보는 확정, revision 대체, 품질/중복 suppress 중 하나로 정리된 뒤에 다음 후보로 넘어간다. 단, 미확정 replacement와 충돌 중인 앞 후보는 age만으로 final 승격하지 않고, age 한계 전에는 즉시 suppress하지 않는다.
-- 짧은 CJK staged 후보가 replacement와 충돌할 때는 추가 hold를 기본 적용하지 않는다. 1223건 replay에서는 짧은 active head가 뒤의 completed sentence queue 소비를 막는 사례가 많아 `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=0`이 가장 좋았다. 이 값은 짧은 문장을 즉시 final로 보내는 규칙이 아니라, 확정 불가능한 짧은 head가 오래 남아 생성순서 queue를 막지 않게 하는 suppress/promote 정책이다.
+- 짧은 CJK staged 후보가 replacement와 충돌할 때는 추가 hold를 기본 적용하지 않는다. 현재 운영 기준 challenge replay에서도 짧은 active head hold가 queue 소비를 막는 사례가 반복되어 `SHORT_CJK_REPLACEMENT_HOLD_CHUNKS=0`을 유지한다. 이 값은 짧은 문장을 즉시 final로 보내는 규칙이 아니라, 확정 불가능한 짧은 head가 오래 남아 생성순서 queue를 막지 않게 하는 suppress/promote 정책이다.
 - 현재 chunk에서 candidate buffer로부터 승격된 staged 후보는 같은 chunk 안의 후속 replacement로 즉시 final 확정하지 않는다. 최소 다음 STT window에서 재평가해 stale queue burst가 false final로 소비되는 경로를 막는다.
 - 이전 chunk부터 staged로 유지된 후보가 종결 경계와 품질 게이트를 만족하고, candidate buffer에 뒤따르는 다른 후보가 있으면 오른쪽 문맥이 확인된 것으로 보고 생성순서대로 final 소비할 수 있다. 단, 같은 chunk에서 막 생성/승격된 staged 후보는 이 규칙으로 즉시 final하지 않는다.
 - 같은 `revisionHash` 계열에서 나중 후보가 final로 소비되면, 이전 미소비 후보는 stale revision으로 폐기한다.
@@ -159,6 +159,8 @@
 - 분할 조건은 접속어 문자열 자체가 아니라 종결 경계 존재, `no_end_marker`, internal stability, pending tail 길이, deferred revision 여부, later completed extension 부재 같은 구조 신호만 사용한다.
 - 성능 평가는 전체 평균 `final_f1_avg`보다 strict logic candidate subset, `underfinal_boundary_or_revision`, `boundary_granularity`, `stage_replace_deferred`, `stage_revision_token_sentence_deferred` 변화로 먼저 판단한다.
 - 소절 분할 완화는 `overfinal_or_extra_final`을 늘릴 위험이 있으므로, 전역 완화가 아니라 strict subset에서 근거가 확인된 경로에만 단계적으로 적용한다.
+- 현재 운영 채택 경로는 전역 소절 분할이 아니라 `raw STT -> SBD candidate -> revision-aware lifecycle -> final-only sink`다. fragment revision replay와 same-chunk tail merge는 벤치 실험으로만 남겼고, 운영 파이프라인에는 채택하지 않는다.
+- 2026-06-29 기준 same-chunk tail merge는 한국어 shard에서는 `final_f1_avg 0.588 -> 0.608`, `final_boundary_f1_avg 0.158 -> 0.165` 신호가 있었지만, full challenge replay에서는 strict exactness를 낮춰 미채택으로 정리했다. 따라서 현재 파이프라인의 소절 대응은 새 문구 규칙이나 병합 규칙 추가가 아니라 lifecycle 상위 축 최적화로 제한한다.
 
 ### 소절 관리 패턴 작성 방법
 

@@ -142,6 +142,15 @@ macOS/Windows, CPU 실행, `auto`에서 CPU로 암묵 전환되는 경로는 운
 - regex 기반 문장 분할은 운영/설정 시나리오에서 사용하지 않는다.
 - SBD 결과는 final 결정자가 아니라 staged 후보 생성기다.
 - final 확정은 `sentenceFinalizeAge`와 revision lifecycle이 담당한다.
+- 운영 기본 경로는 `sat + cuda + float16` 기반 SBD 후보 생성과 revision-aware lifecycle 조합이다.
+- fragment revision replay, same-chunk tail merge, 언어별 소절 예외 규칙은 실험 기록으로만 남기고 운영 계약에는 포함하지 않는다.
+- challenge replay 해석은 개별 문구 성공 여부보다 `stage_replace_deferred`, `stage_queue_revision`, `stage_candidate_quality_blocked`, `final_boundary_f1` 같은 상위 lifecycle 축을 우선한다.
+
+현재 벤치 기준:
+
+- 최신 checked-in challenge replay 기준선은 reviewed `sbd_predicted_cases/` 815건이다.
+- 이 기준선은 실제 `sat + cuda + float16`에서 `final_precision_avg=0.609`, `final_recall_avg=0.798`, `final_f1_avg=0.665`, `final_boundary_f1_avg=0.131`을 기록했다.
+- strict logic candidate subset은 `final_f1_avg` 약 `0.866` 수준으로, 현재 병목이 전체 SBD 후보 부족보다 lifecycle 소비와 경계 보존에 더 가깝다는 해석을 뒷받침한다.
 
 ## 번역 계약
 
