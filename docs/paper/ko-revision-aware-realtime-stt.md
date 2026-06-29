@@ -151,6 +151,8 @@ Whisper 계열 모델은 강력한 오프라인 전사 성능을 보이지만, �
 
 따라서 케이스 수집과 파라미터 채택은 별도 단계다. 앱 로그에서 관측한 실패 구간은 `expected_final`을 확인한 뒤 reviewed benchmark case로만 보관한다. 그 뒤 같은 reviewed case 집합에서 `AVC_DICTATION_*` override를 사용해 값을 바꿔 실행하고, `final_f1_avg`, `final_precision_avg`, `final_recall_avg`, `final_boundary_f1_avg`, `finalized_per_stage_start`와 주요 lifecycle counter를 함께 비교한다. draft 상태의 케이스는 논문 성능 수치에 포함하지 않는다.
 
+이 논문에서 수치를 인용하는 규칙도 그에 맞춰 제한한다. 현재 운영 기준선으로 직접 인용하는 값은 reviewed `sbd_predicted_cases/` 815건 replay뿐이다. 반면 57건 refined set, 1027건/1020건 clean challenge replay, 1113건/1223건 과거 challenge replay는 각각 특정 시점의 케이스 정의 정리, 구조 병목 분석, archived strata 해석을 위한 내부 실험으로만 사용한다. 따라서 본문 안에서 과거 수치를 다시 언급할 때는 "archived", "historical", "refined set", "strict subset" 같은 범주를 함께 표시하고, 815건 기준선과 같은 난도·같은 모집단의 직접 성능 비교처럼 해석하지 않는다.
+
 파라미터 비교 실행은 `run_sbd_parameter_sweep.py`로 표준화한다. 이 도구는 `dictation_tuning_manifest`에 등록된 파라미터만 `NAME=VALUE` 형식으로 받아 `AVC_DICTATION_*` 환경변수로 전달하고, manifest의 `min_value`/`max_value` 범위를 벗어난 값은 실행 전에 거부한다. 항상 같은 `--cases` 입력을 사용해 `sbd_benchmark.py --device cuda --compute-type float16`을 반복 실행한다. 탐색 sweep은 현재 reviewed case 집합에서 수행할 수 있지만, 논문 근거용 sweep은 `--paper-evidence` 모드로 실행한다. 이 모드는 실행 전에 draft marker가 남은 케이스를 거부하고, 검토한 `expected_final` 케이스가 1000건에 도달했는지 확인한다. 실행 요약에는 `dictation_tuning_protocol`, manifest, 각 job의 env override, 출력 리포트 경로, corpus role, 핵심 metric, 언어별 `language_summary`, 실패 증상 태그별 `tag_summary`, baseline 대비 `metric_deltas`, `language_deltas`, `tag_deltas`가 함께 남는다. 또한 논문/실험일지에 직접 옮길 수 있도록 전체 metric, 언어별 delta, 주요 실패 태그 delta만 축약한 `evidence_summary`를 별도로 저장한다. 이 축약 요약은 전체 final F1 상승이 특정 언어의 precision 하락이나 주요 실패군의 boundary 악화를 가리는지 먼저 확인하기 위한 해석 장치다. `interpretation_flags`는 final F1 상승과 precision 하락이 동시에 나타나는 경우, 언어별 final F1 또는 precision 회귀, 주요 실패 태그의 precision/boundary 회귀를 자동으로 표시하고, `interpretation_flag_counts`는 한 sweep 안에서 같은 위험 신호가 몇 개 parameter 후보에서 반복됐는지 집계한다. `adoption_review`는 자동 채택/기각 판정이 아니라, 위험 flag가 있는 후보를 `review-risk`로 표시해 수동 해석을 요구하는 보수적 상태값이며, `adoption_review_counts`는 sweep 전체에서 검토 위험 후보가 몇 개인지 보여준다. 따라서 sweep 결과는 논문에서 "임계값 자체가 문헌에서 왔다"는 근거가 아니라, 문헌으로 정한 문제 설정 안에서 앱 로그 replay가 어떤 값을 지지했는지 보여주는 실험 기록으로 해석한다. 결과를 논문 표로 옮길 때는 `paper_evidence`, `corpus_role`, `experiment_stage`, `claim_scope_key`, `claim_scope`, `supported_claims`, `unsupported_claims`, `deferred_claims`, `runtime_contract`를 함께 확인한다. 현재 challenge replay 결과의 `experiment_stage`는 `challenge-replay`, `claim_scope_key`는 `failure-lifecycle-tradeoff`이고 설명용 `claim_scope`는 `failure-mode lifecycle trade-off only`이다. 향후 representative 결과는 `representative-replay` 및 `operating-average-finalization`으로 별도 표에서 해석한다. representative 결과는 `case_summary.representative_metadata`의 sampling unit, sampling rule, source log 분포를 함께 보존해야 한다. `evidence_protocol.required_evidence_fields`는 논문 표나 실험일지에 수치를 옮길 때 함께 보존해야 하는 최소 문맥을 나열한다. 이 필드가 가리키는 `paper_evidence`, `paper_evidence_eligible`, `corpus_role`, `experiment_stage`, `claim_scope_key`, `supported_claims`, `unsupported_claims`, `deferred_claims`, `runtime_contract`, `expected_final_case_count`, `parameter_axes`, `evidence_summary.results`, `evidence_summary.adoption_review_counts`가 함께 남아 있지 않은 결과는 정식 논문 근거로 승격하지 않는다. 실제 논문 근거용 summary는 `missing_required_evidence_fields=none`이어야 하며, dry-run처럼 `evidence_summary.results`가 없는 출력은 실행 계획 검증으로만 사용한다. 과거 report는 당시 저장된 필드 목록이 아니라 현재 `validate_sbd_evidence_report.py` 기준으로 다시 검사한 뒤 인용한다. 통합 readiness audit의 `checks.methodology`도 함께 확인해 complete report의 `experiment_stage`와 `claim_scope_key`가 challenge-only 논문 범위에 섞이지 않았는지 확인한다.
 
 기존 challenge replay paper-evidence 집합의 수치와 분포는 현재 논문 본문에서 역사적 참고로만 남기고, 운영 기준선으로는 사용하지 않는다. 현재 challenge replay 입력은 source `language`, `chunks`만 사용해 반복 token-sentence 근거로 `expected_final`을 예측한 `sbd_predicted_cases/`이며, 본문의 최신 수치는 이 입력을 실제 `sat + cuda + float16`로 다시 실행한 815건 기준선만 사용한다.
@@ -219,6 +221,21 @@ Whisper 계열 모델은 강력한 오프라인 전사 성능을 보이지만, �
 
 이 설계에서 벤치마크는 품질 게이트가 아니라 성능 추적 하네스다. 관측 케이스가 늘면 난도가 바뀌므로 `pass_rate`는 논문 지표로 쓰지 않는다. 대신 `final_precision`, `final_recall`, `final_f1`, `final_boundary_f1`, `finalized_per_stage_start`, `pending_exact_match`, `staged_exact_match`, lifecycle metric count를 함께 본다. 특히 `final_f1`은 기대 문장 내용 회수율을 보여주지만, 문장 경계가 사용자에게 읽히는 단위와 맞는지는 `final_boundary_f1`이 별도로 보여준다. 언어별/태그별 residual summary는 평균값의 해석 보조 지표이며, 신규 케이스가 추가될 때 어떤 실패 증상이 늘었는지 추적하는 용도로 사용한다.
 
+### 구현 근거 타임라인
+
+실험일지와 커밋 로그를 함께 보면, 현재 논문의 핵심 주장은 단일 아이디어의 성공담이 아니라 채택과 기각을 반복한 보수적 축소 과정에서 남은 결론이다. 본문에서 운영 근거로 승격한 항목은 최소한 다음 두 조건을 함께 만족한 것만 사용한다. 첫째, [실험일지](../2026-06-16-dictation-ai-experiment-log.md)에 입력 집합, 측정값, 해석이 날짜와 함께 남아 있어야 한다. 둘째, 대응되는 checked-in 변경 또는 제거 커밋이 있어 실제 파이프라인 판단으로 이어졌음을 확인할 수 있어야 한다.
+
+| 날짜/커밋 | 실험 또는 변경 | 현재 논문에서의 의미 |
+| --- | --- | --- |
+| 2026-06-23, 실험일지 `SENTENCE_CONFIRM_CHUNKS` 재검증 | confirmation 횟수 1/2/3을 같은 CUDA/SaT replay에서 다시 비교해 `2`가 precision, boundary, strict F1의 절충점임을 확인했다. | 단일 threshold도 무작정 낮추거나 높이는 방식이 아니라 동일 corpus에서 precision/recall/boundary trade-off를 함께 봐야 한다는 원칙의 대표 근거다. |
+| 2026-06-24, 실험일지 `refined case set lifecycle sweep` / `active core axis sweep` | queue promotion age, delta-suppressed stage age, compact recent-final 계열을 다시 훑었지만 strict subset 또는 boundary가 악화되거나 효과가 없었다. | 남은 병목이 “새 knob 추가”보다 queue/revision/recent-final 충돌 같은 상위 lifecycle 구조에 있다는 해석을 뒷받침한다. |
+| `5c662e1`, `4e479fa`, `db5c712` | 기존 `sbd_cases/`를 폐기하고 `sbd_predicted_cases/`를 도입했으며, `expected_final`을 SBD 출력이 아니라 `language`, `chunks`, stable token-sentence 반복 근거로 재정의했다. | 본 논문의 최신 815건 기준선은 case-definition cleanup 이후의 reviewed corpus에만 의존한다. 따라서 과거 1113/1223 수치는 역사적 참고치로만 남기고 현재 운영 기준선으로 직접 비교하지 않는다. |
+| `e510f27` | 런타임 진단 지표와 로그 출력을 정리해 raw STT, final event, performance metric의 관측 위치를 분리했다. | raw STT 품질, lifecycle 품질, sink 계약을 서로 다른 실패 축으로 본다는 논문의 계층 분리 주장을 구현 차원에서 뒷받침한다. |
+| `385d573`, `0e7cd37`, 이어서 `83dd72a` | 한국어 소절 보존, prefix revision 선확정 같은 특수 리비전 경로를 한 차례 추가했지만, 이후 실험 근거가 일반화되지 않아 제거하고 리포트 지표도 상위 축 중심으로 정리했다. | 논문이 특정 발화 보정이나 특수 예외 로직을 기여로 주장하지 않는 이유다. 구조적으로 좁은 실험은 허용했지만, strict/full replay에서 일반 근거가 약하면 제거한다는 운영 원칙이 확인됐다. |
+| 2026-06-29 실험일지 / `3e01ed5` | same-chunk tail merge는 한국어 residue shard에서 개선 신호가 있었지만 full replay에서 `strict_final_f1_avg=0.866 -> 0.854` 하락이 남아 미채택으로 정리했다. | 소절 분리를 전역 기본 정책으로 두지 않고, clause/tail 결합 같은 좁은 lifecycle 원칙도 전체 strict 회귀가 남으면 운영 로직으로 승격하지 않는다는 최종 판단 근거다. |
+
+이 타임라인이 보여주는 핵심은 세 가지다. 첫째, 현재 기준선은 단순히 “좋아 보이는 수치”를 채택한 결과가 아니라 case-definition cleanup 이후 동일 corpus에서 살아남은 값들이다. 둘째, 실험 코드는 적극적으로 추가됐지만 `83dd72a`처럼 일반 근거가 약하면 다시 제거됐다. 셋째, 논문의 핵심 주장인 revision-aware lifecycle, challenge replay 분리 해석, final-only sink 계약은 문서 선언이 아니라 실제 커밋 히스토리와 기각 기록으로 추적 가능하다.
+
 주요 지표는 다음과 같다.
 
 | 지표 | 의미 |
@@ -276,6 +293,8 @@ same-chunk tail merge는 한국어 소절 잔류 사례를 줄일 수 있는지 
 
 같은 날 추가한 UFO/aliens, accelerating launches/launched mass, Optimus surgeons/Zimbabwe, supply chain/medicine, chimps/Raptor 등 케이스는 공통적으로 내용 회수와 boundary 품질이 분리되는 양상을 보였다. 일부 케이스는 false positive 없이 주요 내용을 회수했지만 후반 문장이 staged queue에 남았고, 일부 케이스는 `So what fraction of all that of accelerating launches.`처럼 앞뒤 문맥이 섞인 final을 만들었다. 따라서 최신 실험 판단은 “final F1 상승”보다 “boundary/staged residue와 중복 억제의 균형”을 함께 보는 방향으로 정리된다.
 
+이 운영 관측은 이후 구현 이력과도 직접 이어진다. `e510f27`은 raw STT, final event, runtime metric 로그를 분리해 이런 분석이 운영 로그에서 다시 가능하도록 만들었고, `385d573`과 `0e7cd37`은 한국어 소절 residue를 줄이기 위한 특수 lifecycle 경로를 잠정 추가했다. 그러나 `83dd72a`에서 이 특수 경로를 다시 제거한 것은, 로그에서 보인 국소 증상을 앱 기본 로직으로 일반화하기에는 replay 근거가 부족하다는 판단이었기 때문이다. 즉 운영 로그는 아이디어를 제안하는 출발점이지만, checked-in 기본값은 반드시 전체 replay의 채택/기각 절차를 통과한 것만 남는다.
+
 이 실험 과정에서 중요하게 폐기한 경로도 있다. CJK pending tail 접합, 내부 overlap delta, 언어별 정규식 보정, mock/smoke/CPU 벤치, 단어별 예외 규칙은 현재 논문에서 구현 기여로 주장하지 않는다. 이들은 일부 케이스에서 수치 개선처럼 보일 수 있었지만, 일반 파이프라인의 근거가 약하거나 운영 계약을 흐리는 위험이 있어 실험일지에서 폐기 판단으로 남겼다.
 
 ## 9. 결과 해석
@@ -325,6 +344,8 @@ Queue residue를 심각도별로 나눈 archived 분석도 같은 방향을 가�
 ## 11. 한계
 
 현재 연구는 운영 로그 기반 관측과 텍스트 replay 벤치가 중심이며, 동일 오디오 replay 기반 통제 실험은 제한적이다. 정답 전사 코퍼스가 없어 CER/WER 기반 정량 평가는 아직 보조 지표로만 논의된다. 또한 사용자 체감 지연, 가독성, 번역 만족도에 대한 사용자 연구는 포함하지 않았다. 기존 complete evidence package의 `lifecycle_replay_summary`도 23개 report가 모두 `state_machine_parity=partial`임을 보여준다. 즉 benchmark는 운영 loop의 일부 decision helper와 window text 기반 stable analysis를 공유하지만, 실제 audio timestamp latency와 translation request/output linkage를 포함하지 않는다. 본 논문의 실험 결과는 현재 애플리케이션의 운영 로그와 벤치 샘플에서 관측된 실패 유형과 개선 근거로 해석해야 하며, 운영 loop 전체와 동일한 end-to-end 검증으로 읽지 않는다.
+
+또한 본문에 함께 등장하는 여러 수치 집합은 동일한 모집단이 아니다. 57건 refined set, 1020/1027건 clean set, 1113/1223건 historical set은 모두 그 시점의 case-definition 상태와 분석 목적이 다르다. 이 수치들은 특정 가설이 왜 기각되었는지 보여주는 내부 분석 근거로는 의미가 있지만, 최신 815건 reviewed challenge replay의 절대 성능과 나란히 놓고 개선/악화를 단정하는 근거로는 사용하지 않는다. 이 한계는 논문의 보수적 해석 범위를 구성하는 일부다.
 
 벤치마크 샘플은 실패 사례 중심으로 수집되므로 일반 발화 전체의 평균 품질을 대표하지 않는다. 최신 815개 reviewed sample도 중복 확정, 확정 누락, no-end fragment, staged queue residue 같은 어려운 케이스를 의도적으로 포함한다. 따라서 이 벤치의 `final_f1_avg`는 공개 ASR benchmark의 WER처럼 모델 일반 성능을 뜻하지 않는다.
 
