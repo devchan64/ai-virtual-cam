@@ -46,6 +46,79 @@
 - final 확정은 단일 모델 출력이 아니라 staged confirmation, `sentenceFinalizeAge`, 중복 억제, revision lifecycle로 결정한다.
 - 번역은 final transcript만 대상으로 한다.
 
+## 2026-06-30 길이 strata 벤치로 짧은 문장/긴 문장 가설 확인
+
+가설:
+
+- 짧은 문장은 소비 누락과 중복 소비가 대체로 잘 억제된다.
+- 긴 문장은 내용 회수는 되더라도 소비 누락과 문장 병합 오류가 더 크게 남는다.
+- 따라서 전체 평균 하나만으로는 현재 파이프라인의 강점과 병목이 함께 섞여 보인다.
+
+구현:
+
+- `tests/eval/dictation_ai/benchmark/sbd_benchmark_report.py`에 `length_strata_summary`를 추가했다.
+- strata는 `expected_final` token 수 기준으로 `short_sentences`, `medium_sentences`, `long_sentences`로 나눴다.
+- 짧은 문장 축에는 `missing_final_rate`, `duplicate_suppression_rate`, `queue_bypass_rate`를, 긴 문장 축에는 `missing_final_rate`, `merge_error_rate`, `queue_bypass_rate`를 핵심 지표로 뒀다.
+- `tests/eval/dictation_ai/sbd_benchmark.py` summary line에도 short/long 지표를 직접 노출했다.
+- `tests/eval/dictation_ai/paper/audit_length_strata_hypothesis.py`를 추가해 기준 리포트가 이 가설을 충족하는지 자동 판정하도록 했다.
+
+실행:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_entrypoint \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_length_strata_hypothesis \
+  tests.eval.dictation_ai.tool_tests.test_dictation_ai_sbd_benchmark_report
+
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/length-strata-baseline.json
+
+./.venv/bin/python tests/eval/dictation_ai/paper/audit_length_strata_hypothesis.py \
+  --report .tmp/eval/dictation-ai-sbd/length-strata-baseline.json \
+  --summary-output .tmp/eval/dictation-ai-sbd/length-strata-hypothesis-audit.json
+```
+
+기준선 요약:
+
+```text
+[dictation-ai-sbd-benchmark]
+cases=815
+final_precision_avg=0.614
+final_recall_avg=0.786
+final_f1_avg=0.666
+final_boundary_f1_avg=0.136
+short_cases=59
+short_missing_final_rate=0.000
+short_duplicate_suppression_rate=0.932
+short_queue_bypass_rate=0.831
+long_cases=705
+long_missing_final_rate=0.153
+long_merge_error_rate=0.289
+long_queue_bypass_rate=0.735
+```
+
+자동 판정:
+
+```text
+hypothesis_supported=true
+```
+
+해석:
+
+- 짧은 문장 strata에서는 `missing_final_rate=0.000`이라 소비 누락이 사실상 관측되지 않았다.
+- 짧은 문장 strata에서는 `duplicate_suppression_rate=0.932`로 중복 소비도 대체로 잘 억제됐다.
+- 짧은 문장 strata의 `queue_bypass_rate=0.831`은 많은 후보가 장기 queue residue 없이 빠르게 소비된다는 해석을 지지한다.
+- 긴 문장 strata에서는 `missing_final_rate=0.153`, `long_merge_error_rate=0.289`로 소비 누락과 오병합이 분명히 더 크게 남았다.
+- 따라서 현재 벤치는 "짧은 문장은 비교적 잘 소비되고, 긴 문장은 누락/병합 병목이 크다"는 가설을 지지한다.
+
+제한:
+
+- 이 실험은 reviewed 815건 challenge replay 기준의 길이 strata 비교이며, 운영 평균 전체를 대표하지 않는다.
+- 현재 벤치는 고정된 replay chunk를 재생하므로, `windowSeconds` 확대가 긴 문장 병목을 실제로 완화하는지는 아직 증명하지 못했다.
+- 다음 실험은 같은 발화를 다른 `windowSeconds` 설정으로 수집한 비교군 또는 window별 replay corpus를 만들어, 같은 `length_strata_summary`를 나란히 비교하는 방식으로 진행한다.
+
 ## 2026-06-23 벤치 expected_final 누락 감사 보강
 
 문제:
