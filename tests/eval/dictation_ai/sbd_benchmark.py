@@ -285,6 +285,7 @@ def main() -> int:
         f"strict_final_f1_avg={float(strict_summary.get('final_f1_avg', 0.0)):.3f} "
         f"final_similarity_coverage_avg={summary['final_similarity_coverage_avg']:.3f} "
         f"boundary_diag_f1_avg={summary['final_boundary_f1_avg']:.3f} "
+        f"boundary_granularity_adjusted_f1_avg={summary['boundary_granularity_adjusted_f1_avg']:.3f} "
         f"short_cases={length_strata['short_case_count']} "
         f"short_missing_final_rate={length_strata['short_missing_final_rate']:.3f} "
         f"short_duplicate_suppression_rate={length_strata['short_duplicate_suppression_rate']:.3f} "

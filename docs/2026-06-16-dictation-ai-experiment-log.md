@@ -123,6 +123,102 @@ hypothesis_supported=true
 - 현재 벤치는 고정된 replay chunk를 재생하므로, `windowSeconds` 확대가 긴 문장 병목을 실제로 완화하는지는 아직 증명하지 못했다.
 - 다음 실험은 같은 발화를 다른 `windowSeconds` 설정으로 수집한 비교군 또는 window별 replay corpus를 만들어, 같은 `length_strata_summary`를 나란히 비교하는 방식으로 진행한다.
 
+## 2026-06-30 boundary granularity adjusted 지표로 exact boundary 가설 재검증
+
+가설:
+
+- `final_boundary_f1_avg`는 exact boundary-offset에 과도하게 민감해, 실제 앱 lifecycle 실패보다 split-final/merge-final granularity mismatch를 과대 계상한다.
+- 따라서 final 문장 내용과 순서가 맞는 경우 `1:N` 분할과 `N:1` 병합을 허용하는 보정 지표가 필요하다.
+
+실행:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/boundary-granularity-adjusted-check-20260630.json
+```
+
+기준선 요약:
+
+```text
+final_precision_avg=0.6142274109
+final_recall_avg=0.7857772455
+final_f1_avg=0.6656664232
+final_boundary_f1_avg=0.1362276306
+boundary_granularity_adjusted_precision_avg=0.7127074388
+boundary_granularity_adjusted_recall_avg=0.8466921290
+boundary_granularity_adjusted_f1_avg=0.7504152032
+```
+
+strict logic candidate subset:
+
+```text
+case_count=22
+final_precision_avg=0.8560606061
+final_recall_avg=0.9090909091
+final_f1_avg=0.8664141414
+final_boundary_f1_avg=0.5515151515
+boundary_granularity_adjusted_f1_avg=0.9333333333
+```
+
+granularity 사례:
+
+```text
+boundary_granularity_case_count=62
+predicted-en-000.jsonl:33: final_f1=0.8571428571, final_boundary_f1=0.0, boundary_granularity_adjusted_f1=1.0, expected_final_count=3, actual_final_count=4
+predicted-en-000.jsonl:8: final_f1=0.8888888889, final_boundary_f1=0.0, boundary_granularity_adjusted_f1=1.0, expected_final_count=4, actual_final_count=5
+```
+
+해석:
+
+- 전체 challenge replay에서 `final_boundary_f1_avg=0.136`인데 `boundary_granularity_adjusted_f1_avg=0.750`까지 올라간다. exact boundary 저점의 상당 부분이 pure content loss가 아니라 granularity mismatch였다는 뜻이다.
+- strict logic candidate subset도 `final_boundary_f1_avg=0.552`보다 `boundary_granularity_adjusted_f1_avg=0.933`이 훨씬 높다. strict 후보의 잔여 저점 중 큰 비중이 exact offset mismatch임을 보여준다.
+- 실제 사례에서도 `final_boundary_f1=0.0`인데 `boundary_granularity_adjusted_f1=1.0`인 케이스가 확인됐다. 이 유형은 앱 lifecycle 실패보다 expected boundary granularity 또는 허용 가능한 과분할로 분류하는 편이 타당하다.
+- 따라서 `final_boundary_f1_avg`는 채택 판단의 핵심 지표로 쓰지 않는다. 이후 가설 검증은 `final_f1_avg`와 `boundary_granularity_adjusted_f1_avg`, 그리고 `boundary_granularity_summary`를 함께 본다.
+
+제한:
+
+- 이 재검증은 reviewed 815건 challenge replay에 대한 텍스트 replay 기준이다. 운영 평균 대표성은 여전히 없다.
+- 현재 report는 전체 summary에 `boundary_granularity_adjusted_f1_avg`를 추가했지만, 과거 실험일지의 모든 historical report가 이 지표를 갖고 있는 것은 아니다. 시계열 비교는 재생성한 report에서만 수행한다.
+
+strict subset 독립 replay:
+
+```text
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --cases .tmp/eval/dictation-ai-sbd/strict-cases-from-20260630.jsonl \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/strict-cases-from-20260630-report.json
+```
+
+```text
+cases=22
+final_precision_avg=0.856
+final_recall_avg=0.909
+final_f1_avg=0.866
+boundary_diag_f1_avg=0.552
+boundary_granularity_adjusted_f1_avg=0.933
+long_cases=16
+long_missing_final_rate=0.125
+long_merge_error_rate=0.125
+```
+
+- 이 값은 full replay report 내부의 `strict_logic_candidate_summary`와 같은 방향으로 일치한다.
+- 따라서 `boundary_granularity_adjusted_f1_avg`가 exact boundary 저점을 granularity mismatch로 분리한다는 가설은 report 내부 summary뿐 아니라 strict candidate를 별도 입력으로 재생한 독립 benchmark에서도 유지된다.
+
+언어별 일관성:
+
+```text
+en: final_f1_avg=0.6722843278, final_boundary_f1_avg=0.0596581935, boundary_granularity_adjusted_f1_avg=0.7702998645
+ko: final_f1_avg=0.6059662211, final_boundary_f1_avg=0.1630836669, boundary_granularity_adjusted_f1_avg=0.6723927981
+zh: final_f1_avg=0.6902947708, final_boundary_f1_avg=0.2203555396, boundary_granularity_adjusted_f1_avg=0.7680663842
+```
+
+- 영어, 한국어, 중국어 모두에서 `boundary_granularity_adjusted_f1_avg`가 `final_boundary_f1_avg`보다 크게 높다.
+- gap은 영어 `+0.7106`, 한국어 `+0.5093`, 중국어 `+0.5477`이다. 따라서 이 현상은 특정 언어 하나의 label artifact가 아니라 challenge replay 전반의 exact boundary sensitivity 문제로 해석하는 편이 타당하다.
+- 현재 `.tmp/eval/dictation-ai-sbd/representative-cases/`는 비어 있으므로, 이 결론은 failure-enriched challenge replay 범위에서만 성립한다. 운영 평균 대표성은 후속 representative replay가 준비된 뒤 다시 검증한다.
+
 ## 2026-06-23 벤치 expected_final 누락 감사 보강
 
 문제:
