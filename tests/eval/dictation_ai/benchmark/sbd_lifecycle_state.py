@@ -24,6 +24,7 @@ class LifecycleState:
     metrics: dict[str, int] | None = None
     previous_window_text: str = ""
     stable_analysis: Any = None
+    finalize_events: list[dict[str, object]] | None = None
 
     def __post_init__(self) -> None:
         if self.staged_queue is None:
@@ -32,6 +33,8 @@ class LifecycleState:
             self.final_sentences = []
         if self.metrics is None:
             self.metrics = {}
+        if self.finalize_events is None:
+            self.finalize_events = []
 
     def count(self, name: str, amount: int = 1) -> None:
         assert self.metrics is not None

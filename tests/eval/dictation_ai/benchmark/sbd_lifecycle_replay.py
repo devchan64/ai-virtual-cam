@@ -194,9 +194,22 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
         return []
     state.count("finalize_attempt")
     state.count(f"finalize_reason_{reason}")
-    if _prefer_queued_revision_for_active(state, chunk_index, reason):
-        return []
+    assert state.finalize_events is not None
     staged_before = state.staged_sentence
+    queue_before = [str(entry["sentence"]) for entry in (state.staged_queue or ())]
+    if _prefer_queued_revision_for_active(state, chunk_index, reason):
+        state.finalize_events.append(
+            {
+                "chunk_index": chunk_index,
+                "reason": reason,
+                "staged_before": staged_before,
+                "queue_before": queue_before,
+                "queue_after": [str(entry["sentence"]) for entry in (state.staged_queue or ())],
+                "suppressed": "queued_revision_preferred",
+                "output_sentence": "",
+            }
+        )
+        return []
     output_sentence = _sentence_output_delta(state.committed_text, staged_before)
     if _should_preserve_staged_output_when_delta_fragment(staged_before, output_sentence, language):
         state.count("finalize_delta_fragment_preserved")
@@ -223,6 +236,17 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
             state.count(f"finalize_recent_echo_suppressed_{recent_reason}")
             state.count("segment_state_suppressed")
             _promote_next_staged_sentence(state, chunk_index)
+            state.finalize_events.append(
+                {
+                    "chunk_index": chunk_index,
+                    "reason": reason,
+                    "staged_before": staged_before,
+                    "queue_before": queue_before,
+                    "queue_after": [str(entry["sentence"]) for entry in (state.staged_queue or ())],
+                    "suppressed": f"recent_echo_{recent_reason}",
+                    "output_sentence": "",
+                }
+            )
             return []
     if not output_sentence:
         state.staged_sentence = ""
@@ -235,6 +259,17 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
         state.count("finalize_duplicate_suppressed")
         state.count("segment_state_suppressed")
         _promote_next_staged_sentence(state, chunk_index)
+        state.finalize_events.append(
+            {
+                "chunk_index": chunk_index,
+                "reason": reason,
+                "staged_before": staged_before,
+                "queue_before": queue_before,
+                "queue_after": [str(entry["sentence"]) for entry in (state.staged_queue or ())],
+                "suppressed": "duplicate",
+                "output_sentence": "",
+            }
+        )
         return []
     if _should_suppress_delta_final(staged_before, output_sentence, language, reason):
         state.count("finalize_delta_suppressed")
@@ -252,8 +287,30 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
             state.count("finalize_delta_suppressed_stage_dropped")
             state.count("segment_state_suppressed")
             _promote_next_staged_sentence(state, chunk_index)
+            state.finalize_events.append(
+                {
+                    "chunk_index": chunk_index,
+                    "reason": reason,
+                    "staged_before": staged_before,
+                    "queue_before": queue_before,
+                    "queue_after": [str(entry["sentence"]) for entry in (state.staged_queue or ())],
+                    "suppressed": "delta_stage_dropped",
+                    "output_sentence": output_sentence,
+                }
+            )
             return []
         state.count("finalize_delta_suppressed_stage_retained")
+        state.finalize_events.append(
+            {
+                "chunk_index": chunk_index,
+                "reason": reason,
+                "staged_before": staged_before,
+                "queue_before": queue_before,
+                "queue_after": [str(entry["sentence"]) for entry in (state.staged_queue or ())],
+                "suppressed": "delta_stage_retained",
+                "output_sentence": output_sentence,
+            }
+        )
         return []
     state.staged_sentence = ""
     state.staged_confirmations = 0
@@ -269,6 +326,17 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
     state.committed_text = _append_committed_text(state.committed_text, output_sentence)
     state.final_sentences.append(output_sentence)
     _promote_next_staged_sentence(state, chunk_index)
+    state.finalize_events.append(
+        {
+            "chunk_index": chunk_index,
+            "reason": reason,
+            "staged_before": staged_before,
+            "queue_before": queue_before,
+            "queue_after": [str(entry["sentence"]) for entry in (state.staged_queue or ())],
+            "suppressed": "",
+            "output_sentence": output_sentence,
+        }
+    )
     return [output_sentence]
 
 
@@ -791,6 +859,8 @@ def _run_lifecycle_case(case: SbdCase, detector: Any) -> dict[str, Any]:
         initial_final_count += 1
     chunks: list[dict[str, Any]] = []
     for chunk_index, chunk in enumerate(case.chunks, start=1):
+        assert state.finalize_events is not None
+        state.finalize_events.clear()
         prior_pending_text = state.pending_text
         window_text = normalized_text(chunk)
         state.stable_analysis = analyze_stable_window(state.previous_window_text, window_text, case.language)
@@ -877,6 +947,7 @@ def _run_lifecycle_case(case: SbdCase, detector: Any) -> dict[str, Any]:
                 "staged_confirmations": state.staged_confirmations,
                 "staged_age": state.staged_age,
                 "finalized": produced,
+                "finalized_events": list(state.finalize_events),
                 "boundary_count": boundary.boundary_count,
                 "end_mark_count": boundary.end_mark_count,
                 "right_context_start_count": boundary.right_context_start_count,
