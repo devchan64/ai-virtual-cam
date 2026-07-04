@@ -100,6 +100,7 @@ def _build_subcommand_targets() -> dict[str, str]:
         "promote-representative-cases": "tests.eval.dictation_ai.representative.promote_sbd_representative_cases:main",
     }
     structural_commands = {
+        "extract-case-lifecycle-trace": "tests.eval.dictation_ai.structural.extract_sbd_case_lifecycle_trace:main",
         "select-structural-cases": "tests.eval.dictation_ai.structural.select_sbd_structural_cases:main",
     }
     return (

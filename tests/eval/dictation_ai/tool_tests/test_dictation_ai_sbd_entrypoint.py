@@ -15,6 +15,7 @@ class DictationAiSbdEntrypointTest(unittest.TestCase):
             {
                 "audit-initial-final-context",
                 "build-expected-final-cases",
+                "extract-case-lifecycle-trace",
                 "export-gpt-case-review-packets",
                 "extract-representative-drafts",
                 "extract-review-packets",

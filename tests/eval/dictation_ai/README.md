@@ -47,6 +47,7 @@
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py build-expected-final-cases --help
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py export-gpt-case-review-packets --help
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py audit-initial-final-context --help
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py extract-case-lifecycle-trace --help
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py run-sweep --help
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py paper-baseline-recheck --help
 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py paper-readiness --help
