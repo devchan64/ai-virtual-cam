@@ -13,6 +13,7 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _is_pending_prefix_mixed_candidate,
     _is_prior_pending_recent_final_mixed_candidate,
     _normalized_text,
+    _stale_leading_short_closed_candidate_reason,
     _should_restore_trimmed_closed_candidate,
     _should_stage_boundary_candidate,
 )
@@ -115,6 +116,25 @@ def prepare_stage_candidate(
             "받아쓰기 AI prior pending/recent final 혼합 후보 무시: "
             f"chunk={chunk_index} candidate_tail={_diagnostic_tail(candidate)} "
             f"prior_pending_tail={_diagnostic_tail(prior_pending_text)}",
+            display=False,
+        )
+        return None
+    stale_leading_reason = _stale_leading_short_closed_candidate_reason(
+        candidate,
+        detected,
+        later_completed_sentences=later_completed_sentences,
+        active_stage_sentence=active_stage.sentence,
+        recent_final_sentences=recent_transcripts,
+    )
+    if stale_leading_reason:
+        count_metric("candidate_stale_leading_short_closed_suppressed")
+        count_metric(f"candidate_stale_leading_short_closed_suppressed_{stale_leading_reason}")
+        count_segment_state("suppressed")
+        worker._emit(
+            "status",
+            "받아쓰기 AI stale 선행 단문 후보 무시: "
+            f"chunk={chunk_index} reason={stale_leading_reason} "
+            f"candidate_tail={_diagnostic_tail(candidate)}",
             display=False,
         )
         return None

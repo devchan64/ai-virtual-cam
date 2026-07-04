@@ -469,6 +469,46 @@ def _should_suppress_aged_no_end_marker_queue_final(
     return False
 
 
+def _should_suppress_aged_short_closed_when_queue_has_stronger_candidate(
+    sentence: str,
+    language: str,
+    reason: str,
+    staged_confirmations: int,
+    queued_entries: tuple[dict[str, object], ...],
+    *,
+    sentence_required_confirmations: int,
+) -> bool:
+    if reason not in {"aged", "aged_forced"}:
+        return False
+    if language != "ko" or not queued_entries:
+        return False
+    if staged_confirmations >= sentence_required_confirmations:
+        return False
+    normalized_sentence = _normalized_text(sentence)
+    if not normalized_sentence or _sentence_end_count(normalized_sentence) <= 0:
+        return False
+    sentence_flags = set(_final_sentence_diagnostic_flags(normalized_sentence, language))
+    if sentence_flags.intersection({"empty", "no_end_marker", "short_no_end_fragment", "trailing_ellipsis"}):
+        return False
+    sentence_units = _word_units(normalized_sentence)
+    if len(sentence_units) == 0 or len(sentence_units) > 2:
+        return False
+    for entry in queued_entries:
+        queued_sentence = _normalized_text(str(entry.get("sentence") or ""))
+        if not queued_sentence or _sentence_end_count(queued_sentence) <= 0:
+            continue
+        queued_flags = set(_final_sentence_diagnostic_flags(queued_sentence, language))
+        if queued_flags.intersection({"empty", "no_end_marker", "short_no_end_fragment", "trailing_ellipsis"}):
+            continue
+        queued_units = _word_units(queued_sentence)
+        if len(queued_units) < len(sentence_units) + 2:
+            continue
+        queued_confirmations = int(entry.get("confirmations", 0))
+        if queued_confirmations >= max(2, staged_confirmations + 1):
+            return True
+    return False
+
+
 def _should_enable_aged_queue_backlog_promotion_boost(
     reason: str,
     queued_sentence_count: int,

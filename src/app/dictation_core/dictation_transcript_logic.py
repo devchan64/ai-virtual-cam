@@ -6,9 +6,9 @@ from src.app.dictation_core.dictation_revision_text import (
     _new_text_delta,
     _normalized_text,
     _stable_window_text,
+    _word_units,
 )
 from src.app.dictation_core.dictation_recent_final import (
-    _recent_final_output_delta,
     _recent_final_output_delta_with_reason,
 )
 from src.app.dictation_core.dictation_revision_progression import (
@@ -43,6 +43,7 @@ from src.app.dictation_core.dictation_stage_policy import (
     _should_enable_aged_queue_backlog_promotion_boost as _should_enable_aged_queue_backlog_promotion_boost_impl,
     _should_allow_no_text_stage_aging as _should_allow_no_text_stage_aging_impl,
     _should_restore_trimmed_closed_candidate as _should_restore_trimmed_closed_candidate_impl,
+    _should_suppress_aged_short_closed_when_queue_has_stronger_candidate as _should_suppress_aged_short_closed_when_queue_has_stronger_candidate_impl,
     _should_suppress_aged_low_value_final as _should_suppress_aged_low_value_final_impl,
     _should_suppress_aged_no_end_marker_queue_final as _should_suppress_aged_no_end_marker_queue_final_impl,
     _should_finalize_with_right_context as _should_finalize_with_right_context_impl,
@@ -196,6 +197,40 @@ def _should_defer_short_closed_queue_quality_block(
     )
 
 
+def _stale_leading_short_closed_candidate_reason(
+    candidate: str,
+    language: str,
+    *,
+    later_completed_sentences: list[str] | tuple[str, ...] = (),
+    active_stage_sentence: str = "",
+    recent_final_sentences: tuple[str, ...] = (),
+) -> str:
+    normalized_candidate = _normalized_text(candidate)
+    if not normalized_candidate or _sentence_end_count(normalized_candidate) <= 0:
+        return ""
+    candidate_words = _word_units(normalized_candidate)
+    if len(candidate_words) == 0 or len(candidate_words) > 2:
+        return ""
+    candidate_flags = set(_final_sentence_diagnostic_flags(normalized_candidate, language))
+    if candidate_flags.intersection({"empty", "no_end_marker", "short_no_end_fragment", "trailing_ellipsis"}):
+        return ""
+    normalized_active_stage = _normalized_text(active_stage_sentence)
+    normalized_recent_finals = {
+        normalized
+        for sentence in recent_final_sentences
+        if (normalized := _normalized_text(sentence))
+    }
+    for later_sentence in later_completed_sentences:
+        normalized_later = _normalized_text(later_sentence)
+        if not normalized_later or normalized_later == normalized_candidate:
+            continue
+        if normalized_active_stage and normalized_later == normalized_active_stage:
+            return "active_stage_later_repeat"
+        if normalized_later in normalized_recent_finals:
+            return "recent_final_later_repeat"
+    return ""
+
+
 def _coalesce_completed_short_no_end_fragments(
     sentences: list[str] | tuple[str, ...],
     language: str,
@@ -251,6 +286,24 @@ def _should_suppress_aged_low_value_final(
         deferred_revision_sentences,
         sentence_required_confirmations=_sentence_required_confirmations(staged_forced),
         short_latin_only_zh_total_units=_short_latin_only_zh_total_units(),
+    )
+
+
+def _should_suppress_aged_short_closed_when_queue_has_stronger_candidate(
+    sentence: str,
+    language: str,
+    reason: str,
+    staged_confirmations: int,
+    staged_forced: bool,
+    queued_entries: tuple[dict[str, object], ...] = (),
+) -> bool:
+    return _should_suppress_aged_short_closed_when_queue_has_stronger_candidate_impl(
+        sentence,
+        language,
+        reason,
+        staged_confirmations,
+        queued_entries,
+        sentence_required_confirmations=_sentence_required_confirmations(staged_forced),
     )
 
 

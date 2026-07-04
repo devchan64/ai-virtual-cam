@@ -44,6 +44,7 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _strip_prior_pending_prefix_revision,
     _should_translate_final_sentence,
 )
+from src.app.dictation_core.dictation_revision_progression import _should_age_staged_sentence
 from src.app.dictation_core.sentence_boundary import SentenceBoundaryResult
 
 
@@ -467,6 +468,14 @@ class DictationPipelineNodeTest(unittest.TestCase):
         )
 
         self.assertEqual(preferred, "카니 총리가 작년 말에 굉장히 의미심장한 연설을 했어요.")
+
+    def test_staged_sentence_holds_age_when_pending_extends_prefix(self) -> None:
+        self.assertFalse(
+            _should_age_staged_sentence(
+                "쉽지 않다.",
+                "쉽지 않다는 거에 대한 의미가",
+            )
+        )
 
     def test_hypothesis_candidate_node_preserves_boundary_contract(self) -> None:
         detector = FakeBoundaryDetector()

@@ -48,11 +48,32 @@ def _is_short_staged_suffix_repeat(staged_sentence: str, pending_text: str) -> b
     return staged_words[-len(pending_words) :] == pending_words
 
 
+def _is_pending_prefix_extension_of_staged(staged_sentence: str, pending_text: str) -> bool:
+    normalized_staged = _normalized_text(staged_sentence)
+    normalized_pending = _normalized_text(pending_text)
+    if not normalized_staged or not normalized_pending:
+        return False
+    if _boundary_sentence_end_count(normalized_pending) > 0:
+        return False
+    staged_stem = normalized_staged.rstrip(".!?。？！")
+    staged_compact = staged_stem.replace(" ", "")
+    pending_compact = normalized_pending.replace(" ", "")
+    if len(staged_compact) < 4 or not pending_compact.startswith(staged_compact):
+        return False
+    staged_words = _word_units(staged_stem)
+    pending_words = _word_units(normalized_pending)
+    if len(staged_words) < 2 or len(pending_words) <= len(staged_words):
+        return False
+    return True
+
+
 def _should_age_staged_sentence(staged_sentence: str, pending_text: str) -> bool:
     if not staged_sentence:
         return False
     if pending_text and _is_short_staged_suffix_repeat(staged_sentence, pending_text):
         return True
+    if pending_text and _is_pending_prefix_extension_of_staged(staged_sentence, pending_text):
+        return False
     if pending_text and _sentences_are_revisions(staged_sentence, pending_text):
         return False
     return True
