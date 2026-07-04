@@ -264,6 +264,24 @@ class DictationStagePolicyTest(unittest.TestCase):
             )
         )
 
+    def test_suppresses_single_unit_ko_aged_final_when_clean_closed_queue_bursts(self) -> None:
+        self.assertTrue(
+            _should_suppress_aged_short_closed_when_queue_has_stronger_candidate(
+                "뭐래요!",
+                "ko",
+                "aged",
+                staged_confirmations=1,
+                staged_forced=False,
+                queued_entries=(
+                    {"sentence": "바보같애!", "confirmations": 1},
+                    {"sentence": "토익 500점이죠?", "confirmations": 1},
+                    {"sentence": "아이큐가 500인데요?", "confirmations": 1},
+                    {"sentence": "500은 무슨?", "confirmations": 1},
+                    {"sentence": "고백이나 하지 마요.", "confirmations": 1},
+                ),
+            )
+        )
+
     def test_suppresses_ko_pure_latin_aged_final_when_queue_has_hangul_sentence(self) -> None:
         self.assertTrue(
             _should_suppress_ko_pure_latin_final_with_hangul_queue(

@@ -514,6 +514,7 @@ def _should_suppress_aged_short_closed_when_queue_has_stronger_candidate(
     sentence_units = _word_units(normalized_sentence)
     if len(sentence_units) == 0 or len(sentence_units) > 2:
         return False
+    clean_closed_queue_count = 0
     for entry in queued_entries:
         queued_sentence = _normalized_text(str(entry.get("sentence") or ""))
         if not queued_sentence or _sentence_end_count(queued_sentence) <= 0:
@@ -522,12 +523,13 @@ def _should_suppress_aged_short_closed_when_queue_has_stronger_candidate(
         if queued_flags.intersection({"empty", "no_end_marker", "short_no_end_fragment", "trailing_ellipsis"}):
             continue
         queued_units = _word_units(queued_sentence)
+        clean_closed_queue_count += 1
         if len(queued_units) < len(sentence_units) + 2:
             continue
         queued_confirmations = int(entry.get("confirmations", 0))
         if queued_confirmations >= max(2, staged_confirmations + 1):
             return True
-    return False
+    return len(sentence_units) == 1 and staged_confirmations <= 1 and clean_closed_queue_count >= 4
 
 
 def _should_suppress_right_context_short_prefix_extension_with_single_queue(
