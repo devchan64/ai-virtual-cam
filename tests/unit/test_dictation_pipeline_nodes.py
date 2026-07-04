@@ -36,6 +36,7 @@ from src.app.dictation.pipeline_settings import (
 )
 from src.app.dictation_core.dictation_transcript_logic import (
     _prefer_sentence_revision,
+    _replacement_decision_reason,
     _strip_prior_pending_prefix_from_final,
     _strip_prior_pending_prefix_revision,
     _should_translate_final_sentence,
@@ -195,6 +196,7 @@ class DictationPipelineNodeTest(unittest.TestCase):
                 "AVC_DICTATION_SENTENCE_CONFIRM_CHUNKS": "4",
                 "AVC_DICTATION_SHORT_NO_END_FRAGMENT_UNITS": "6",
                 "AVC_DICTATION_SHORT_CJK_CONFIRM_EXTRA_CHUNKS": "2",
+                "AVC_DICTATION_LONG_NO_END_REPLACEMENT_EARLY_AGE_MIN_UNITS": "11",
                 "AVC_DICTATION_STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS": "9",
             },
         ):
@@ -205,6 +207,19 @@ class DictationPipelineNodeTest(unittest.TestCase):
         self.assertEqual(policy["sentence_confirm_chunks"], 4)
         self.assertEqual(policy["short_no_end_fragment_units"], 6)
         self.assertEqual(policy["short_cjk_confirm_extra_chunks"], 2)
+        self.assertEqual(policy["long_no_end_replacement_early_age_min_units"], 11)
+
+    def test_replacement_policy_ages_long_non_cjk_no_end_stage_one_chunk_early(self) -> None:
+        reason = _replacement_decision_reason(
+            "so you know I was watching this graph for a while and I said maybe people were still asking the wrong question",
+            "now people are asking a different question.",
+            staged_confirmations=1,
+            staged_forced=False,
+            staged_age=2,
+            sentence_finalize_age=3,
+        )
+
+        self.assertEqual(reason, "aged")
 
     def test_commit_buffer_drops_stale_queued_candidate_before_promotion(self) -> None:
         node = SentenceCandidateCommitBufferNode(max_size=4)

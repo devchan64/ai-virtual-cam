@@ -150,6 +150,7 @@ SLOW_PENDING_MAX_CHARS_PER_CHUNK = 18.0
 SHORT_CJK_FINAL_UNITS = 10
 SHORT_NO_END_FRAGMENT_UNITS = 7
 SHORT_CJK_REPLACEMENT_HOLD_CHUNKS = 0
+LONG_NO_END_REPLACEMENT_EARLY_AGE_MIN_UNITS = 16
 
 # 기본 confirmation을 3회 반복 관측으로 맞추면서 짧은 CJK만 별도로 더
 # 지연시키는 예외는 제거한다. 짧은 후보의 품질 차단은 structural flag로
@@ -429,6 +430,13 @@ def short_cjk_replacement_hold_chunks() -> int:
     return _dictation_env_int("SHORT_CJK_REPLACEMENT_HOLD_CHUNKS", SHORT_CJK_REPLACEMENT_HOLD_CHUNKS)
 
 
+def long_no_end_replacement_early_age_min_units() -> int:
+    return _dictation_env_int(
+        "LONG_NO_END_REPLACEMENT_EARLY_AGE_MIN_UNITS",
+        LONG_NO_END_REPLACEMENT_EARLY_AGE_MIN_UNITS,
+    )
+
+
 def short_cjk_confirm_extra_chunks() -> int:
     return _dictation_env_int("SHORT_CJK_CONFIRM_EXTRA_CHUNKS", SHORT_CJK_CONFIRM_EXTRA_CHUNKS)
 
@@ -490,6 +498,7 @@ def dictation_pipeline_policy() -> dict[str, object]:
         "short_cjk_final_units": short_cjk_final_units(),
         "short_no_end_fragment_units": short_no_end_fragment_units(),
         "short_cjk_replacement_hold_chunks": short_cjk_replacement_hold_chunks(),
+        "long_no_end_replacement_early_age_min_units": long_no_end_replacement_early_age_min_units(),
         "short_cjk_confirm_extra_chunks": short_cjk_confirm_extra_chunks(),
         "short_mixed_latin_zh_cjk_units": short_mixed_latin_zh_cjk_units(),
         "short_mixed_latin_zh_total_units": short_mixed_latin_zh_total_units(),
@@ -536,6 +545,7 @@ def lifecycle_tuning_policy() -> dict[str, int]:
         "short_cjk_final_units": short_cjk_final_units(),
         "short_no_end_fragment_units": short_no_end_fragment_units(),
         "short_cjk_replacement_hold_chunks": short_cjk_replacement_hold_chunks(),
+        "long_no_end_replacement_early_age_min_units": long_no_end_replacement_early_age_min_units(),
         "short_cjk_confirm_extra_chunks": short_cjk_confirm_extra_chunks(),
     }
 
@@ -841,6 +851,16 @@ def dictation_tuning_manifest() -> list[dict[str, int | float | str]]:
             max_value=6,
             scope="lifecycle",
             intent="optionally hold punctuated short CJK staged heads during replacement; default avoids queue stalls",
+        ),
+        _tuning_manifest_entry(
+            "LONG_NO_END_REPLACEMENT_EARLY_AGE_MIN_UNITS",
+            default=LONG_NO_END_REPLACEMENT_EARLY_AGE_MIN_UNITS,
+            current=long_no_end_replacement_early_age_min_units(),
+            value_type="int",
+            min_value=4,
+            max_value=30,
+            scope="lifecycle",
+            intent="allow long non-CJK staged clauses without end markers to age out one chunk earlier during replacement so they do not linger as unconfirmed residue",
         ),
         _tuning_manifest_entry(
             "CJK_REVISION_RATIO_MIN",

@@ -50,6 +50,7 @@ from src.app.dictation_core.dictation_stage_policy import (
 from src.app.dictation.pipeline_settings import (
     forced_sentence_confirm_chunks as _forced_sentence_confirm_chunks,
     forced_sentence_confirm_max_age_chunks as _forced_sentence_confirm_max_age_chunks,
+    long_no_end_replacement_early_age_min_units as _long_no_end_replacement_early_age_min_units,
     revision_similarity_policy as _revision_similarity_policy,
     sentence_confirm_chunks as _sentence_confirm_chunks,
     sentence_confirm_max_age_chunks as _sentence_confirm_max_age_chunks,
@@ -122,6 +123,7 @@ def _replacement_decision_reason(
         sentence_max_age_chunks=_sentence_max_age_chunks(staged_forced, sentence_finalize_age),
         short_cjk_confirm_extra_chunks=_short_cjk_confirm_extra_chunks(),
         short_cjk_replacement_hold_chunks=_short_cjk_replacement_hold_chunks(),
+        long_no_end_replacement_early_age_min_units=_long_no_end_replacement_early_age_min_units(),
     )
 
 
@@ -145,6 +147,7 @@ def _should_finalize_replaced_sentence(
         sentence_max_age_chunks=_sentence_max_age_chunks(staged_forced, sentence_finalize_age),
         short_cjk_confirm_extra_chunks=_short_cjk_confirm_extra_chunks(),
         short_cjk_replacement_hold_chunks=_short_cjk_replacement_hold_chunks(),
+        long_no_end_replacement_early_age_min_units=_long_no_end_replacement_early_age_min_units(),
     )
 
 
@@ -188,6 +191,7 @@ def _should_finalize_before_replacement(
         sentence_max_age_chunks=_sentence_max_age_chunks(staged_forced, sentence_finalize_age),
         short_cjk_confirm_extra_chunks=_short_cjk_confirm_extra_chunks(),
         short_cjk_replacement_hold_chunks=_short_cjk_replacement_hold_chunks(),
+        long_no_end_replacement_early_age_min_units=_long_no_end_replacement_early_age_min_units(),
     )
 
 

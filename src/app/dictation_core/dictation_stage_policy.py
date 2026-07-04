@@ -93,11 +93,19 @@ def _replacement_decision_reason(
     sentence_max_age_chunks: int,
     short_cjk_confirm_extra_chunks: int,
     short_cjk_replacement_hold_chunks: int,
+    long_no_end_replacement_early_age_min_units: int,
 ) -> str:
     staged_words = _word_units(staged_sentence)
     if not staged_words:
         return "empty"
+    non_cjk_flags = set(_final_sentence_diagnostic_flags(staged_sentence, "en"))
     if _looks_like_open_latin_clause(staged_sentence, staged_words):
+        if (
+            "no_end_marker" in non_cjk_flags
+            and len(staged_words) >= long_no_end_replacement_early_age_min_units
+            and staged_age + 1 >= sentence_max_age_chunks
+        ):
+            return "aged"
         return "open_latin_clause"
     if staged_confirmations >= _staged_sentence_required_confirmations(
         staged_sentence,
@@ -110,6 +118,13 @@ def _replacement_decision_reason(
         flags = set(_final_sentence_diagnostic_flags(staged_sentence, "zh"))
         if "short_cjk" in flags and "no_end_marker" not in flags and staged_age < sentence_max_age_chunks + short_cjk_replacement_hold_chunks:
             return "unconfirmed_cjk"
+    else:
+        if (
+            "no_end_marker" in non_cjk_flags
+            and len(staged_words) >= long_no_end_replacement_early_age_min_units
+            and staged_age + 1 >= sentence_max_age_chunks
+        ):
+            return "aged"
     if staged_age >= sentence_max_age_chunks:
         return "aged"
     if _has_cjk_words(staged_words):
@@ -140,6 +155,7 @@ def _should_finalize_replaced_sentence(
     sentence_max_age_chunks: int,
     short_cjk_confirm_extra_chunks: int,
     short_cjk_replacement_hold_chunks: int,
+    long_no_end_replacement_early_age_min_units: int,
 ) -> bool:
     reason = _replacement_decision_reason(
         staged_sentence,
@@ -151,6 +167,7 @@ def _should_finalize_replaced_sentence(
         sentence_max_age_chunks=sentence_max_age_chunks,
         short_cjk_confirm_extra_chunks=short_cjk_confirm_extra_chunks,
         short_cjk_replacement_hold_chunks=short_cjk_replacement_hold_chunks,
+        long_no_end_replacement_early_age_min_units=long_no_end_replacement_early_age_min_units,
     )
     flags = set(_final_sentence_diagnostic_flags(staged_sentence, language))
     if "no_end_marker" in flags and staged_confirmations < sentence_required_confirmations:
@@ -248,6 +265,7 @@ def _should_finalize_before_replacement(
     sentence_max_age_chunks: int,
     short_cjk_confirm_extra_chunks: int,
     short_cjk_replacement_hold_chunks: int,
+    long_no_end_replacement_early_age_min_units: int,
 ) -> bool:
     if _has_deferred_revision_extension(sentence, deferred_revision_sentences):
         return False
@@ -271,6 +289,7 @@ def _should_finalize_before_replacement(
         sentence_max_age_chunks=sentence_max_age_chunks,
         short_cjk_confirm_extra_chunks=short_cjk_confirm_extra_chunks,
         short_cjk_replacement_hold_chunks=short_cjk_replacement_hold_chunks,
+        long_no_end_replacement_early_age_min_units=long_no_end_replacement_early_age_min_units,
     )
 
 
