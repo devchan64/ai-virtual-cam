@@ -10,6 +10,8 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _final_sentence_diagnostic_flags,
     _normalized_text,
     _should_preserve_staged_output_when_delta_fragment,
+    _should_suppress_aged_low_value_final,
+    _should_suppress_aged_no_end_marker_queue_final,
     _should_suppress_delta_final,
 )
 from src.app.dictation.pipeline_stage_runtime_candidate_helpers import suppress_finalize_candidate
@@ -254,6 +256,57 @@ def finalize_staged_sentence(
     )
     if output_sentence is None:
         return committed_text, next_final_segment_id, []
+    if _should_suppress_aged_low_value_final(
+        staged_before,
+        detected,
+        reason,
+        active_stage.confirmations,
+        active_stage.forced,
+        commit_buffer_node.queued_sentences(),
+    ):
+        return (
+            committed_text,
+            next_final_segment_id,
+            suppress_finalize_candidate(
+                active_stage=active_stage,
+                detected=detected,
+                chunk_index=chunk_index,
+                metric_name="finalize_aged_low_value_suppressed",
+                reason=reason,
+                status_prefix="받아쓰기 AI 낮은 가치 aged 확정 후보 무시",
+                text=staged_before,
+                extra_status="",
+                count_metric=count_metric,
+                count_segment_state=count_segment_state,
+                promote_next_staged_sentence=promote_next_staged_sentence,
+                worker=worker,
+            ),
+        )
+    if _should_suppress_aged_no_end_marker_queue_final(
+        staged_before,
+        detected,
+        reason,
+        active_stage.confirmations,
+        commit_buffer_node.queued_sentences(),
+    ):
+        return (
+            committed_text,
+            next_final_segment_id,
+            suppress_finalize_candidate(
+                active_stage=active_stage,
+                detected=detected,
+                chunk_index=chunk_index,
+                metric_name="finalize_aged_no_end_marker_queue_suppressed",
+                reason=reason,
+                status_prefix="받아쓰기 AI no-end queue aged 확정 후보 무시",
+                text=staged_before,
+                extra_status="",
+                count_metric=count_metric,
+                count_segment_state=count_segment_state,
+                promote_next_staged_sentence=promote_next_staged_sentence,
+                worker=worker,
+            ),
+        )
     if apply_delta_finalize_guard(
         detected,
         reason=reason,

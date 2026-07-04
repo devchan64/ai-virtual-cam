@@ -347,3 +347,55 @@ def _should_preserve_staged_output_when_delta_fragment(staged_sentence: str, out
         return False
     output_flags = set(_final_sentence_diagnostic_flags(output, language))
     return bool(output_flags.intersection({"no_end_marker", "short_no_end_fragment", "trailing_ellipsis"}))
+
+
+def _should_suppress_aged_low_value_final(
+    sentence: str,
+    language: str,
+    reason: str,
+    staged_confirmations: int,
+    deferred_revision_sentences: tuple[str, ...],
+    *,
+    sentence_required_confirmations: int,
+    short_latin_only_zh_total_units: int,
+) -> bool:
+    if reason not in {"aged", "aged_forced"}:
+        return False
+    if language != "zh" or not deferred_revision_sentences:
+        return False
+    flags = set(_final_sentence_diagnostic_flags(sentence, language))
+    if "latin_only_for_zh" not in flags:
+        return False
+    if staged_confirmations >= sentence_required_confirmations:
+        return False
+    sentence_units = _word_units(sentence)
+    if len(sentence_units) > short_latin_only_zh_total_units:
+        return False
+    for deferred in deferred_revision_sentences:
+        deferred_flags = set(_final_sentence_diagnostic_flags(deferred, language))
+        if "latin_only_for_zh" not in deferred_flags:
+            return True
+    return False
+
+
+def _should_suppress_aged_no_end_marker_queue_final(
+    sentence: str,
+    language: str,
+    reason: str,
+    staged_confirmations: int,
+    deferred_revision_sentences: tuple[str, ...],
+    *,
+    max_confirmations: int,
+) -> bool:
+    if reason not in {"aged", "aged_forced"}:
+        return False
+    if language != "zh" or max_confirmations <= 0:
+        return False
+    if staged_confirmations > max_confirmations:
+        return False
+    if _final_sentence_diagnostic_flags(sentence, language):
+        return False
+    for deferred in deferred_revision_sentences:
+        if "no_end_marker" in set(_final_sentence_diagnostic_flags(deferred, language)):
+            return True
+    return False

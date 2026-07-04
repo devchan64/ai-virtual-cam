@@ -46,6 +46,8 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _should_finalize_with_right_context,
     _should_finalize_replaced_sentence,
     _should_preserve_staged_output_when_delta_fragment,
+    _should_suppress_aged_low_value_final,
+    _should_suppress_aged_no_end_marker_queue_final,
     _should_split_terminal_tail_revision,
     _should_stage_boundary_candidate,
     _should_suppress_delta_final,
@@ -268,6 +270,65 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
                 "queue_after": [str(entry["sentence"]) for entry in (state.staged_queue or ())],
                 "suppressed": "duplicate",
                 "output_sentence": "",
+            }
+        )
+        return []
+    if _should_suppress_aged_low_value_final(
+        staged_before,
+        language,
+        reason,
+        state.staged_confirmations,
+        state.staged_forced,
+        tuple(str(entry["sentence"]) for entry in (state.staged_queue or ())),
+    ):
+        state.staged_sentence = ""
+        state.staged_confirmations = 0
+        state.staged_age = 0
+        state.staged_forced = False
+        state.staged_deferred_age_chunk = -1
+        state.staged_delta_suppressed_chunks = 0
+        state.staged_delta_suppressed_chunk_index = -1
+        state.count("finalize_aged_low_value_suppressed")
+        state.count("segment_state_suppressed")
+        _promote_next_staged_sentence(state, chunk_index)
+        state.finalize_events.append(
+            {
+                "chunk_index": chunk_index,
+                "reason": reason,
+                "staged_before": staged_before,
+                "queue_before": queue_before,
+                "queue_after": [str(entry["sentence"]) for entry in (state.staged_queue or ())],
+                "suppressed": "aged_low_value",
+                "output_sentence": output_sentence,
+            }
+        )
+        return []
+    if _should_suppress_aged_no_end_marker_queue_final(
+        staged_before,
+        language,
+        reason,
+        state.staged_confirmations,
+        tuple(str(entry["sentence"]) for entry in (state.staged_queue or ())),
+    ):
+        state.staged_sentence = ""
+        state.staged_confirmations = 0
+        state.staged_age = 0
+        state.staged_forced = False
+        state.staged_deferred_age_chunk = -1
+        state.staged_delta_suppressed_chunks = 0
+        state.staged_delta_suppressed_chunk_index = -1
+        state.count("finalize_aged_no_end_marker_queue_suppressed")
+        state.count("segment_state_suppressed")
+        _promote_next_staged_sentence(state, chunk_index)
+        state.finalize_events.append(
+            {
+                "chunk_index": chunk_index,
+                "reason": reason,
+                "staged_before": staged_before,
+                "queue_before": queue_before,
+                "queue_after": [str(entry["sentence"]) for entry in (state.staged_queue or ())],
+                "suppressed": "aged_no_end_marker_queue",
+                "output_sentence": output_sentence,
             }
         )
         return []

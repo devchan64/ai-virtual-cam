@@ -164,6 +164,18 @@ SHORT_CJK_CONFIRM_EXTRA_CHUNKS = 0
 SHORT_MIXED_LATIN_ZH_CJK_UNITS = 2
 SHORT_MIXED_LATIN_ZH_TOTAL_UNITS = 5
 
+# 중국어 window에서 queue가 남은 aged finalize가 매우 짧은 latin-only 조각을
+# final로 내보내는 경우가 있다. 이 값은 완전한 영어 문장을 막기 위한 것이
+# 아니라, `T S。`, `OK OK OK。` 같은 짧은 조각을 출력 없이 소비할지 판단하는
+# 구조적 길이 기준이다.
+SHORT_LATIN_ONLY_ZH_TOTAL_UNITS = 3
+
+# 중국어 no-flag staged 문장이 aged finalize 직전인데 queue 쪽에 no_end_marker
+# 후보가 남아 있으면, 아직 sliding window가 다음 절을 충분히 닫지 못한
+# 상태일 수 있다. 아래 값은 이런 queue 잔여가 있을 때 suppression을 허용할
+# 최대 confirmation 수다. 0이면 비활성화한다.
+AGED_QUEUE_ZH_NO_END_MARKER_MAX_CONFIRMATIONS = 1
+
 
 # revision confirmation 보존
 #
@@ -449,6 +461,17 @@ def short_mixed_latin_zh_total_units() -> int:
     return _dictation_env_int("SHORT_MIXED_LATIN_ZH_TOTAL_UNITS", SHORT_MIXED_LATIN_ZH_TOTAL_UNITS)
 
 
+def short_latin_only_zh_total_units() -> int:
+    return _dictation_env_int("SHORT_LATIN_ONLY_ZH_TOTAL_UNITS", SHORT_LATIN_ONLY_ZH_TOTAL_UNITS)
+
+
+def aged_queue_zh_no_end_marker_max_confirmations() -> int:
+    return _dictation_env_int(
+        "AGED_QUEUE_ZH_NO_END_MARKER_MAX_CONFIRMATIONS",
+        AGED_QUEUE_ZH_NO_END_MARKER_MAX_CONFIRMATIONS,
+    )
+
+
 def dictation_pipeline_policy() -> dict[str, object]:
     return {
         "stt_transcribe_task": STT_TRANSCRIBE_TASK,
@@ -502,6 +525,8 @@ def dictation_pipeline_policy() -> dict[str, object]:
         "short_cjk_confirm_extra_chunks": short_cjk_confirm_extra_chunks(),
         "short_mixed_latin_zh_cjk_units": short_mixed_latin_zh_cjk_units(),
         "short_mixed_latin_zh_total_units": short_mixed_latin_zh_total_units(),
+        "short_latin_only_zh_total_units": short_latin_only_zh_total_units(),
+        "aged_queue_zh_no_end_marker_max_confirmations": aged_queue_zh_no_end_marker_max_confirmations(),
         "cjk_revision_internal_stability_min_ratio": CJK_REVISION_INTERNAL_STABILITY_MIN_RATIO,
         "cjk_revision_internal_stability_mid_ratio": CJK_REVISION_INTERNAL_STABILITY_MID_RATIO,
         "cjk_revision_internal_stability_min_chars": CJK_REVISION_INTERNAL_STABILITY_MIN_CHARS,
