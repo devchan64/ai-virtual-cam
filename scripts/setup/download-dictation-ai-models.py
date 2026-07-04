@@ -13,7 +13,7 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from src.app.model_cache import (
+from src.app.models.model_cache import (
     is_hf_repo_cached,
     is_qwen_asr_model_cached,
 )
