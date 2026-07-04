@@ -19,7 +19,9 @@ from src.app.dictation.pipeline_settings import (
 )
 from src.app.dictation_core.dictation_revision_text import (
     _best_common_word_run,
+    _hangul_compact_key,
     _has_cjk_words,
+    _has_hangul_words,
     _is_subsequence_at,
     _normalized_text,
     _sentence_delta_from_words,
@@ -62,6 +64,10 @@ def _is_recent_final_echo(candidate: str, recent_sentence: str, _language: str) 
 def _compact_recent_final_delta(candidate_words: list[str], recent_words: list[str]) -> str | None:
     candidate_key = "".join(candidate_words).lower()
     recent_key = "".join(recent_words).lower()
+    candidate_hangul_key = _hangul_compact_key(candidate_words) if _has_hangul_words(candidate_words) else ""
+    recent_hangul_key = _hangul_compact_key(recent_words) if _has_hangul_words(recent_words) else ""
+    if candidate_hangul_key and candidate_hangul_key == recent_hangul_key and len(candidate_hangul_key) >= 2:
+        return ""
     if min(len(candidate_key), len(recent_key)) < 8:
         return None
     if candidate_key == recent_key or candidate_key in recent_key:

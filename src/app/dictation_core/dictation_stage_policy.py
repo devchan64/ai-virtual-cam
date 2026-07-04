@@ -515,6 +515,7 @@ def _should_suppress_aged_short_closed_when_queue_has_stronger_candidate(
     if len(sentence_units) == 0 or len(sentence_units) > 2:
         return False
     clean_closed_queue_count = 0
+    saw_stronger_queue_candidate = False
     for entry in queued_entries:
         queued_sentence = _normalized_text(str(entry.get("sentence") or ""))
         if not queued_sentence or _sentence_end_count(queued_sentence) <= 0:
@@ -527,9 +528,17 @@ def _should_suppress_aged_short_closed_when_queue_has_stronger_candidate(
         if len(queued_units) < len(sentence_units) + 2:
             continue
         queued_confirmations = int(entry.get("confirmations", 0))
-        if queued_confirmations >= max(2, staged_confirmations + 1):
+        if len(sentence_units) > 1 and queued_confirmations >= max(2, staged_confirmations + 1):
             return True
-    return len(sentence_units) == 1 and staged_confirmations <= 1 and clean_closed_queue_count >= 4
+        if queued_confirmations >= max(2, staged_confirmations + 1):
+            saw_stronger_queue_candidate = True
+    if len(sentence_units) != 1 or staged_confirmations > 1:
+        return False
+    if clean_closed_queue_count >= 4:
+        return True
+    if clean_closed_queue_count == 3:
+        return False
+    return saw_stronger_queue_candidate
 
 
 def _should_suppress_right_context_short_prefix_extension_with_single_queue(
@@ -618,11 +627,21 @@ def _should_allow_no_text_stage_aging(
         return _should_stage_boundary_candidate(normalized_sentence, language)
     if language != "ko":
         return False
-    if len(queued_sentences) != 1:
-        return False
     if not _should_stage_boundary_candidate(normalized_sentence, language):
         return False
-    queued_sentence = _normalized_text(queued_sentences[0])
-    if not queued_sentence:
+    if not queued_sentences or len(queued_sentences) > 2:
         return False
-    return _should_stage_boundary_candidate(queued_sentence, language)
+    if len(queued_sentences) == 1:
+        queued_sentence = _normalized_text(queued_sentences[0])
+        return bool(queued_sentence) and _should_stage_boundary_candidate(queued_sentence, language)
+    if len(_word_units(normalized_sentence)) < 3:
+        return False
+    for queued_sentence in queued_sentences:
+        normalized_queued = _normalized_text(queued_sentence)
+        if not normalized_queued:
+            return False
+        if not _should_stage_boundary_candidate(normalized_queued, language):
+            return False
+        if len(_word_units(normalized_queued)) > 3:
+            return False
+    return True

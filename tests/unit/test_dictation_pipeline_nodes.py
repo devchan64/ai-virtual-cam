@@ -45,6 +45,7 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _strip_prior_pending_prefix_revision,
     _should_translate_final_sentence,
 )
+from src.app.dictation_core.dictation_recent_final import _recent_final_output_delta
 from src.app.dictation_core.dictation_revision_progression import _should_age_staged_sentence
 from src.app.dictation_core.sentence_boundary import SentenceBoundaryResult
 
@@ -389,6 +390,12 @@ class DictationPipelineNodeTest(unittest.TestCase):
                 "一二三四五六七八一二三四五六七八一二三四五六七八一二三四五六七八一二三四五六七八。",
                 "zh",
             )
+        )
+
+    def test_recent_final_delta_suppresses_short_hangul_compact_duplicate(self) -> None:
+        self.assertEqual(
+            _recent_final_output_delta("원 몰!", ("원몰!",), "ko"),
+            ("", "원몰!"),
         )
 
     def test_mixed_latin_cjk_prefix_growth_keeps_longer_revision(self) -> None:

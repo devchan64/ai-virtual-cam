@@ -229,6 +229,13 @@ def _stale_leading_short_closed_candidate_reason(
     candidate_flags = set(_final_sentence_diagnostic_flags(normalized_candidate, language))
     if candidate_flags.intersection({"empty", "no_end_marker", "short_no_end_fragment", "trailing_ellipsis"}):
         return ""
+    repeated_later_candidate = False
+    for later_sentence in later_completed_sentences:
+        if _normalized_text(later_sentence) == normalized_candidate:
+            repeated_later_candidate = True
+            break
+    if repeated_later_candidate:
+        return ""
     normalized_active_stage = _normalized_text(active_stage_sentence)
     normalized_recent_finals = {
         normalized
