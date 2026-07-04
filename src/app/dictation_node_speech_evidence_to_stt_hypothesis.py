@@ -4,6 +4,7 @@ import time
 from typing import Any
 
 from src.app.dictation_pipeline_contracts import AudioEvidence, RecognitionHypothesis
+from src.app.dictation_pipeline_types import SttModelLike
 from src.app.dictation_pipeline_settings import (
     CJK_CHAR_RANGES,
     MAX_SEGMENT_NO_SPEECH_CJK_OVERRIDE_PROB,
@@ -34,7 +35,7 @@ class SpeechEvidenceToSttHypothesisNode:
         self,
         *,
         evidence: AudioEvidence,
-        model: Any,
+        model: SttModelLike,
         stream_block: Any,
         committed_text: str,
         pending_text: str,

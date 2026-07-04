@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from src.app.stable_token_detection import StableWindowAnalysis
+
 
 @dataclass(frozen=True)
 class AudioEvidence:
@@ -25,7 +27,7 @@ class RecognitionHypothesis:
     deltaText: str
     acceptedSegments: tuple[str, ...] = ()
     rejectedReasons: tuple[str, ...] = ()
-    stability: Any = None
+    stability: StableWindowAnalysis | None = None
     boundaryConfidence: float | None = None
     segmentBoundaryConfidence: float | None = None
     stableBoundaryConfidence: float | None = None
