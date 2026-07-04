@@ -2457,6 +2457,133 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         clean_low = report["clean_low_bottleneck_intersection_summary"]["thresholds"]["0.35"]
         self.assertEqual(clean_low["case_count"], 0)
 
+    def test_overlapping_expected_boundary_family_is_case_definition_review(self) -> None:
+        args = Namespace(
+            model="sat-3l-sm",
+            device="cuda",
+            compute_type="float16",
+            min_final_f1=0.0,
+            fail_on_regression=False,
+        )
+        cases = [
+            SbdCase(
+                id="predicted-ko-007.jsonl:7",
+                language="ko",
+                chunks=[
+                    "내가 왜 걱정되시는데요? 뭐 남자친구도 아니고 뭐래? 뭐 남자친구야? 내가 왜 그쪽 남자친구야?",
+                    "내가 왜 걱정되시는데요? 뭐 남자친구도 아니고. 뭐래? 뭐 남자친구야? 뭐가 싸지 마. 내가 왜 그쪽 남자친구야? 내 말이.",
+                ],
+                expected_completed=[],
+                expected_pending="",
+                expected_final=[
+                    "내가 왜 걱정되시는데요?",
+                    "뭐 남자친구야?",
+                    "내가 왜 그쪽 남자친구야?",
+                ],
+                expected_staged="",
+                tags=("missing-final",),
+                sentence_finalize_age=3,
+            ),
+            SbdCase(
+                id="predicted-ko-007.jsonl:28",
+                language="ko",
+                chunks=[
+                    "위험할 거 아니야. 내가 왜 걱정되시는데요? 남자친구도 아니고. 뭐 그래? 남자친구야?",
+                    "내가 왜 걱정되시는데요? 뭐 남자친구도 아니고 뭐래? 뭐 남자친구야? 내가 왜 그쪽 남자친구야?",
+                ],
+                expected_completed=[],
+                expected_pending="",
+                expected_final=[
+                    "내가 왜 걱정되시는데요?",
+                    "뭐 남자친구도 아니고 뭐래?",
+                ],
+                expected_staged="",
+                tags=("missing-final",),
+                sentence_finalize_age=3,
+            ),
+        ]
+        results = [
+            {
+                "id": "predicted-ko-007.jsonl:7",
+                "language": "ko",
+                "tags": ["missing-final"],
+                "expected_final": [
+                    "내가 왜 걱정되시는데요?",
+                    "뭐 남자친구야?",
+                    "내가 왜 그쪽 남자친구야?",
+                ],
+                "chunks": [{"input": chunk} for chunk in cases[0].chunks],
+                "actual_final": [
+                    "내가 왜 걱정되시는데요?",
+                    "뭐 남자친구도 아니고 뭐래?",
+                    "뭐 남자친구야?",
+                    "내가 왜 그쪽 남자친구야?",
+                ],
+                "actual_pending": "",
+                "actual_staged": "",
+                "actual_staged_queue": [],
+                "final_score": _score(0.75, 1.0, 0.8571428571),
+                "final_ordered_score": _score(0.75, 1.0, 0.8571428571),
+                "final_boundary_score": _score(0.75, 1.0, 0.8571428571),
+                "completed_last_score": _score(0.75, 1.0, 0.8571428571),
+                "pending_exact": True,
+                "staged_exact": True,
+                "case_exact_match": False,
+                "metrics": {"finalized": 4, "stage_start": 1},
+            },
+            {
+                "id": "predicted-ko-007.jsonl:28",
+                "language": "ko",
+                "tags": ["missing-final"],
+                "expected_final": [
+                    "내가 왜 걱정되시는데요?",
+                    "뭐 남자친구도 아니고 뭐래?",
+                ],
+                "chunks": [{"input": chunk} for chunk in cases[1].chunks],
+                "actual_final": [
+                    "내가 왜 걱정되시는데요?",
+                    "남자친구도 아니고.",
+                    "뭐 그래?",
+                    "뭐 남자친구야?",
+                ],
+                "actual_pending": "",
+                "actual_staged": "",
+                "actual_staged_queue": [],
+                "final_score": _score(0.3333333333, 0.3333333333, 0.3333333333),
+                "final_ordered_score": _score(0.3333333333, 0.3333333333, 0.3333333333),
+                "final_boundary_score": _score(0.3333333333, 0.3333333333, 0.3333333333),
+                "completed_last_score": _score(0.3333333333, 0.3333333333, 0.3333333333),
+                "pending_exact": True,
+                "staged_exact": True,
+                "case_exact_match": False,
+                "metrics": {"finalized": 4, "stage_start": 1},
+            },
+        ]
+
+        report = build_benchmark_report(
+            args=args,
+            case_sources=["cases.jsonl"],
+            corpus_role="challenge-replay",
+            cases=cases,
+            results=results,
+            metric_totals={"finalized": 8, "stage_start": 2},
+            elapsed_ms=1.0,
+        )
+
+        self.assertEqual(
+            report["cases"][0]["case_definition_flags"],
+            ["overlapping_expected_boundary_family"],
+        )
+        self.assertEqual(
+            report["cases"][1]["case_definition_flags"],
+            ["overlapping_expected_boundary_family"],
+        )
+        self.assertEqual(
+            report["case_definition_action_summary"]["action_counts"],
+            {"manual_boundary_review": 2},
+        )
+        self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
+
     def test_revision_variant_expected_sentences_are_case_definition_review(self) -> None:
         args = Namespace(
             model="sat-3l-sm",

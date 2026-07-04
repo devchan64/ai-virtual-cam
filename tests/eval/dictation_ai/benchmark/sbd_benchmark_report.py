@@ -164,6 +164,9 @@ EXPECTED_SHORT_CONTAINED_TOKEN_MIN_UNITS = 5
 EXPECTED_SHORT_SUPPORTED_BY_LONGER_MIN_UNITS = 5
 EXPECTED_SHORT_SUPPORTED_BY_LONGER_MAX_UNITS = 8
 EXPECTED_SHORT_SUPPORTED_BY_LONGER_MIN_SIMILARITY = 0.80
+OVERLAPPING_EXPECTED_BOUNDARY_MIN_SUPPORT = 0.85
+OVERLAPPING_EXPECTED_BOUNDARY_MAX_EXPECTED_COUNT = 3
+OVERLAPPING_EXPECTED_BOUNDARY_MAX_NONSHARED_UNITS = 4
 OMITTED_STABLE_ACTUAL_MIN_SIMILARITY = 0.70
 OMITTED_STABLE_ACTUAL_MIN_RATIO = 0.70
 COMBINED_RESIDUE_MATCH_MIN_SIMILARITY = 0.70
@@ -250,6 +253,49 @@ def _expected_short_sentence_supported_by_longer_sentence(left: str, right: str)
     ):
         return False
     return _sentence_support_score(shorter, longer) >= EXPECTED_SHORT_SUPPORTED_BY_LONGER_MIN_SIMILARITY
+
+
+def _case_family_group_key(result: dict[str, Any]) -> tuple[str, str]:
+    case_id = str(result.get("id", "")).strip()
+    family = case_id.split(":", 1)[0] if case_id else ""
+    return str(result.get("language", "")).strip(), family
+
+
+def _expected_sentences_supported_by_chunks(sentences: list[str], chunks: list[str]) -> bool:
+    if not sentences or not chunks:
+        return False
+    for sentence in sentences:
+        if max((_sentence_support_score(sentence, chunk) for chunk in chunks), default=0.0) < OVERLAPPING_EXPECTED_BOUNDARY_MIN_SUPPORT:
+            return False
+    return True
+
+
+def _has_overlapping_expected_boundary_conflict(
+    left_expected: list[str],
+    right_expected: list[str],
+    left_chunks: list[str],
+    right_chunks: list[str],
+) -> bool:
+    if not left_expected or not right_expected or left_expected == right_expected:
+        return False
+    if (
+        len(left_expected) > OVERLAPPING_EXPECTED_BOUNDARY_MAX_EXPECTED_COUNT
+        or len(right_expected) > OVERLAPPING_EXPECTED_BOUNDARY_MAX_EXPECTED_COUNT
+    ):
+        return False
+    shared = {sentence for sentence in left_expected if sentence in right_expected}
+    if not shared:
+        return False
+    left_only = [sentence for sentence in left_expected if sentence not in shared]
+    right_only = [sentence for sentence in right_expected if sentence not in shared]
+    if not left_only or not right_only:
+        return False
+    if max((len(_word_units(sentence)) for sentence in left_only + right_only), default=0) > OVERLAPPING_EXPECTED_BOUNDARY_MAX_NONSHARED_UNITS:
+        return False
+    return _expected_sentences_supported_by_chunks(left_only, right_chunks) and _expected_sentences_supported_by_chunks(
+        right_only,
+        left_chunks,
+    )
 
 
 def _has_expected_app_quality_blocked_sentence(expected_final: list[str], language: str) -> bool:
@@ -1478,6 +1524,8 @@ def _case_primary_review_action(result: dict[str, Any]) -> str:
         return "rewrite_expected_final_to_observed_stt_text"
     if "expected_final_omits_stable_candidate" in definition_flags:
         return "recut_or_relabel_stable_candidate_mismatch"
+    if "overlapping_expected_boundary_family" in definition_flags:
+        return "manual_boundary_review"
     if context_flags.intersection({"unmodeled_prefix_context", "actual_prefix_before_expected_final"}):
         return "add_initial_final_or_recut_mid_stream_case"
     if "legacy_sample_without_source_trace" in definition_flags:
@@ -2888,13 +2936,22 @@ def _with_case_evidence_metadata(results: list[dict[str, Any]]) -> list[dict[str
     enriched: list[dict[str, Any]] = []
     expected_group_counts: Counter[str] = Counter()
     normalized_expected_by_id: dict[int, list[str]] = {}
+    normalized_chunks_by_id: dict[int, list[str]] = {}
+    family_groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for result in results:
         expected_final = [
             normalized_text(sentence)
             for sentence in result.get("expected_final", []) or []
             if normalized_text(sentence)
         ]
+        chunk_inputs = [
+            normalized_text(str(chunk.get("input") or ""))
+            for chunk in result.get("chunks", []) or []
+            if normalized_text(str(chunk.get("input") or ""))
+        ]
         normalized_expected_by_id[id(result)] = expected_final
+        normalized_chunks_by_id[id(result)] = chunk_inputs
+        family_groups.setdefault(_case_family_group_key(result), []).append(result)
         if expected_final:
             expected_group_counts[
                 json.dumps(
@@ -2906,6 +2963,23 @@ def _with_case_evidence_metadata(results: list[dict[str, Any]]) -> list[dict[str
                     sort_keys=True,
                 )
             ] += 1
+    overlapping_expected_boundary_case_ids: set[int] = set()
+    for group in family_groups.values():
+        if len(group) < 2:
+            continue
+        for left_index, left in enumerate(group):
+            left_expected = normalized_expected_by_id.get(id(left), [])
+            left_chunks = normalized_chunks_by_id.get(id(left), [])
+            if not left_expected or not left_chunks:
+                continue
+            for right in group[left_index + 1 :]:
+                right_expected = normalized_expected_by_id.get(id(right), [])
+                right_chunks = normalized_chunks_by_id.get(id(right), [])
+                if not right_expected or not right_chunks:
+                    continue
+                if _has_overlapping_expected_boundary_conflict(left_expected, right_expected, left_chunks, right_chunks):
+                    overlapping_expected_boundary_case_ids.add(id(left))
+                    overlapping_expected_boundary_case_ids.add(id(right))
     for result in results:
         item = dict(result)
         metadata = dict(item.get("case_metadata", {}) or {})
@@ -2988,6 +3062,8 @@ def _with_case_evidence_metadata(results: list[dict[str, Any]]) -> list[dict[str
             )
             if expected_group_counts[expected_group_key] > 1:
                 case_definition_flags.append("repeated_expected_group")
+        if id(result) in overlapping_expected_boundary_case_ids:
+            case_definition_flags.append("overlapping_expected_boundary_family")
         if (
             not case_definition_flags
             and not item["expected_quality_flags"]
