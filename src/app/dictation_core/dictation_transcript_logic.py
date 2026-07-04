@@ -37,13 +37,15 @@ from src.app.dictation_core.dictation_stage_policy import (
     _replacement_decision_reason as _replacement_decision_reason_impl,
     _should_confirm_staged_sentence as _should_confirm_staged_sentence_impl,
     _should_defer_unconfirmed_replacement,
+    _should_defer_short_closed_queue_quality_block as _should_defer_short_closed_queue_quality_block_impl,
     _should_finalize_before_replacement as _should_finalize_before_replacement_impl,
     _should_finalize_replaced_sentence as _should_finalize_replaced_sentence_impl,
     _should_enable_aged_queue_backlog_promotion_boost as _should_enable_aged_queue_backlog_promotion_boost_impl,
     _should_allow_no_text_stage_aging as _should_allow_no_text_stage_aging_impl,
+    _should_restore_trimmed_closed_candidate as _should_restore_trimmed_closed_candidate_impl,
     _should_suppress_aged_low_value_final as _should_suppress_aged_low_value_final_impl,
     _should_suppress_aged_no_end_marker_queue_final as _should_suppress_aged_no_end_marker_queue_final_impl,
-    _should_finalize_with_right_context,
+    _should_finalize_with_right_context as _should_finalize_with_right_context_impl,
     _should_preserve_staged_output_when_delta_fragment as _should_preserve_staged_output_when_delta_fragment_impl,
     _should_split_terminal_tail_revision,
     _should_stage_boundary_candidate as _should_stage_boundary_candidate_impl,
@@ -172,6 +174,28 @@ def _should_stage_boundary_candidate(sentence: str, language: str) -> bool:
     return _should_stage_boundary_candidate_impl(sentence, language)
 
 
+def _should_restore_trimmed_closed_candidate(
+    original_sentence: str,
+    trimmed_candidate: str,
+    language: str,
+) -> bool:
+    return _should_restore_trimmed_closed_candidate_impl(original_sentence, trimmed_candidate, language)
+
+
+def _should_defer_short_closed_queue_quality_block(
+    sentence: str,
+    language: str,
+    queued_sentences: tuple[str, ...] = (),
+    staged_confirmations: int = 0,
+) -> bool:
+    return _should_defer_short_closed_queue_quality_block_impl(
+        sentence,
+        language,
+        queued_sentences,
+        staged_confirmations,
+    )
+
+
 def _coalesce_completed_short_no_end_fragments(
     sentences: list[str] | tuple[str, ...],
     language: str,
@@ -267,6 +291,14 @@ def _should_allow_no_text_stage_aging(
     queued_sentences: tuple[str, ...] = (),
 ) -> bool:
     return _should_allow_no_text_stage_aging_impl(sentence, language, queued_sentences)
+
+
+def _should_finalize_with_right_context(
+    sentence: str,
+    language: str,
+    deferred_revision_sentences: tuple[str, ...] = (),
+) -> bool:
+    return _should_finalize_with_right_context_impl(sentence, language, deferred_revision_sentences)
 
 
 def _strip_prior_pending_prefix_revision(staged_sentence: str, candidate: str, prior_pending_text: str) -> str:

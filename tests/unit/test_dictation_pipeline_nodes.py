@@ -441,6 +441,33 @@ class DictationPipelineNodeTest(unittest.TestCase):
 
         self.assertEqual(preferred, "我的里面还有小熊猫，小浣熊，加一些豆芽菜。")
 
+    def test_cjk_revision_prefers_short_closed_suffix_when_prefix_is_stale(self) -> None:
+        preferred = _prefer_sentence_revision(
+            "고용하고 일부 중국인들 넘어와서 베트남에 생산해서 미국에 보내고 다른 나라에 보냈던 일을 했는데 미국이 베트남 것도 보겠다는 거잖아요.",
+            "미국이 베트남 것도 보겠다는 거잖아요.",
+        )
+
+        self.assertEqual(preferred, "미국이 베트남 것도 보겠다는 거잖아요.")
+
+    def test_cjk_revision_does_not_prefer_longer_closed_suffix_fragment(self) -> None:
+        preferred = _prefer_sentence_revision(
+            "이렇게 좀 말씀드릴 수 있으면 편할 텐데 지역에 따라 상품에 따라 완전히 다른 시장이에요.",
+            "지역에 따라 상품에 따라 완전히 다른 시장이에요.",
+        )
+
+        self.assertEqual(
+            preferred,
+            "이렇게 좀 말씀드릴 수 있으면 편할 텐데 지역에 따라 상품에 따라 완전히 다른 시장이에요.",
+        )
+
+    def test_hangul_revision_prefers_closed_sentence_without_inserted_middle_clause(self) -> None:
+        preferred = _prefer_sentence_revision(
+            "카니 총리가 작년 말에 굉장히 살피를 해가지고 새로운 파트너를 잡아야 되는데 칸의 총리가 작년 말에 굉장히 의미심장한 연설을 했어요.",
+            "카니 총리가 작년 말에 굉장히 의미심장한 연설을 했어요.",
+        )
+
+        self.assertEqual(preferred, "카니 총리가 작년 말에 굉장히 의미심장한 연설을 했어요.")
+
     def test_hypothesis_candidate_node_preserves_boundary_contract(self) -> None:
         detector = FakeBoundaryDetector()
         node = SttHypothesisToSentenceCandidateNode(lambda language: detector)

@@ -15,6 +15,7 @@ from src.app.dictation.pipeline_settings import (
 from src.app.dictation_core.dictation_revision_text import (
     _final_sentence_diagnostic_flags,
     _has_cjk_words,
+    _has_hangul_words,
     _has_repeated_cjk_ngram,
     _has_repeated_word_ngram,
     _is_cjk_text,
@@ -172,6 +173,54 @@ def _is_cjk_prefixed_stale_revision(left: str, right: str) -> bool:
     return common_run >= 8 and right_coverage >= 0.70
 
 
+def _is_short_closed_cjk_suffix_revision(left: str, right: str) -> bool:
+    normalized_left = _normalized_text(left)
+    normalized_right = _normalized_text(right)
+    left_words = _word_units(normalized_left)
+    right_words = _word_units(normalized_right)
+    if not (
+        _is_cjk_text(normalized_left)
+        or _is_cjk_text(normalized_right)
+        or _has_hangul_words(left_words)
+        or _has_hangul_words(right_words)
+    ):
+        return False
+    if _boundary_sentence_end_count(normalized_left) == 0 or _boundary_sentence_end_count(normalized_right) == 0:
+        return False
+    if len(right_words) < 5 or len(right_words) > 5 or len(right_words) >= len(left_words):
+        return False
+    if len(left_words) - len(right_words) < 6:
+        return False
+    return left_words[-len(right_words) :] == right_words
+
+
+def _is_closed_hangul_inserted_middle_revision(left: str, right: str) -> bool:
+    normalized_left = _normalized_text(left)
+    normalized_right = _normalized_text(right)
+    left_words = _word_units(normalized_left)
+    right_words = _word_units(normalized_right)
+    if not (_has_hangul_words(left_words) and _has_hangul_words(right_words)):
+        return False
+    if _boundary_sentence_end_count(normalized_left) == 0 or _boundary_sentence_end_count(normalized_right) == 0:
+        return False
+    if len(right_words) < 7 or len(left_words) - len(right_words) < 6:
+        return False
+    prefix_len = 0
+    for left_word, right_word in zip(left_words, right_words):
+        if left_word != right_word:
+            break
+        prefix_len += 1
+    if prefix_len < 4:
+        return False
+    suffix_len = 0
+    max_suffix = len(right_words) - prefix_len
+    while suffix_len < max_suffix and left_words[-(suffix_len + 1)] == right_words[-(suffix_len + 1)]:
+        suffix_len += 1
+    if suffix_len < 3:
+        return False
+    return prefix_len + suffix_len >= len(right_words)
+
+
 def _is_prefix_dropped_revision(left: str, right: str) -> bool:
     normalized_left = _normalized_text(left)
     normalized_right = _normalized_text(right)
@@ -232,12 +281,21 @@ def _prefer_sentence_revision(left: str, right: str) -> str:
         return _normalized_text(right)
     if _is_prefix_inserted_staged_tail_revision(left, right):
         return _normalized_text(left)
-    if _is_cjk_text(left) or _is_cjk_text(right):
+    if (
+        _is_cjk_text(left)
+        or _is_cjk_text(right)
+        or _has_hangul_words(left_words)
+        or _has_hangul_words(right_words)
+    ):
         if _is_cjk_shifted_prefix_dangling_tail_revision(left, right):
             return _normalized_text(right)
         if _is_cjk_prefixed_truncated_revision(left, right):
             return _normalized_text(right)
         if _is_cjk_prefixed_stale_revision(left, right):
+            return _normalized_text(right)
+        if _is_short_closed_cjk_suffix_revision(left, right):
+            return _normalized_text(right)
+        if _is_closed_hangul_inserted_middle_revision(left, right):
             return _normalized_text(right)
         if "cjk_repeated_ngram" in right_flags and "cjk_repeated_ngram" not in left_flags:
             return _normalized_text(left)

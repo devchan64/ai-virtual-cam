@@ -3,6 +3,10 @@ import unittest
 from src.app.dictation_core.dictation_transcript_logic import (
     _should_allow_no_text_stage_aging,
     _should_enable_aged_queue_backlog_promotion_boost,
+    _should_defer_short_closed_queue_quality_block,
+    _should_finalize_before_replacement,
+    _should_finalize_with_right_context,
+    _should_restore_trimmed_closed_candidate,
     _should_suppress_aged_low_value_final,
     _should_suppress_aged_no_end_marker_queue_final,
 )
@@ -89,6 +93,85 @@ class DictationStagePolicyTest(unittest.TestCase):
                 "불편하시니까.",
                 "ko",
                 ("내가 이거보다 훨씬 안 좋았어.", "거짓말하지 마, 선배."),
+            )
+        )
+
+    def test_blocks_right_context_finalize_when_queue_has_preferred_ko_revision(self) -> None:
+        self.assertFalse(
+            _should_finalize_with_right_context(
+                "고용하고 일부 중국인들 넘어와서 베트남에 생산해서 미국에 보내고 다른 나라에 보냈던 일을 했는데 미국이 베트남 것도 보겠다는 거잖아요.",
+                "ko",
+                ("미국이 베트남 것도 보겠다는 거잖아요.",),
+            )
+        )
+
+    def test_keeps_right_context_finalize_for_independent_ko_queue_sentence(self) -> None:
+        self.assertTrue(
+            _should_finalize_with_right_context(
+                "사실 한국이 이미 이런 경험이 있어요.",
+                "ko",
+                ("80년대 후반에서 90년대 초반에 저희가 16메가 D램 공동 개발 사업이 있었습니다.",),
+            )
+        )
+
+    def test_blocks_age_finalize_when_queue_has_preferred_ko_revision(self) -> None:
+        self.assertFalse(
+            _should_finalize_before_replacement(
+                "고용하고 일부 중국인들 넘어와서 베트남에 생산해서 미국에 보내고 다른 나라에 보냈던 일을 했는데 미국이 베트남 것도 보겠다는 거잖아요.",
+                "ko",
+                staged_confirmations=1,
+                staged_age=2,
+                sentence_finalize_age=1,
+                staged_forced=False,
+                deferred_revision_sentences=("미국이 베트남 것도 보겠다는 거잖아요.",),
+            )
+        )
+
+    def test_restores_trimmed_short_closed_ko_sentence(self) -> None:
+        self.assertTrue(
+            _should_restore_trimmed_closed_candidate(
+                "1920년대 미국의 본격적인 호환기거입니다.",
+                "호환기거입니다",
+                "ko",
+            )
+        )
+
+    def test_does_not_restore_trimmed_longer_ko_suffix_sentence(self) -> None:
+        self.assertFalse(
+            _should_restore_trimmed_closed_candidate(
+                "지역에 따라 상품에 따라 완전히 다른 시장이에요.",
+                "완전히 다른 시장이에요",
+                "ko",
+            )
+        )
+
+    def test_defers_short_closed_zh_queue_quality_block_for_single_short_queue(self) -> None:
+        self.assertTrue(
+            _should_defer_short_closed_queue_quality_block(
+                "是我的错觉吗？",
+                "zh",
+                ("我就。",),
+                staged_confirmations=2,
+            )
+        )
+
+    def test_defers_short_closed_zh_queue_quality_block_for_multi_short_queue_after_repeat(self) -> None:
+        self.assertTrue(
+            _should_defer_short_closed_queue_quality_block(
+                "是我的错觉吗？",
+                "zh",
+                ("我就。", "我觉得在这边。"),
+                staged_confirmations=2,
+            )
+        )
+
+    def test_does_not_defer_short_closed_zh_queue_quality_block_before_repeat(self) -> None:
+        self.assertFalse(
+            _should_defer_short_closed_queue_quality_block(
+                "是我的错觉吗？",
+                "zh",
+                ("我就。",),
+                staged_confirmations=1,
             )
         )
 

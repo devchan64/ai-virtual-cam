@@ -32,6 +32,7 @@ def age_staged_sentence(
     count_metric: Callable[[str, int], None],
     finalize_staged_sentence: Callable[[str, str], list[str]],
     suppress_active_stage_for_quality: Callable[..., None],
+    should_defer_short_closed_queue_quality_block: Callable[[str], bool],
     worker: TranscriptWorkerLike,
     sentence_max_age_chunks: Callable[[bool, int], int],
 ) -> list[str]:
@@ -75,6 +76,9 @@ def age_staged_sentence(
             active_stage.forced,
             sentence_finalize_age,
         ):
+            return []
+        if should_defer_short_closed_queue_quality_block(detected):
+            count_metric("stage_age_quality_block_deferred_short_queue")
             return []
         suppress_active_stage_for_quality(
             detected,

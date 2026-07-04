@@ -46,7 +46,9 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _should_defer_token_sentence_revision,
     _should_enable_aged_queue_backlog_promotion_boost,
     _should_defer_unconfirmed_replacement,
+    _should_defer_short_closed_queue_quality_block,
     _should_finalize_before_replacement,
+    _should_restore_trimmed_closed_candidate,
     _should_finalize_with_right_context,
     _should_finalize_replaced_sentence,
     _should_preserve_staged_output_when_delta_fragment,
@@ -441,6 +443,9 @@ def _stage_completed_sentence(
         state.count("candidate_delta_trimmed")
         if _is_cjk_text(normalized_sentence):
             state.count("candidate_delta_trimmed_cjk")
+    if _should_restore_trimmed_closed_candidate(normalized_sentence, candidate, language):
+        candidate = normalized_sentence
+        state.count("candidate_delta_trimmed_restored_closed_sentence")
     if state.staged_sentence and prior_pending_text and candidate:
         stripped_candidate = _strip_prior_pending_prefix_revision(
             state.staged_sentence,
@@ -868,6 +873,14 @@ def _age_staged_sentence(state: LifecycleState, language: str, sentence_finalize
         tuple(str(entry["sentence"]) for entry in (state.staged_queue or ())),
     ):
         if state.staged_age < _stage_quality_block_age_limit(state.staged_sentence, language, state.staged_forced, sentence_finalize_age):
+            return []
+        if _should_defer_short_closed_queue_quality_block(
+            state.staged_sentence,
+            language,
+            tuple(str(entry["sentence"]) for entry in (state.staged_queue or ())),
+            state.staged_confirmations,
+        ):
+            state.count("stage_age_quality_block_deferred_short_queue")
             return []
         state.count("stage_age_quality_blocked")
         state.count("segment_state_suppressed")

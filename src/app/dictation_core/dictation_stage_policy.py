@@ -211,6 +211,53 @@ def _should_stage_boundary_candidate(sentence: str, language: str) -> bool:
     )
 
 
+def _should_restore_trimmed_closed_candidate(
+    original_sentence: str,
+    trimmed_candidate: str,
+    language: str,
+) -> bool:
+    normalized_original = _normalized_text(original_sentence)
+    normalized_trimmed = _normalized_text(trimmed_candidate)
+    if not normalized_original or not normalized_trimmed or normalized_original == normalized_trimmed:
+        return False
+    original_words = _word_units(normalized_original)
+    trimmed_words = _word_units(normalized_trimmed)
+    if len(original_words) < 4 or len(original_words) > 5:
+        return False
+    if len(trimmed_words) > 2 or len(trimmed_words) >= len(original_words):
+        return False
+    if original_words[-len(trimmed_words) :] != trimmed_words:
+        return False
+    original_flags = set(_final_sentence_diagnostic_flags(normalized_original, language))
+    trimmed_flags = set(_final_sentence_diagnostic_flags(normalized_trimmed, language))
+    if original_flags:
+        return False
+    return trimmed_flags.issuperset({"no_end_marker", "short_no_end_fragment"})
+
+
+def _should_defer_short_closed_queue_quality_block(
+    sentence: str,
+    language: str,
+    queued_sentences: tuple[str, ...],
+    staged_confirmations: int,
+) -> bool:
+    if language != "zh" or staged_confirmations < 2 or not queued_sentences:
+        return False
+    flags = set(_final_sentence_diagnostic_flags(sentence, language))
+    if "short_cjk" not in flags or flags.intersection({"no_end_marker", "short_no_end_fragment", "low_value_cjk_fragment"}):
+        return False
+    for queued_sentence in queued_sentences:
+        queued = _normalized_text(queued_sentence)
+        if not queued:
+            return False
+        if not _should_stage_boundary_candidate(queued, language):
+            return False
+        queued_flags = set(_final_sentence_diagnostic_flags(queued, language))
+        if "short_cjk" not in queued_flags or queued_flags.intersection({"no_end_marker", "short_no_end_fragment"}):
+            return False
+    return True
+
+
 def _coalesce_completed_short_no_end_fragments(
     sentences: list[str] | tuple[str, ...],
     language: str,
@@ -255,6 +302,21 @@ def _has_deferred_revision_extension(sentence: str, deferred_revision_sentences:
     return False
 
 
+def _has_preferred_deferred_revision(sentence: str, deferred_revision_sentences: tuple[str, ...]) -> bool:
+    normalized_sentence = _normalized_text(sentence)
+    if not normalized_sentence:
+        return False
+    for deferred in deferred_revision_sentences:
+        normalized_deferred = _normalized_text(deferred)
+        if not normalized_deferred or normalized_deferred == normalized_sentence:
+            continue
+        if not _sentences_are_revisions(normalized_sentence, normalized_deferred):
+            continue
+        if _prefer_sentence_revision(normalized_sentence, normalized_deferred) == normalized_deferred:
+            return True
+    return False
+
+
 def _should_finalize_before_replacement(
     sentence: str,
     language: str,
@@ -270,6 +332,8 @@ def _should_finalize_before_replacement(
     long_no_end_replacement_early_age_min_units: int,
 ) -> bool:
     if _has_deferred_revision_extension(sentence, deferred_revision_sentences):
+        return False
+    if _has_preferred_deferred_revision(sentence, deferred_revision_sentences):
         return False
     flags = set(_final_sentence_diagnostic_flags(sentence, language))
     if flags.intersection({"empty", "spaced_cjk", "cjk_repeated_ngram", "repeated_word_ngram", "short_no_end_fragment"}):
@@ -303,6 +367,8 @@ def _should_finalize_with_right_context(
     if not _normalized_text(sentence) or not deferred_revision_sentences:
         return False
     if _has_deferred_revision_extension(sentence, deferred_revision_sentences):
+        return False
+    if _has_preferred_deferred_revision(sentence, deferred_revision_sentences):
         return False
     if _sentence_end_count(sentence) <= 0:
         return False

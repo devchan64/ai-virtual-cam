@@ -13,6 +13,7 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _is_pending_prefix_mixed_candidate,
     _is_prior_pending_recent_final_mixed_candidate,
     _normalized_text,
+    _should_restore_trimmed_closed_candidate,
     _should_stage_boundary_candidate,
 )
 from src.app.dictation.pipeline_types import ActiveStage, CommitBufferNode, TranscriptWorkerLike
@@ -61,6 +62,16 @@ def prepare_stage_candidate(
         count_metric("candidate_delta_trimmed")
         if _is_cjk_text(normalized_sentence):
             count_metric("candidate_delta_trimmed_cjk")
+    if _should_restore_trimmed_closed_candidate(normalized_sentence, candidate, detected):
+        count_metric("candidate_delta_trimmed_restored_closed_sentence")
+        worker._emit(
+            "status",
+            "받아쓰기 AI delta trim 복구: "
+            f"chunk={chunk_index} before={_diagnostic_tail(candidate)} "
+            f"after={_diagnostic_tail(normalized_sentence)}",
+            display=False,
+        )
+        candidate = normalized_sentence
     recent_candidate, recent_source = _recent_final_output_delta(
         normalized_sentence,
         recent_transcripts,
