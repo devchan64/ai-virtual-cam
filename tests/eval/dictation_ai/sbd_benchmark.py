@@ -22,7 +22,7 @@ from src.app.dictation_pipeline_settings import (
     SBD_BENCHMARK_DEVICE,
     SBD_BENCHMARK_MODEL,
 )
-from src.app.dictation_transcript_logic import _word_units
+from src.app.dictation_revision_text import _word_units
 from tests.eval.dictation_ai.cases.sbd_case_paths import (
     case_corpus_role as _case_corpus_role,
     default_case_inputs as _default_case_inputs,

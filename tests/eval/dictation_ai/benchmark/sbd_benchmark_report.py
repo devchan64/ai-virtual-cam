@@ -15,7 +15,8 @@ from src.app.dictation_pipeline_settings import (
     dictation_tuning_protocol,
     lifecycle_tuning_policy,
 )
-from src.app.dictation_transcript_logic import _final_sentence_diagnostic_flags, _revision_similarity_policy, _word_units
+from src.app.dictation_revision_text import _final_sentence_diagnostic_flags, _word_units
+from src.app.dictation_transcript_logic import _revision_similarity_policy
 from src.app.sentence_boundary import normalized_text
 from tests.eval.dictation_ai.cases.sbd_case_loader import SbdCase
 from tests.eval.dictation_ai.cases.sbd_case_paths import (

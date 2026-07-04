@@ -5,7 +5,7 @@ from difflib import SequenceMatcher
 from typing import Any
 
 from src.app.dictation_pipeline_settings import SENTENCE_CONFIRM_MAX_AGE_CHUNKS
-from src.app.dictation_transcript_logic import _word_units
+from src.app.dictation_revision_text import _word_units
 from src.app.sentence_boundary import normalized_text, sentence_end_count, split_punctuated_text
 
 

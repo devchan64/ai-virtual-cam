@@ -11,42 +11,46 @@ from src.app.dictation_pipeline_settings import (
     no_text_stale_stage_suppress_chunks,
     staged_queue_max_promotion_age_chunks,
 )
-from src.app.dictation_transcript_logic import (
-    _coalesce_completed_short_no_end_fragments,
-    _final_sentence_diagnostic_flags,
-    _has_later_completed_extension,
-    _is_cjk_text,
-    _is_pending_prefix_mixed_candidate,
-    _is_prior_pending_recent_final_mixed_candidate,
+from src.app.dictation_recent_final import _recent_final_output_delta_with_reason
+from src.app.dictation_revision_progression import (
     _next_revision_confirmation_count,
     _pending_overrun_reason,
     _pending_text_diagnostic_flags,
     _prefer_sentence_revision,
-    _recent_final_output_delta_with_reason,
-    _replacement_decision_reason,
     _revision_internal_stability_bucket,
-    _sentence_max_age_chunks,
     _sentence_end_count,
+    _should_age_staged_sentence,
+    _should_preserve_revision_confirmation_from_internal_stability,
+    _should_reset_revision_age,
+)
+from src.app.dictation_revision_text import (
+    _final_sentence_diagnostic_flags,
+    _is_cjk_text,
     _sentence_output_delta,
     _sentences_are_revisions,
+    _word_units,
+)
+from src.app.dictation_transcript_logic import (
+    _coalesce_completed_short_no_end_fragments,
+    _has_later_completed_extension,
+    _is_pending_prefix_mixed_candidate,
+    _is_prior_pending_recent_final_mixed_candidate,
+    _replacement_decision_reason,
+    _sentence_max_age_chunks,
     _stage_quality_block_age_limit,
     _staged_sentence_required_confirmations,
-    _should_age_staged_sentence,
     _should_confirm_staged_sentence,
     _should_defer_token_sentence_revision,
     _should_defer_unconfirmed_replacement,
     _should_finalize_before_replacement,
     _should_finalize_with_right_context,
     _should_finalize_replaced_sentence,
-    _should_preserve_revision_confirmation_from_internal_stability,
     _should_preserve_staged_output_when_delta_fragment,
-    _should_reset_revision_age,
     _should_split_terminal_tail_revision,
     _should_stage_boundary_candidate,
     _should_suppress_delta_final,
     _strip_prior_pending_prefix_from_final,
     _strip_prior_pending_prefix_revision,
-    _word_units,
 )
 from src.app.stable_token_detection import analyze_stable_window
 from src.app.transcript_revision import append_context as _append_committed_text

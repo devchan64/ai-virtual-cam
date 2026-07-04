@@ -185,7 +185,7 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
             report["lifecycle_replay_contract"]["shared_state_transitions"],
         )
         self.assertIn(
-            "src.app.dictation_transcript_logic._sentences_are_revisions",
+            "src.app.dictation_revision_text._sentences_are_revisions",
             report["lifecycle_replay_contract"]["shared_decision_helpers"],
         )
         self.assertIn(

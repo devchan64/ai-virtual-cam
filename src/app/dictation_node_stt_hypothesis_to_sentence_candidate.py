@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from src.app.dictation_pipeline_contracts import RecognitionHypothesis, SentenceCandidateSet, UncommittedContext
-from src.app.dictation_transcript_logic import _normalized_text
+from src.app.dictation_revision_text import _normalized_text
 
 
 SentenceBoundaryProvider = Callable[[str], Any]

@@ -20,7 +20,7 @@ from src.app.dictation_pipeline_settings import (
     STT_TRANSCRIBE_TASK,
     STT_WITHOUT_TIMESTAMPS,
 )
-from src.app.dictation_transcript_logic import _new_text_delta, _normalized_text, _stable_window_text
+from src.app.dictation_revision_text import _new_text_delta, _normalized_text, _stable_window_text
 from src.app.stable_token_detection import analyze_stable_window, combine_boundary_confidence
 from src.app.transcript_revision import append_context as _append_committed_text
 

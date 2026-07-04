@@ -4,12 +4,14 @@ from collections import deque
 from typing import Any, Callable, Iterable, Mapping
 
 from src.app.dictation_pipeline_contracts import ActiveSentenceCandidate
-from src.app.dictation_transcript_logic import (
+from src.app.dictation_revision_progression import (
     _next_revision_confirmation_count,
     _prefer_sentence_revision,
     _sentence_end_count,
-    _sentences_are_revisions,
     _should_reset_revision_age,
+)
+from src.app.dictation_revision_text import _sentences_are_revisions
+from src.app.dictation_transcript_logic import (
     _staged_sentence_required_confirmations,
 )
 
