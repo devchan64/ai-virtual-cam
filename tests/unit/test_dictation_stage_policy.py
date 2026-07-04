@@ -92,6 +92,24 @@ class DictationStagePolicyTest(unittest.TestCase):
             )
         )
 
+    def test_allows_no_text_stage_aging_for_ko_three_unit_question_with_single_queue(self) -> None:
+        self.assertTrue(
+            _should_allow_no_text_stage_aging(
+                "참내 영어 못하세요?",
+                "ko",
+                ("뭐가?",),
+            )
+        )
+
+    def test_blocks_no_text_stage_aging_for_ko_three_unit_statement_with_single_queue(self) -> None:
+        self.assertFalse(
+            _should_allow_no_text_stage_aging(
+                "아 씨 어떡해.",
+                "ko",
+                ("누구.. 어.",),
+            )
+        )
+
     def test_allows_no_text_stage_aging_for_ko_two_short_closed_queue(self) -> None:
         self.assertTrue(
             _should_allow_no_text_stage_aging(
@@ -177,6 +195,45 @@ class DictationStagePolicyTest(unittest.TestCase):
                 sentence_finalize_age=1,
                 staged_forced=False,
                 deferred_revision_sentences=("미국이 베트남 것도 보겠다는 거잖아요.",),
+            )
+        )
+
+    def test_blocks_finalize_before_replacement_for_restart_like_repeat_sentence(self) -> None:
+        self.assertFalse(
+            _should_finalize_before_replacement(
+                "그 말은 기술 차이나 성능 차이 그 말은 기술 차이나 성능 차이나 이런 것에서 차이가 날 수밖에 없다는 거죠.",
+                "ko",
+                staged_confirmations=1,
+                staged_age=2,
+                sentence_finalize_age=3,
+                staged_forced=False,
+                deferred_revision_sentences=(),
+            )
+        )
+
+    def test_keeps_finalize_before_replacement_for_clean_sentence(self) -> None:
+        self.assertTrue(
+            _should_finalize_before_replacement(
+                "80년대 후반에서 90년대 초반에 저희가 16메가 D램 공동 개발 사업이 있었습니다.",
+                "ko",
+                staged_confirmations=1,
+                staged_age=1,
+                sentence_finalize_age=3,
+                staged_forced=False,
+                deferred_revision_sentences=(),
+            )
+        )
+
+    def test_keeps_finalize_before_replacement_for_non_restart_repeat_sentence(self) -> None:
+        self.assertTrue(
+            _should_finalize_before_replacement(
+                "아니 무슨 놀이공원 집회사 집회사입니다.",
+                "ko",
+                staged_confirmations=1,
+                staged_age=1,
+                sentence_finalize_age=3,
+                staged_forced=False,
+                deferred_revision_sentences=(),
             )
         )
 

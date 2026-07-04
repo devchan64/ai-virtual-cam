@@ -342,6 +342,8 @@ def _should_finalize_before_replacement(
         return False
     if _has_preferred_deferred_revision(sentence, deferred_revision_sentences):
         return False
+    if language == "ko" and _has_restart_like_repeat_for_next_completed(sentence):
+        return False
     flags = set(_final_sentence_diagnostic_flags(sentence, language))
     if flags.intersection({"empty", "spaced_cjk", "cjk_repeated_ngram", "repeated_word_ngram", "short_no_end_fragment"}):
         return False
@@ -364,6 +366,28 @@ def _should_finalize_before_replacement(
         short_cjk_replacement_hold_chunks=short_cjk_replacement_hold_chunks,
         long_no_end_replacement_early_age_min_units=long_no_end_replacement_early_age_min_units,
     )
+
+
+def _has_restart_like_repeat_for_next_completed(sentence: str) -> bool:
+    words = _word_units(sentence)
+    if len(words) < 10:
+        return False
+    return _has_restart_prefix_run(words)
+
+
+def _has_restart_prefix_run(words: list[str]) -> bool:
+    if len(words) < 10:
+        return False
+    max_prefix = min(6, len(words) // 2)
+    for size in range(max_prefix, 3, -1):
+        prefix = tuple(words[:size])
+        max_restart = min(len(words) - size, size + 3)
+        for restart in range(size - 1, max_restart + 1):
+            candidate = tuple(words[restart : restart + size])
+            matches = sum(1 for left, right in zip(prefix, candidate, strict=True) if left == right)
+            if matches >= size - 1:
+                return True
+    return False
 
 
 def _should_finalize_with_right_context(
@@ -633,7 +657,12 @@ def _should_allow_no_text_stage_aging(
         return False
     if len(queued_sentences) == 1:
         queued_sentence = _normalized_text(queued_sentences[0])
-        return bool(queued_sentence) and _should_stage_boundary_candidate(queued_sentence, language)
+        if not queued_sentence or not _should_stage_boundary_candidate(queued_sentence, language):
+            return False
+        sentence_units = len(_word_units(normalized_sentence))
+        if sentence_units >= 4:
+            return True
+        return sentence_units >= 3 and normalized_sentence.endswith("?")
     if len(_word_units(normalized_sentence)) < 3:
         return False
     for queued_sentence in queued_sentences:
