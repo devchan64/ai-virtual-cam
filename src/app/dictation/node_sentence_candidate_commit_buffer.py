@@ -47,6 +47,7 @@ class SentenceCandidateCommitBufferNode:
         self.active.deferredAgeChunk = active.deferredAgeChunk
         self.active.deltaSuppressedChunks = active.deltaSuppressedChunks
         self.active.deltaSuppressedChunkIndex = active.deltaSuppressedChunkIndex
+        self.active.queuePromotedChunk = active.queuePromotedChunk
         self._queue = deque(dict(entry) for entry in queue_entries)
 
     def prefer_queued_revision_for_active(
@@ -184,6 +185,7 @@ class SentenceCandidateCommitBufferNode:
                 count_segment_state("suppressed", 1)
                 continue
             self.active.apply_buffer_entry(entry)
+            self.active.queuePromotedChunk = chunk_index
             count_metric("stage_queue_promote", 1)
             count_metric("stage_start", 1)
             count_segment_state("staged", 1)

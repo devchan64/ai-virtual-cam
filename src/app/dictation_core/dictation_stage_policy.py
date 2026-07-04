@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import re
+
 from src.app.dictation_core.dictation_revision_text import (
     _best_common_word_run,
     _final_sentence_diagnostic_flags,
     _has_cjk_words,
+    _has_hangul_words,
+    _has_latin_words,
     _is_cjk_text,
     _looks_like_open_latin_clause,
     _normalized_text,
@@ -13,6 +17,9 @@ from src.app.dictation_core.dictation_revision_text import (
 )
 from src.app.dictation_core.dictation_revision_progression import _prefer_sentence_revision, _sentence_end_count
 from src.app.dictation_core.sentence_boundary import sentence_end_count as _boundary_sentence_end_count
+
+
+_DIGIT_RE = re.compile(r"\d")
 
 
 def _staged_sentence_required_confirmations(
@@ -363,9 +370,23 @@ def _should_finalize_with_right_context(
     sentence: str,
     language: str,
     deferred_revision_sentences: tuple[str, ...],
+    promoted_from_queue_same_chunk: bool = False,
 ) -> bool:
     if not _normalized_text(sentence) or not deferred_revision_sentences:
         return False
+    if promoted_from_queue_same_chunk:
+        first_queued = _normalized_text(deferred_revision_sentences[0])
+        if not first_queued:
+            return False
+        if not _sentences_are_revisions(sentence, first_queued):
+            queued_flags = set(_final_sentence_diagnostic_flags(first_queued, language))
+            queued_words = _word_units(first_queued)
+            if (
+                _sentence_end_count(first_queued) > 0
+                and len(queued_words) <= 3
+                and not queued_flags.intersection({"empty", "no_end_marker", "short_no_end_fragment", "trailing_ellipsis"})
+            ):
+                return False
     if _has_deferred_revision_extension(sentence, deferred_revision_sentences):
         return False
     if _has_preferred_deferred_revision(sentence, deferred_revision_sentences):
@@ -507,6 +528,42 @@ def _should_suppress_aged_short_closed_when_queue_has_stronger_candidate(
         if queued_confirmations >= max(2, staged_confirmations + 1):
             return True
     return False
+
+
+def _should_suppress_ko_pure_latin_final_with_hangul_queue(
+    sentence: str,
+    language: str,
+    reason: str,
+    queued_sentences: tuple[str, ...],
+) -> bool:
+    if language != "ko" or reason not in {"aged", "aged_forced", "right_context"}:
+        return False
+    sentence_words = _word_units(sentence)
+    if not sentence_words:
+        return False
+    if not _has_latin_words(sentence_words) or _has_hangul_words(sentence_words) or _has_cjk_words(sentence_words):
+        return False
+    return any(_has_hangul_words(_word_units(queued_sentence)) for queued_sentence in queued_sentences)
+
+
+def _should_suppress_ko_numeric_aged_final_with_queue(
+    sentence: str,
+    language: str,
+    reason: str,
+    queued_sentences: tuple[str, ...],
+) -> bool:
+    if language != "ko" or reason not in {"aged", "aged_forced"} or not queued_sentences:
+        return False
+    sentence_words = _word_units(sentence)
+    if not sentence_words:
+        return False
+    digit_token_count = sum(1 for word in sentence_words if _DIGIT_RE.search(word))
+    if digit_token_count < 2:
+        return False
+    queue_word_lengths = [len(_word_units(queued_sentence)) for queued_sentence in queued_sentences if queued_sentence]
+    if not queue_word_lengths:
+        return False
+    return max(queue_word_lengths) <= 4
 
 
 def _should_enable_aged_queue_backlog_promotion_boost(

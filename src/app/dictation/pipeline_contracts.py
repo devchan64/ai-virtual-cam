@@ -61,6 +61,7 @@ class ActiveSentenceCandidate:
     deferredAgeChunk: int = -1
     deltaSuppressedChunks: int = 0
     deltaSuppressedChunkIndex: int = -1
+    queuePromotedChunk: int = -1
 
     def clear(self) -> None:
         self.sentence = ""
@@ -70,6 +71,7 @@ class ActiveSentenceCandidate:
         self.deferredAgeChunk = -1
         self.deltaSuppressedChunks = 0
         self.deltaSuppressedChunkIndex = -1
+        self.queuePromotedChunk = -1
 
     def start(self, sentence: str, *, forced: bool, chunk_index: int) -> None:
         self.sentence = sentence
@@ -79,6 +81,7 @@ class ActiveSentenceCandidate:
         self.deferredAgeChunk = chunk_index
         self.deltaSuppressedChunks = 0
         self.deltaSuppressedChunkIndex = -1
+        self.queuePromotedChunk = -1
 
     def apply_buffer_entry(self, entry: dict[str, object]) -> None:
         self.sentence = str(entry["sentence"])
@@ -88,6 +91,7 @@ class ActiveSentenceCandidate:
         self.deferredAgeChunk = int(entry["deferred_age_chunk"])
         self.deltaSuppressedChunks = 0
         self.deltaSuppressedChunkIndex = -1
+        self.queuePromotedChunk = -1
 
 
 @dataclass

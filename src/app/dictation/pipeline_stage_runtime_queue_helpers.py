@@ -10,6 +10,7 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _normalized_text,
     _should_stage_boundary_candidate,
 )
+from src.app.dictation.pipeline_settings import staged_queue_max_promotion_age_chunks_for_language
 from src.app.dictation.pipeline_types import ActiveStage, CommitBufferNode, TranscriptWorkerLike
 
 
@@ -30,7 +31,7 @@ def promote_next_staged_sentence(
     worker: TranscriptWorkerLike,
 ) -> None:
     while True:
-        base_max_promotion_age = staged_queue_max_promotion_age_chunks()
+        base_max_promotion_age = staged_queue_max_promotion_age_chunks_for_language(detected)
         boosted_max_promotion_age = base_max_promotion_age
         if queue_promotion_backlog_boost_remaining() > 0:
             boosted_max_promotion_age += max(0, queue_backlog_promotion_extra_age())

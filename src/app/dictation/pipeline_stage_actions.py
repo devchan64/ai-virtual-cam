@@ -111,6 +111,7 @@ def finalize_right_context_staged_sentences(
             active_stage.sentence,
             detected,
             commit_buffer_node.queued_sentences(),
+            promoted_from_queue_same_chunk=active_stage.queuePromotedChunk == chunk_index,
         )
     ):
         count_metric("stage_finalize_right_context")

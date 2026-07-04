@@ -18,6 +18,7 @@ class LifecycleState:
     staged_deferred_age_chunk: int = -1
     staged_delta_suppressed_chunks: int = 0
     staged_delta_suppressed_chunk_index: int = -1
+    staged_queue_promoted_chunk: int = -1
     no_text_stage_skip_chunks: int = 0
     staged_queue: deque[dict[str, object]] | None = None
     final_sentences: list[str] | None = None

@@ -3,6 +3,8 @@ import unittest
 from src.app.dictation_core.dictation_transcript_logic import (
     _stale_leading_short_closed_candidate_reason,
     _should_allow_no_text_stage_aging,
+    _should_suppress_ko_numeric_aged_final_with_queue,
+    _should_suppress_ko_pure_latin_final_with_hangul_queue,
     _should_enable_aged_queue_backlog_promotion_boost,
     _should_defer_short_closed_queue_quality_block,
     _should_finalize_before_replacement,
@@ -113,6 +115,36 @@ class DictationStagePolicyTest(unittest.TestCase):
                 "사실 한국이 이미 이런 경험이 있어요.",
                 "ko",
                 ("80년대 후반에서 90년대 초반에 저희가 16메가 D램 공동 개발 사업이 있었습니다.",),
+            )
+        )
+
+    def test_blocks_right_context_finalize_for_same_chunk_promoted_unrelated_short_queue(self) -> None:
+        self.assertFalse(
+            _should_finalize_with_right_context(
+                "나 그냥 막 이렇게 들어왔는데 그냥 막 집에 쳐들어온다니까.",
+                "ko",
+                ("스토크 게임 좋아하세요?",),
+                promoted_from_queue_same_chunk=True,
+            )
+        )
+
+    def test_keeps_right_context_finalize_for_same_chunk_promoted_duplicate_queue(self) -> None:
+        self.assertTrue(
+            _should_finalize_with_right_context(
+                "뷔페가 전혀 뷔페 없는 느낌인데?",
+                "ko",
+                ("뷔페가 전혀 뷔페 없는 느낌인데?",),
+                promoted_from_queue_same_chunk=True,
+            )
+        )
+
+    def test_keeps_right_context_finalize_for_same_chunk_promoted_unrelated_long_queue(self) -> None:
+        self.assertTrue(
+            _should_finalize_with_right_context(
+                "UMC나 PSMC나 이런 벵거드.",
+                "ko",
+                ("사실 벵거드는 TSMC의 자회사.",),
+                promoted_from_queue_same_chunk=True,
             )
         )
 
@@ -228,6 +260,76 @@ class DictationStagePolicyTest(unittest.TestCase):
                     {"sentence": "그래가지고 이거 내가 한 달 동안 돈 모아가지고 산 거예요", "confirmations": 1},
                     {"sentence": "할아범 방탱이가 알코올 중독자인 줄 알아요?", "confirmations": 1},
                 ),
+            )
+        )
+
+    def test_suppresses_ko_pure_latin_aged_final_when_queue_has_hangul_sentence(self) -> None:
+        self.assertTrue(
+            _should_suppress_ko_pure_latin_final_with_hangul_queue(
+                "Come on.",
+                "ko",
+                "aged",
+                ("시스템 효과를 노려야 됩니다.",),
+            )
+        )
+
+    def test_keeps_ko_hangul_aged_final_when_queue_has_hangul_sentence(self) -> None:
+        self.assertFalse(
+            _should_suppress_ko_pure_latin_final_with_hangul_queue(
+                "왜냐하면 레가시니까.",
+                "ko",
+                "aged",
+                ("레가시는 통제를 하지 않습니다.",),
+            )
+        )
+
+    def test_keeps_ko_pure_latin_confirmed_final_when_queue_has_hangul_sentence(self) -> None:
+        self.assertFalse(
+            _should_suppress_ko_pure_latin_final_with_hangul_queue(
+                "Come on.",
+                "ko",
+                "confirmed",
+                ("시스템 효과를 노려야 됩니다.",),
+            )
+        )
+
+    def test_suppresses_ko_numeric_aged_final_when_queue_remains(self) -> None:
+        self.assertTrue(
+            _should_suppress_ko_numeric_aged_final_with_queue(
+                "3, 1, 3, 11인가?",
+                "ko",
+                "aged",
+                ("기억이 헷갈려.", "1년?"),
+            )
+        )
+
+    def test_keeps_ko_numeric_confirmed_final_when_queue_remains(self) -> None:
+        self.assertFalse(
+            _should_suppress_ko_numeric_aged_final_with_queue(
+                "3, 1, 3, 11인가?",
+                "ko",
+                "confirmed",
+                ("기억이 헷갈려.", "1년?"),
+            )
+        )
+
+    def test_keeps_ko_single_numeric_token_aged_final_when_queue_remains(self) -> None:
+        self.assertFalse(
+            _should_suppress_ko_numeric_aged_final_with_queue(
+                "3?",
+                "ko",
+                "aged",
+                ("3일?", "31일인가?"),
+            )
+        )
+
+    def test_keeps_ko_numeric_aged_final_when_queue_contains_long_sentence(self) -> None:
+        self.assertFalse(
+            _should_suppress_ko_numeric_aged_final_with_queue(
+                "2시간이 지났는데, 거의 10밀리언 달러가 스톡에 투입되었습니다.",
+                "ko",
+                "aged",
+                ("그냥 씻어버렸습니다.", "테일러신 아케이디스는 금은보기 타일럿이나 케이디 씨는 금흥 목요일에서 드러눔 봤죠."),
             )
         )
 

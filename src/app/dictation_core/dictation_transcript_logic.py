@@ -43,6 +43,8 @@ from src.app.dictation_core.dictation_stage_policy import (
     _should_enable_aged_queue_backlog_promotion_boost as _should_enable_aged_queue_backlog_promotion_boost_impl,
     _should_allow_no_text_stage_aging as _should_allow_no_text_stage_aging_impl,
     _should_restore_trimmed_closed_candidate as _should_restore_trimmed_closed_candidate_impl,
+    _should_suppress_ko_numeric_aged_final_with_queue as _should_suppress_ko_numeric_aged_final_with_queue_impl,
+    _should_suppress_ko_pure_latin_final_with_hangul_queue as _should_suppress_ko_pure_latin_final_with_hangul_queue_impl,
     _should_suppress_aged_short_closed_when_queue_has_stronger_candidate as _should_suppress_aged_short_closed_when_queue_has_stronger_candidate_impl,
     _should_suppress_aged_low_value_final as _should_suppress_aged_low_value_final_impl,
     _should_suppress_aged_no_end_marker_queue_final as _should_suppress_aged_no_end_marker_queue_final_impl,
@@ -307,6 +309,34 @@ def _should_suppress_aged_short_closed_when_queue_has_stronger_candidate(
     )
 
 
+def _should_suppress_ko_pure_latin_final_with_hangul_queue(
+    sentence: str,
+    language: str,
+    reason: str,
+    queued_sentences: tuple[str, ...] = (),
+) -> bool:
+    return _should_suppress_ko_pure_latin_final_with_hangul_queue_impl(
+        sentence,
+        language,
+        reason,
+        queued_sentences,
+    )
+
+
+def _should_suppress_ko_numeric_aged_final_with_queue(
+    sentence: str,
+    language: str,
+    reason: str,
+    queued_sentences: tuple[str, ...] = (),
+) -> bool:
+    return _should_suppress_ko_numeric_aged_final_with_queue_impl(
+        sentence,
+        language,
+        reason,
+        queued_sentences,
+    )
+
+
 def _should_suppress_aged_no_end_marker_queue_final(
     sentence: str,
     language: str,
@@ -350,8 +380,14 @@ def _should_finalize_with_right_context(
     sentence: str,
     language: str,
     deferred_revision_sentences: tuple[str, ...] = (),
+    promoted_from_queue_same_chunk: bool = False,
 ) -> bool:
-    return _should_finalize_with_right_context_impl(sentence, language, deferred_revision_sentences)
+    return _should_finalize_with_right_context_impl(
+        sentence,
+        language,
+        deferred_revision_sentences,
+        promoted_from_queue_same_chunk,
+    )
 
 
 def _strip_prior_pending_prefix_revision(staged_sentence: str, candidate: str, prior_pending_text: str) -> str:

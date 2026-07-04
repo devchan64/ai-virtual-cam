@@ -102,6 +102,7 @@ MAX_STAGED_SENTENCE_QUEUE = 5
 # strict final F1을 개선했다. 생성순서는 유지하되, 오래 밀린 후보는 다음
 # replay 근거로 다시 관측될 때만 stage에 재진입하게 둔다.
 STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS = 1
+STAGED_QUEUE_KO_EXTRA_PROMOTION_AGE_CHUNKS = 1
 
 # empty/no-speech STT chunk는 final 확정 근거가 아니다. 이 임계값은 no-text
 # chunk가 반복될 때 미확정 staged 후보를 폐기하는 데만 쓰며, 이 값만으로
@@ -339,6 +340,23 @@ def staged_queue_max_promotion_age_chunks() -> int:
     return max(1, _dictation_env_int("STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS", STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS))
 
 
+def staged_queue_ko_extra_promotion_age_chunks() -> int:
+    return max(
+        0,
+        _dictation_env_int(
+            "STAGED_QUEUE_KO_EXTRA_PROMOTION_AGE_CHUNKS",
+            STAGED_QUEUE_KO_EXTRA_PROMOTION_AGE_CHUNKS,
+        ),
+    )
+
+
+def staged_queue_max_promotion_age_chunks_for_language(language: str) -> int:
+    base_age = staged_queue_max_promotion_age_chunks()
+    if language == "ko":
+        return base_age + staged_queue_ko_extra_promotion_age_chunks()
+    return base_age
+
+
 def no_text_stale_stage_suppress_chunks() -> int:
     return _dictation_env_int("NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS", NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS)
 
@@ -522,6 +540,7 @@ def dictation_pipeline_policy() -> dict[str, object]:
         "cjk_char_ranges": CJK_CHAR_RANGES,
         "max_staged_sentence_queue": max_staged_sentence_queue(),
         "staged_queue_max_promotion_age_chunks": staged_queue_max_promotion_age_chunks(),
+        "staged_queue_ko_extra_promotion_age_chunks": staged_queue_ko_extra_promotion_age_chunks(),
         "no_text_stale_stage_suppress_chunks": no_text_stale_stage_suppress_chunks(),
         "delta_suppressed_stage_max_chunks": delta_suppressed_stage_max_chunks(),
         "sentence_confirm_chunks": sentence_confirm_chunks(),
@@ -581,6 +600,8 @@ def revision_similarity_policy() -> dict[str, int | float]:
 def lifecycle_tuning_policy() -> dict[str, int]:
     return {
         "max_staged_sentence_queue": max_staged_sentence_queue(),
+        "staged_queue_max_promotion_age_chunks": staged_queue_max_promotion_age_chunks(),
+        "staged_queue_ko_extra_promotion_age_chunks": staged_queue_ko_extra_promotion_age_chunks(),
         "no_text_stale_stage_suppress_chunks": no_text_stale_stage_suppress_chunks(),
         "delta_suppressed_stage_max_chunks": delta_suppressed_stage_max_chunks(),
         "sentence_confirm_chunks": sentence_confirm_chunks(),
@@ -688,6 +709,16 @@ def dictation_tuning_manifest() -> list[dict[str, int | float | str]]:
             max_value=30,
             scope="lifecycle",
             intent="drop queued staged candidates that are too old to represent the current sliding-window sentence stream",
+        ),
+        _tuning_manifest_entry(
+            "STAGED_QUEUE_KO_EXTRA_PROMOTION_AGE_CHUNKS",
+            default=STAGED_QUEUE_KO_EXTRA_PROMOTION_AGE_CHUNKS,
+            current=staged_queue_ko_extra_promotion_age_chunks(),
+            value_type="int",
+            min_value=0,
+            max_value=10,
+            scope="lifecycle",
+            intent="allow one extra queued promotion age step for Korean tail sentences without relaxing other languages globally",
         ),
         _tuning_manifest_entry(
             "NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS",

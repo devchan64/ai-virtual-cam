@@ -9,6 +9,8 @@ from src.app.dictation_core.dictation_revision_text import _sentence_output_delt
 from src.app.dictation_core.dictation_transcript_logic import (
     _final_sentence_diagnostic_flags,
     _normalized_text,
+    _should_suppress_ko_numeric_aged_final_with_queue,
+    _should_suppress_ko_pure_latin_final_with_hangul_queue,
     _should_enable_aged_queue_backlog_promotion_boost,
     _should_preserve_staged_output_when_delta_fragment,
     _should_suppress_aged_short_closed_when_queue_has_stronger_candidate,
@@ -17,6 +19,7 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _should_suppress_delta_final,
 )
 from src.app.dictation.pipeline_stage_runtime_candidate_helpers import suppress_finalize_candidate
+from src.app.dictation.pipeline_settings import staged_queue_max_promotion_age_chunks_for_language
 from src.app.dictation.pipeline_types import ActiveStage, CommitBufferNode, TranscriptWorkerLike
 from src.app.dictation_core.transcript_revision import append_context as _append_committed_text
 
@@ -213,9 +216,13 @@ def finalize_staged_sentence(
         return committed_text, next_final_segment_id, []
     count_metric("finalize_attempt")
     count_metric(f"finalize_reason_{reason}")
+    queue_before_sentences = commit_buffer_node.queued_sentences()
+    if reason in {"confirmed", "confirmed_forced"} and queue_before_sentences:
+        count_metric("finalize_confirmed_with_queue_tail")
+        count_metric(f"finalize_confirmed_with_queue_tail_q{min(len(queue_before_sentences), 5)}")
     if commit_buffer_node.prefer_queued_revision_for_active(
         chunk_index=chunk_index,
-        max_promotion_age_chunks=staged_queue_max_promotion_age_chunks(),
+        max_promotion_age_chunks=staged_queue_max_promotion_age_chunks_for_language(detected),
         finalize_reason=reason,
         count_metric=count_metric,
         count_segment_state=count_segment_state,
@@ -303,6 +310,54 @@ def finalize_staged_sentence(
                 metric_name="finalize_aged_short_closed_stronger_queue_suppressed",
                 reason=reason,
                 status_prefix="받아쓰기 AI 강한 queue로 짧은 aged 확정 후보 무시",
+                text=staged_before,
+                extra_status="",
+                count_metric=count_metric,
+                count_segment_state=count_segment_state,
+                promote_next_staged_sentence=promote_next_staged_sentence,
+                worker=worker,
+            ),
+        )
+    if _should_suppress_ko_pure_latin_final_with_hangul_queue(
+        staged_before,
+        detected,
+        reason,
+        commit_buffer_node.queued_sentences(),
+    ):
+        return (
+            committed_text,
+            next_final_segment_id,
+            suppress_finalize_candidate(
+                active_stage=active_stage,
+                detected=detected,
+                chunk_index=chunk_index,
+                metric_name="finalize_ko_pure_latin_hangul_queue_suppressed",
+                reason=reason,
+                status_prefix="받아쓰기 AI 한글 queue 뒤 순수 영문 확정 후보 무시",
+                text=staged_before,
+                extra_status="",
+                count_metric=count_metric,
+                count_segment_state=count_segment_state,
+                promote_next_staged_sentence=promote_next_staged_sentence,
+                worker=worker,
+            ),
+        )
+    if _should_suppress_ko_numeric_aged_final_with_queue(
+        staged_before,
+        detected,
+        reason,
+        commit_buffer_node.queued_sentences(),
+    ):
+        return (
+            committed_text,
+            next_final_segment_id,
+            suppress_finalize_candidate(
+                active_stage=active_stage,
+                detected=detected,
+                chunk_index=chunk_index,
+                metric_name="finalize_ko_numeric_aged_queue_suppressed",
+                reason=reason,
+                status_prefix="받아쓰기 AI 숫자 위주 aged 확정 후보 무시",
                 text=staged_before,
                 extra_status="",
                 count_metric=count_metric,

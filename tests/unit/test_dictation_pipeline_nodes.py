@@ -28,6 +28,7 @@ from src.app.dictation.pipeline_settings import (
     SEGMENT_LOGPROB_SCORE_OFFSET,
     SEGMENT_LOGPROB_SCORE_SCALE,
     SEGMENT_NO_SPEECH_CONFIDENCE_WEIGHT,
+    STAGED_QUEUE_KO_EXTRA_PROMOTION_AGE_CHUNKS,
     STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS,
     STT_CONDITION_ON_PREVIOUS_TEXT,
     STT_STREAM_AUDIO_DTYPE,
@@ -192,6 +193,10 @@ class DictationPipelineNodeTest(unittest.TestCase):
             STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS,
         )
         self.assertEqual(
+            policy["staged_queue_ko_extra_promotion_age_chunks"],
+            STAGED_QUEUE_KO_EXTRA_PROMOTION_AGE_CHUNKS,
+        )
+        self.assertEqual(
             policy["aged_queue_backlog_promotion_min"],
             AGED_QUEUE_BACKLOG_PROMOTION_MIN,
         )
@@ -210,6 +215,7 @@ class DictationPipelineNodeTest(unittest.TestCase):
                 "AVC_DICTATION_SHORT_CJK_CONFIRM_EXTRA_CHUNKS": "2",
                 "AVC_DICTATION_LONG_NO_END_REPLACEMENT_EARLY_AGE_MIN_UNITS": "11",
                 "AVC_DICTATION_STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS": "9",
+                "AVC_DICTATION_STAGED_QUEUE_KO_EXTRA_PROMOTION_AGE_CHUNKS": "3",
                 "AVC_DICTATION_AGED_QUEUE_BACKLOG_PROMOTION_MIN": "4",
                 "AVC_DICTATION_AGED_QUEUE_BACKLOG_PROMOTION_EXTRA_AGE": "2",
             },
@@ -218,6 +224,7 @@ class DictationPipelineNodeTest(unittest.TestCase):
 
         self.assertEqual(policy["max_staged_sentence_queue"], 33)
         self.assertEqual(policy["staged_queue_max_promotion_age_chunks"], 9)
+        self.assertEqual(policy["staged_queue_ko_extra_promotion_age_chunks"], 3)
         self.assertEqual(policy["sentence_confirm_chunks"], 4)
         self.assertEqual(policy["short_no_end_fragment_units"], 6)
         self.assertEqual(policy["short_cjk_confirm_extra_chunks"], 2)
