@@ -61,7 +61,7 @@ def _int_from_env(name: str, default: int) -> int:
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return Path(__file__).resolve().parents[3]
 
 
 def _timestamped_log_filename(name: str) -> str:

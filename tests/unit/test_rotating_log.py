@@ -6,12 +6,18 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from src.app import rotating_log
+from src.app.shared import rotating_log
 
 
 class RotatingLogTest(unittest.TestCase):
     def test_default_backup_count_keeps_long_monitoring_logs(self) -> None:
         self.assertEqual(rotating_log.DEFAULT_BACKUP_COUNT, 1000)
+
+    def test_repo_root_resolves_to_repository_root_not_src_dir(self) -> None:
+        repo_root = rotating_log._repo_root()
+        self.assertEqual(repo_root.name, "ai-virtual-cam")
+        self.assertTrue((repo_root / "src" / "app" / "shared" / "rotating_log.py").exists())
+        self.assertNotEqual(repo_root.name, "src")
 
     def test_timestamped_log_filename_includes_name_and_timestamp(self) -> None:
         filename = rotating_log._timestamped_log_filename("avc-whisper")
