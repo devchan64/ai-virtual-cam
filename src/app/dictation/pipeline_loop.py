@@ -11,6 +11,7 @@ from src.app.dictation.pipeline_settings import (
     delta_suppressed_stage_max_chunks,
     no_text_stale_stage_suppress_chunks,
     staged_queue_max_promotion_age_chunks,
+    terminal_no_text_drain_chunks,
 )
 from src.app.dictation.pipeline_diagnostics import (
     emit_runtime_performance,
@@ -32,6 +33,7 @@ from src.app.dictation.pipeline_translation import (
 from src.app.dictation.pipeline_types import SttModelLike, TextTranslatorLike, TranscriptWorkerLike
 from src.app.dictation_core.dictation_transcript_logic import (
     _diagnostic_tail,
+    _should_allow_no_text_stage_aging,
 )
 from src.app.dictation_core.transcript_revision import (
     consume_committed_prefix as _consume_committed_prefix,
@@ -49,6 +51,55 @@ def _validate_final_segments(final_segments: list[object], *, chunk_index: int) 
         segment_id, sentence = item
         normalized.append((int(segment_id), str(sentence)))
     return normalized
+
+
+def _drain_terminal_no_text_stage(
+    *,
+    worker: TranscriptWorkerLike,
+    stage_facade: StageLoopFacade,
+    active_stage: object,
+    commit_buffer_node: object,
+    committed_text: str,
+    pending_transcript_text: str,
+    no_text_stage_skip_chunks: int,
+    detected: str,
+    stable_analysis: Any | None,
+    chunk_index: int,
+    sentence_finalize_age: int,
+) -> tuple[str, int]:
+    if pending_transcript_text or stable_analysis is None:
+        return committed_text, no_text_stage_skip_chunks
+    initial_stage_sentence = str(getattr(active_stage, "sentence", "") or "")
+    if not _should_allow_no_text_stage_aging(
+        initial_stage_sentence,
+        detected,
+        tuple(commit_buffer_node.queued_sentences()),
+    ):
+        return committed_text, no_text_stage_skip_chunks
+    drain_limit = terminal_no_text_drain_chunks(sentence_finalize_age)
+    worker._emit(
+        "status",
+        "받아쓰기 AI 종료 drain 시작: "
+        f"chunk={chunk_index} drain_limit={drain_limit} staged_tail={_diagnostic_tail(initial_stage_sentence)}",
+        display=False,
+    )
+    for drain_step in range(1, drain_limit + 1):
+        if str(getattr(active_stage, "sentence", "") or "") != initial_stage_sentence:
+            break
+        synthetic_chunk_index = chunk_index + drain_step
+        stage_facade.sync_chunk(
+            chunk_index=synthetic_chunk_index,
+            committed_text=committed_text,
+            stable_analysis=stable_analysis,
+        )
+        final_segments = stage_facade.age_staged_sentence(detected, "")
+        committed_text = stage_facade.committed_text
+        if final_segments:
+            no_text_stage_skip_chunks = 0
+            break
+        no_text_stage_skip_chunks += 1
+        no_text_stage_skip_chunks = stage_facade.suppress_stale_no_text_stage(detected, no_text_stage_skip_chunks)
+    return committed_text, no_text_stage_skip_chunks
 
 def run_transcribe_loop(
     worker: TranscriptWorkerLike,
@@ -75,6 +126,8 @@ def run_transcribe_loop(
     commit_buffer_node = setup.commit_buffer_node
     active_stage = setup.active_stage
     no_text_stage_skip_chunks = 0
+    last_stable_analysis: Any | None = None
+    last_detected = language
     stage_facade = StageLoopFacade(
         worker=worker,
         loop_support=loop_support,
@@ -152,6 +205,7 @@ def run_transcribe_loop(
             stable_analysis = hypothesis.stability
             if stable_analysis is None:
                 raise RuntimeError("RecognitionHypothesis.stability must be populated")
+            last_stable_analysis = stable_analysis
             stage_facade.sync_chunk(
                 chunk_index=chunks,
                 committed_text=committed_text,
@@ -175,6 +229,7 @@ def run_transcribe_loop(
             text = hypothesis.deltaText
             stt_elapsed = hypothesis.elapsedSeconds
             detected = hypothesis.language
+            last_detected = detected
             if hypothesis.rejectedReasons:
                 worker._emit(
                     "status",
@@ -199,6 +254,7 @@ def run_transcribe_loop(
                 pending_chunks=pending_chunks,
                 no_text_stage_skip_chunks=no_text_stage_skip_chunks,
                 active_stage_sentence=active_stage.sentence,
+                staged_queue_sentences=tuple(commit_buffer_node.queued_sentences()),
                 window_text=window_text,
                 stable_text=stable_text,
                 count_metric=stage_facade.count_metric,
@@ -338,3 +394,16 @@ def run_transcribe_loop(
             worker._emit("error", f"받아쓰기 AI 전사 실패: {exc}")
             worker._stop.set()
             raise
+    committed_text, no_text_stage_skip_chunks = _drain_terminal_no_text_stage(
+        worker=worker,
+        stage_facade=stage_facade,
+        active_stage=active_stage,
+        commit_buffer_node=commit_buffer_node,
+        committed_text=committed_text,
+        pending_transcript_text=pending_transcript_text,
+        no_text_stage_skip_chunks=no_text_stage_skip_chunks,
+        detected=last_detected,
+        stable_analysis=last_stable_analysis,
+        chunk_index=chunks,
+        sentence_finalize_age=sentence_finalize_age,
+    )

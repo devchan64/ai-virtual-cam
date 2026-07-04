@@ -33440,3 +33440,220 @@ trace 해석:
 - `SHORT_CJK_CONFIRM_EXTRA_CHUNKS=1`은 현재 933건 challenge replay 기준 기각한다.
 - 다음 실험은 short CJK 자체를 더 기다리게 하는 방향보다, 짧은 closed staged가 어떤 revision churn
   조건에서 active로 남는지 추적해 active candidate quality gate를 더 구조적으로 보는 편이 맞다.
+
+## 2026-07-05 CJK no-text aging / terminal drain 재검증
+
+배경:
+
+- 구조 trace에서 `predicted-ko-001.jsonl:41` 같은 케이스는 expected final이 active staged에 그대로
+  남아 있는데, replay가 끝날 때 pending이 비어 있어도 추가 final 기회 없이 residue로 끝났다.
+- 현재 실시간 루프는 `completed`가 없는 chunk에서 `pending_text`도 비어 있으면 stale suppress만
+  진행하고, staged age를 더 먹여 final 확정하는 경로가 없었다.
+- 이 가설은 "닫힌 문장이 active staged로 남았고 이후 silence/no-text가 오면, suppression 전에
+  limited no-text age tick을 한 번 더 주는 편이 final 누락을 줄일 수 있다"는 것이다.
+
+실험 단계:
+
+1. 전언어 + `NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS` 길이만큼 terminal drain
+2. 전언어 + `sentence_finalize_age - 1` 길이만큼 terminal drain
+3. CJK active stage(`_is_cjk_text`)에만 no-text aging / terminal drain 적용
+
+실행:
+
+- baseline:
+  - `.tmp/eval/dictation-ai-sbd/all-aged-backlog-promotion-zhonly-enabled-current.json`
+- aggressive drain:
+  - `.tmp/eval/dictation-ai-sbd/all-terminal-no-text-drain-current.json`
+- reduced drain:
+  - `.tmp/eval/dictation-ai-sbd/all-terminal-no-text-drain-current-v2.json`
+- accepted CJK-only:
+  - `.tmp/eval/dictation-ai-sbd/all-terminal-no-text-drain-current-v4.json`
+- 실행 조건:
+  - 실제 `sat + cuda + float16`
+  - corpus=`challenge-replay` 933건
+
+중간 기각:
+
+- aggressive drain(`all-terminal-no-text-drain-current.json`)
+  - `final_similarity_coverage_avg 0.546623 -> 0.539`
+  - `long_missing_final_rate 0.151 -> 0.121`, `long_merge_error_rate 0.287 -> 0.269`
+  - residue는 크게 줄었지만 synthetic no-text tail이 너무 길어 over-final이 늘어 기각
+- reduced drain(`all-terminal-no-text-drain-current-v2.json`)
+  - `final_f1_avg 0.651758 -> 0.652`
+  - `final_similarity_coverage_avg 0.546623 -> 0.542`
+  - 전언어 terminal drain은 여전히 `en` similarity를 깎아 기각
+- queue-empty only(`all-terminal-no-text-drain-current-v3.json`)
+  - `final_similarity_coverage_avg 0.546623 -> 0.542`
+  - 개선폭이 줄고 core metric 이득이 사라져 기각
+
+채택 버전:
+
+- no-text aging / terminal drain은 CJK active stage에만 적용한다.
+- terminal drain 길이는 `sentence_finalize_age - 1` synthetic no-text tick으로 제한한다.
+- `en`/비-CJK active stage는 기존 동작을 그대로 유지한다.
+
+결과:
+
+| metric | baseline | CJK-only | delta |
+| --- | ---: | ---: | ---: |
+| `final_f1_avg` | 0.651758 | 0.652 | +0.000242 |
+| `final_similarity_coverage_avg` | 0.546623 | 0.547 | +0.000377 |
+| `boundary_granularity_adjusted_f1_avg` | 0.730952 | 0.732 | +0.001 |
+| `finalized_per_stage_start` | 0.578407 | 0.581828 | +0.003421 |
+
+길이 strata:
+
+| metric | delta |
+| --- | ---: |
+| `short_missing_final_rate` | +0.000000 |
+| `short_merge_error_rate` | +0.000000 |
+| `long_missing_final_rate` | -0.018031 |
+| `long_merge_error_rate` | -0.009709 |
+| `long_queue_bypass_rate` | +0.061026 |
+
+언어별:
+
+| language | `final_f1_avg` delta | `final_similarity_coverage_avg` delta | `boundary_granularity_adjusted_f1_avg` delta |
+| --- | ---: | ---: | ---: |
+| `en` | +0.000000 | +0.000000 | +0.000000 |
+| `ko` | +0.000000 | +0.000000 | +0.000000 |
+| `zh` | +0.002404 | +0.001191 | +0.004016 |
+
+residue 변화:
+
+- `queue_residue_case_count`: `245 -> 199`
+- `queue_residue_total`: `396 -> 311`
+- `active_staged_residue_case_count`: `597 -> 495`
+- `pending_residue_case_count`: `296 -> 296`
+
+해석:
+
+- 전언어 terminal drain은 `en` over-final을 늘리며 core similarity를 깎았다.
+- 하지만 CJK active stage로 범위를 제한하면 `en/ko`는 baseline과 동일하게 유지되고, `zh`의
+  staged residue 감소가 그대로 `final_similarity_coverage_avg`와 long strata 개선으로 남았다.
+- short strata는 그대로 유지되므로, 이번 규칙은 "짧은 문장을 더 빨리 소비한다"기보다 "CJK active
+  residue가 silence/no-text 뒤에 확정 기회를 한 번 더 얻는다"는 lifecycle 보정으로 보는 편이 맞다.
+
+판단:
+
+- CJK no-text aging / terminal drain은 현재 challenge replay 기준 채택한다.
+- 채택 근거는 `final_similarity_coverage_avg`의 소폭 순증, `long_missing_final_rate` /
+  `long_merge_error_rate` 완화, `en/ko` 무영향 유지다.
+
+추가 재검증:
+
+- `ko+zh` no-text aging / terminal drain (`all-terminal-no-text-drain-current-v5.json`)
+  - `ko final_f1_avg +0.007765`, `zh final_f1_avg +0.001472`
+  - 하지만 `ko final_similarity_coverage_avg -0.001343`로 핵심지표가 하락했고,
+    aggregate `final_similarity_coverage_avg`도 baseline보다 낮아졌다.
+  - residue는 `queue_residue_case_count 245 -> 166`, `active_staged_residue_case_count 597 -> 423`로 크게
+    줄었지만, 이는 과소비를 동반한 trade-off로 판단했다.
+- `zh 유지 + ko queue-empty only` hybrid (`all-terminal-no-text-drain-current-v6.json`)
+  - `long_missing_final_rate 0.151 -> 0.130`, `long_merge_error_rate 0.287 -> 0.276`까지는 유지됐지만,
+    `final_similarity_coverage_avg`가 여전히 baseline보다 낮았다.
+  - 따라서 `ko` 확장은 채택하지 않고, 현재 checked-in 로직은 `zh` 한정 no-text aging / terminal
+    drain(v4)로 유지한다.
+
+- `ko queue_len==1 clean queue + zh` narrow hybrid (`all-terminal-no-text-drain-current-v7.json`)
+  - 규칙:
+    - `zh`: 기존 v4와 동일하게 closed stage면 no-text aging / terminal drain 허용
+    - `ko`: active stage가 clean closed sentence이고 queue 길이가 정확히 1이며 queue head도 clean
+      closed sentence일 때만 no-text aging / terminal drain 허용
+  - 결과:
+    - aggregate
+      - `final_f1_avg 0.651758 -> 0.655`
+      - `final_similarity_coverage_avg 0.546623 -> 0.549`
+      - `boundary_granularity_adjusted_f1_avg 0.730952 -> 0.736`
+      - `finalized_per_stage_start 0.578407 -> 0.583486`
+    - `ko`
+      - `final_f1_avg 0.570258 -> 0.580136`
+      - `final_similarity_coverage_avg 0.461641 -> 0.468830`
+      - `boundary_granularity_adjusted_f1_avg 0.636185 -> 0.647492`
+      - `finalized_per_stage_start 0.727426 -> 0.735468`
+    - `zh`
+      - `final_f1_avg +0.001472`
+      - `final_similarity_coverage_avg +0.000182`
+    - `en`
+      - 변화 없음
+    - residue
+      - `queue_residue_case_count 245 -> 183`
+      - `queue_residue_total 396 -> 290`
+      - `active_staged_residue_case_count 597 -> 478`
+  - 해석:
+    - broad `ko` 확장(v5, v6)은 core similarity를 훼손했지만, `queue_len==1`과 clean closed queue head로
+      범위를 좁히면 `ko-002.jsonl:6` 같은 "같은 chunk에서 닫힌 문장 두 개가 연속으로 잡히고 첫 문장이
+      queue head 하나만 남긴 채 residue로 끝나는" 패턴만 건드리게 된다.
+    - 이 범위에서는 `en`을 건드리지 않고 `ko` core metric이 개선되며, `zh` gain도 baseline 대비 유지된다.
+  - 판단:
+    - 현재 checked-in 로직은 `v4`에서 `v7`로 갱신한다.
+    - 채택 기준은 `final_similarity_coverage_avg`의 순증, `ko` 주지표 개선, `en` 무영향 유지다.
+
+## 2026-07-05 closed candidate confirmation boost 기각
+
+배경:
+
+- `predicted-ko-001.jsonl:41` 같은 한국어 케이스는 이전 chunk의 pending tail과 현재 chunk의
+  no-end fragment를 거쳐 닫힌 문장이 완성되지만, 마지막 closed candidate가 `confirmations=1`로
+  시작해 residue로 끝났다.
+- 이에 따라 `prior_pending_text`와 같은 chunk의 blocked no-end fragment가 현재 closed candidate의
+  revision support라면 start confirmation에 소폭 boost를 주는 가설을 시험했다.
+
+실험 규칙:
+
+- closed candidate가 stageable일 때만 적용
+- `prior_pending_text` 또는 같은 chunk의 이전 completed sentence가
+  - 현재 candidate의 revision prefix이고
+  - 스스로는 `no_end_marker`/`short_no_end_fragment` 등으로 stageable하지 않을 때
+  - confirmation support로 1씩 가산
+- support는 최대 2로 제한
+
+실행:
+
+- variant:
+  - `.tmp/eval/dictation-ai-sbd/all-closed-candidate-confirmation-boost-current.json`
+- baseline:
+  - `.tmp/eval/dictation-ai-sbd/all-aged-backlog-promotion-zhonly-enabled-current.json`
+- 비교 기준:
+  - 현재 checked-in 채택안은 `all-terminal-no-text-drain-current-v4.json`
+
+결과:
+
+| metric | baseline | variant | delta |
+| --- | ---: | ---: | ---: |
+| `final_f1_avg` | 0.651758 | 0.652 | +0.000242 |
+| `final_similarity_coverage_avg` | 0.546623 | 0.547 | +0.000377 |
+| `boundary_granularity_adjusted_f1_avg` | 0.730952 | 0.733 | +0.002 |
+| `finalized_per_stage_start` | 0.578407 | 0.581021 | +0.002614 |
+
+길이 strata:
+
+| metric | delta |
+| --- | ---: |
+| `short_missing_final_rate` | +0.000000 |
+| `short_merge_error_rate` | +0.000000 |
+| `long_missing_final_rate` | -0.015257 |
+| `long_merge_error_rate` | -0.006935 |
+
+언어별:
+
+| language | `final_f1_avg` delta | `final_similarity_coverage_avg` delta | `boundary_granularity_adjusted_f1_avg` delta |
+| --- | ---: | ---: | ---: |
+| `en` | +0.001433 | +0.001973 | +0.003439 |
+| `ko` | -0.001696 | -0.001865 | -0.001725 |
+| `zh` | +0.001472 | +0.000182 | +0.004559 |
+
+해석:
+
+- 전반 aggregate는 소폭 개선처럼 보이지만, 실제 목표였던 `ko` clean residue 케이스에는 도움이 되지
+  않았다.
+- `en/zh`는 미세 이득이 있었지만, `ko final_similarity_coverage_avg`와 `ko final_f1_avg`가 함께
+  하락해 언어 간 trade-off가 발생했다.
+- residue 수치도 `zh-only no-text aging` 채택안(v4)보다 특별히 더 좋아지지 않았고,
+  `queue_residue_case_count`는 `199 -> 204`로 오히려 소폭 늘었다.
+
+판단:
+
+- closed candidate confirmation boost는 채택하지 않고 코드에서 제거한다.
+- 다음 실험은 stage start confirmation을 인위적으로 보강하기보다, `ko`에서 closed sentence가
+  `unconfirmed` replacement로 queue에 눌리거나 no-end fragment 품질 차단 뒤 residue로 남는
+  lifecycle 소비 규칙을 더 직접적으로 보는 편이 맞다.

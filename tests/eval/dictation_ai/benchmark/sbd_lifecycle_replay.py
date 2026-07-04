@@ -11,6 +11,7 @@ from src.app.dictation.pipeline_settings import (
     max_staged_sentence_queue,
     no_text_stale_stage_suppress_chunks,
     staged_queue_max_promotion_age_chunks,
+    terminal_no_text_drain_chunks,
 )
 from src.app.dictation_core.dictation_recent_final import _recent_final_output_delta_with_reason
 from src.app.dictation_core.dictation_revision_progression import (
@@ -40,6 +41,7 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _sentence_max_age_chunks,
     _stage_quality_block_age_limit,
     _staged_sentence_required_confirmations,
+    _should_allow_no_text_stage_aging,
     _should_confirm_staged_sentence,
     _should_defer_token_sentence_revision,
     _should_enable_aged_queue_backlog_promotion_boost,
@@ -1008,9 +1010,17 @@ def _run_lifecycle_case(case: SbdCase, detector: Any) -> dict[str, Any]:
             produced.extend(_age_staged_sentence(state, case.language, case.sentence_finalize_age, chunk_index))
         if not completed and not state.pending_text and not window_text:
             state.count("stage_age_no_text_skipped")
-            if state.staged_sentence:
-                state.no_text_stage_skip_chunks += 1
-                _suppress_stale_no_text_stage(state, chunk_index)
+            if state.staged_sentence and _should_allow_no_text_stage_aging(
+                state.staged_sentence,
+                case.language,
+                tuple(str(entry["sentence"]) for entry in state.staged_queue),
+            ):
+                produced.extend(_age_staged_sentence(state, case.language, case.sentence_finalize_age, chunk_index))
+                if produced:
+                    state.no_text_stage_skip_chunks = 0
+                else:
+                    state.no_text_stage_skip_chunks += 1
+                    _suppress_stale_no_text_stage(state, chunk_index)
             else:
                 state.no_text_stage_skip_chunks = 0
         pending_overrun = _pending_overrun_reason(state.pending_text, state.pending_chunks)
@@ -1035,6 +1045,22 @@ def _run_lifecycle_case(case: SbdCase, detector: Any) -> dict[str, Any]:
                 "right_context_start_count": boundary.right_context_start_count,
             }
         )
+    initial_terminal_stage = state.staged_sentence
+    if initial_terminal_stage and not state.pending_text and _should_allow_no_text_stage_aging(
+        initial_terminal_stage,
+        case.language,
+        tuple(str(entry["sentence"]) for entry in state.staged_queue),
+    ):
+        for drain_step in range(1, terminal_no_text_drain_chunks(case.sentence_finalize_age) + 1):
+            if state.staged_sentence != initial_terminal_stage:
+                break
+            synthetic_chunk_index = len(case.chunks) + drain_step
+            produced = _age_staged_sentence(state, case.language, case.sentence_finalize_age, synthetic_chunk_index)
+            if produced:
+                state.no_text_stage_skip_chunks = 0
+                break
+            state.no_text_stage_skip_chunks += 1
+            _suppress_stale_no_text_stage(state, synthetic_chunk_index)
     assert state.final_sentences is not None
     assert state.metrics is not None
     assert state.staged_queue is not None

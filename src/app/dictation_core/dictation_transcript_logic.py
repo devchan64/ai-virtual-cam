@@ -40,6 +40,7 @@ from src.app.dictation_core.dictation_stage_policy import (
     _should_finalize_before_replacement as _should_finalize_before_replacement_impl,
     _should_finalize_replaced_sentence as _should_finalize_replaced_sentence_impl,
     _should_enable_aged_queue_backlog_promotion_boost as _should_enable_aged_queue_backlog_promotion_boost_impl,
+    _should_allow_no_text_stage_aging as _should_allow_no_text_stage_aging_impl,
     _should_suppress_aged_low_value_final as _should_suppress_aged_low_value_final_impl,
     _should_suppress_aged_no_end_marker_queue_final as _should_suppress_aged_no_end_marker_queue_final_impl,
     _should_finalize_with_right_context,
@@ -258,6 +259,14 @@ def _should_enable_aged_queue_backlog_promotion_boost(
         min_queue_size=_aged_queue_backlog_promotion_min(),
         extra_age=_aged_queue_backlog_promotion_extra_age(),
     )
+
+
+def _should_allow_no_text_stage_aging(
+    sentence: str,
+    language: str,
+    queued_sentences: tuple[str, ...] = (),
+) -> bool:
+    return _should_allow_no_text_stage_aging_impl(sentence, language, queued_sentences)
 
 
 def _strip_prior_pending_prefix_revision(staged_sentence: str, candidate: str, prior_pending_text: str) -> str:

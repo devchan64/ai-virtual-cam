@@ -234,6 +234,8 @@ def _coalesce_completed_short_no_end_fragments(
     return tuple(coalesced)
 
 
+
+
 def _has_deferred_revision_extension(sentence: str, deferred_revision_sentences: tuple[str, ...]) -> bool:
     normalized_sentence = _normalized_text(sentence)
     sentence_words = _word_units(normalized_sentence)
@@ -416,3 +418,25 @@ def _should_enable_aged_queue_backlog_promotion_boost(
     if language != "zh":
         return False
     return queued_sentence_count >= min_queue_size
+
+
+def _should_allow_no_text_stage_aging(
+    sentence: str,
+    language: str,
+    queued_sentences: tuple[str, ...] = (),
+) -> bool:
+    normalized_sentence = _normalized_text(sentence)
+    if not normalized_sentence:
+        return False
+    if language == "zh":
+        return _should_stage_boundary_candidate(normalized_sentence, language)
+    if language != "ko":
+        return False
+    if len(queued_sentences) != 1:
+        return False
+    if not _should_stage_boundary_candidate(normalized_sentence, language):
+        return False
+    queued_sentence = _normalized_text(queued_sentences[0])
+    if not queued_sentence:
+        return False
+    return _should_stage_boundary_candidate(queued_sentence, language)

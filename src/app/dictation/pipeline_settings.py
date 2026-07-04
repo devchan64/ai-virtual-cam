@@ -343,6 +343,10 @@ def no_text_stale_stage_suppress_chunks() -> int:
     return _dictation_env_int("NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS", NO_TEXT_STALE_STAGE_SUPPRESS_CHUNKS)
 
 
+def terminal_no_text_drain_chunks(sentence_finalize_age: int) -> int:
+    return max(1, int(sentence_finalize_age) - 1)
+
+
 def delta_suppressed_stage_max_chunks() -> int:
     return _dictation_env_int("DELTA_SUPPRESSED_STAGE_MAX_CHUNKS", DELTA_SUPPRESSED_STAGE_MAX_CHUNKS)
 

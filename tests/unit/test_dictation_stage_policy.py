@@ -1,6 +1,7 @@
 import unittest
 
 from src.app.dictation_core.dictation_transcript_logic import (
+    _should_allow_no_text_stage_aging,
     _should_enable_aged_queue_backlog_promotion_boost,
     _should_suppress_aged_low_value_final,
     _should_suppress_aged_no_end_marker_queue_final,
@@ -69,6 +70,27 @@ class DictationStagePolicyTest(unittest.TestCase):
 
     def test_does_not_enable_aged_queue_backlog_promotion_boost_for_non_zh(self) -> None:
         self.assertFalse(_should_enable_aged_queue_backlog_promotion_boost("aged", 3, "en"))
+
+    def test_allows_no_text_stage_aging_for_zh_closed_stage(self) -> None:
+        self.assertTrue(_should_allow_no_text_stage_aging("是我的错觉吗？", "zh", ()))
+
+    def test_allows_no_text_stage_aging_for_ko_single_clean_queue(self) -> None:
+        self.assertTrue(
+            _should_allow_no_text_stage_aging(
+                "그런데 갑자기 미국이 우리 안 사 해버리니까 이거 자칫 잘못하면 줄도산이 될 수 있는 거거든요.",
+                "ko",
+                ("그러니 어떻게든 경제성장률 10%를 우리가 달성할 수 있는 거죠.",),
+            )
+        )
+
+    def test_blocks_no_text_stage_aging_for_ko_multi_queue(self) -> None:
+        self.assertFalse(
+            _should_allow_no_text_stage_aging(
+                "불편하시니까.",
+                "ko",
+                ("내가 이거보다 훨씬 안 좋았어.", "거짓말하지 마, 선배."),
+            )
+        )
 
 if __name__ == "__main__":
     unittest.main()

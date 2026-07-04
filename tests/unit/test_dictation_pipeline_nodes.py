@@ -2,6 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from src.app.dictation.pipeline_chunk_interpreter import process_chunk_sentence_flow
 from src.app.dictation.pipeline_contracts import (
     ActiveSentenceCandidate,
     AudioEvidence,
@@ -234,6 +235,70 @@ class DictationPipelineNodeTest(unittest.TestCase):
         )
 
         self.assertEqual(reason, "aged")
+
+    def test_no_text_chunk_ages_closed_stage_before_stale_suppression(self) -> None:
+        suppressed_calls: list[int] = []
+
+        result = process_chunk_sentence_flow(
+            candidate_node=SimpleNamespace(),
+            hypothesis=SimpleNamespace(),
+            detected="zh",
+            text="",
+            chunk_index=7,
+            committed_text="",
+            pending_transcript_text="",
+            pending_chunks=0,
+            no_text_stage_skip_chunks=0,
+            active_stage_sentence="这是完整句子。",
+            staged_queue_sentences=(),
+            window_text="这是完整句子。",
+            stable_text="这是完整句子。",
+            count_metric=lambda *_args, **_kwargs: None,
+            count_segment_state=lambda *_args, **_kwargs: None,
+            stage_completed_sentence=lambda *args, **kwargs: [],
+            finalize_right_context_staged_sentences=lambda *_args, **_kwargs: [],
+            age_staged_sentence=lambda *_args, **_kwargs: [(3, "这是完整句子。")],
+            suppress_stale_no_text_stage=lambda _detected, skip_chunks: suppressed_calls.append(skip_chunks) or skip_chunks,
+            consume_committed_prefix=lambda pending, _produced: pending,
+            emit_status=lambda _status: None,
+        )
+
+        self.assertEqual(result.final_segments, [(3, "这是完整句子。")])
+        self.assertEqual(result.no_text_stage_skip_chunks, 0)
+        self.assertEqual(suppressed_calls, [])
+
+    def test_no_text_chunk_keeps_non_cjk_stage_on_stale_path(self) -> None:
+        suppressed_calls: list[int] = []
+        age_calls: list[str] = []
+
+        result = process_chunk_sentence_flow(
+            candidate_node=SimpleNamespace(),
+            hypothesis=SimpleNamespace(),
+            detected="en",
+            text="",
+            chunk_index=9,
+            committed_text="",
+            pending_transcript_text="",
+            pending_chunks=0,
+            no_text_stage_skip_chunks=0,
+            active_stage_sentence="This is a complete sentence.",
+            staged_queue_sentences=(),
+            window_text="This is a complete sentence.",
+            stable_text="This is a complete sentence.",
+            count_metric=lambda *_args, **_kwargs: None,
+            count_segment_state=lambda *_args, **_kwargs: None,
+            stage_completed_sentence=lambda *args, **kwargs: [],
+            finalize_right_context_staged_sentences=lambda *_args, **_kwargs: [],
+            age_staged_sentence=lambda *_args, **_kwargs: age_calls.append("called") or [(5, "This is a complete sentence.")],
+            suppress_stale_no_text_stage=lambda _detected, skip_chunks: suppressed_calls.append(skip_chunks) or skip_chunks,
+            consume_committed_prefix=lambda pending, _produced: pending,
+            emit_status=lambda _status: None,
+        )
+
+        self.assertEqual(result.final_segments, [])
+        self.assertEqual(result.no_text_stage_skip_chunks, 0)
+        self.assertEqual(age_calls, [])
+        self.assertEqual(suppressed_calls, [])
 
     def test_commit_buffer_drops_stale_queued_candidate_before_promotion(self) -> None:
         node = SentenceCandidateCommitBufferNode(max_size=4)

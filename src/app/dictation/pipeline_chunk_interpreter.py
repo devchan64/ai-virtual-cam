@@ -5,7 +5,11 @@ from dataclasses import dataclass
 from typing import Callable
 
 from src.app.dictation.pipeline_contracts import RecognitionHypothesis, UncommittedContext
-from src.app.dictation_core.dictation_transcript_logic import _coalesce_completed_short_no_end_fragments, _normalized_text
+from src.app.dictation_core.dictation_transcript_logic import (
+    _coalesce_completed_short_no_end_fragments,
+    _normalized_text,
+    _should_allow_no_text_stage_aging,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +37,7 @@ def process_chunk_sentence_flow(
     pending_chunks: int,
     no_text_stage_skip_chunks: int,
     active_stage_sentence: str,
+    staged_queue_sentences: tuple[str, ...],
     window_text: str,
     stable_text: str,
     count_metric: Callable[[str, int], None],
@@ -50,6 +55,11 @@ def process_chunk_sentence_flow(
     boundary_soft = 0
     boundary_end_marks = 0
     boundary_right_context_starts = 0
+    allow_no_text_stage_aging = _should_allow_no_text_stage_aging(
+        active_stage_sentence,
+        detected,
+        staged_queue_sentences,
+    )
 
     if text:
         no_text_stage_skip_chunks = 0
@@ -116,9 +126,13 @@ def process_chunk_sentence_flow(
             count_segment_state("pending", 1)
             pending_chunks += 1
         count_metric("stage_age_no_text_skipped", 1)
-        if active_stage_sentence and not pending_transcript_text:
-            no_text_stage_skip_chunks += 1
-            no_text_stage_skip_chunks = suppress_stale_no_text_stage(detected, no_text_stage_skip_chunks)
+        if active_stage_sentence and not pending_transcript_text and allow_no_text_stage_aging:
+            final_segments.extend(age_staged_sentence(detected, pending_transcript_text))
+            if final_segments:
+                no_text_stage_skip_chunks = 0
+            else:
+                no_text_stage_skip_chunks += 1
+                no_text_stage_skip_chunks = suppress_stale_no_text_stage(detected, no_text_stage_skip_chunks)
         else:
             no_text_stage_skip_chunks = 0
 
