@@ -399,3 +399,20 @@ def _should_suppress_aged_no_end_marker_queue_final(
         if "no_end_marker" in set(_final_sentence_diagnostic_flags(deferred, language)):
             return True
     return False
+
+
+def _should_enable_aged_queue_backlog_promotion_boost(
+    reason: str,
+    queued_sentence_count: int,
+    language: str,
+    *,
+    min_queue_size: int,
+    extra_age: int,
+) -> bool:
+    if extra_age <= 0 or min_queue_size <= 0:
+        return False
+    if reason not in {"aged", "aged_forced"}:
+        return False
+    if language != "zh":
+        return False
+    return queued_sentence_count >= min_queue_size

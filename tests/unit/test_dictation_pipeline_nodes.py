@@ -12,6 +12,8 @@ from src.app.dictation.node_sentence_candidate_commit_buffer import SentenceCand
 from src.app.dictation.node_speech_evidence_to_stt_hypothesis import SpeechEvidenceToSttHypothesisNode
 from src.app.dictation.node_stt_hypothesis_to_sentence_candidate import SttHypothesisToSentenceCandidateNode
 from src.app.dictation.pipeline_settings import (
+    AGED_QUEUE_BACKLOG_PROMOTION_EXTRA_AGE,
+    AGED_QUEUE_BACKLOG_PROMOTION_MIN,
     CJK_CHAR_RANGES,
     MAX_SEGMENT_NO_SPEECH_CJK_OVERRIDE_PROB,
     MAX_SEGMENT_NO_SPEECH_PROB,
@@ -187,6 +189,14 @@ class DictationPipelineNodeTest(unittest.TestCase):
             policy["staged_queue_max_promotion_age_chunks"],
             STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS,
         )
+        self.assertEqual(
+            policy["aged_queue_backlog_promotion_min"],
+            AGED_QUEUE_BACKLOG_PROMOTION_MIN,
+        )
+        self.assertEqual(
+            policy["aged_queue_backlog_promotion_extra_age"],
+            AGED_QUEUE_BACKLOG_PROMOTION_EXTRA_AGE,
+        )
 
     def test_lifecycle_policy_supports_benchmark_env_overrides(self) -> None:
         with patch.dict(
@@ -198,6 +208,8 @@ class DictationPipelineNodeTest(unittest.TestCase):
                 "AVC_DICTATION_SHORT_CJK_CONFIRM_EXTRA_CHUNKS": "2",
                 "AVC_DICTATION_LONG_NO_END_REPLACEMENT_EARLY_AGE_MIN_UNITS": "11",
                 "AVC_DICTATION_STAGED_QUEUE_MAX_PROMOTION_AGE_CHUNKS": "9",
+                "AVC_DICTATION_AGED_QUEUE_BACKLOG_PROMOTION_MIN": "4",
+                "AVC_DICTATION_AGED_QUEUE_BACKLOG_PROMOTION_EXTRA_AGE": "2",
             },
         ):
             policy = dictation_pipeline_policy()
@@ -208,6 +220,8 @@ class DictationPipelineNodeTest(unittest.TestCase):
         self.assertEqual(policy["short_no_end_fragment_units"], 6)
         self.assertEqual(policy["short_cjk_confirm_extra_chunks"], 2)
         self.assertEqual(policy["long_no_end_replacement_early_age_min_units"], 11)
+        self.assertEqual(policy["aged_queue_backlog_promotion_min"], 4)
+        self.assertEqual(policy["aged_queue_backlog_promotion_extra_age"], 2)
 
     def test_replacement_policy_ages_long_non_cjk_no_end_stage_one_chunk_early(self) -> None:
         reason = _replacement_decision_reason(

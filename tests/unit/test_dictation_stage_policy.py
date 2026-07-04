@@ -1,6 +1,7 @@
 import unittest
 
 from src.app.dictation_core.dictation_transcript_logic import (
+    _should_enable_aged_queue_backlog_promotion_boost,
     _should_suppress_aged_low_value_final,
     _should_suppress_aged_no_end_marker_queue_final,
 )
@@ -59,6 +60,15 @@ class DictationStagePolicyTest(unittest.TestCase):
                 ),
             )
         )
+
+    def test_enables_aged_queue_backlog_promotion_boost_for_large_backlog(self) -> None:
+        self.assertTrue(_should_enable_aged_queue_backlog_promotion_boost("aged", 3, "zh"))
+
+    def test_does_not_enable_aged_queue_backlog_promotion_boost_for_small_backlog(self) -> None:
+        self.assertFalse(_should_enable_aged_queue_backlog_promotion_boost("aged", 2, "zh"))
+
+    def test_does_not_enable_aged_queue_backlog_promotion_boost_for_non_zh(self) -> None:
+        self.assertFalse(_should_enable_aged_queue_backlog_promotion_boost("aged", 3, "en"))
 
 if __name__ == "__main__":
     unittest.main()

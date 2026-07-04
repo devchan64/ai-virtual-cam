@@ -9,6 +9,7 @@ from src.app.dictation_core.dictation_revision_text import _sentence_output_delt
 from src.app.dictation_core.dictation_transcript_logic import (
     _final_sentence_diagnostic_flags,
     _normalized_text,
+    _should_enable_aged_queue_backlog_promotion_boost,
     _should_preserve_staged_output_when_delta_fragment,
     _should_suppress_aged_low_value_final,
     _should_suppress_aged_no_end_marker_queue_final,
@@ -200,6 +201,7 @@ def finalize_staged_sentence(
     promote_next_staged_sentence: Callable[[str], None],
     worker: TranscriptWorkerLike,
     staged_queue_max_promotion_age_chunks: Callable[[], int],
+    set_queue_promotion_backlog_boost: Callable[[int], None],
     preserve_staged_output_when_delta_fragment: Callable[..., str],
     suppress_finalize_candidate: Callable[..., list[tuple[int, str]]],
     apply_recent_final_finalize_adjustment: Callable[..., str | None],
@@ -314,6 +316,10 @@ def finalize_staged_sentence(
         output_sentence=output_sentence,
     ):
         return committed_text, next_final_segment_id, []
+    queued_sentence_count = len(commit_buffer_node)
+    if _should_enable_aged_queue_backlog_promotion_boost(reason, queued_sentence_count, detected):
+        set_queue_promotion_backlog_boost(queued_sentence_count)
+        count_metric("stage_queue_backlog_boost_enabled")
     committed_text, next_final_segment_id, produced = emit_finalized_sentence(
         detected,
         reason=reason,

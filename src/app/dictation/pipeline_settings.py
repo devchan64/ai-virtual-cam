@@ -176,6 +176,9 @@ SHORT_LATIN_ONLY_ZH_TOTAL_UNITS = 3
 # 최대 confirmation 수다. 0이면 비활성화한다.
 AGED_QUEUE_ZH_NO_END_MARKER_MAX_CONFIRMATIONS = 1
 
+AGED_QUEUE_BACKLOG_PROMOTION_MIN = 3
+AGED_QUEUE_BACKLOG_PROMOTION_EXTRA_AGE = 1
+
 
 # revision confirmation 보존
 #
@@ -472,6 +475,17 @@ def aged_queue_zh_no_end_marker_max_confirmations() -> int:
     )
 
 
+def aged_queue_backlog_promotion_min() -> int:
+    return _dictation_env_int("AGED_QUEUE_BACKLOG_PROMOTION_MIN", AGED_QUEUE_BACKLOG_PROMOTION_MIN)
+
+
+def aged_queue_backlog_promotion_extra_age() -> int:
+    return _dictation_env_int(
+        "AGED_QUEUE_BACKLOG_PROMOTION_EXTRA_AGE",
+        AGED_QUEUE_BACKLOG_PROMOTION_EXTRA_AGE,
+    )
+
+
 def dictation_pipeline_policy() -> dict[str, object]:
     return {
         "stt_transcribe_task": STT_TRANSCRIBE_TASK,
@@ -527,6 +541,8 @@ def dictation_pipeline_policy() -> dict[str, object]:
         "short_mixed_latin_zh_total_units": short_mixed_latin_zh_total_units(),
         "short_latin_only_zh_total_units": short_latin_only_zh_total_units(),
         "aged_queue_zh_no_end_marker_max_confirmations": aged_queue_zh_no_end_marker_max_confirmations(),
+        "aged_queue_backlog_promotion_min": aged_queue_backlog_promotion_min(),
+        "aged_queue_backlog_promotion_extra_age": aged_queue_backlog_promotion_extra_age(),
         "cjk_revision_internal_stability_min_ratio": CJK_REVISION_INTERNAL_STABILITY_MIN_RATIO,
         "cjk_revision_internal_stability_mid_ratio": CJK_REVISION_INTERNAL_STABILITY_MID_RATIO,
         "cjk_revision_internal_stability_min_chars": CJK_REVISION_INTERNAL_STABILITY_MIN_CHARS,
@@ -572,6 +588,8 @@ def lifecycle_tuning_policy() -> dict[str, int]:
         "short_cjk_replacement_hold_chunks": short_cjk_replacement_hold_chunks(),
         "long_no_end_replacement_early_age_min_units": long_no_end_replacement_early_age_min_units(),
         "short_cjk_confirm_extra_chunks": short_cjk_confirm_extra_chunks(),
+        "aged_queue_backlog_promotion_min": aged_queue_backlog_promotion_min(),
+        "aged_queue_backlog_promotion_extra_age": aged_queue_backlog_promotion_extra_age(),
     }
 
 

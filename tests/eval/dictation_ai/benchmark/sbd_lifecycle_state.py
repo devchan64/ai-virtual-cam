@@ -25,6 +25,7 @@ class LifecycleState:
     previous_window_text: str = ""
     stable_analysis: Any = None
     finalize_events: list[dict[str, object]] | None = None
+    queue_promotion_backlog_boost_remaining: int = 0
 
     def __post_init__(self) -> None:
         if self.staged_queue is None:

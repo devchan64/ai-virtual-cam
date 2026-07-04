@@ -23,6 +23,7 @@ class StageFacadeContext:
     committed_text: str = ""
     next_final_segment_id: int = 1
     stable_analysis: StableAnalysis | None = None
+    queue_promotion_backlog_boost_remaining: int = 0
 
     def sync_chunk(
         self,

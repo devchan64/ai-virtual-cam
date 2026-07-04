@@ -24,17 +24,27 @@ def promote_next_staged_sentence(
     count_segment_state: Callable[[str, int], None],
     count_recent_final_stable_internal_suppression: Callable[[str], None],
     staged_queue_max_promotion_age_chunks: Callable[[], int],
+    queue_promotion_backlog_boost_remaining: Callable[[], int],
+    consume_queue_promotion_backlog_boost: Callable[[], None],
+    queue_backlog_promotion_extra_age: Callable[[], int],
     worker: TranscriptWorkerLike,
 ) -> None:
     while True:
+        base_max_promotion_age = staged_queue_max_promotion_age_chunks()
+        boosted_max_promotion_age = base_max_promotion_age
+        if queue_promotion_backlog_boost_remaining() > 0:
+            boosted_max_promotion_age += max(0, queue_backlog_promotion_extra_age())
         promoted = commit_buffer_node.promote_if_idle(
             chunk_index=chunk_index,
-            max_promotion_age_chunks=staged_queue_max_promotion_age_chunks(),
+            max_promotion_age_chunks=boosted_max_promotion_age,
             count_metric=count_metric,
             count_segment_state=count_segment_state,
         )
         if not promoted:
             return
+        if active_stage.age > base_max_promotion_age:
+            consume_queue_promotion_backlog_boost()
+            count_metric("stage_queue_backlog_boost_promote", 1)
         promoted_quality_flags = set(_final_sentence_diagnostic_flags(active_stage.sentence, detected))
         if not _should_stage_boundary_candidate(active_stage.sentence, detected):
             count_metric("stage_queue_quality_suppressed", 1)

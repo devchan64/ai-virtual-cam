@@ -6,6 +6,7 @@ from src.app.dictation.node_sentence_candidate_commit_buffer import SentenceCand
 from src.app.dictation.pipeline_contracts import ActiveSentenceCandidate
 from src.app.dictation_core.sentence_boundary import normalized_text
 from src.app.dictation.pipeline_settings import (
+    aged_queue_backlog_promotion_extra_age,
     delta_suppressed_stage_max_chunks,
     max_staged_sentence_queue,
     no_text_stale_stage_suppress_chunks,
@@ -41,6 +42,7 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _staged_sentence_required_confirmations,
     _should_confirm_staged_sentence,
     _should_defer_token_sentence_revision,
+    _should_enable_aged_queue_backlog_promotion_boost,
     _should_defer_unconfirmed_replacement,
     _should_finalize_before_replacement,
     _should_finalize_with_right_context,
@@ -117,11 +119,24 @@ def _promote_next_staged_sentence(state: LifecycleState, chunk_index: int) -> No
     node = _commit_buffer_from_state(state)
     while node.promote_if_idle(
         chunk_index=chunk_index,
-        max_promotion_age_chunks=staged_queue_max_promotion_age_chunks(),
+        max_promotion_age_chunks=(
+            staged_queue_max_promotion_age_chunks()
+            + (
+                max(0, aged_queue_backlog_promotion_extra_age())
+                if state.queue_promotion_backlog_boost_remaining > 0
+                else 0
+            )
+        ),
         count_metric=state.count,
         count_segment_state=lambda name, amount=1: _count_segment_state(state, name, amount),
     ):
         _sync_state_from_commit_buffer(state, node)
+        if (
+            state.queue_promotion_backlog_boost_remaining > 0
+            and state.staged_age > staged_queue_max_promotion_age_chunks()
+        ):
+            state.queue_promotion_backlog_boost_remaining = max(0, state.queue_promotion_backlog_boost_remaining - 1)
+            state.count("stage_queue_backlog_boost_promote")
         promoted_quality_flags = set(_final_sentence_diagnostic_flags(state.staged_sentence, state.language))
         if not _should_stage_boundary_candidate(state.staged_sentence, state.language):
             state.count("stage_queue_quality_suppressed")
@@ -373,6 +388,12 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
             }
         )
         return []
+    if _should_enable_aged_queue_backlog_promotion_boost(reason, len(state.staged_queue or ()), language):
+        state.queue_promotion_backlog_boost_remaining = max(
+            state.queue_promotion_backlog_boost_remaining,
+            len(state.staged_queue or ()),
+        )
+        state.count("stage_queue_backlog_boost_enabled")
     state.staged_sentence = ""
     state.staged_confirmations = 0
     state.staged_age = 0
