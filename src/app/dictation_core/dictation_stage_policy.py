@@ -530,13 +530,34 @@ def _should_suppress_aged_short_closed_when_queue_has_stronger_candidate(
     return False
 
 
+def _should_suppress_right_context_short_prefix_extension_with_single_queue(
+    sentence: str,
+    reason: str,
+    queued_sentences: tuple[str, ...],
+) -> bool:
+    if reason != "right_context" or len(queued_sentences) != 1:
+        return False
+    sentence_words = _word_units(sentence)
+    queued_words = _word_units(queued_sentences[0])
+    if not sentence_words or len(sentence_words) > 4:
+        return False
+    if len(queued_words) < len(sentence_words) + 2:
+        return False
+    prefix_words = 0
+    for sentence_word, queued_word in zip(sentence_words, queued_words):
+        if sentence_word != queued_word:
+            break
+        prefix_words += 1
+    return prefix_words >= 3
+
+
 def _should_suppress_ko_pure_latin_final_with_hangul_queue(
     sentence: str,
     language: str,
     reason: str,
     queued_sentences: tuple[str, ...],
 ) -> bool:
-    if language != "ko" or reason not in {"aged", "aged_forced", "right_context"}:
+    if language != "ko" or reason not in {"aged", "aged_forced", "replaced_aged", "right_context"}:
         return False
     sentence_words = _word_units(sentence)
     if not sentence_words:

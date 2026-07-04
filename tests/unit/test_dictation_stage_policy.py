@@ -5,6 +5,7 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _should_allow_no_text_stage_aging,
     _should_suppress_ko_numeric_aged_final_with_queue,
     _should_suppress_ko_pure_latin_final_with_hangul_queue,
+    _should_suppress_right_context_short_prefix_extension_with_single_queue,
     _should_enable_aged_queue_backlog_promotion_boost,
     _should_defer_short_closed_queue_quality_block,
     _should_finalize_before_replacement,
@@ -270,6 +271,34 @@ class DictationStagePolicyTest(unittest.TestCase):
                 "ko",
                 "aged",
                 ("시스템 효과를 노려야 됩니다.",),
+            )
+        )
+
+    def test_suppresses_right_context_short_prefix_extension_with_single_queue(self) -> None:
+        self.assertTrue(
+            _should_suppress_right_context_short_prefix_extension_with_single_queue(
+                "작년에 지금 아직 안녕하세요.",
+                "right_context",
+                ("작년에 지금 아직 공식 통계가 나오지 않았죠.",),
+            )
+        )
+
+    def test_keeps_right_context_short_sentence_without_prefix_extension(self) -> None:
+        self.assertFalse(
+            _should_suppress_right_context_short_prefix_extension_with_single_queue(
+                "굳이 미국에서 봐도.",
+                "right_context",
+                ("이거는 어쨌든 싸게 만드는 게 남는 거니까.",),
+            )
+        )
+
+    def test_suppresses_ko_pure_latin_replaced_aged_final_when_queue_has_hangul_sentence(self) -> None:
+        self.assertTrue(
+            _should_suppress_ko_pure_latin_final_with_hangul_queue(
+                "There was like, you know, Narendra Modi up there suddenly telling everyone.",
+                "ko",
+                "replaced_aged",
+                ("시스템 효과를 노려야 됩니다.", "그러는데 병목이라는 것은 다시 말하면 병목에 대해서 사람들이 더 많은 관심을 가질 수밖에 없어요"),
             )
         )
 

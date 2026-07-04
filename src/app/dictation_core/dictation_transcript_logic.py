@@ -46,6 +46,7 @@ from src.app.dictation_core.dictation_stage_policy import (
     _should_suppress_ko_numeric_aged_final_with_queue as _should_suppress_ko_numeric_aged_final_with_queue_impl,
     _should_suppress_ko_pure_latin_final_with_hangul_queue as _should_suppress_ko_pure_latin_final_with_hangul_queue_impl,
     _should_suppress_aged_short_closed_when_queue_has_stronger_candidate as _should_suppress_aged_short_closed_when_queue_has_stronger_candidate_impl,
+    _should_suppress_right_context_short_prefix_extension_with_single_queue as _should_suppress_right_context_short_prefix_extension_with_single_queue_impl,
     _should_suppress_aged_low_value_final as _should_suppress_aged_low_value_final_impl,
     _should_suppress_aged_no_end_marker_queue_final as _should_suppress_aged_no_end_marker_queue_final_impl,
     _should_finalize_with_right_context as _should_finalize_with_right_context_impl,
@@ -196,6 +197,18 @@ def _should_defer_short_closed_queue_quality_block(
         language,
         queued_sentences,
         staged_confirmations,
+    )
+
+
+def _should_suppress_right_context_short_prefix_extension_with_single_queue(
+    sentence: str,
+    reason: str,
+    queued_sentences: tuple[str, ...] = (),
+) -> bool:
+    return _should_suppress_right_context_short_prefix_extension_with_single_queue_impl(
+        sentence,
+        reason,
+        queued_sentences,
     )
 
 

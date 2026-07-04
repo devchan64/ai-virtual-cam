@@ -11,6 +11,7 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _normalized_text,
     _should_suppress_ko_numeric_aged_final_with_queue,
     _should_suppress_ko_pure_latin_final_with_hangul_queue,
+    _should_suppress_right_context_short_prefix_extension_with_single_queue,
     _should_enable_aged_queue_backlog_promotion_boost,
     _should_preserve_staged_output_when_delta_fragment,
     _should_suppress_aged_short_closed_when_queue_has_stronger_candidate,
@@ -310,6 +311,29 @@ def finalize_staged_sentence(
                 metric_name="finalize_aged_short_closed_stronger_queue_suppressed",
                 reason=reason,
                 status_prefix="받아쓰기 AI 강한 queue로 짧은 aged 확정 후보 무시",
+                text=staged_before,
+                extra_status="",
+                count_metric=count_metric,
+                count_segment_state=count_segment_state,
+                promote_next_staged_sentence=promote_next_staged_sentence,
+                worker=worker,
+            ),
+        )
+    if _should_suppress_right_context_short_prefix_extension_with_single_queue(
+        staged_before,
+        reason,
+        commit_buffer_node.queued_sentences(),
+    ):
+        return (
+            committed_text,
+            next_final_segment_id,
+            suppress_finalize_candidate(
+                active_stage=active_stage,
+                detected=detected,
+                chunk_index=chunk_index,
+                metric_name="finalize_right_context_short_prefix_queue_extension_suppressed",
+                reason=reason,
+                status_prefix="받아쓰기 AI 짧은 right-context prefix 확정 후보 무시",
                 text=staged_before,
                 extra_status="",
                 count_metric=count_metric,
