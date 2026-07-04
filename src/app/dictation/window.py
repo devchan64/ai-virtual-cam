@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 from pathlib import Path
 
 
@@ -441,6 +442,7 @@ class WhisperTranscriptWorker:
                 self._emit("status", "받아쓰기 AI 전사 시작")
                 self._transcribe_loop(model, np, text_translator)
         except Exception as exc:
+            _log_line("[avc] Dictation AI worker traceback:\n" + traceback.format_exc())
             self._emit("error", str(exc))
 
     def _start_pulse_capture(self, np) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 import queue
 import time
+import traceback
 from typing import Any
 from src.app.dictation.audio_window import SlidingAudioWindow
 from src.app.dictation.pipeline_audio_runtime import prepare_chunk_audio
@@ -35,6 +36,19 @@ from src.app.dictation_core.dictation_transcript_logic import (
 from src.app.dictation_core.transcript_revision import (
     consume_committed_prefix as _consume_committed_prefix,
 )
+
+
+def _validate_final_segments(final_segments: list[object], *, chunk_index: int) -> list[tuple[int, str]]:
+    normalized: list[tuple[int, str]] = []
+    for index, item in enumerate(final_segments):
+        if not isinstance(item, tuple) or len(item) != 2:
+            raise RuntimeError(
+                "final_segments contract violation: "
+                f"chunk={chunk_index} index={index} type={type(item).__name__} value={item!r}"
+            )
+        segment_id, sentence = item
+        normalized.append((int(segment_id), str(sentence)))
+    return normalized
 
 def run_transcribe_loop(
     worker: TranscriptWorkerLike,
@@ -209,7 +223,7 @@ def run_transcribe_loop(
             no_text_stage_skip_chunks = sentence_flow.no_text_stage_skip_chunks
             committed_text = stage_facade.committed_text
             completed_sentences = sentence_flow.completed_sentences
-            final_segments = sentence_flow.final_segments
+            final_segments = _validate_final_segments(sentence_flow.final_segments, chunk_index=chunks)
             boundary_complete = sentence_flow.boundary_complete
             boundary_soft = sentence_flow.boundary_soft
             boundary_end_marks = sentence_flow.boundary_end_marks
@@ -316,6 +330,11 @@ def run_transcribe_loop(
                 text_chars=len(text),
             )
         except Exception as exc:
+            worker._emit(
+                "status",
+                "받아쓰기 AI 전사 traceback:\n" + traceback.format_exc(),
+                display=False,
+            )
             worker._emit("error", f"받아쓰기 AI 전사 실패: {exc}")
             worker._stop.set()
             raise

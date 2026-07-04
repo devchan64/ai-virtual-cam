@@ -156,8 +156,8 @@ def emit_finalized_sentence(
     staged_before: str,
     output_sentence: str,
     committed_before_chars: int,
-) -> list[tuple[int, str]]:
-    ctx.committed_text, ctx.next_final_segment_id, produced = _emit_finalized_sentence(
+) -> tuple[str, int, list[tuple[int, str]]]:
+    committed_text, next_final_segment_id, produced = _emit_finalized_sentence(
         active_stage=ctx.active_stage,
         committed_text=ctx.committed_text,
         next_final_segment_id=ctx.next_final_segment_id,
@@ -173,7 +173,9 @@ def emit_finalized_sentence(
         promote_next_staged_sentence=lambda language: promote_next_staged_sentence(ctx, language),
         worker=ctx.worker,
     )
-    return produced
+    ctx.committed_text = committed_text
+    ctx.next_final_segment_id = next_final_segment_id
+    return committed_text, next_final_segment_id, produced
 
 
 def finalize_staged_sentence(ctx: StageFacadeContext, detected: str, reason: str) -> list[tuple[int, str]]:

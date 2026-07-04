@@ -174,7 +174,7 @@ class StageLoopFacade:
         staged_before: str,
         output_sentence: str,
         committed_before_chars: int,
-    ) -> list[tuple[int, str]]:
+    ) -> tuple[str, int, list[tuple[int, str]]]:
         return _emit_finalized_sentence(
             self._ctx,
             detected,
