@@ -2,16 +2,16 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from src.app.dictation_pipeline_contracts import (
+from src.app.dictation.pipeline_contracts import (
     ActiveSentenceCandidate,
     AudioEvidence,
     RecognitionHypothesis,
     UncommittedContext,
 )
-from src.app.dictation_node_sentence_candidate_commit_buffer import SentenceCandidateCommitBufferNode
-from src.app.dictation_node_speech_evidence_to_stt_hypothesis import SpeechEvidenceToSttHypothesisNode
-from src.app.dictation_node_stt_hypothesis_to_sentence_candidate import SttHypothesisToSentenceCandidateNode
-from src.app.dictation_pipeline_settings import (
+from src.app.dictation.node_sentence_candidate_commit_buffer import SentenceCandidateCommitBufferNode
+from src.app.dictation.node_speech_evidence_to_stt_hypothesis import SpeechEvidenceToSttHypothesisNode
+from src.app.dictation.node_stt_hypothesis_to_sentence_candidate import SttHypothesisToSentenceCandidateNode
+from src.app.dictation.pipeline_settings import (
     CJK_CHAR_RANGES,
     MAX_SEGMENT_NO_SPEECH_CJK_OVERRIDE_PROB,
     MAX_SEGMENT_NO_SPEECH_PROB,
@@ -34,13 +34,13 @@ from src.app.dictation_pipeline_settings import (
     dictation_tuning_manifest,
     dictation_tuning_protocol,
 )
-from src.app.dictation_transcript_logic import (
+from src.app.dictation_core.dictation_transcript_logic import (
     _prefer_sentence_revision,
     _strip_prior_pending_prefix_from_final,
     _strip_prior_pending_prefix_revision,
     _should_translate_final_sentence,
 )
-from src.app.sentence_boundary import SentenceBoundaryResult
+from src.app.dictation_core.sentence_boundary import SentenceBoundaryResult
 
 
 class FakeSttModel:
@@ -533,9 +533,9 @@ class DictationPipelineNodeTest(unittest.TestCase):
             count_segment_state=count_state,
         )
         with (
-            patch("src.app.dictation_node_sentence_candidate_commit_buffer._sentences_are_revisions", return_value=True),
-            patch("src.app.dictation_node_sentence_candidate_commit_buffer._prefer_sentence_revision", return_value="new token sentence."),
-            patch("src.app.dictation_node_sentence_candidate_commit_buffer._should_reset_revision_age", return_value=True),
+            patch("src.app.dictation.node_sentence_candidate_commit_buffer._sentences_are_revisions", return_value=True),
+            patch("src.app.dictation.node_sentence_candidate_commit_buffer._prefer_sentence_revision", return_value="new token sentence."),
+            patch("src.app.dictation.node_sentence_candidate_commit_buffer._should_reset_revision_age", return_value=True),
         ):
             node.enqueue_or_revision(
                 candidate="new token sentence.",
@@ -580,9 +580,9 @@ class DictationPipelineNodeTest(unittest.TestCase):
         )
 
         with (
-            patch("src.app.dictation_node_sentence_candidate_commit_buffer._sentences_are_revisions", return_value=True),
+            patch("src.app.dictation.node_sentence_candidate_commit_buffer._sentences_are_revisions", return_value=True),
             patch(
-                "src.app.dictation_node_sentence_candidate_commit_buffer._prefer_sentence_revision",
+                "src.app.dictation.node_sentence_candidate_commit_buffer._prefer_sentence_revision",
                 return_value="short fragment with stable tail.",
             ),
         ):
@@ -673,9 +673,9 @@ class DictationPipelineNodeTest(unittest.TestCase):
         )
 
         with (
-            patch("src.app.dictation_node_sentence_candidate_commit_buffer._sentences_are_revisions", return_value=True),
+            patch("src.app.dictation.node_sentence_candidate_commit_buffer._sentences_are_revisions", return_value=True),
             patch(
-                "src.app.dictation_node_sentence_candidate_commit_buffer._prefer_sentence_revision",
+                "src.app.dictation.node_sentence_candidate_commit_buffer._prefer_sentence_revision",
                 return_value="short fragment with stable tail.",
             ),
         ):

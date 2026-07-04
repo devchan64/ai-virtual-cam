@@ -17,7 +17,7 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from src.app.dictation_pipeline_settings import (
+from src.app.dictation.pipeline_settings import (
     PAPER_EVIDENCE_REVIEWED_FINALIZATION_CASE_TARGET,
     dictation_tuning_manifest,
     dictation_tuning_protocol,

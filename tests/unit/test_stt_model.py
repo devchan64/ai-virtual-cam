@@ -1,6 +1,6 @@
 import unittest
 
-from src.app.stt_model import Qwen3AsrVllmStreamingSttModel, SttSegment, qwen_asr_generated_text
+from src.app.models.stt_model import Qwen3AsrVllmStreamingSttModel, SttSegment, qwen_asr_generated_text
 
 
 class SttModelTest(unittest.TestCase):

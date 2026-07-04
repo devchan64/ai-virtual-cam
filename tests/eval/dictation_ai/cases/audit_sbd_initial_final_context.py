@@ -13,7 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from src.app.sentence_boundary import normalized_text
+from src.app.dictation_core.sentence_boundary import normalized_text
 from tests.eval.dictation_ai.cases.sbd_expected_quality import expected_quality_flags
 from tests.eval.dictation_ai.cases.sbd_case_paths import iter_case_paths
 from tests.eval.dictation_ai.cases.sbd_input_evidence import case_input_evidence

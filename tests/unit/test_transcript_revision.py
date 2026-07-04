@@ -1,6 +1,6 @@
 import unittest
 
-from src.app.transcript_revision import append_context, consume_committed_prefix, revision_lifecycle_context
+from src.app.dictation_core.transcript_revision import append_context, consume_committed_prefix, revision_lifecycle_context
 
 
 class TranscriptRevisionLifecycleTest(unittest.TestCase):

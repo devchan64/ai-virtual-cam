@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from src.app.dictation_pipeline_loop import SlidingAudioWindow
+from src.app.dictation.pipeline_loop import SlidingAudioWindow
 
 
 class SlidingAudioWindowTest(unittest.TestCase):

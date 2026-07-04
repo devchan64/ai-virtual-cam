@@ -1554,7 +1554,7 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
         self.assertEqual(
             summary["lifecycle_replay_summary"]["runtime_state_owner_counts"],
             {
-                "src.app.dictation_node_sentence_candidate_commit_buffer."
+                "src.app.dictation.node_sentence_candidate_commit_buffer."
                 "SentenceCandidateCommitBufferNode": 1
             },
         )
@@ -1656,7 +1656,7 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
         self.assertIn("lifecycle_state_machine_parity_counts: partial=1", markdown)
         self.assertIn(
             "lifecycle_runtime_state_owner_counts: "
-            "src.app.dictation_node_sentence_candidate_commit_buffer."
+            "src.app.dictation.node_sentence_candidate_commit_buffer."
             "SentenceCandidateCommitBufferNode=1",
             markdown,
         )
@@ -2572,7 +2572,7 @@ class DictationAiSbdParameterSweepTest(unittest.TestCase):
         self.assertIn("lifecycle_state_machine_parity: partial", markdown)
         self.assertIn(
             "lifecycle_runtime_state_owner: "
-            "src.app.dictation_node_sentence_candidate_commit_buffer.SentenceCandidateCommitBufferNode",
+            "src.app.dictation.node_sentence_candidate_commit_buffer.SentenceCandidateCommitBufferNode",
             markdown,
         )
         self.assertIn(

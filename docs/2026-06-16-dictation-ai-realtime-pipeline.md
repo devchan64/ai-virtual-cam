@@ -30,34 +30,34 @@
 
 | 모듈 | 현재 책임 | 온보딩 시 읽는 목적 |
 | --- | --- | --- |
-| `src/app/dictation_pipeline_loop.py` | 오디오 chunk 수신, STT 노드 호출, candidate 노드 호출, stage helper 조합, sink 호출을 orchestration한다. | 전체 처리 순서와 런타임 entrypoint를 파악한다. |
-| `src/app/dictation_pipeline_audio_runtime.py` | sliding window를 numpy audio와 레벨 관측값으로 정리한다. | 오디오 chunk가 루프 안으로 들어온 직후 어떤 형태로 표준화되는지 본다. |
-| `src/app/dictation_pipeline_stt_runtime.py` | `AudioEvidence` 생성과 STT recognize 호출 경계를 감싼다. | STT adapter 경계와 입력 계약이 어디서 조립되는지 본다. |
-| `src/app/dictation_pipeline_chunk_interpreter.py` | candidate 해석 결과를 completed/pending/final segment 흐름으로 정리한다. | `text 있음/없음` 분기와 pending tail 후속 처리가 어디서 묶이는지 본다. |
-| `src/app/dictation_pipeline_stage_facade.py` | loop가 직접 들고 있던 stage lifecycle callback 조합을 facade로 묶는다. | orchestration loop와 stage policy/helper 사이의 접착층을 먼저 본다. |
-| `src/app/dictation_pipeline_stage_runtime.py` | stage runtime helper의 안정된 import surface를 제공한다. 실제 구현은 candidate/finalize 하위 helper로 분리됐다. | active stage helper의 진입점과 하위 분해 구조를 파악한다. |
-| `src/app/dictation_pipeline_stage_coordinator.py` | revision/replacement 정책의 안정된 import surface를 제공한다. 실제 구현은 두 하위 helper로 분리됐다. | lifecycle 분기의 진입점과 하위 분해 구조를 파악한다. |
-| `src/app/dictation_pipeline_stage_actions.py` | staged aging, right-context finalize, no-text stale suppression을 담당한다. | chunk 간 age 증가와 stale 정리 규칙을 확인한다. |
-| `src/app/dictation_pipeline_translation.py` | final-only translation job 선택과 번역 sink 호출을 담당한다. | final-only sink 계약이 어떻게 유지되는지 본다. |
-| `src/app/dictation_pipeline_diagnostics.py` | pending 진단, 문장 진단, 성능 로그 출력을 담당한다. | 관측 지표가 어디서 계산되고 어떤 로그로 노출되는지 본다. |
-| `src/app/dictation_pipeline_runtime_support.py` | recent transcript, lifecycle metric, runtime stability metric 집계를 담당한다. | 상위 안정성 지표와 hallucination 억제 기록 방식을 본다. |
-| `src/app/dictation_pipeline_runtime_observer.py` | 큐 드롭, backlog, chunk stability snapshot을 관측 helper로 정리한다. | 루프 후반부의 runtime telemetry가 어떤 입력으로 만들어지는지 본다. |
+| `src/app/dictation/pipeline_loop.py` | 오디오 chunk 수신, STT 노드 호출, candidate 노드 호출, stage helper 조합, sink 호출을 orchestration한다. | 전체 처리 순서와 런타임 entrypoint를 파악한다. |
+| `src/app/dictation/pipeline_audio_runtime.py` | sliding window를 numpy audio와 레벨 관측값으로 정리한다. | 오디오 chunk가 루프 안으로 들어온 직후 어떤 형태로 표준화되는지 본다. |
+| `src/app/dictation/pipeline_stt_runtime.py` | `AudioEvidence` 생성과 STT recognize 호출 경계를 감싼다. | STT adapter 경계와 입력 계약이 어디서 조립되는지 본다. |
+| `src/app/dictation/pipeline_chunk_interpreter.py` | candidate 해석 결과를 completed/pending/final segment 흐름으로 정리한다. | `text 있음/없음` 분기와 pending tail 후속 처리가 어디서 묶이는지 본다. |
+| `src/app/dictation/pipeline_stage_facade.py` | loop가 직접 들고 있던 stage lifecycle callback 조합을 facade로 묶는다. | orchestration loop와 stage policy/helper 사이의 접착층을 먼저 본다. |
+| `src/app/dictation/pipeline_stage_runtime.py` | stage runtime helper의 안정된 import surface를 제공한다. 실제 구현은 candidate/finalize 하위 helper로 분리됐다. | active stage helper의 진입점과 하위 분해 구조를 파악한다. |
+| `src/app/dictation/pipeline_stage_coordinator.py` | revision/replacement 정책의 안정된 import surface를 제공한다. 실제 구현은 두 하위 helper로 분리됐다. | lifecycle 분기의 진입점과 하위 분해 구조를 파악한다. |
+| `src/app/dictation/pipeline_stage_actions.py` | staged aging, right-context finalize, no-text stale suppression을 담당한다. | chunk 간 age 증가와 stale 정리 규칙을 확인한다. |
+| `src/app/dictation/pipeline_translation.py` | final-only translation job 선택과 번역 sink 호출을 담당한다. | final-only sink 계약이 어떻게 유지되는지 본다. |
+| `src/app/dictation/pipeline_diagnostics.py` | pending 진단, 문장 진단, 성능 로그 출력을 담당한다. | 관측 지표가 어디서 계산되고 어떤 로그로 노출되는지 본다. |
+| `src/app/dictation/pipeline_runtime_support.py` | recent transcript, lifecycle metric, runtime stability metric 집계를 담당한다. | 상위 안정성 지표와 hallucination 억제 기록 방식을 본다. |
+| `src/app/dictation/pipeline_runtime_observer.py` | 큐 드롭, backlog, chunk stability snapshot을 관측 helper로 정리한다. | 루프 후반부의 runtime telemetry가 어떤 입력으로 만들어지는지 본다. |
 
 권장 읽기 순서:
 
-1. `dictation_pipeline_loop.py`에서 `run_transcribe_loop`의 상위 흐름만 본다.
-2. `dictation_pipeline_audio_runtime.py`, `dictation_pipeline_stt_runtime.py`에서 오디오와 STT 입력 경계를 본다.
-3. `dictation_pipeline_chunk_interpreter.py`에서 candidate 해석 이후 chunk-level 흐름을 본다.
-4. `dictation_pipeline_stage_facade.py`에서 loop와 stage helper 사이의 접착층을 본다.
-5. `dictation_pipeline_stage_runtime.py`에서 stage runtime 진입점을 본다.
-6. `dictation_pipeline_stage_coordinator.py`에서 revision/replacement 진입점을 본다.
+1. `dictation/pipeline_loop.py`에서 `run_transcribe_loop`의 상위 흐름만 본다.
+2. `dictation/pipeline_audio_runtime.py`, `dictation/pipeline_stt_runtime.py`에서 오디오와 STT 입력 경계를 본다.
+3. `dictation/pipeline_chunk_interpreter.py`에서 candidate 해석 이후 chunk-level 흐름을 본다.
+4. `dictation/pipeline_stage_facade.py`에서 loop와 stage helper 사이의 접착층을 본다.
+5. `dictation/pipeline_stage_runtime.py`에서 stage runtime 진입점을 본다.
+6. `dictation/pipeline_stage_coordinator.py`에서 revision/replacement 진입점을 본다.
 7. 필요할 때만 `translation`, `diagnostics`, `runtime_support`, `runtime_observer`로 내려간다.
 
-`dictation_pipeline_stage_facade.py`를 따라갈 때 facade 내부 세부가 더 필요하면 `dictation_pipeline_stage_facade_support.py`, `dictation_pipeline_stage_finalize_helpers.py`, `dictation_pipeline_stage_progression_helpers.py` 순서로 내려가면 된다. 이 셋은 loop에서 바로 읽는 진입점이 아니라 facade 내부를 더 좁힐 때만 보는 하위 모듈이다.
+`dictation/pipeline_stage_facade.py`를 따라갈 때 facade 내부 세부가 더 필요하면 `dictation/pipeline_stage_facade_support.py`, `dictation/pipeline_stage_finalize_helpers.py`, `dictation/pipeline_stage_progression_helpers.py` 순서로 내려가면 된다. 이 셋은 loop에서 바로 읽는 진입점이 아니라 facade 내부를 더 좁힐 때만 보는 하위 모듈이다.
 
-`dictation_pipeline_stage_runtime.py`를 따라갈 때는 먼저 import surface만 확인하고, 실제 정책이 필요할 때만 `dictation_pipeline_stage_runtime_candidate_helpers.py`와 `dictation_pipeline_stage_runtime_finalize_helpers.py`로 내려간다. `candidate_helpers`도 다시 `dictation_pipeline_stage_runtime_queue_helpers.py`와 `dictation_pipeline_stage_runtime_candidate_prepare_helpers.py`로 나뉘어, 전자는 queue 승격/start/suppress, 후자는 candidate 준비와 품질 차단에 집중한다. `finalize_helpers`는 finalize 보정과 final emit에 집중한다.
+`dictation/pipeline_stage_runtime.py`를 따라갈 때는 먼저 import surface만 확인하고, 실제 정책이 필요할 때만 `dictation/pipeline_stage_runtime_candidate_helpers.py`와 `dictation/pipeline_stage_runtime_finalize_helpers.py`로 내려간다. `candidate_helpers`도 다시 `dictation/pipeline_stage_runtime_queue_helpers.py`와 `dictation/pipeline_stage_runtime_candidate_prepare_helpers.py`로 나뉘어, 전자는 queue 승격/start/suppress, 후자는 candidate 준비와 품질 차단에 집중한다. `finalize_helpers`는 finalize 보정과 final emit에 집중한다.
 
-`dictation_pipeline_stage_coordinator.py`를 따라갈 때도 먼저 import surface만 확인하고, 실제 정책이 필요할 때만 `dictation_pipeline_stage_revision_helpers.py`와 `dictation_pipeline_stage_replacement_helpers.py`로 내려간다. 전자는 revision confirmation/age/reset 규칙, 후자는 replacement defer/finalize/suppress 규칙에 집중한다. 두 파일 모두 내부에서는 `defer branch`와 `post-update branch`를 나눠 읽는 편이 빠르다.
+`dictation/pipeline_stage_coordinator.py`를 따라갈 때도 먼저 import surface만 확인하고, 실제 정책이 필요할 때만 `dictation/pipeline_stage_revision_helpers.py`와 `dictation/pipeline_stage_replacement_helpers.py`로 내려간다. 전자는 revision confirmation/age/reset 규칙, 후자는 replacement defer/finalize/suppress 규칙에 집중한다. 두 파일 모두 내부에서는 `defer branch`와 `post-update branch`를 나눠 읽는 편이 빠르다.
 
 이 순서는 "어떤 문장을 어떻게 자를지"보다 "어떤 상태가 어느 모듈에서 소유되고 어떤 계약으로 다음 단계에 넘겨지는지"를 먼저 보게 하기 위한 것이다.
 
@@ -67,14 +67,14 @@
 
 | 바꾸려는 것 | 먼저 보는 모듈 | 이유 |
 | --- | --- | --- |
-| `active_stage`의 시작/승격/finalize/suppress 세부 | `dictation_pipeline_stage_runtime.py` | 먼저 안정된 import surface를 보고, 필요하면 candidate/finalize 하위 helper로 내려간다. |
-| revision과 replacement 사이의 상위 판단 | `dictation_pipeline_stage_coordinator.py` | 먼저 import surface를 보고, 필요하면 revision/replacement 하위 helper로 내려간다. |
-| age 증가, right-context finalize, no-text stale 정리 | `dictation_pipeline_stage_actions.py` | chunk progression 기반 후속 조치가 여기 있다. |
-| loop에서 stage helper들이 어떤 상태로 묶여 호출되는지 | `dictation_pipeline_stage_facade.py` | closure 대신 facade가 현재 chunk 상태와 callback 조합을 가진다. |
-| 번역이 언제 호출되는지, final-only sink 유지 | `dictation_pipeline_translation.py` | translation은 lifecycle 이후 sink로만 호출된다. |
-| pending/성능/stability 로그 문구나 지표 출력 | `dictation_pipeline_diagnostics.py`, `dictation_pipeline_runtime_support.py` | 로그 조립과 metric 집계가 분리돼 있다. |
-| chunk 단위 candidate 해석과 pending/final 분기 | `dictation_pipeline_chunk_interpreter.py` | loop 중간의 `text 있음/없음` 분기를 여기서 먼저 좁힐 수 있다. |
-| 노드 호출 순서, chunk 루프, 모듈 연결 방식 | `dictation_pipeline_loop.py` | orchestration entrypoint는 여기 하나다. |
+| `active_stage`의 시작/승격/finalize/suppress 세부 | `dictation/pipeline_stage_runtime.py` | 먼저 안정된 import surface를 보고, 필요하면 candidate/finalize 하위 helper로 내려간다. |
+| revision과 replacement 사이의 상위 판단 | `dictation/pipeline_stage_coordinator.py` | 먼저 import surface를 보고, 필요하면 revision/replacement 하위 helper로 내려간다. |
+| age 증가, right-context finalize, no-text stale 정리 | `dictation/pipeline_stage_actions.py` | chunk progression 기반 후속 조치가 여기 있다. |
+| loop에서 stage helper들이 어떤 상태로 묶여 호출되는지 | `dictation/pipeline_stage_facade.py` | closure 대신 facade가 현재 chunk 상태와 callback 조합을 가진다. |
+| 번역이 언제 호출되는지, final-only sink 유지 | `dictation/pipeline_translation.py` | translation은 lifecycle 이후 sink로만 호출된다. |
+| pending/성능/stability 로그 문구나 지표 출력 | `dictation/pipeline_diagnostics.py`, `dictation/pipeline_runtime_support.py` | 로그 조립과 metric 집계가 분리돼 있다. |
+| chunk 단위 candidate 해석과 pending/final 분기 | `dictation/pipeline_chunk_interpreter.py` | loop 중간의 `text 있음/없음` 분기를 여기서 먼저 좁힐 수 있다. |
+| 노드 호출 순서, chunk 루프, 모듈 연결 방식 | `dictation/pipeline_loop.py` | orchestration entrypoint는 여기 하나다. |
 
 수정 전 빠른 점검:
 

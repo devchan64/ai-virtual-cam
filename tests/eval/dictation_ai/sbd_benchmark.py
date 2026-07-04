@@ -14,15 +14,15 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from src.app.sentence_boundary import create_sentence_boundary_detector, normalized_text
-from src.app.dictation_pipeline_settings import (
+from src.app.dictation_core.sentence_boundary import create_sentence_boundary_detector, normalized_text
+from src.app.dictation.pipeline_settings import (
     FINAL_SENTENCE_MATCH_MIN_SIMILARITY,
     SBD_BENCHMARK_BACKEND,
     SBD_BENCHMARK_COMPUTE_TYPE,
     SBD_BENCHMARK_DEVICE,
     SBD_BENCHMARK_MODEL,
 )
-from src.app.dictation_revision_text import _word_units
+from src.app.dictation_core.dictation_revision_text import _word_units
 from tests.eval.dictation_ai.cases.sbd_case_paths import (
     case_corpus_role as _case_corpus_role,
     default_case_inputs as _default_case_inputs,

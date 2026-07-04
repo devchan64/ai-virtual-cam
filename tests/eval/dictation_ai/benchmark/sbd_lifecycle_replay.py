@@ -2,17 +2,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.app.dictation_node_sentence_candidate_commit_buffer import SentenceCandidateCommitBufferNode
-from src.app.dictation_pipeline_contracts import ActiveSentenceCandidate
-from src.app.sentence_boundary import normalized_text
-from src.app.dictation_pipeline_settings import (
+from src.app.dictation.node_sentence_candidate_commit_buffer import SentenceCandidateCommitBufferNode
+from src.app.dictation.pipeline_contracts import ActiveSentenceCandidate
+from src.app.dictation_core.sentence_boundary import normalized_text
+from src.app.dictation.pipeline_settings import (
     delta_suppressed_stage_max_chunks,
     max_staged_sentence_queue,
     no_text_stale_stage_suppress_chunks,
     staged_queue_max_promotion_age_chunks,
 )
-from src.app.dictation_recent_final import _recent_final_output_delta_with_reason
-from src.app.dictation_revision_progression import (
+from src.app.dictation_core.dictation_recent_final import _recent_final_output_delta_with_reason
+from src.app.dictation_core.dictation_revision_progression import (
     _next_revision_confirmation_count,
     _pending_overrun_reason,
     _pending_text_diagnostic_flags,
@@ -23,14 +23,14 @@ from src.app.dictation_revision_progression import (
     _should_preserve_revision_confirmation_from_internal_stability,
     _should_reset_revision_age,
 )
-from src.app.dictation_revision_text import (
+from src.app.dictation_core.dictation_revision_text import (
     _final_sentence_diagnostic_flags,
     _is_cjk_text,
     _sentence_output_delta,
     _sentences_are_revisions,
     _word_units,
 )
-from src.app.dictation_transcript_logic import (
+from src.app.dictation_core.dictation_transcript_logic import (
     _coalesce_completed_short_no_end_fragments,
     _has_later_completed_extension,
     _is_pending_prefix_mixed_candidate,
@@ -52,9 +52,9 @@ from src.app.dictation_transcript_logic import (
     _strip_prior_pending_prefix_from_final,
     _strip_prior_pending_prefix_revision,
 )
-from src.app.stable_token_detection import analyze_stable_window
-from src.app.transcript_revision import append_context as _append_committed_text
-from src.app.transcript_revision import consume_committed_prefix as _consume_committed_prefix
+from src.app.dictation_core.stable_token_detection import analyze_stable_window
+from src.app.dictation_core.transcript_revision import append_context as _append_committed_text
+from src.app.dictation_core.transcript_revision import consume_committed_prefix as _consume_committed_prefix
 from tests.eval.dictation_ai.benchmark.sbd_lifecycle_state import (
     LifecycleState,
     _stable_internal_chars,

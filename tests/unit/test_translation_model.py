@@ -1,6 +1,6 @@
 import unittest
 
-from src.app.translation_model import (
+from src.app.models.translation_model import (
     MockTextTranslator,
     TranslationRequest,
     _m2m100_generation_kwargs,
@@ -72,11 +72,11 @@ class TranslationModelTest(unittest.TestCase):
         torch = _FakeTorch(_FakeCuda(capability=(8, 0), arches=["sm_80"]))
 
         with self.assertRaisesRegex(RuntimeError, "translationDevice=auto"):
-            from src.app.translation_model import NllbTransformersTranslator
+            from src.app.models.translation_model import NllbTransformersTranslator
 
             NllbTransformersTranslator._resolve_device(torch, "auto")
         with self.assertRaisesRegex(RuntimeError, "translationComputeType=auto"):
-            from src.app.translation_model import NllbTransformersTranslator
+            from src.app.models.translation_model import NllbTransformersTranslator
 
             NllbTransformersTranslator._resolve_dtype(torch, "auto", "cuda")
 

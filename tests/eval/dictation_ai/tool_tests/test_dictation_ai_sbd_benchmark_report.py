@@ -174,7 +174,7 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(report["lifecycle_replay_contract"]["state_machine_parity"], "partial")
         self.assertEqual(
             report["lifecycle_replay_contract"]["runtime_state_owner"],
-            "src.app.dictation_node_sentence_candidate_commit_buffer.SentenceCandidateCommitBufferNode",
+            "src.app.dictation.node_sentence_candidate_commit_buffer.SentenceCandidateCommitBufferNode",
         )
         self.assertEqual(
             report["lifecycle_replay_contract"]["replay_state_owner"],
@@ -185,7 +185,7 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
             report["lifecycle_replay_contract"]["shared_state_transitions"],
         )
         self.assertIn(
-            "src.app.dictation_revision_text._sentences_are_revisions",
+            "src.app.dictation_core.dictation_revision_text._sentences_are_revisions",
             report["lifecycle_replay_contract"]["shared_decision_helpers"],
         )
         self.assertIn(

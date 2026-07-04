@@ -4,9 +4,9 @@ from difflib import SequenceMatcher
 from functools import lru_cache
 from typing import Any
 
-from src.app.dictation_pipeline_settings import FINAL_SENTENCE_MATCH_MIN_SIMILARITY
-from src.app.dictation_revision_text import _word_units
-from src.app.sentence_boundary import normalized_text
+from src.app.dictation.pipeline_settings import FINAL_SENTENCE_MATCH_MIN_SIMILARITY
+from src.app.dictation_core.dictation_revision_text import _word_units
+from src.app.dictation_core.sentence_boundary import normalized_text
 
 
 def _boundary_offsets(sentences: list[str]) -> set[int]:

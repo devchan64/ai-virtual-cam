@@ -2,8 +2,8 @@ import queue
 import types
 import unittest
 
-from src.app.dictation_window import WhisperTranscriptWorker
-from src.app.dictation_window_events import TranscriptEvent
+from src.app.dictation.window import WhisperTranscriptWorker
+from src.app.dictation.window_events import TranscriptEvent
 
 
 class DictationWindowEventTest(unittest.TestCase):

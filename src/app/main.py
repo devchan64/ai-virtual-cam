@@ -15,7 +15,7 @@ from src.adapter.capture.opencv_capture import OpenCVCapture
 from src.adapter.output.factory import build_output
 from src.audio.mixer import VirtualAudioMixer
 from src.domain.config import AppConfig
-from src.app.rotating_log import install_rotating_stdout_log
+from src.app.shared.rotating_log import install_rotating_stdout_log
 from src.pipeline.runner import PipelineRunner
 
 
@@ -109,7 +109,7 @@ def main() -> int:
         _log("[avc] camera pipeline disabled by config (cameraServer.enabled=false)")
     whisper_process: subprocess.Popen | None = None
     if args.with_whisper_window and config.dictationAi.enabled:
-        whisper_cmd = [sys.executable, "-m", "src.app.dictation_window", "--config", str(config_path)]
+        whisper_cmd = [sys.executable, "-m", "src.app.dictation.window", "--config", str(config_path)]
         try:
             whisper_process = subprocess.Popen(whisper_cmd, env=_child_env_with_nvidia_libraries())
             _log(f"[avc] Dictation AI transcript window started (pid={whisper_process.pid})")
