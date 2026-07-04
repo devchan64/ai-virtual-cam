@@ -33007,3 +33007,436 @@ HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
   해결하는 안정적 개선축이 아니라 trade-off 축으로 남는다.
 - 따라서 현재 checked-in 기본값을 유지하되, 이후 구조 실험도 이 recheck baseline을 기준으로만
   비교한다.
+
+## 2026-07-05 aged queue backlog promotion `zh` 한정 재검증
+
+배경:
+
+- `aged` 또는 `aged_forced`로 staged 문장이 소비될 때 queue backlog가 큰 경우, 다음 head 후보를
+  한 chunk 더 오래 stage로 승격시킬 수 있게 하는 backlog promotion boost를 실험했다.
+- 초기 full challenge replay에서는 전체 `final_f1_avg`와 `final_similarity_coverage_avg`가
+  소폭 상승했고, 개선 대부분이 `zh`에서 나왔다.
+- 반면 `en`에서는 미세한 순이득만 있었고, `ko`는 변화가 없었다. 따라서 이 규칙이 실제로는
+  `zh` backlog 병목만 풀고 있는지 현재 코드 기준으로 다시 확인했다.
+
+현재 코드:
+
+- `AGED_QUEUE_BACKLOG_PROMOTION_MIN=3`
+- `AGED_QUEUE_BACKLOG_PROMOTION_EXTRA_AGE=1`
+- `_should_enable_aged_queue_backlog_promotion_boost()`는 `reason in {"aged", "aged_forced"}`와
+  queue 크기 조건을 만족하더라도 `language == "zh"`일 때만 활성화한다.
+
+실행:
+
+- disabled:
+  - `HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 AVC_DICTATION_AGED_QUEUE_BACKLOG_PROMOTION_EXTRA_AGE=0 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py --device cuda --compute-type float16 --output .tmp/eval/dictation-ai-sbd/all-aged-backlog-promotion-zhonly-disabled-current.json`
+- enabled:
+  - `HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py --device cuda --compute-type float16 --output .tmp/eval/dictation-ai-sbd/all-aged-backlog-promotion-zhonly-enabled-current.json`
+- 실행 조건:
+  - 실제 `sat + cuda + float16`
+  - corpus=`challenge-replay` 933건
+  - code=`HEAD 71df53f`
+
+결과:
+
+| metric | disabled | enabled | delta |
+| --- | ---: | ---: | ---: |
+| `final_f1_avg` | 0.649140 | 0.651758 | +0.002617 |
+| `final_similarity_coverage_avg` | 0.544433 | 0.546623 | +0.002190 |
+| `boundary_granularity_adjusted_f1_avg` | 0.730886 | 0.730952 | +0.000066 |
+| `finalized_per_stage_start` | 0.579038 | 0.578407 | -0.000631 |
+| `long_missing_final_rate` | 0.161 | 0.151 | -0.010 |
+| `long_merge_error_rate` | 0.293 | 0.287 | -0.006 |
+
+언어별:
+
+| language | disabled `final_f1_avg` | enabled `final_f1_avg` | delta | 해석 |
+| --- | ---: | ---: | ---: | --- |
+| `en` | 0.671394 | 0.671394 | +0.000000 | `zh` 한정 후 baseline으로 복귀 |
+| `ko` | 0.570258 | 0.570258 | +0.000000 | 변화 없음 |
+| `zh` | 0.696751 | 0.705289 | +0.008538 | 개선 유지 |
+
+이전 generic boost 대비:
+
+- 비교군:
+  - disabled=`.tmp/eval/dictation-ai-sbd/all-aged-backlog-promotion-boost-disabled.json`
+  - enabled=`.tmp/eval/dictation-ai-sbd/all-aged-backlog-promotion-boost-enabled.json`
+- generic enabled 대비 `zh` 한정 enabled는 `final_f1_avg -0.000088`,
+  `final_similarity_coverage_avg -0.000031`로 사실상 동일했다.
+- 대신 generic에서 남아 있던 영어 미세 변화(`final_f1_avg +0.000222`)를 제거해, 규칙의 실제 효과
+  범위를 `zh` backlog 병목으로 더 명확하게 좁혔다.
+
+판단:
+
+- 이 규칙은 전언어 공통 튜닝이라기보다 `zh` queue backlog에서 staged head를 너무 빨리 포기하던
+  lifecycle 병목을 완화하는 보정으로 보는 것이 정확하다.
+- 주지표인 `final_similarity_coverage_avg`와 `final_f1_avg` 개선은 유지되고, `en/ko` side effect는
+  제거되므로 현재 운영 코드는 `zh` 한정 활성화 상태를 유지한다.
+- `boundary_granularity_adjusted_f1_avg` 이득은 generic보다 줄었지만, 현재 채택 기준은 boundary
+  보조축보다 final similarity와 long-sentence 누락/오병합 완화에 둔다.
+
+## 2026-07-05 `sentence_finalize_age` 언어별 상향 기각
+
+배경:
+
+- `zh` backlog boost를 `zh` 한정으로 유지한 뒤에도 구조 trace 상위 사례에는 `ko`와 `en`의 이른
+  `aged` 소비가 남아 있었다.
+- 특히 `predicted-ko-004.jsonl:9`, `predicted-ko-007.jsonl:37`, `predicted-en-003.jsonl:37` 같은
+  케이스에서는 queue에 더 나은 후속 revision이 이미 쌓여 있는데도 현재 staged가 age 기준으로 먼저
+  final 처리되는 패턴이 반복됐다.
+- 가장 단순한 파라미터 가설은 해당 언어의 `sentence_finalize_age`를 올려 early aged finalize를
+  늦추는 것이다. 로직 예외를 추가하기 전에 이 축을 full replay로 확인했다.
+
+실행:
+
+- baseline:
+  - `.tmp/eval/dictation-ai-sbd/all-aged-backlog-promotion-zhonly-enabled-current.json`
+- `en_age4`:
+  - `HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py --device cuda --compute-type float16 --override-sentence-finalize-age-en 4 --output .tmp/eval/dictation-ai-sbd/all-aged-backlog-zhonly-enage4.json`
+- `ko_age4`:
+  - `HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py --device cuda --compute-type float16 --override-sentence-finalize-age-ko 4 --output .tmp/eval/dictation-ai-sbd/all-aged-backlog-zhonly-koage4.json`
+- 실행 조건:
+  - 실제 `sat + cuda + float16`
+  - corpus=`challenge-replay` 933건
+  - code=`HEAD 71df53f`
+
+비교:
+
+| variant | `final_f1_avg` delta | `final_similarity_coverage_avg` delta | `boundary_granularity_adjusted_f1_avg` delta | `finalized_per_stage_start` delta |
+| --- | ---: | ---: | ---: | ---: |
+| `en_age4` | +0.000001 | +0.002617 | -0.007482 | +0.013525 |
+| `ko_age4` | -0.007899 | -0.004907 | -0.010939 | -0.005496 |
+
+길이 strata:
+
+| variant | `long_missing_final_rate` delta | `long_merge_error_rate` delta | `short_missing_final_rate` delta | 해석 |
+| --- | ---: | ---: | ---: | --- |
+| `en_age4` | +0.011096 | +0.006935 | +0.000000 | 긴 문장 누락/오병합 완화 실패 |
+| `ko_age4` | +0.006935 | +0.005548 | +0.051471 | 긴 문장도 나빠지고 짧은 문장 누락이 크게 악화 |
+
+언어별:
+
+- `en_age4`
+  - `en final_f1_avg`: `+0.000004`
+  - `en final_similarity_coverage_avg`: `+0.006600`
+  - `en finalized_per_stage_start`: `+0.035231`
+  - 하지만 이는 더 많은 staged 소비량 증가에 가깝고, 전체 long strata는 `missing_final_rate`와
+    `merge_error_rate`가 함께 악화됐다.
+- `ko_age4`
+  - `ko final_f1_avg`: `-0.026607`
+  - `ko final_similarity_coverage_avg`: `-0.016529`
+  - `ko finalized_per_stage_start`: `-0.026703`
+  - 짧은 문장 `missing_final_rate`가 `+0.051471` 올라 short fast-consume 특성도 훼손됐다.
+
+trace 해석:
+
+- 상위 trace는 `stage_replace_deferred`와 `stage_queue_revision`이 높은 상태에서 잘못된 staged가
+  age로 먼저 소비되는 모습을 보여줬다.
+- 하지만 언어별 `sentence_finalize_age`를 올리면 이 병목이 "더 나은 revision을 기다리는 방향"으로
+  풀리기보다, 전체 queue bypass를 줄이면서 긴 문장 merge/no-final과 짧은 문장 final 지연을 동시에
+  악화시켰다.
+- 즉 현재 문제는 단순 age 부족이 아니라, replacement/queue 소비 순서와 품질 판단이 함께 얽힌
+  lifecycle 병목으로 보는 편이 맞다.
+
+판단:
+
+- `sentence_finalize_age`의 `en` 또는 `ko` 상향은 현재 challenge replay 기준 채택하지 않는다.
+- 다음 실험은 age 자체를 올리기보다, `stage_replace_deferred`와 `stage_queue_revision`이 높은
+  케이스에서 queue head를 어떻게 소비하거나 억제할지를 보는 replacement/queue 규칙 쪽으로
+  제한한다.
+
+## 2026-07-05 aged queue competition suppression 기각
+
+배경:
+
+- 구조 trace를 보면 `predicted-ko-004.jsonl:9`, `predicted-ko-007.jsonl:37`,
+  `predicted-en-003.jsonl:37` 같은 사례에서 queue에 더 좋은 후속 후보가 여러 개 쌓여 있는데도
+  현재 staged가 `aged`로 먼저 final 처리되는 패턴이 보였다.
+- 이에 따라 `aged` finalize 직전 backlog가 충분히 크고, queue 안에 현재 staged보다 더 긴 closed
+  후보가 있으면 현재 staged를 suppress하고 queue를 먼저 승격시키는 일반 규칙을 시도했다.
+- 의도는 `stage_replace_deferred`/`stage_queue_revision`이 높은 케이스의 잘못된 조기 final을
+  줄이는 것이었다.
+
+실험 규칙:
+
+- 조건:
+  - `reason in {"aged", "aged_forced"}`
+  - `staged_confirmations < sentence_required_confirmations`
+  - `staged_confirmations <= 2`
+  - queue 크기 `>= 4`
+  - queue 안에 현재 staged보다 최소 2 unit 이상 긴 closed 후보가 하나 이상 존재
+- 구현:
+  - runtime과 benchmark mirror에서 `finalize_aged_queue_competition_suppressed`를 추가해
+    staged를 버리고 queue head를 즉시 승격시켰다.
+
+실행:
+
+- enabled:
+  - `HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py --device cuda --compute-type float16 --output .tmp/eval/dictation-ai-sbd/all-aged-queue-competition-enabled.json`
+- disabled:
+  - `HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 AVC_DICTATION_AGED_QUEUE_COMPETITION_SUPPRESS_MIN=0 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py --device cuda --compute-type float16 --output .tmp/eval/dictation-ai-sbd/all-aged-queue-competition-disabled.json`
+- 실행 조건:
+  - 실제 `sat + cuda + float16`
+  - corpus=`challenge-replay` 933건
+  - code 실험 branch 기준, disabled는 같은 코드에서 새 규칙만 끈 비교군
+
+결과:
+
+| metric | disabled | enabled | delta |
+| --- | ---: | ---: | ---: |
+| `final_f1_avg` | 0.651846 | 0.653810 | +0.001964 |
+| `final_similarity_coverage_avg` | 0.546654 | 0.550644 | +0.003989 |
+| `strict_final_f1_avg` | 0.836 | 0.839 | +0.002793 |
+| `boundary_granularity_adjusted_f1_avg` | 0.731 | 0.730 | -0.000456 |
+| `finalized_per_stage_start` | 0.578 | 0.557 | -0.021099 |
+
+길이 strata:
+
+| metric | delta |
+| --- | ---: |
+| `long_missing_final_rate` | +0.015257 |
+| `long_merge_error_rate` | +0.011096 |
+| `short_missing_final_rate` | +0.029412 |
+
+언어별:
+
+| language | `final_f1_avg` delta | `final_similarity_coverage_avg` delta | `finalized_per_stage_start` delta |
+| --- | ---: | ---: | ---: |
+| `en` | +0.007819 | +0.010619 | -0.024714 |
+| `ko` | -0.001198 | +0.000602 | -0.035767 |
+| `zh` | -0.002548 | -0.001306 | -0.011472 |
+
+해석:
+
+- aggregate `final_f1_avg`와 `final_similarity_coverage_avg`는 소폭 상승했지만, 목표였던 long sentence
+  병목은 오히려 악화됐다.
+- `long_missing_final_rate`와 `long_merge_error_rate`가 모두 올라간 것은 queue를 먼저 보게 하는
+  suppression이 "잘못된 조기 final 제거"보다 "필요한 final 자체를 늦추거나 놓치는 효과"를 더 크게
+  냈다는 의미다.
+- short strata의 `missing_final_rate`까지 `+0.029412` 상승했기 때문에, 이 규칙은 빠른 소비 특성도
+  훼손했다.
+- 개선 신호는 거의 `en` aggregate에 편중됐고, `ko`/`zh`는 유지되지 못했다. 현재 병목을
+  replacement/queue 경쟁만으로 단순 억제해서 해결할 수 없다는 근거로 본다.
+
+판단:
+
+- aged queue competition suppression 규칙은 채택하지 않고 코드에서 제거한다.
+- 다음 실험은 "현재 staged를 버릴지 말지"보다, queue promotion과 replacement ordering 자체가 어떤
+  기준으로 head를 선택해야 하는지 보는 방향으로 더 좁혀야 한다.
+
+## 2026-07-05 idle queue promotion reorder 기각
+
+배경:
+
+- suppression 실험을 기각한 뒤에도 구조 trace에서는 queue head가 너무 짧거나 덜 완성된 후보이고,
+  더 나은 closed 후보가 queue 뒤쪽에 남아 있는 모습이 반복됐다.
+- 특히 `predicted-ko-004.jsonl:9`, `predicted-ko-007.jsonl:37`, `predicted-en-003.jsonl:37`
+  같은 케이스에서 idle promotion이 FIFO 기준으로 `Come on.`, `괜찮으시냐고 그랬대.` 같은 head를 먼저
+  올리는 동안, 뒤쪽의 더 긴 closed 문장은 늦게 승격되거나 끝내 final로 못 갔다.
+- 그래서 finalize/suppress가 아니라 queue head 선택만 보수적으로 바꾸는 실험을 했다.
+
+실험 규칙:
+
+- `promote_if_idle()`에서 queue 길이가 충분하고,
+  - head가 아직 required confirmation에 미달하며
+  - 뒤쪽에 같은 이상 confirmation의 더 긴 closed 후보가 있으면
+  - 그 후보를 먼저 승격한다.
+- 즉 FIFO 전체를 버리는 것이 아니라, "head보다 더 완성도가 높은 closed 후보"가 있을 때만 reorder하는
+  idle promotion 규칙이다.
+
+실행:
+
+- enabled:
+  - `HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py --device cuda --compute-type float16 --output .tmp/eval/dictation-ai-sbd/all-queue-promotion-reorder-enabled.json`
+- baseline:
+  - `.tmp/eval/dictation-ai-sbd/all-aged-backlog-promotion-zhonly-enabled-current.json`
+- 실행 조건:
+  - 실제 `sat + cuda + float16`
+  - corpus=`challenge-replay` 933건
+
+결과:
+
+| metric | baseline | reorder | delta |
+| --- | ---: | ---: | ---: |
+| `final_f1_avg` | 0.651758 | 0.647118 | -0.004640 |
+| `final_similarity_coverage_avg` | 0.546623 | 0.544405 | -0.002218 |
+| `strict_final_f1_avg` | 0.837 | 0.822 | -0.014347 |
+| `boundary_granularity_adjusted_f1_avg` | 0.731 | 0.701 | -0.029538 |
+| `finalized_per_stage_start` | 0.578 | 0.578 | -0.000489 |
+
+길이 strata:
+
+| metric | delta |
+| --- | ---: |
+| `long_missing_final_rate` | +0.013870 |
+| `long_merge_error_rate` | +0.015257 |
+| `short_missing_final_rate` | -0.007353 |
+
+언어별:
+
+| language | `final_f1_avg` delta | `final_similarity_coverage_avg` delta |
+| --- | ---: | ---: |
+| `en` | -0.000449 | +0.001378 |
+| `ko` | -0.004866 | -0.001659 |
+| `zh` | -0.009843 | -0.007412 |
+
+해석:
+
+- 의도와 달리 queue reorder는 long sentence 병목을 줄이지 못했고, `long_missing_final_rate`와
+  `long_merge_error_rate`를 함께 악화시켰다.
+- `strict_final_f1_avg -0.014347`과 `boundary_granularity_adjusted_f1_avg -0.029538` 하락도 커서,
+  "더 나은 queue head를 먼저 올린다"는 국소 직관이 전체 lifecycle ordering에서는 성립하지 않았다.
+- short strata는 약간 좋아졌지만, 이 목표는 긴 문장 누락/오병합 완화보다 우선순위가 낮다.
+- 특히 `zh`와 `ko`가 함께 악화돼, reorder가 다국어 공통 개선축이라고 보기 어렵다.
+
+판단:
+
+- idle queue promotion reorder 규칙은 채택하지 않고 코드에서 제거한다.
+- 다음 실험은 queue ordering 자체를 뒤섞기보다, `stage_finalize_deferred_for_queue_revision`과
+  `stage_queue_revision_preempt_deferred`가 언제 발생하는지 다시 좁혀 보는 편이 더 안전하다.
+
+## 2026-07-05 unready active queue revision 허용 기각
+
+배경:
+
+- `queued revision preferred` 경로를 full report에서 다시 확인하니, `stage_finalize_deferred_for_queue_revision`
+  또는 `stage_queue_revision_preempt_deferred`가 찍힌 케이스는 51건이었고 대부분 `zh`였다.
+- 현재 보호 규칙은 "closed active sentence가 있고 queued revision confirmation이 낮으면 active를
+  그대로 보호"하는데, 이 때문에 unready active가 더 나은 queued revision으로 교체되지 못하는
+  상황이 있는지 검증할 필요가 있었다.
+- 다만 기존 unit test는 ready active final을 약한 queued revision으로부터 보호하는 계약을 이미
+  검증하고 있었기 때문에, 실험은 이를 완전히 제거하지 않고 "active가 아직 required confirmation에
+  도달하지 못한 경우에만 queued revision을 허용"하는 좁은 형태로 제한했다.
+
+실험 규칙:
+
+- 기존:
+  - closed active sentence
+  - queued revision end-marker가 더 강하지 않음
+  - queued confirmation이 required confirmation보다 낮음
+  - 이 조건이면 active 보호, `stage_queue_revision_preempt_deferred`
+- 실험:
+  - 위 보호를 `active.confirmations < required_confirmation`일 때는 적용하지 않음
+  - 즉 ready active만 보호하고, unready active는 queued revision으로 교체 허용
+
+실행:
+
+- enabled:
+  - `HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py --device cuda --compute-type float16 --output .tmp/eval/dictation-ai-sbd/all-queue-revision-active-unready-enabled.json`
+- baseline:
+  - `.tmp/eval/dictation-ai-sbd/all-aged-backlog-promotion-zhonly-enabled-current.json`
+- 실행 조건:
+  - 실제 `sat + cuda + float16`
+  - corpus=`challenge-replay` 933건
+
+결과:
+
+| metric | baseline | enabled | delta |
+| --- | ---: | ---: | ---: |
+| `final_f1_avg` | 0.651758 | 0.650234 | -0.001524 |
+| `final_similarity_coverage_avg` | 0.546623 | 0.545729 | -0.000894 |
+| `boundary_granularity_adjusted_f1_avg` | 0.730952 | 0.729595 | -0.001357 |
+| `strict_final_f1_avg` | 0.837 | 0.837 | +0.000000 |
+| `finalized_per_stage_start` | 0.578407 | 0.579814 | +0.001407 |
+
+길이 strata:
+
+| metric | delta |
+| --- | ---: |
+| `long_missing_final_rate` | +0.005548 |
+| `long_merge_error_rate` | +0.002774 |
+| `long_queue_bypass_rate` | +0.001387 |
+| `short_missing_final_rate` | +0.000000 |
+
+언어별:
+
+| language | `final_f1_avg` delta | `final_similarity_coverage_avg` delta | `finalized_per_stage_start` delta |
+| --- | ---: | ---: | ---: |
+| `en` | +0.000000 | +0.000000 | +0.000000 |
+| `ko` | +0.000000 | +0.000000 | +0.000000 |
+| `zh` | -0.004973 | -0.002915 | +0.000845 |
+
+관련 metric 변화:
+
+- `stage_finalize_deferred_for_queue_revision`: `+53`
+- `stage_queue_revision_preempt_deferred`: `-48`
+
+해석:
+
+- 의도대로 preempt 보호는 줄고 queued revision deferred finalize는 늘어났다.
+- 하지만 그 변화는 거의 전부 `zh`에만 반영됐고, 실제 품질은 `zh final_f1_avg`와
+  `final_similarity_coverage_avg`가 함께 하락했다.
+- aggregate에서는 손실 폭이 아주 크지는 않지만, 목표였던 long sentence 병목도
+  `missing_final_rate`와 `merge_error_rate`가 모두 소폭 악화됐다.
+- 즉 이 규칙은 counter 수준에서는 병목 위치를 이동시키지만, 실제 final quality 개선으로 이어지지
+  않았다.
+
+판단:
+
+- unready active queue revision 허용 규칙은 채택하지 않고 코드에서 제거한다.
+- 다음 단계는 `queued revision preferred` 경로 자체보다, queue가 비어 있거나 짧은 closed staged가
+  남는 케이스에서 active candidate 품질/confirmation을 어떻게 더 보수적으로 볼지 쪽으로 좁히는
+  편이 맞다.
+
+## 2026-07-05 `SHORT_CJK_CONFIRM_EXTRA_CHUNKS=1` 현재 corpus 재검증 기각
+
+배경:
+
+- 현재 933건 challenge replay에서도 queue가 비어 있거나 짧은 closed active staged가 남는 케이스가
+  반복됐다.
+- `short_cjk_replacement_hold_chunks`는 이미 현재 baseline과 같은 축으로 닫혀 있었기 때문에,
+  더 직접적인 파라미터인 `SHORT_CJK_CONFIRM_EXTRA_CHUNKS=1`만 올렸을 때 짧은 CJK 조각이 덜
+  섣불리 final 처리되는지 다시 확인했다.
+- 이 실험은 새 규칙 추가가 아니라 기존 파라미터 한 칸 조정만으로 현재 corpus에서 실효가 있는지
+  보는 목적이다.
+
+실행:
+
+- variant:
+  - `HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 AVC_DICTATION_SHORT_CJK_CONFIRM_EXTRA_CHUNKS=1 ./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py --device cuda --compute-type float16 --output .tmp/eval/dictation-ai-sbd/all-short-cjk-confirm-extra-1-current.json`
+- baseline:
+  - `.tmp/eval/dictation-ai-sbd/all-aged-backlog-promotion-zhonly-enabled-current.json`
+- 실행 조건:
+  - 실제 `sat + cuda + float16`
+  - corpus=`challenge-replay` 933건
+
+결과:
+
+| metric | baseline | variant | delta |
+| --- | ---: | ---: | ---: |
+| `final_f1_avg` | 0.651758 | 0.632011 | -0.019747 |
+| `final_similarity_coverage_avg` | 0.546623 | 0.527125 | -0.019498 |
+| `boundary_granularity_adjusted_f1_avg` | 0.730952 | 0.721378 | -0.009574 |
+| `strict_final_f1_avg` | 0.837 | 0.831 | -0.005629 |
+| `finalized_per_stage_start` | 0.578407 | 0.545053 | -0.033354 |
+
+길이 strata:
+
+| metric | delta |
+| --- | ---: |
+| `long_missing_final_rate` | +0.034674 |
+| `long_merge_error_rate` | +0.020804 |
+| `long_queue_bypass_rate` | -0.023578 |
+| `short_missing_final_rate` | +0.007353 |
+
+언어별:
+
+| language | `final_f1_avg` delta | `final_similarity_coverage_avg` delta | `finalized_per_stage_start` delta |
+| --- | ---: | ---: | ---: |
+| `en` | +0.000000 | +0.000000 | +0.000000 |
+| `ko` | +0.000000 | +0.000000 | +0.000000 |
+| `zh` | -0.064418 | -0.063606 | -0.082231 |
+
+해석:
+
+- 현재 corpus에서는 이 축이 사실상 `zh`만 직접 건드리며, 그 영향이 전반적으로 악화 방향이었다.
+- 짧은 CJK를 한 번 더 기다리게 하면 조기 final 일부는 줄 수 있지만, 실제로는 final 소비량 자체가
+  크게 줄어 `finalized_per_stage_start`가 떨어지고 long sentence 누락/오병합이 함께 늘었다.
+- `short_missing_final_rate`도 좋아지지 않았기 때문에, "짧은 CJK를 더 보수적으로 본다"는 단순
+  파라미터는 현재 병목을 해결하지 못한다.
+
+판단:
+
+- `SHORT_CJK_CONFIRM_EXTRA_CHUNKS=1`은 현재 933건 challenge replay 기준 기각한다.
+- 다음 실험은 short CJK 자체를 더 기다리게 하는 방향보다, 짧은 closed staged가 어떤 revision churn
+  조건에서 active로 남는지 추적해 active candidate quality gate를 더 구조적으로 보는 편이 맞다.
