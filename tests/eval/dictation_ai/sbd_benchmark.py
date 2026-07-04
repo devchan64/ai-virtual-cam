@@ -6,6 +6,7 @@ import importlib
 import json
 import sys
 import time
+from dataclasses import replace
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,30 @@ from tests.eval.dictation_ai.benchmark.sbd_lifecycle_scoring import (
 )
 from tests.eval.dictation_ai.benchmark.sbd_runtime_contract import force_offline_model_cache_env
 from tests.eval.dictation_ai.cases.validate_sbd_case_files import validate_case_files
+
+
+def _apply_sentence_finalize_age_override(
+    cases: list[SbdCase],
+    override_sentence_finalize_age: int | None,
+    language_overrides: dict[str, int] | None = None,
+) -> list[SbdCase]:
+    normalized_language_overrides = {
+        str(language).strip().lower(): int(value)
+        for language, value in dict(language_overrides or {}).items()
+        if value is not None
+    }
+    if override_sentence_finalize_age is None and not normalized_language_overrides:
+        return cases
+    return [
+        replace(
+            case,
+            sentence_finalize_age=normalized_language_overrides.get(
+                case.language,
+                int(override_sentence_finalize_age if override_sentence_finalize_age is not None else case.sentence_finalize_age),
+            ),
+        )
+        for case in cases
+    ]
 
 def _build_subcommand_targets() -> dict[str, str]:
     case_commands = {
@@ -167,6 +192,18 @@ def main() -> int:
     parser.add_argument("--model", default=SBD_BENCHMARK_MODEL)
     parser.add_argument("--device", default=SBD_BENCHMARK_DEVICE)
     parser.add_argument("--compute-type", default=SBD_BENCHMARK_COMPUTE_TYPE)
+    parser.add_argument(
+        "--override-sentence-finalize-age",
+        type=int,
+        default=None,
+        help=(
+            "Override sentence_finalize_age for every loaded case without rewriting case files. "
+            "Use this for age-sweep experiments while keeping the same corpus_role and case sources."
+        ),
+    )
+    parser.add_argument("--override-sentence-finalize-age-en", type=int, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--override-sentence-finalize-age-ko", type=int, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--override-sentence-finalize-age-zh", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--output", type=Path, default=REPO_ROOT / ".tmp/eval/dictation-ai-sbd/latest.json")
     parser.add_argument(
         "--review-packets",
@@ -190,6 +227,15 @@ def main() -> int:
         validate_case_files(args.cases, review_packets=args.review_packets) if args.review_packets is not None else None
     )
     cases, case_sources = _load_cases(args.cases)
+    cases = _apply_sentence_finalize_age_override(
+        cases,
+        args.override_sentence_finalize_age,
+        {
+            "en": args.override_sentence_finalize_age_en,
+            "ko": args.override_sentence_finalize_age_ko,
+            "zh": args.override_sentence_finalize_age_zh,
+        },
+    )
     detector = create_sentence_boundary_detector(
         SBD_BENCHMARK_BACKEND,
         model=args.model,

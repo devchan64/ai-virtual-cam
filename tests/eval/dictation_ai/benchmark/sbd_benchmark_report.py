@@ -92,6 +92,7 @@ CASE_EXEMPLAR_METRICS = (
 )
 CASE_EXEMPLAR_LIMIT = 8
 CASE_EXEMPLAR_PREVIEW_CHARS = 160
+FINALIZE_EVENT_EXAMPLE_LIMIT = 8
 BOUNDARY_ZERO_HIGH_FINAL_F1 = 0.95
 BOUNDARY_GRANULARITY_FINAL_RECALL = 0.95
 BOUNDARY_GRANULARITY_FINAL_F1 = 0.85
@@ -3535,8 +3536,158 @@ def _avg_final_f1(results: list[dict[str, Any]]) -> float:
     return sum(float(result["final_score"]["f1"]) for result in results) / len(results)
 
 
+def _avg_final_similarity_coverage(results: list[dict[str, Any]]) -> float:
+    if not results:
+        return 0.0
+    return (
+        sum(float(dict(result.get("final_score", {})).get("similarity_coverage", 0.0)) for result in results)
+        / len(results)
+    )
+
+
 def _low_final_f1_count(results: list[dict[str, Any]], threshold: float = 0.45) -> int:
     return sum(1 for result in results if float(result["final_score"]["f1"]) < threshold)
+
+
+def _low_final_similarity_coverage_count(results: list[dict[str, Any]], threshold: float = 0.45) -> int:
+    return sum(1 for result in results if float(dict(result.get("final_score", {})).get("similarity_coverage", 0.0)) < threshold)
+
+
+def _finalize_event_queue_bucket(queue_len: int) -> str:
+    if queue_len <= 0:
+        return "0"
+    if queue_len <= 2:
+        return "1_2"
+    if queue_len <= 5:
+        return "3_5"
+    return "6_plus"
+
+
+def _finalize_event_case_results(
+    results_by_id: dict[str, dict[str, Any]],
+    events: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    ordered_ids: list[str] = []
+    seen: set[str] = set()
+    for event in events:
+        case_id = str(event.get("id") or "")
+        if not case_id or case_id in seen:
+            continue
+        seen.add(case_id)
+        ordered_ids.append(case_id)
+    return [results_by_id[case_id] for case_id in ordered_ids if case_id in results_by_id]
+
+
+def _finalize_event_bucket_summary(
+    *,
+    results_by_id: dict[str, dict[str, Any]],
+    events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    bucket_cases = _finalize_event_case_results(results_by_id, events)
+    return {
+        "event_count": len(events),
+        "case_count": len(bucket_cases),
+        "suppressed_event_count": sum(1 for event in events if bool(event.get("suppressed"))),
+        "final_f1_avg": _avg_final_f1(bucket_cases),
+        "final_similarity_coverage_avg": _avg_final_similarity_coverage(bucket_cases),
+        "low_final_f1_case_count": _low_final_f1_count(bucket_cases),
+        "low_similarity_coverage_case_count": _low_final_similarity_coverage_count(bucket_cases),
+    }
+
+
+def _finalize_event_example_payload(event: dict[str, Any]) -> dict[str, Any]:
+    queue_before = list(event.get("queue_before", []) or [])
+    return {
+        "id": event.get("id"),
+        "language": event.get("language"),
+        "chunk_index": int(event.get("chunk_index", 0)),
+        "reason": event.get("reason"),
+        "suppressed": event.get("suppressed"),
+        "queue_len": len(queue_before),
+        "staged_before": _text_preview(event.get("staged_before")),
+        "queue_head_preview": _first_text_preview(queue_before),
+        "output_sentence": _text_preview(event.get("output_sentence")),
+        "final_f1": float(event.get("final_f1", 0.0)),
+        "final_similarity_coverage": float(event.get("final_similarity_coverage", 0.0)),
+        "expected_final_preview": _first_text_preview(event.get("expected_final")),
+        "actual_final_preview": _first_text_preview(event.get("actual_final")),
+    }
+
+
+def summarize_finalize_events(results: list[dict[str, Any]]) -> dict[str, Any]:
+    results_by_id = {str(result.get("id") or ""): result for result in results}
+    events: list[dict[str, Any]] = []
+    for result in results:
+        final_score = dict(result.get("final_score", {}))
+        for chunk in result.get("chunks", []) or []:
+            for raw_event in chunk.get("finalized_events", []) or []:
+                event = dict(raw_event)
+                event["id"] = result.get("id")
+                event["language"] = result.get("language")
+                event["final_f1"] = float(final_score.get("f1", 0.0))
+                event["final_similarity_coverage"] = float(final_score.get("similarity_coverage", 0.0))
+                event["expected_final"] = list(result.get("expected_final", []) or [])
+                event["actual_final"] = list(result.get("actual_final", []) or [])
+                events.append(event)
+    by_reason: dict[str, list[dict[str, Any]]] = {}
+    for event in events:
+        by_reason.setdefault(str(event.get("reason") or "unknown"), []).append(event)
+    aged_events = by_reason.get("aged", [])
+    aged_with_queue = [event for event in aged_events if len(list(event.get("queue_before", []) or [])) > 0]
+    aged_with_queue_unsuppressed = [event for event in aged_with_queue if not event.get("suppressed")]
+    queue_bucket_summary = {
+        bucket: _finalize_event_bucket_summary(
+            results_by_id=results_by_id,
+            events=[event for event in aged_with_queue if _finalize_event_queue_bucket(len(list(event.get("queue_before", []) or []))) == bucket],
+        )
+        for bucket in ("0", "1_2", "3_5", "6_plus")
+    }
+    aged_queue_cases = _finalize_event_case_results(results_by_id, aged_with_queue)
+    top_unsuppressed_examples = [
+        _finalize_event_example_payload(event)
+        for event in sorted(
+            aged_with_queue_unsuppressed,
+            key=lambda event: (
+                -len(list(event.get("queue_before", []) or [])),
+                float(event.get("final_similarity_coverage", 0.0)),
+                float(event.get("final_f1", 0.0)),
+            ),
+        )[:FINALIZE_EVENT_EXAMPLE_LIMIT]
+    ]
+    top_suppressed_examples = [
+        _finalize_event_example_payload(event)
+        for event in sorted(
+            [event for event in aged_with_queue if event.get("suppressed")],
+            key=lambda event: (
+                -len(list(event.get("queue_before", []) or [])),
+                float(event.get("final_similarity_coverage", 0.0)),
+                float(event.get("final_f1", 0.0)),
+            ),
+        )[:FINALIZE_EVENT_EXAMPLE_LIMIT]
+    ]
+    return {
+        "event_count": len(events),
+        "suppressed_event_count": sum(1 for event in events if bool(event.get("suppressed"))),
+        "by_reason": {
+            reason: _finalize_event_bucket_summary(results_by_id=results_by_id, events=reason_events)
+            for reason, reason_events in sorted(by_reason.items())
+        },
+        "aged_queue_focus": {
+            "event_count": len(aged_events),
+            "with_queue_event_count": len(aged_with_queue),
+            "with_queue_rate": len(aged_with_queue) / max(len(aged_events), 1),
+            "unsuppressed_event_count": len(aged_with_queue_unsuppressed),
+            "suppressed_event_count": sum(1 for event in aged_with_queue if bool(event.get("suppressed"))),
+            "case_count": len(aged_queue_cases),
+            "final_f1_avg": _avg_final_f1(aged_queue_cases),
+            "final_similarity_coverage_avg": _avg_final_similarity_coverage(aged_queue_cases),
+            "low_final_f1_case_count": _low_final_f1_count(aged_queue_cases),
+            "low_similarity_coverage_case_count": _low_final_similarity_coverage_count(aged_queue_cases),
+            "queue_len_strata": queue_bucket_summary,
+            "top_unsuppressed_examples": top_unsuppressed_examples,
+            "top_suppressed_examples": top_suppressed_examples,
+        },
+    }
 
 
 def build_benchmark_report(
@@ -3584,6 +3735,7 @@ def build_benchmark_report(
     queue_residue_strata_summary = summarize_results_by_queue_residue_strata(results)
     case_exemplar_summary = summarize_case_exemplars(results)
     lifecycle_bottleneck_summary = summarize_lifecycle_bottlenecks(results, metric_totals)
+    finalize_event_summary = summarize_finalize_events(results)
     staged_queue_residue_summary = summarize_staged_queue_residue(results)
     terminal_expected_residue_summary = summarize_terminal_expected_residue(results)
     missing_expected_without_terminal_residue_summary = summarize_missing_expected_without_terminal_residue(results)
@@ -3632,6 +3784,12 @@ def build_benchmark_report(
         "model": args.model,
         "device": args.device,
         "compute_type": args.compute_type,
+        "benchmark_overrides": {
+            "sentence_finalize_age": getattr(args, "override_sentence_finalize_age", None),
+            "sentence_finalize_age_en": getattr(args, "override_sentence_finalize_age_en", None),
+            "sentence_finalize_age_ko": getattr(args, "override_sentence_finalize_age_ko", None),
+            "sentence_finalize_age_zh": getattr(args, "override_sentence_finalize_age_zh", None),
+        },
         "case_sources": case_sources,
         "corpus_role": corpus_role,
         "corpus_interpretation": corpus_interpretation(corpus_role),
@@ -3682,6 +3840,7 @@ def build_benchmark_report(
             "pending_overrun": metric_totals.get("pending_overrun", 0),
         },
         "lifecycle_bottleneck_summary": lifecycle_bottleneck_summary,
+        "finalize_event_summary": finalize_event_summary,
         "staged_queue_residue_summary": staged_queue_residue_summary,
         "terminal_expected_residue_summary": terminal_expected_residue_summary,
         "missing_expected_without_terminal_residue_summary": missing_expected_without_terminal_residue_summary,

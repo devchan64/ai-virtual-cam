@@ -8,6 +8,7 @@ from tests.eval.dictation_ai.benchmark.sbd_benchmark_report import (
     build_benchmark_report,
     _strict_actionable_low_final_summary,
     summarize_case_exemplars,
+    summarize_finalize_events,
     summarize_results_by_input_evidence_strata,
     summarize_results_by_expected_quality_strata,
     summarize_results_by_queue_residue_strata,
@@ -55,6 +56,10 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
             model="sat-3l-sm",
             device="cuda",
             compute_type="float16",
+            override_sentence_finalize_age=None,
+            override_sentence_finalize_age_en=None,
+            override_sentence_finalize_age_ko=None,
+            override_sentence_finalize_age_zh=None,
             min_final_f1=0.0,
             fail_on_regression=False,
         )
@@ -128,6 +133,15 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         protocol = report["evidence_protocol"]
         self.assertEqual(report["corpus_role"], "challenge-replay")
         self.assertEqual(
+            report["benchmark_overrides"],
+            {
+                "sentence_finalize_age": None,
+                "sentence_finalize_age_en": None,
+                "sentence_finalize_age_ko": None,
+                "sentence_finalize_age_zh": None,
+            },
+        )
+        self.assertEqual(
             report["case_summary"],
             {
                 "case_count": 1,
@@ -200,6 +214,8 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(report["summary"]["final_f1_avg"], 1.0)
         self.assertEqual(report["summary"]["finalized_per_stage_start"], 1.0)
         self.assertEqual(report["summary"]["boundary_granularity_adjusted_f1_avg"], 1.0)
+        self.assertEqual(report["finalize_event_summary"]["event_count"], 0)
+        self.assertEqual(report["finalize_event_summary"]["aged_queue_focus"]["with_queue_event_count"], 0)
         self.assertEqual(report["evidence_strata_summary"]["all_cases"]["case_count"], 1)
         self.assertEqual(report["evidence_strata_summary"]["lifecycle_focus"]["case_count"], 1)
         self.assertEqual(report["evidence_strata_summary"]["input_contamination_review"]["case_count"], 0)
@@ -264,6 +280,147 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         source_trace = report["source_trace_strata_summary"]["strata"]
         self.assertEqual(source_trace["missing_source_trace"]["expected_final_case_count"], 1)
         self.assertEqual(source_trace["missing_source_trace"]["logic_tuning_candidate_count"], 1)
+
+    def test_finalize_event_summary_surfaces_aged_queue_pressure(self) -> None:
+        summary = summarize_finalize_events(
+            [
+                {
+                    "id": "case-a",
+                    "language": "ko",
+                    "tags": ["missing-final"],
+                    "expected_final": ["나 원래 운동할 때 스트레칭해요."],
+                    "actual_final": ["뭐하세요?", "스트레칭 하잖아요."],
+                    "final_score": _score(0.2, 0.2, 0.2),
+                    "chunks": [
+                        {
+                            "finalized_events": [
+                                {
+                                    "chunk_index": 2,
+                                    "reason": "aged",
+                                    "staged_before": "뭐하세요?",
+                                    "queue_before": [
+                                        "스트레칭 하잖아요.",
+                                        "나 원래 운동할 때 스트레칭해요.",
+                                    ],
+                                    "queue_after": ["나 원래 운동할 때 스트레칭해요."],
+                                    "suppressed": "",
+                                    "output_sentence": "뭐하세요?",
+                                },
+                                {
+                                    "chunk_index": 3,
+                                    "reason": "aged",
+                                    "staged_before": "스트레칭 하잖아요.",
+                                    "queue_before": ["나 원래 운동할 때 스트레칭해요."],
+                                    "queue_after": [],
+                                    "suppressed": "queued_revision_preferred",
+                                    "output_sentence": "",
+                                },
+                            ]
+                        }
+                    ],
+                },
+                {
+                    "id": "case-b",
+                    "language": "ko",
+                    "tags": ["final"],
+                    "expected_final": ["물가를 잡아야 합니다."],
+                    "actual_final": ["물가를 잡아야 합니다."],
+                    "final_score": _score(1.0, 1.0, 1.0),
+                    "chunks": [
+                        {
+                            "finalized_events": [
+                                {
+                                    "chunk_index": 1,
+                                    "reason": "confirmed",
+                                    "staged_before": "물가를 잡아야 합니다.",
+                                    "queue_before": [],
+                                    "queue_after": [],
+                                    "suppressed": "",
+                                    "output_sentence": "물가를 잡아야 합니다.",
+                                }
+                            ]
+                        }
+                    ],
+                },
+            ]
+        )
+
+        self.assertEqual(summary["event_count"], 3)
+        self.assertEqual(summary["by_reason"]["aged"]["event_count"], 2)
+        aged_queue = summary["aged_queue_focus"]
+        self.assertEqual(aged_queue["with_queue_event_count"], 2)
+        self.assertEqual(aged_queue["unsuppressed_event_count"], 1)
+        self.assertEqual(aged_queue["suppressed_event_count"], 1)
+        self.assertEqual(aged_queue["case_count"], 1)
+        self.assertEqual(aged_queue["low_final_f1_case_count"], 1)
+        self.assertEqual(aged_queue["low_similarity_coverage_case_count"], 1)
+        self.assertEqual(aged_queue["queue_len_strata"]["1_2"]["event_count"], 2)
+        self.assertEqual(aged_queue["queue_len_strata"]["6_plus"]["event_count"], 0)
+        self.assertEqual(aged_queue["top_unsuppressed_examples"][0]["id"], "case-a")
+        self.assertEqual(aged_queue["top_unsuppressed_examples"][0]["queue_len"], 2)
+        self.assertEqual(
+            aged_queue["top_unsuppressed_examples"][0]["expected_final_preview"],
+            "나 원래 운동할 때 스트레칭해요.",
+        )
+        self.assertEqual(
+            aged_queue["top_suppressed_examples"][0]["suppressed"],
+            "queued_revision_preferred",
+        )
+
+    def test_apply_sentence_finalize_age_override_replaces_case_age_without_mutating_source(self) -> None:
+        original = SbdCase(
+            id="case-a",
+            language="ko",
+            chunks=["안녕하세요."],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=["안녕하세요."],
+            expected_staged="",
+            tags=(),
+            sentence_finalize_age=3,
+        )
+
+        overridden = sbd_benchmark._apply_sentence_finalize_age_override([original], 2)
+
+        self.assertEqual(original.sentence_finalize_age, 3)
+        self.assertEqual(overridden[0].sentence_finalize_age, 2)
+        self.assertEqual(overridden[0].id, original.id)
+        self.assertNotEqual(id(overridden[0]), id(original))
+
+    def test_apply_sentence_finalize_age_override_supports_language_specific_values(self) -> None:
+        original = [
+            SbdCase(
+                id="case-en",
+                language="en",
+                chunks=["Hello."],
+                expected_completed=[],
+                expected_pending="",
+                expected_final=["Hello."],
+                expected_staged="",
+                tags=(),
+                sentence_finalize_age=3,
+            ),
+            SbdCase(
+                id="case-ko",
+                language="ko",
+                chunks=["안녕하세요."],
+                expected_completed=[],
+                expected_pending="",
+                expected_final=["안녕하세요."],
+                expected_staged="",
+                tags=(),
+                sentence_finalize_age=3,
+            ),
+        ]
+
+        overridden = sbd_benchmark._apply_sentence_finalize_age_override(
+            original,
+            None,
+            {"ko": 2},
+        )
+
+        self.assertEqual(overridden[0].sentence_finalize_age, 3)
+        self.assertEqual(overridden[1].sentence_finalize_age, 2)
 
     def test_length_strata_summary_separates_short_and_long_behavior(self) -> None:
         short_result = {

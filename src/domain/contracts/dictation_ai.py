@@ -180,7 +180,7 @@ DICTATION_AI_CONTRACT: dict[str, ConfigFieldSpec] = {
     "stepSecondsKo": ConfigFieldSpec("stepSecondsKo", 1.0, float, min_value=0.5, max_value=5.0, ui_group="runtime.ko"),
     "windowSecondsKo": ConfigFieldSpec("windowSecondsKo", 10.0, float, min_value=1.0, max_value=30.0, ui_group="runtime.ko"),
     "sentenceFinalizeAgeKo": ConfigFieldSpec(
-        "sentenceFinalizeAgeKo", 3, int, min_value=1, max_value=8, ui_group="runtime.ko"
+        "sentenceFinalizeAgeKo", 2, int, min_value=1, max_value=8, ui_group="runtime.ko"
     ),
     "beamSizeKo": ConfigFieldSpec("beamSizeKo", 3, int, min_value=1, max_value=8, ui_group="runtime.ko"),
     "maxNewTokensKo": ConfigFieldSpec("maxNewTokensKo", 192, int, min_value=16, max_value=512, ui_group="runtime.ko"),

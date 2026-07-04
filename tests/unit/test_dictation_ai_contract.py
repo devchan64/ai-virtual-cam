@@ -41,7 +41,7 @@ class WhisperContractTest(unittest.TestCase):
         self.assertEqual(defaults["windowSecondsZh"], 15.0)
         self.assertEqual(defaults["sentenceFinalizeAge"], 3)
         self.assertEqual(defaults["sentenceFinalizeAgeEn"], 3)
-        self.assertEqual(defaults["sentenceFinalizeAgeKo"], 3)
+        self.assertEqual(defaults["sentenceFinalizeAgeKo"], 2)
         self.assertEqual(defaults["sentenceFinalizeAgeZh"], 3)
         self.assertEqual(defaults["maxNewTokens"], 192)
         self.assertEqual(defaults["postProcessingProfile"], "manual")

@@ -91,8 +91,10 @@ RECENT_FINAL_NO_END_SUFFIX_ECHO_COVERAGE_MIN = 0.35
 
 # MAX_STAGED_SENTENCE_QUEUE는 현재 active staged 문장을 아직 소비할 수 없을
 # 때 생성순서 후보를 보존한다. 값을 키우면 SBD 출력이 몰릴 때 final 누락은
-# 줄 수 있지만 stale 후보 churn은 늘어난다.
-MAX_STAGED_SENTENCE_QUEUE = 20
+# 줄 수 있지만 stale 후보 churn은 늘어난다. reviewed challenge replay에서는
+# 20이 deep queue aged consume을 늘렸고, 5로 낮췄을 때 KO shard와 전체
+# reviewed corpus 모두에서 final F1/similarity가 소폭 개선됐다.
+MAX_STAGED_SENTENCE_QUEUE = 5
 
 # queued stage 후보가 늦게 승격되면 현재 sliding window와 의미상 멀어진
 # stale 문장이 final로 나갈 수 있다. 최신 reviewed challenge에서는 1 chunk

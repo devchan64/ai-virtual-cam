@@ -189,7 +189,7 @@ class DictationAiConfigTest(unittest.TestCase):
                 "temperatureEn": 0.2,
                 "stepSecondsKo": 1.0,
                 "windowSecondsKo": 10.0,
-                "sentenceFinalizeAgeKo": 3,
+                "sentenceFinalizeAgeKo": 2,
                 "beamSizeKo": 3,
                 "maxNewTokensKo": 192,
                 "temperatureKo": 0.0,
