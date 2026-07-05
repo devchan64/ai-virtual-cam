@@ -902,7 +902,8 @@ def _stage_completed_sentence(
         else:
             state.staged_age += 1
         state.staged_deferred_age_chunk = chunk_index
-        state.count("stage_age_tick")
+        if not revision_age_reset:
+            state.count("stage_age_tick")
         state.staged_forced = state.staged_forced or forced
         if revision_age_reset:
             return []
