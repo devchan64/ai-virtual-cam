@@ -851,6 +851,38 @@ def _should_suppress_ko_numeric_aged_final_with_queue(
     return max(queue_word_lengths) <= 4
 
 
+def _should_suppress_ko_aged_question_chain_final(
+    sentence: str,
+    language: str,
+    reason: str,
+    staged_confirmations: int,
+    queued_sentences: tuple[str, ...],
+    *,
+    sentence_required_confirmations: int,
+) -> bool:
+    if language != "ko" or reason not in {"aged", "aged_forced"} or not queued_sentences:
+        return False
+    if staged_confirmations >= sentence_required_confirmations:
+        return False
+    normalized_sentence = _normalized_text(sentence)
+    if not normalized_sentence.endswith("?"):
+        return False
+    sentence_flags = set(_final_sentence_diagnostic_flags(normalized_sentence, language))
+    if sentence_flags.intersection({"empty", "no_end_marker", "short_no_end_fragment", "trailing_ellipsis"}):
+        return False
+    sentence_units = _word_units(normalized_sentence)
+    if len(sentence_units) < 3:
+        return False
+    for queued_sentence in queued_sentences:
+        normalized_queued = _normalized_text(queued_sentence)
+        if not normalized_queued or not normalized_queued.endswith("?"):
+            return False
+        queued_flags = set(_final_sentence_diagnostic_flags(normalized_queued, language))
+        if queued_flags.intersection({"empty", "no_end_marker", "short_no_end_fragment", "trailing_ellipsis"}):
+            return False
+    return True
+
+
 def _should_enable_aged_queue_backlog_promotion_boost(
     reason: str,
     queued_sentence_count: int,

@@ -8,6 +8,7 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _stale_leading_short_closed_candidate_reason,
     _should_allow_no_text_stage_aging,
     _should_suppress_ko_numeric_aged_final_with_queue,
+    _should_suppress_ko_aged_question_chain_final,
     _should_suppress_ko_pure_latin_final_with_hangul_queue,
     _should_suppress_right_context_prefixed_cjk_merge_with_single_queue,
     _should_suppress_right_context_short_prefix_extension_with_single_queue,
@@ -876,6 +877,48 @@ class DictationStagePolicyTest(unittest.TestCase):
                 "ko",
                 "aged",
                 ("그냥 씻어버렸습니다.", "테일러신 아케이디스는 금은보기 타일럿이나 케이디 씨는 금흥 목요일에서 드러눔 봤죠."),
+            )
+        )
+
+    def test_suppresses_ko_aged_question_chain_with_question_only_queue(self) -> None:
+        self.assertTrue(
+            _should_suppress_ko_aged_question_chain_final(
+                "이게 영원할 것인가?",
+                "ko",
+                "aged",
+                1,
+                (
+                    "우리는 계속해서 미국 투자를 이어갈 것인가?",
+                    "아니면 미국 이외의 다른 곳들도 같이 눈여겨봐야 될 것인가?",
+                ),
+            )
+        )
+
+    def test_keeps_ko_aged_question_when_queue_has_statement(self) -> None:
+        self.assertFalse(
+            _should_suppress_ko_aged_question_chain_final(
+                "술 마셨어요?",
+                "ko",
+                "aged",
+                1,
+                (
+                    "왜 술주정이야?",
+                    "운동하는 거예요.",
+                ),
+            )
+        )
+
+    def test_keeps_short_ko_aged_question_chain(self) -> None:
+        self.assertFalse(
+            _should_suppress_ko_aged_question_chain_final(
+                "3?",
+                "ko",
+                "aged",
+                1,
+                (
+                    "1년?",
+                    "둘이 얼마나 만났는데?",
+                ),
             )
         )
 

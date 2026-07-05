@@ -46,6 +46,7 @@ from src.app.dictation_core.dictation_stage_policy import (
     _is_ko_short_closed_sentence as _is_ko_short_closed_sentence_impl,
     _should_restore_trimmed_closed_candidate as _should_restore_trimmed_closed_candidate_impl,
     _should_suppress_ko_numeric_aged_final_with_queue as _should_suppress_ko_numeric_aged_final_with_queue_impl,
+    _should_suppress_ko_aged_question_chain_final as _should_suppress_ko_aged_question_chain_final_impl,
     _should_suppress_ko_pure_latin_final_with_hangul_queue as _should_suppress_ko_pure_latin_final_with_hangul_queue_impl,
     _should_suppress_ko_short_closed_final_with_stronger_queue_candidate as _should_suppress_ko_short_closed_final_with_stronger_queue_candidate_impl,
     _should_suppress_right_context_prefixed_cjk_merge_with_single_queue as _should_suppress_right_context_prefixed_cjk_merge_with_single_queue_impl,
@@ -518,6 +519,23 @@ def _should_suppress_ko_numeric_aged_final_with_queue(
         language,
         reason,
         queued_sentences,
+    )
+
+
+def _should_suppress_ko_aged_question_chain_final(
+    sentence: str,
+    language: str,
+    reason: str,
+    staged_confirmations: int,
+    queued_sentences: tuple[str, ...] = (),
+) -> bool:
+    return _should_suppress_ko_aged_question_chain_final_impl(
+        sentence,
+        language,
+        reason,
+        staged_confirmations,
+        queued_sentences,
+        sentence_required_confirmations=_sentence_required_confirmations(False),
     )
 
 

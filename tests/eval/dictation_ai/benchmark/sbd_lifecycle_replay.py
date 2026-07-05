@@ -60,6 +60,7 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _should_preserve_staged_output_when_delta_fragment,
     _should_defer_cjk_recent_final_trimmed_queue_finalize,
     _should_suppress_ko_numeric_aged_final_with_queue,
+    _should_suppress_ko_aged_question_chain_final,
     _should_suppress_ko_pure_latin_final_with_hangul_queue,
     _should_suppress_right_context_prefixed_cjk_merge_with_single_queue,
     _should_suppress_right_context_short_prefix_extension_with_single_queue,
@@ -528,6 +529,36 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
                 "queue_before": queue_before,
                 "queue_after": [str(entry["sentence"]) for entry in (state.staged_queue or ())],
                 "suppressed": "ko_numeric_aged_queue",
+                "output_sentence": output_sentence,
+            }
+        )
+        return []
+    if _should_suppress_ko_aged_question_chain_final(
+        output_source_sentence,
+        language,
+        reason,
+        state.staged_confirmations,
+        tuple(str(entry["sentence"]) for entry in (state.staged_queue or ())),
+    ):
+        state.staged_sentence = ""
+        state.staged_confirmations = 0
+        state.staged_age = 0
+        state.staged_forced = False
+        state.staged_deferred_age_chunk = -1
+        state.staged_delta_suppressed_chunks = 0
+        state.staged_delta_suppressed_chunk_index = -1
+        state.staged_queue_promoted_chunk = -1
+        state.count("finalize_ko_aged_question_chain_suppressed")
+        state.count("segment_state_suppressed")
+        _promote_next_staged_sentence(state, chunk_index)
+        state.finalize_events.append(
+            {
+                "chunk_index": chunk_index,
+                "reason": reason,
+                "staged_before": output_source_sentence,
+                "queue_before": queue_before,
+                "queue_after": [str(entry["sentence"]) for entry in (state.staged_queue or ())],
+                "suppressed": "ko_aged_question_chain",
                 "output_sentence": output_sentence,
             }
         )
