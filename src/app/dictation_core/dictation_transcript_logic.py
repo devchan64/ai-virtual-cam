@@ -465,7 +465,6 @@ def _should_finalize_with_right_context(
         promoted_from_queue_same_chunk,
     )
 
-
 def _strip_prior_pending_prefix_revision(staged_sentence: str, candidate: str, prior_pending_text: str) -> str:
     return _strip_prior_pending_prefix_revision_impl(staged_sentence, candidate, prior_pending_text)
 

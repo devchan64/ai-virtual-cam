@@ -215,6 +215,36 @@ def _is_short_closed_cjk_suffix_revision(left: str, right: str) -> bool:
     return left_words[-len(right_words) :] == right_words
 
 
+def _is_equal_length_cjk_midspan_revision(left: str, right: str) -> bool:
+    normalized_left = _normalized_text(left)
+    normalized_right = _normalized_text(right)
+    if not (_is_cjk_text(normalized_left) or _is_cjk_text(normalized_right)):
+        return False
+    if _boundary_sentence_end_count(normalized_left) == 0 or _boundary_sentence_end_count(normalized_right) == 0:
+        return False
+    left_words = _word_units(normalized_left)
+    right_words = _word_units(normalized_right)
+    if len(left_words) != len(right_words) or len(left_words) < 16:
+        return False
+    prefix_len = 0
+    for left_word, right_word in zip(left_words, right_words):
+        if left_word != right_word:
+            break
+        prefix_len += 1
+    if prefix_len < 12:
+        return False
+    max_suffix = len(left_words) - prefix_len
+    suffix_len = 0
+    while suffix_len < max_suffix and left_words[-(suffix_len + 1)] == right_words[-(suffix_len + 1)]:
+        suffix_len += 1
+    if suffix_len < 3:
+        return False
+    changed_span = len(left_words) - prefix_len - suffix_len
+    if not (2 <= changed_span <= 5):
+        return False
+    return True
+
+
 def _is_closed_hangul_inserted_middle_revision(left: str, right: str) -> bool:
     normalized_left = _normalized_text(left)
     normalized_right = _normalized_text(right)
@@ -315,6 +345,8 @@ def _prefer_sentence_revision(left: str, right: str) -> str:
         if _is_cjk_prefixed_stale_revision(left, right):
             return _normalized_text(right)
         if _is_short_closed_cjk_suffix_revision(left, right):
+            return _normalized_text(right)
+        if _is_equal_length_cjk_midspan_revision(left, right):
             return _normalized_text(right)
         if _is_closed_hangul_inserted_middle_revision(left, right):
             return _normalized_text(right)

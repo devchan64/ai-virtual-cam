@@ -33657,3 +33657,443 @@ residue 변화:
 - 다음 실험은 stage start confirmation을 인위적으로 보강하기보다, `ko`에서 closed sentence가
   `unconfirmed` replacement로 queue에 눌리거나 no-end fragment 품질 차단 뒤 residue로 남는
   lifecycle 소비 규칙을 더 직접적으로 보는 편이 맞다.
+
+## 2026-07-05 append-only final 이후 retroactive replacement 가설 기각
+
+배경:
+
+- 현재 파이프라인과 replay 벤치는 final transcript를 append-only로 유지한다.
+- `predicted-zh-000.jsonl:27`, `predicted-zh-001.jsonl:59`, `predicted-zh-002.jsonl:55`는 이 제약의
+  대표 사례였다. 초반에 잘못 final된
+  `我点的是橄榄的，它里面主要是有味的，开始选一个酱。`
+  뒤에 더 나은 revision
+  `我点的是橄榄的，然后里面主要是油底的，还选了一个酱。`
+  이 later chunk에서 다시 나타났지만, 이미 final된 문장을 append-only transcript에서 교체할 수는
+  없었다.
+- 직관적으로는 "뒤 revision이 더 좋아 보이면 이미 final된 문장을 바꾸면 되지 않는가"라는 가설이
+  가능하므로, 코드 변경 전 counterfactual replay로 먼저 검증했다.
+
+오프라인 가설 1: 마지막 final 무조건 교체
+
+- 규칙:
+  - chunk별 `completed` 문장을 보면서
+  - `_prefer_sentence_revision()`이 새 문장을 더 나은 revision으로 선택하면
+  - 현재 actual final의 마지막 문장을 새 문장으로 교체한다.
+- 기준 리포트:
+  - `.tmp/eval/dictation-ai-sbd/20260705-v22-prefix-aligned-zh-aged-block.json`
+
+결과:
+
+| metric | baseline | counterfactual | delta |
+| --- | ---: | ---: | ---: |
+| `final_similarity_coverage_avg` | 0.576843 | 0.377304 | -0.199538 |
+| ordered `final_similarity_coverage_avg` | 0.532245 | 0.356573 | -0.175673 |
+| `boundary_granularity_adjusted_similarity_coverage_avg` | 0.695602 | 0.503098 | -0.192504 |
+
+- 변경 케이스 수:
+  - changed `878`
+  - positive `82`
+  - negative `657`
+- 대표 회귀:
+  - `predicted-ko-000.jsonl:30`
+  - `predicted-ko-000.jsonl:78`
+  - `predicted-zh-000.jsonl:14`
+- 해석:
+  - later completed sentence가 실제로는 "방금 final된 문장의 더 좋은 revision"이 아니라, 다음 문장이나
+    suffix fragment인 경우가 훨씬 많았다.
+  - 따라서 append-only final 뒤의 단순 last-final replacement는 전역 규칙으로 채택할 수 없다.
+
+오프라인 가설 2: 최근 final history 안의 유사한 earlier final만 교체
+
+- 규칙:
+  - 최근 final history 안에서 `_prefer_sentence_revision()`과 token 유사도로 matched 되는 earlier final을
+    찾고
+  - suffix drop처럼 기존 final의 부분문장만 남긴 candidate는 제외하고
+  - 더 긴 revision만 earlier final slot에 대입한다.
+- 목적:
+  - `predicted-zh-000.jsonl:27`, `predicted-zh-001.jsonl:59`, `predicted-zh-002.jsonl:55`처럼 "마지막
+    final이 아니라 한두 문장 앞에서 잘못 확정된 문장"을 보정할 수 있는지 본다.
+
+대표 결과:
+
+| 규칙 | `final_similarity_coverage_avg` delta | ordered delta | granularity-adjusted delta |
+| --- | ---: | ---: | ---: |
+| recent history replacement, similarity `>=0.55` | -0.042614 | -0.039757 | -0.058908 |
+| non-last history replacement, longer revision only | -0.012921 | -0.012529 | -0.019313 |
+| `zh` 한정 + prefix-aligned longer revision only | -0.005827 | -0.006004 | -0.004649 |
+
+타깃 케이스 이득:
+
+- `predicted-zh-000.jsonl:27`: `0.844444 -> 0.966667`
+- `predicted-zh-001.jsonl:59`: `0.562963 -> 0.966667`
+- `predicted-zh-002.jsonl:55`: `0.409091 -> 0.466667`
+
+대표 회귀 신호:
+
+- `predicted-zh-000.jsonl:14`, `predicted-zh-001.jsonl:60`, `predicted-zh-002.jsonl:5`는
+  `我们点了两杯冰拿铁，然后发现他这家有名的好像是柴。`
+  를
+  `然后发现他这家有名的好像是柴。`
+  같은 suffix-only 문장으로 잘못 바꾸는 경향이 강했다.
+- prefix 정렬, longer-only, non-last 제한을 추가해도 aggregate delta는 끝내 음수였다.
+
+판단:
+
+- append-only final 이후의 retroactive replacement는 일부 `zh` replay를 살리지만, 현재 corpus 전체에서
+  핵심 지표를 순증시키지 못했다.
+- 따라서 이 방향의 직접 코드 변경은 채택하지 않고 제거한다.
+- 현재 병목은 "이미 final된 문장을 나중에 교체할 수 있느냐" 자체보다, 그 이전 단계에서 더 긴 revision이
+  들어왔을 때 어떤 후보를 staged로 유지하고 어떤 후보를 final로 소비할지에 가깝다.
+- 다음 실험은 retroactive replacement 자체가 아니라
+  - multi-slot staged history,
+  - same-boundary competing sentence의 final 전 보류/소비 규칙,
+  - queue promotion 직후 wrong early final을 막는 일반 lifecycle 조건
+  쪽으로 진행한다.
+
+## 2026-07-05 equal-length closed `zh` midspan revision 선호 채택
+
+배경:
+
+- `predicted-zh-000.jsonl:27`, `predicted-zh-001.jsonl:59`를 trace로 다시 보면 병목은
+  "나중 revision이 이미 final된 문장을 못 바꾼다"보다 더 앞단에 있었다.
+- 실제로는
+  `我点的是橄榄的，它里面主要是有味的，开始选一个酱。`
+  와
+  `我点的是橄榄的，它里面主要是有味的，还选了一个酱。`
+  가 revision pair인데도 `_prefer_sentence_revision()`이 기존 staged를 유지했다.
+- 그 결과 다음 chunk에서 `我点的是橄榄的，它里面主要是油底的，还选了一个酱。`가 오기 전에
+  첫 문장이 `confirmed`로 소비되면서 wrong early final이 만들어졌다.
+
+가설:
+
+- closed `zh` revision 중
+  - 길이가 같고
+  - 긴 공통 prefix와 suffix를 공유하며
+  - 바뀐 span이 짧은 middle token 교체인 경우는
+  기존 staged보다 새 candidate를 선호하는 편이 append-only wrong early final을 줄일 수 있다.
+
+구현:
+
+- `src/app/dictation_core/dictation_revision_progression.py`
+  - `_is_equal_length_cjk_midspan_revision()`을 추가했다.
+  - 조건:
+    - equal-length
+    - closed CJK sentence
+    - `prefix_len >= 12`
+    - `suffix_len >= 3`
+    - changed middle span `2..5` token
+  - 위 조건을 만족하면 `_prefer_sentence_revision()`이 right candidate를 선택한다.
+- `tests/unit/test_dictation_stage_policy.py`
+  - `我点的是橄榄的 ... 开始选一个酱。` → `... 还选了一个酱。` pair가 새 candidate를 선호하는지
+    회귀 테스트를 추가했다.
+
+검증:
+
+```text
+./.venv/bin/python -m unittest \
+  tests.unit.test_dictation_pipeline_loop \
+  tests.unit.test_transcript_revision \
+  tests.unit.test_dictation_stage_policy \
+  tests.unit.test_dictation_pipeline_nodes
+
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+./.venv/bin/python tests/eval/dictation_ai/sbd_benchmark.py \
+  --device cuda \
+  --compute-type float16 \
+  --output .tmp/eval/dictation-ai-sbd/20260705-v28-equal-length-zh-midspan-revision.json
+```
+
+결과:
+
+| metric | `v22` baseline | `v28` variant | delta |
+| --- | ---: | ---: | ---: |
+| `final_precision_avg` | 0.623512 | 0.623693 | +0.000181 |
+| `final_recall_avg` | 0.817191 | 0.816647 | -0.000544 |
+| `final_f1_avg` | 0.682425 | 0.682353 | -0.000073 |
+| `final_similarity_coverage_avg` | 0.576843 | 0.577783 | +0.000940 |
+| `boundary_granularity_adjusted_f1_avg` | 0.763728 | 0.764852 | +0.001124 |
+| `case_exact_match` | 32 | 33 | +1 |
+
+변경 케이스:
+
+- changed `12`
+- positive `10`
+- negative `2`
+
+타깃 케이스:
+
+- `predicted-zh-000.jsonl:27`: `0.844444 -> 0.933333`
+- `predicted-zh-001.jsonl:59`: `0.562963 -> 0.933333`
+- `predicted-zh-002.jsonl:55`: `0.409091 -> 0.333333`
+
+주요 개선:
+
+- `predicted-zh-000.jsonl:27`
+  - base final:
+    - `我点的是橄榄的，它里面主要是有味的，开始选一个酱。`
+    - `刚刚那一间贝果店，我觉得蛮不错的。`
+  - new final:
+    - `我点的是橄榄的，它里面主要是油底的，还选了一个酱。`
+    - `刚刚那一间贝果店，我觉得蛮不错的。`
+- `predicted-zh-001.jsonl:59`
+  - over-merged extra final이 제거되며 target first sentence가 correction 쪽으로 바뀌었다.
+
+주요 회귀:
+
+- `predicted-zh-000.jsonl:77`: `0.460526 -> 0.333333`
+- `predicted-zh-002.jsonl:55`: target first sentence는 좋아졌지만
+  `它的贝狗不是那种特别扎实的。`
+  extra final이 추가되어 최종 점수는 하락했다.
+
+판단:
+
+- aggregate 핵심 지표인 `final_similarity_coverage_avg`가 순증했고, 변경 케이스 수가 `12`건으로 좁다.
+- 타깃 `zh` 저점 두 건에서 wrong early final이 실제로 개선됐다.
+- 따라서 이 수정은 채택한다.
+- 다만 `predicted-zh-002.jsonl:55`처럼 corrected first sentence 뒤의 extra tail final이 남는 패턴은 별도 후속 과제로 둔다.
+
+## 2026-07-05 same-chunk promoted confirmed queue defer 기각
+
+배경:
+
+- `predicted-zh-002.jsonl:55`는 `v28`에서 첫 문장 교정은 성공했지만,
+  `刚刚那一间贝果店，我觉得蛮不错的。`
+  와
+  `它的贝狗不是那种特别扎实的。`
+  가 extra final로 남았다.
+- trace를 다시 보면 문제 문장은 대체로
+  - 같은 chunk 안에서 앞 문장이 먼저 final되고
+  - queue에서 승격된 다음 문장이 `confirmed`로 즉시 닫히며
+  - queue tail에 매우 짧은 `short_cjk` 조각이 붙어 있는
+  패턴을 보였다.
+
+가설:
+
+- same-chunk에서 queue promotion 직후 `confirmed` final을 한 번 보류하면 extra tail final을 줄일 수 있다.
+
+실험:
+
+- runtime/replay 양쪽에서 same-chunk promoted active가 queue tail을 가진 채 `confirmed`로 닫히는 경로를
+  지연시키는 보조 guard를 넣어봤다.
+- 추가로 counterfactual replay에서도
+  - `confirmed`
+  - 같은 chunk 안에 이미 이전 final이 1개 이상 존재
+  - `queue_before` head가 `short_cjk`
+  인 경우만 제거하는 축을 따로 계산했다.
+
+counterfactual 결과:
+
+| metric | delta |
+| --- | ---: |
+| `final_similarity_coverage_avg` | -0.008157 |
+
+- changed `112`
+- positive `26`
+- negative `74`
+
+대표 이득:
+
+- `predicted-zh-002.jsonl:55`: `+0.666667`
+
+대표 회귀:
+
+- `predicted-zh-000.jsonl:27`: `-0.466667`
+- `predicted-zh-001.jsonl:59`: `-0.466667`
+- `predicted-zh-002.jsonl:57`: `-0.333333`
+
+실제 CUDA benchmark (`v29`) 결과:
+
+```text
+output=.tmp/eval/dictation-ai-sbd/20260705-v29-same-chunk-promoted-confirmed-defer.json
+final_precision_avg=0.627
+final_recall_avg=0.801
+final_f1_avg=0.677
+final_similarity_coverage_avg=0.574
+boundary_granularity_adjusted_f1_avg=0.760
+finalized_per_stage_start=0.577
+short_missing_final_rate=0.048
+long_missing_final_rate=0.158
+long_merge_error_rate=0.296
+```
+
+`v28` 대비:
+
+- `final_similarity_coverage_avg`: `0.577783 -> 0.574`
+- `final_f1_avg`: `0.682353 -> 0.677`
+- `long_missing_final_rate`: `0.138 -> 0.158`
+- `long_merge_error_rate`: `0.279 -> 0.296`
+
+판단:
+
+- same-chunk promoted confirmed defer는 `predicted-zh-002.jsonl:55` 한 건에는 직접 도움이 되지만,
+  이미 개선된 `predicted-zh-000.jsonl:27`, `predicted-zh-001.jsonl:59` 계열을 다시 악화시킨다.
+- 또한 long strata의 누락/병합 지표가 함께 악화됐다.
+- 따라서 이 실험은 채택하지 않고 코드에서 제거한다.
+- 후속 방향은 same-chunk defer 자체가 아니라, queue tail 조각이 붙은 second final을 구조적으로
+  잘못 independent sentence로 보게 되는 boundary/revision 해석 축을 더 좁혀 보는 쪽이 맞다.
+
+## 2026-07-05 `predicted-zh-002.jsonl:55` 단일-타깃 해석 정리
+
+관측:
+
+- `predicted-zh-002.jsonl:55`의 `expected_final`은
+  `我点的是橄榄的，它里面主要是油底的，还选了一个酱。`
+  단 한 문장만 가진다.
+- 같은 `bagel` 구간의 인접 케이스를 보면
+  - `predicted-zh-000.jsonl:27`
+  - `predicted-zh-001.jsonl:59`
+  - `predicted-zh-002.jsonl:57`
+  는
+  `刚刚那一间贝狗店，我觉得蛮不错的。`
+  를 정상 expected sentence로 포함한다.
+
+입력 근거 비교:
+
+- `predicted-zh-002.jsonl:55`
+  - `input_evidence.expected_count=1`
+  - `stable_candidate_examples`도 첫 문장 하나만 가진다.
+- 반면 `predicted-zh-000.jsonl:27`, `predicted-zh-001.jsonl:59`, `predicted-zh-002.jsonl:57`은
+  `bagel store` 문장과 `olive/oil-base` 문장을 모두 stable candidate로 가진다.
+
+해석:
+
+- `predicted-zh-002.jsonl:55`에서 두 번째 final
+  `刚刚那一间贝果店，我觉得蛮不错的。`
+  을 억제하면 이 케이스의 점수는 올라간다.
+- 하지만 같은 문장을 독립 final로 인정하는 인접 케이스가 이미 다수 존재하므로, runtime이 이 문장을
+  전역적으로 suppress하는 규칙은 benchmark 전체와 충돌한다.
+- 실제 counterfactual과 `v29` 실험이 둘 다 음수였던 이유도 여기에 가깝다. `:55` 한 건을 살리기 위해
+  suppress한 second final이 `:27`, `:59`, `:57` 같은 다중-타깃 케이스의 정상 final을 함께 잃게 만든다.
+
+판단:
+
+- `predicted-zh-002.jsonl:55`는 "같은 발화 뒤쪽 문장이 왜 final로 남았는가"를 보는 구조 진단 입력으로는
+  유용하다.
+- 하지만 이 케이스 하나를 근거로 second final suppress 규칙을 일반화하면 벤치 전체와 충돌한다.
+- 따라서 이후 pipeline 튜닝에서는 `:55`를 전역 억제 규칙의 채택 근거로 사용하지 않는다.
+- 이 케이스는 challenge replay에서 "단일-타깃 benchmark label과 실제 독립 final 후보가 충돌할 수 있다"는
+  해석 사례로만 남긴다.
+
+## 2026-07-05 다중-타깃 `zh` 저점의 주 병목은 lifecycle보다 context/label 축에 더 치우침
+
+관측:
+
+- `v28` 기준 `zh` multi-target 저점(`expected_final >= 2`, `final_similarity_coverage <= 0.5`)을 다시 묶어 보면
+  low-score 케이스의 다수가 `unmodeled_prefix_context` 플래그를 갖는다.
+
+집계:
+
+```text
+context flags:
+  unmodeled_prefix_context = 50
+  actual_prefix_before_expected_final = 7
+
+definition flags:
+  repeated_expected_group = 23
+  expected_revision_variant_group = 16
+  expected_app_quality_blocked_sentence = 5
+```
+
+대표 구조:
+
+1. 앞 문맥이 잘린 상태에서 중간 발화부터 expected가 시작되는 케이스
+   - `predicted-zh-001.jsonl:20`
+   - `predicted-zh-002.jsonl:12`
+   - `predicted-zh-001.jsonl:45`
+
+2. expected 자체가 revision variant group으로 구성된 케이스
+   - `predicted-zh-000.jsonl:39`
+   - `predicted-zh-000.jsonl:38`
+   - `predicted-zh-000.jsonl:63`
+
+3. repeated expected group / short expected group 때문에 앱 final granularity와 바로 충돌하는 케이스
+   - `predicted-zh-000.jsonl:62`
+   - `predicted-zh-002.jsonl:75`
+   - `predicted-zh-001.jsonl:98`
+
+해석:
+
+- 현재 `zh` 다중-타깃 저점의 큰 비중은
+  - 앞 문맥이 잘린 challenge replay,
+  - expected가 이미 revision variant를 섞고 있는 label,
+  - 앱 append-only final granularity와 다른 짧은 expected group
+  의 조합으로 설명된다.
+- 즉 이 구간에서 `second final suppress`, `same-chunk defer`, `queue tail suppress` 같은 전역 lifecycle 규칙을
+  더 세게 넣으면, 순수한 pipeline bug보다 label/context mismatch를 먼저 맞추려 하게 된다.
+- 실제로 같은 방향의 억제 실험은 `predicted-zh-002.jsonl:55` 같은 일부 케이스를 살리지만,
+  `predicted-zh-000.jsonl:27`, `predicted-zh-001.jsonl:59`, `predicted-zh-002.jsonl:57`처럼
+  stable multi-target case를 같이 악화시켰다.
+
+판단:
+
+- 다음 `zh` 개선은 low-score 전체를 한 묶음으로 보고 suppress 규칙을 강화하는 방식으로 가지 않는다.
+- 우선순위는 다음 순서로 둔다.
+  1. `case_context_flags`가 비어 있고 `expected_count >= 2`인 clean multi-target `zh` 저점만 별도 subset으로 분리한다.
+  2. 그 subset에서 반복되는 revision/boundary 병목이 있을 때만 pipeline 규칙을 조정한다.
+  3. `unmodeled_prefix_context`, `expected_revision_variant_group`, `repeated_expected_group`이 붙은 케이스는
+     pipeline 채택 근거보다 benchmark interpretation 근거로 취급한다.
+
+clean subset 추출 결과 (`v28` 기준):
+
+```text
+.tmp/eval/dictation-ai-sbd/clean-zh-multitarget-low-v28.jsonl
+count=5
+- predicted-zh-000.jsonl:77
+- predicted-zh-001.jsonl:33
+- predicted-zh-001.jsonl:73
+- predicted-zh-002.jsonl:18
+- predicted-zh-002.jsonl:47
+```
+
+- 이후 `zh` lifecycle 실험은 기본적으로 이 5건 clean subset에서 먼저 pattern을 확인하고,
+  full challenge replay는 채택 검증 단계에서 다시 본다.
+
+## 2026-07-05 mergeable short-suffix final suppress counterfactual 기각
+
+배경:
+
+- clean subset 최저점 `predicted-zh-002.jsonl:18`은
+  `...然后整个。`
+  가 먼저 final된 뒤, 다음 revision
+  `...然后整个味道很香。`
+  에서 delta가 `味道很香。`만 남아 append-only short suffix final로 소비되는 패턴이었다.
+- 직관적으로는 "이 short suffix final만 억제하면 merge-split 오류를 줄일 수 있지 않은가"라는 가설이 가능하다.
+
+counterfactual:
+
+- `zh` final 중
+  - 짧은 `short_cjk` 문장이고
+  - 직전 final과 붙이면
+  - 현재 chunk 또는 직후 chunk의 `completed` 문장 안에 mergeable revision으로 다시 나타나는 경우
+  그 short suffix final을 제거하는 오프라인 계산을 수행했다.
+
+결과:
+
+| metric | delta |
+| --- | ---: |
+| `final_similarity_coverage_avg` | -0.016803 |
+
+- changed `146`
+- positive `23`
+- negative `113`
+
+대표 이득:
+
+- `predicted-zh-002.jsonl:18`: split suffix final이 줄어든다.
+- `predicted-zh-002.jsonl:55`: `+0.166667`
+
+대표 회귀:
+
+- `predicted-zh-002.jsonl:32`: `-0.466667`
+- `predicted-zh-002.jsonl:61`: `-0.5`
+- `predicted-zh-002.jsonl:57`: `-0.333333`
+
+판단:
+
+- append-only short suffix final 억제도 일부 split 케이스는 살리지만, global rule로는 회귀가 훨씬 크다.
+- 따라서 이 축도 채택하지 않는다.
+- 다음 실험은 short suffix 자체를 global suppress하는 대신, clean subset 5건 안에서
+  1. detector split granularity,
+  2. `completed` 순서와 staged queue progression,
+  3. expected group 자체의 merge/split 허용 범위
+  중 어느 축이 공통 병목인지 더 좁혀서 진행한다.

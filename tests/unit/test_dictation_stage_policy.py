@@ -22,6 +22,15 @@ from src.app.dictation_core.dictation_transcript_logic import (
 
 
 class DictationStagePolicyTest(unittest.TestCase):
+    def test_prefers_equal_length_closed_zh_midspan_revision_candidate(self) -> None:
+        self.assertEqual(
+            _prefer_sentence_revision(
+                "我点的是橄榄的，它里面主要是有味的，开始选一个酱。",
+                "我点的是橄榄的，它里面主要是有味的，还选了一个酱。",
+            ),
+            "我点的是橄榄的，它里面主要是有味的，还选了一个酱。",
+        )
+
     def test_prefers_compact_hangul_no_end_revision_over_stale_longer_tokenization(self) -> None:
         self.assertEqual(
             _prefer_sentence_revision(
