@@ -61,6 +61,7 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _should_defer_cjk_recent_final_trimmed_queue_finalize,
     _should_suppress_ko_numeric_aged_final_with_queue,
     _should_suppress_ko_pure_latin_final_with_hangul_queue,
+    _should_suppress_right_context_prefixed_cjk_merge_with_single_queue,
     _should_suppress_right_context_short_prefix_extension_with_single_queue,
     _should_suppress_aged_low_value_final,
     _should_suppress_ko_short_closed_final_with_stronger_queue_candidate,
@@ -449,6 +450,26 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
                 "queue_before": queue_before,
                 "queue_after": [str(entry["sentence"]) for entry in (state.staged_queue or ())],
                 "suppressed": "right_context_short_prefix_queue_extension",
+                "output_sentence": output_sentence,
+            }
+        )
+        return []
+    if _should_suppress_right_context_prefixed_cjk_merge_with_single_queue(
+        output_source_sentence,
+        reason,
+        tuple(str(entry["sentence"]) for entry in (state.staged_queue or ())),
+    ):
+        state.count("finalize_prefixed_cjk_queue_merge_suppressed")
+        state.count("segment_state_suppressed")
+        _promote_next_staged_sentence(state, chunk_index)
+        state.finalize_events.append(
+            {
+                "chunk_index": chunk_index,
+                "reason": reason,
+                "staged_before": output_source_sentence,
+                "queue_before": queue_before,
+                "queue_after": [str(entry["sentence"]) for entry in (state.staged_queue or ())],
+                "suppressed": "right_context_prefixed_cjk_queue_merge",
                 "output_sentence": output_sentence,
             }
         )
@@ -1346,7 +1367,17 @@ def _run_lifecycle_case(case: SbdCase, detector: Any) -> dict[str, Any]:
         case.language,
         tuple(str(entry["sentence"]) for entry in state.staged_queue),
     ):
-        for drain_step in range(1, terminal_no_text_drain_chunks(case.sentence_finalize_age) + 1):
+        drain_limit = terminal_no_text_drain_chunks(case.sentence_finalize_age)
+        stage_finalize_age_limit = _stage_finalize_age_limit(
+            initial_terminal_stage,
+            case.language,
+            state.staged_forced,
+            case.sentence_finalize_age,
+            tuple(str(entry["sentence"]) for entry in state.staged_queue),
+        )
+        if stage_finalize_age_limit > int(case.sentence_finalize_age) and len(_word_units(initial_terminal_stage)) >= 24:
+            drain_limit = max(drain_limit, stage_finalize_age_limit - state.staged_age)
+        for drain_step in range(1, drain_limit + 1):
             if state.staged_sentence != initial_terminal_stage:
                 break
             synthetic_chunk_index = len(case.chunks) + drain_step

@@ -790,6 +790,31 @@ def _should_suppress_right_context_short_prefix_extension_with_single_queue(
     return prefix_words >= 3
 
 
+def _should_suppress_right_context_prefixed_cjk_merge_with_single_queue(
+    sentence: str,
+    reason: str,
+    queued_sentences: tuple[str, ...],
+) -> bool:
+    if reason not in {"right_context", "aged", "aged_forced"} or len(queued_sentences) != 1:
+        return False
+    normalized_sentence = _normalized_text(sentence)
+    normalized_queue = _normalized_text(queued_sentences[0])
+    if not normalized_sentence or not normalized_queue:
+        return False
+    if not (_is_cjk_text(normalized_sentence) and _is_cjk_text(normalized_queue)):
+        return False
+    if _sentence_end_count(normalized_sentence) <= 0 or _sentence_end_count(normalized_queue) <= 0:
+        return False
+    sentence_words = _word_units(normalized_sentence)
+    queued_words = _word_units(normalized_queue)
+    if len(sentence_words) < 12 or len(queued_words) < 10:
+        return False
+    best_i, best_j, best_len = _best_common_word_run(sentence_words, queued_words)
+    if best_j != 0 or best_i < 6 or best_len < 5:
+        return False
+    return best_len / max(len(queued_words), 1) <= 0.45
+
+
 def _should_suppress_ko_pure_latin_final_with_hangul_queue(
     sentence: str,
     language: str,

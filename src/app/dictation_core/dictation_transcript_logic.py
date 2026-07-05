@@ -48,6 +48,7 @@ from src.app.dictation_core.dictation_stage_policy import (
     _should_suppress_ko_numeric_aged_final_with_queue as _should_suppress_ko_numeric_aged_final_with_queue_impl,
     _should_suppress_ko_pure_latin_final_with_hangul_queue as _should_suppress_ko_pure_latin_final_with_hangul_queue_impl,
     _should_suppress_ko_short_closed_final_with_stronger_queue_candidate as _should_suppress_ko_short_closed_final_with_stronger_queue_candidate_impl,
+    _should_suppress_right_context_prefixed_cjk_merge_with_single_queue as _should_suppress_right_context_prefixed_cjk_merge_with_single_queue_impl,
     _should_suppress_right_context_short_prefix_extension_with_single_queue as _should_suppress_right_context_short_prefix_extension_with_single_queue_impl,
     _should_suppress_aged_low_value_final as _should_suppress_aged_low_value_final_impl,
     _should_suppress_aged_no_end_marker_queue_final as _should_suppress_aged_no_end_marker_queue_final_impl,
@@ -237,6 +238,18 @@ def _should_suppress_right_context_short_prefix_extension_with_single_queue(
     queued_sentences: tuple[str, ...] = (),
 ) -> bool:
     return _should_suppress_right_context_short_prefix_extension_with_single_queue_impl(
+        sentence,
+        reason,
+        queued_sentences,
+    )
+
+
+def _should_suppress_right_context_prefixed_cjk_merge_with_single_queue(
+    sentence: str,
+    reason: str,
+    queued_sentences: tuple[str, ...] = (),
+) -> bool:
+    return _should_suppress_right_context_prefixed_cjk_merge_with_single_queue_impl(
         sentence,
         reason,
         queued_sentences,

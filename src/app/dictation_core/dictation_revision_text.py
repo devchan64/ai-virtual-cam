@@ -483,6 +483,9 @@ def _sentence_output_delta(committed_text: str, sentence: str) -> str:
             return _sentence_delta_from_words(suffix_words)
         return ""
     if best_i + best_len == len(committed_words) and best_j == 1 and best_len >= 4:
+        overlap_coverage = best_len / max(len(sentence_words), 1)
+        if is_cjk_overlap and overlap_coverage < 0.45:
+            return normalized
         suffix_words = sentence_words[best_j + best_len :]
         if len(suffix_words) >= 3:
             return _sentence_delta_from_words(suffix_words)

@@ -33,8 +33,10 @@ from src.app.dictation.pipeline_translation import (
 from src.app.dictation.pipeline_types import SttModelLike, TextTranslatorLike, TranscriptWorkerLike
 from src.app.dictation_core.dictation_transcript_logic import (
     _diagnostic_tail,
+    _stage_finalize_age_limit,
     _should_allow_no_text_stage_aging,
 )
+from src.app.dictation_core.dictation_revision_text import _word_units
 from src.app.dictation_core.transcript_revision import (
     consume_committed_prefix as _consume_committed_prefix,
 )
@@ -76,7 +78,19 @@ def _drain_terminal_no_text_stage(
         tuple(commit_buffer_node.queued_sentences()),
     ):
         return committed_text, no_text_stage_skip_chunks
+    queued_sentences = tuple(commit_buffer_node.queued_sentences())
+    current_stage_age = int(getattr(active_stage, "age", 0) or 0)
+    current_stage_forced = bool(getattr(active_stage, "forced", False))
     drain_limit = terminal_no_text_drain_chunks(sentence_finalize_age)
+    stage_finalize_age_limit = _stage_finalize_age_limit(
+        initial_stage_sentence,
+        detected,
+        current_stage_forced,
+        sentence_finalize_age,
+        queued_sentences,
+    )
+    if stage_finalize_age_limit > int(sentence_finalize_age) and len(_word_units(initial_stage_sentence)) >= 24:
+        drain_limit = max(drain_limit, stage_finalize_age_limit - current_stage_age)
     worker._emit(
         "status",
         "받아쓰기 AI 종료 drain 시작: "

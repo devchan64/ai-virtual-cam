@@ -63,6 +63,15 @@ class TranscriptRevisionLifecycleTest(unittest.TestCase):
             "哦，还有泡菜，还有葱。",
         )
 
+    def test_sentence_output_delta_keeps_full_zh_sentence_on_short_tail_overlap(self) -> None:
+        self.assertEqual(
+            _sentence_output_delta(
+                "我的父母呢，他们讲他们想要吃饭，所以我就找了一家餐厅。",
+                "这一家餐厅呢，它是有很多分店的。",
+            ),
+            "这一家餐厅呢，它是有很多分店的。",
+        )
+
     def test_sentence_output_delta_keeps_non_cjk_prefix_growth_trim(self) -> None:
         self.assertEqual(
             _sentence_output_delta(

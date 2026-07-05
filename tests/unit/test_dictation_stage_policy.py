@@ -9,6 +9,7 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _should_allow_no_text_stage_aging,
     _should_suppress_ko_numeric_aged_final_with_queue,
     _should_suppress_ko_pure_latin_final_with_hangul_queue,
+    _should_suppress_right_context_prefixed_cjk_merge_with_single_queue,
     _should_suppress_right_context_short_prefix_extension_with_single_queue,
     _should_enable_aged_queue_backlog_promotion_boost,
     _should_defer_short_closed_queue_quality_block,
@@ -220,6 +221,24 @@ class DictationStagePolicyTest(unittest.TestCase):
 
     def test_does_not_enable_aged_queue_backlog_promotion_boost_for_non_zh(self) -> None:
         self.assertFalse(_should_enable_aged_queue_backlog_promotion_boost("aged", 3, "en"))
+
+    def test_suppresses_prefixed_cjk_right_context_merge_with_single_queue(self) -> None:
+        self.assertTrue(
+            _should_suppress_right_context_prefixed_cjk_merge_with_single_queue(
+                "我是很喜欢喝那个维也纳咖啡，所以它特别。",
+                "right_context",
+                ("维也纳咖啡的所以它测评是最出的。",),
+            )
+        )
+
+    def test_suppresses_prefixed_cjk_aged_merge_with_single_queue(self) -> None:
+        self.assertTrue(
+            _should_suppress_right_context_prefixed_cjk_merge_with_single_queue(
+                "我是很喜欢喝那个维也纳咖啡，所以它特别。",
+                "aged",
+                ("维也纳咖啡的所以它测评是最出的。",),
+            )
+        )
 
     def test_defers_trimmed_closed_zh_finalize_once_when_queue_has_closed_sentence(self) -> None:
         self.assertTrue(
