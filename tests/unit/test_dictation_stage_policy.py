@@ -83,6 +83,16 @@ class DictationStagePolicyTest(unittest.TestCase):
             )
         )
 
+    def test_defers_short_closed_zh_quality_block_with_single_long_closed_queue(self) -> None:
+        self.assertTrue(
+            _should_defer_short_closed_queue_quality_block(
+                "再点一颗。",
+                "zh",
+                ("然后蛋煎很好，大蒜土司，然后蛋。",),
+                staged_confirmations=2,
+            )
+        )
+
     def test_keeps_no_flag_zh_aged_final_when_queue_has_no_closed_sentence(self) -> None:
         self.assertFalse(
             _should_suppress_aged_no_end_marker_queue_final(

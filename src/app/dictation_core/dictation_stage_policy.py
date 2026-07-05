@@ -253,6 +253,17 @@ def _should_defer_short_closed_queue_quality_block(
     flags = set(_final_sentence_diagnostic_flags(sentence, language))
     if "short_cjk" not in flags or flags.intersection({"no_end_marker", "short_no_end_fragment", "low_value_cjk_fragment"}):
         return False
+    sentence_units = _word_units(_normalized_text(sentence))
+    if len(queued_sentences) == 1:
+        queued = _normalized_text(queued_sentences[0])
+        if not queued:
+            return False
+        if _should_stage_boundary_candidate(queued, language):
+            queued_flags = set(_final_sentence_diagnostic_flags(queued, language))
+            if not queued_flags.intersection({"no_end_marker", "short_no_end_fragment", "low_value_cjk_fragment"}):
+                if "short_cjk" not in queued_flags and len(sentence_units) > 4:
+                    return False
+                return True
     for queued_sentence in queued_sentences:
         queued = _normalized_text(queued_sentence)
         if not queued:

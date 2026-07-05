@@ -9,6 +9,7 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _replacement_decision_reason,
     _staged_sentence_required_confirmations,
     _should_defer_unconfirmed_replacement,
+    _should_defer_short_closed_queue_quality_block,
     _should_finalize_before_replacement,
     _should_finalize_replaced_sentence,
     _should_stage_boundary_candidate,
@@ -79,6 +80,21 @@ def _handle_deferred_replacement(
         active_stage.forced,
         sentence_finalize_age,
     ):
+        if _should_defer_short_closed_queue_quality_block(
+            active_stage.sentence,
+            detected,
+            commit_buffer_node.queued_sentences(),
+            active_stage.confirmations,
+        ):
+            count_metric("stage_age_quality_block_deferred_short_queue")
+            worker._emit(
+                "status",
+                "받아쓰기 AI stage 보류 후보 품질 차단 연기: "
+                f"chunk={chunk_index} decision={replacement_reason} staged_confirmations={active_stage.confirmations} "
+                f"staged_age={active_stage.age} staged_tail={_diagnostic_tail(active_stage.sentence)}",
+                display=False,
+            )
+            return []
         suppress_active_stage_for_quality(
             detected,
             metric_name="stage_age_quality_blocked",
