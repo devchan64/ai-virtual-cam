@@ -42,6 +42,7 @@ from src.app.dictation_core.dictation_stage_policy import (
     _should_finalize_replaced_sentence as _should_finalize_replaced_sentence_impl,
     _should_enable_aged_queue_backlog_promotion_boost as _should_enable_aged_queue_backlog_promotion_boost_impl,
     _should_allow_no_text_stage_aging as _should_allow_no_text_stage_aging_impl,
+    _is_ko_short_closed_sentence as _is_ko_short_closed_sentence_impl,
     _should_restore_trimmed_closed_candidate as _should_restore_trimmed_closed_candidate_impl,
     _should_suppress_ko_numeric_aged_final_with_queue as _should_suppress_ko_numeric_aged_final_with_queue_impl,
     _should_suppress_ko_pure_latin_final_with_hangul_queue as _should_suppress_ko_pure_latin_final_with_hangul_queue_impl,
@@ -184,6 +185,15 @@ def _should_restore_trimmed_closed_candidate(
     language: str,
 ) -> bool:
     return _should_restore_trimmed_closed_candidate_impl(original_sentence, trimmed_candidate, language)
+
+
+def _is_ko_short_closed_sentence(
+    sentence: str,
+    language: str,
+    *,
+    max_units: int = 2,
+) -> bool:
+    return _is_ko_short_closed_sentence_impl(sentence, language, max_units=max_units)
 
 
 def _should_defer_short_closed_queue_quality_block(

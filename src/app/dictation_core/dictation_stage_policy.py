@@ -514,6 +514,24 @@ def _should_suppress_aged_no_end_marker_queue_final(
     return False
 
 
+def _is_ko_short_closed_sentence(
+    sentence: str,
+    language: str,
+    *,
+    max_units: int = 2,
+) -> bool:
+    if language != "ko":
+        return False
+    normalized_sentence = _normalized_text(sentence)
+    if not normalized_sentence or _sentence_end_count(normalized_sentence) <= 0:
+        return False
+    sentence_flags = set(_final_sentence_diagnostic_flags(normalized_sentence, language))
+    if sentence_flags.intersection({"empty", "no_end_marker", "short_no_end_fragment", "trailing_ellipsis"}):
+        return False
+    sentence_units = _word_units(normalized_sentence)
+    return 0 < len(sentence_units) <= max_units
+
+
 def _should_suppress_ko_short_closed_final_with_stronger_queue_candidate(
     sentence: str,
     language: str,
@@ -530,14 +548,9 @@ def _should_suppress_ko_short_closed_final_with_stronger_queue_candidate(
     if staged_confirmations >= sentence_required_confirmations:
         return False
     normalized_sentence = _normalized_text(sentence)
-    if not normalized_sentence or _sentence_end_count(normalized_sentence) <= 0:
-        return False
-    sentence_flags = set(_final_sentence_diagnostic_flags(normalized_sentence, language))
-    if sentence_flags.intersection({"empty", "no_end_marker", "short_no_end_fragment", "trailing_ellipsis"}):
+    if not _is_ko_short_closed_sentence(normalized_sentence, language):
         return False
     sentence_units = _word_units(normalized_sentence)
-    if len(sentence_units) == 0 or len(sentence_units) > 2:
-        return False
     clean_closed_queue_count = 0
     clean_closed_queue_word_lengths: list[int] = []
     saw_stronger_queue_candidate = False

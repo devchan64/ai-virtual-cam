@@ -1,6 +1,8 @@
 import unittest
 
 from src.app.dictation_core.dictation_transcript_logic import (
+    _is_ko_short_closed_sentence,
+    _prefer_sentence_revision,
     _stale_leading_short_closed_candidate_reason,
     _should_allow_no_text_stage_aging,
     _should_suppress_ko_numeric_aged_final_with_queue,
@@ -18,6 +20,30 @@ from src.app.dictation_core.dictation_transcript_logic import (
 
 
 class DictationStagePolicyTest(unittest.TestCase):
+    def test_prefers_compact_hangul_no_end_revision_over_stale_longer_tokenization(self) -> None:
+        self.assertEqual(
+            _prefer_sentence_revision(
+                "패권 전쟁이 반도체 하고 ai 로 국한이 될 것이냐 아니면 전략산업으로 방법이 되지 않겠는가",
+                "패권 전쟁이 반도체하고 AI로 국한이 될 것이냐 아니면 전략산업으로 확장이 될 것이냐",
+            ),
+            "패권 전쟁이 반도체하고 AI로 국한이 될 것이냐 아니면 전략산업으로 확장이 될 것이냐",
+        )
+
+    def test_keeps_longer_hangul_no_end_sentence_when_right_is_too_short(self) -> None:
+        self.assertEqual(
+            _prefer_sentence_revision(
+                "심지어는 그쪽에 더 많은 인력 양성을 해야 하는 해외 학교들의 분교도 많이 생길 수밖에 없을 거예요",
+                "심지어는 그쪽에 더 많은 인력 양성을 해야 하는",
+            ),
+            "심지어는 그쪽에 더 많은 인력 양성을 해야 하는 해외 학교들의 분교도 많이 생길 수밖에 없을 거예요",
+        )
+
+    def test_detects_ko_short_closed_sentence(self) -> None:
+        self.assertTrue(_is_ko_short_closed_sentence("네.", "ko"))
+
+    def test_ignores_ko_short_no_end_fragment_for_closed_sentence_detection(self) -> None:
+        self.assertFalse(_is_ko_short_closed_sentence("어 뭐", "ko"))
+
     def test_suppresses_short_latin_only_zh_aged_final_with_non_latin_queue(self) -> None:
         self.assertTrue(
             _should_suppress_aged_low_value_final(

@@ -8,6 +8,7 @@ from src.app.dictation_core.dictation_revision_progression import _diagnostic_ta
 from src.app.dictation_core.dictation_revision_text import _sentence_output_delta
 from src.app.dictation_core.dictation_transcript_logic import (
     _final_sentence_diagnostic_flags,
+    _is_ko_short_closed_sentence,
     _normalized_text,
     _should_suppress_ko_numeric_aged_final_with_queue,
     _should_suppress_ko_pure_latin_final_with_hangul_queue,
@@ -221,6 +222,11 @@ def finalize_staged_sentence(
     if reason in {"confirmed", "confirmed_forced"} and queue_before_sentences:
         count_metric("finalize_confirmed_with_queue_tail")
         count_metric(f"finalize_confirmed_with_queue_tail_q{min(len(queue_before_sentences), 5)}")
+    if not queue_before_sentences and _is_ko_short_closed_sentence(active_stage.sentence, detected):
+        if reason in {"aged", "aged_forced"}:
+            count_metric("finalize_ko_short_closed_aged_no_queue")
+        elif reason == "next_completed":
+            count_metric("finalize_ko_short_closed_next_completed_no_queue")
     if commit_buffer_node.prefer_queued_revision_for_active(
         chunk_index=chunk_index,
         max_promotion_age_chunks=staged_queue_max_promotion_age_chunks_for_language(detected),

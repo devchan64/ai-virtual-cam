@@ -1409,8 +1409,80 @@ class DictationAiSbdBenchmarkReportTest(unittest.TestCase):
         self.assertEqual(example["id"], "case-split")
         self.assertEqual(example["expected_final_count"], 4)
         self.assertEqual(example["actual_final_count"], 5)
+        self.assertEqual(summary["boundary_granularity_split_only_case_count"], 0)
         self.assertEqual(report["case_definition_action_summary"]["action_counts"], {"manual_boundary_review": 1})
         self.assertEqual(report["strict_logic_candidate_summary"]["strict_case_count"], 0)
+
+    def test_boundary_granularity_summary_tracks_split_only_cases_separately(self) -> None:
+        args = Namespace(
+            model="sat-3l-sm",
+            device="cuda",
+            compute_type="float16",
+            min_final_f1=0.0,
+            fail_on_regression=False,
+        )
+        case = SbdCase(
+            id="case-split-only",
+            language="ko",
+            chunks=[
+                "우리는 계속해서 미국 투자를 이어갈 것인가?",
+                "아니면 미국 이외의 다른 곳들도 같이 눈여겨봐야 될 것인가?",
+                "이 고민을 좀 해야 되는 시기가 된 것 같아요.",
+            ],
+            expected_completed=[],
+            expected_pending="",
+            expected_final=[
+                "우리는 계속해서 미국 투자를 이어갈 것인가 아니면 미국 이외의 다른 곳들도 같이 눈여겨봐야 될 것인가 이 고민을 좀 해야 되는 시기가 된 것 같아요."
+            ],
+            expected_staged="",
+            tags=(),
+            sentence_finalize_age=3,
+        )
+        results = [
+            {
+                "id": "case-split-only",
+                "language": "ko",
+                "expected_completed": [],
+                "actual_completed_last": [],
+                "expected_pending": "",
+                "actual_pending": "",
+                "expected_final": list(case.expected_final),
+                "actual_final": [
+                    "우리는 계속해서 미국 투자를 이어갈 것인가?",
+                    "아니면 미국 이외의 다른 곳들도 같이 눈여겨봐야 될 것인가?",
+                    "이 고민을 좀 해야 되는 시기가 된 것 같아요.",
+                ],
+                "expected_staged": "",
+                "actual_staged": "",
+                "actual_staged_queue": [],
+                "final_score": _score(0.0, 1.0, 0.0),
+                "final_ordered_score": _score(0.0, 1.0, 0.0),
+                "final_boundary_score": _score(0.0, 1.0, 0.0),
+                "boundary_granularity_adjusted_score": _score(1.0, 1.0, 1.0),
+                "completed_last_score": _score(0.0, 0.0, 0.0),
+                "pending_exact": True,
+                "staged_exact": True,
+                "case_exact_match": False,
+                "metrics": {"finalized": 3, "stage_start": 3},
+            }
+        ]
+
+        report = build_benchmark_report(
+            args=args,
+            case_sources=["cases.jsonl"],
+            corpus_role="challenge-replay",
+            cases=[case],
+            results=results,
+            metric_totals={"finalized": 3, "stage_start": 3},
+            elapsed_ms=1.0,
+        )
+
+        summary = report["boundary_granularity_summary"]
+        self.assertEqual(summary["boundary_granularity_case_count"], 0)
+        self.assertEqual(summary["boundary_granularity_split_only_case_count"], 1)
+        self.assertEqual(summary["boundary_granularity_split_only_examples"][0]["id"], "case-split-only")
+        self.assertEqual(report["case_definition_action_summary"]["action_counts"], {"manual_boundary_review": 1})
+        self.assertEqual(report["tuning_next_action_summary"]["priority"], "review_split_only_boundary_granularity")
 
     def test_strict_summary_separates_boundary_metric_sensitivity(self) -> None:
         args = Namespace(

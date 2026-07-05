@@ -44,6 +44,8 @@ LIFECYCLE_BOTTLENECK_METRICS = (
     "stage_revision",
     "stage_revision_token_sentence_deferred",
     "stage_candidate_quality_blocked",
+    "finalize_ko_short_closed_aged_no_queue",
+    "finalize_ko_short_closed_next_completed_no_queue",
     "pending_overrun",
     "candidate_delta_trimmed",
     "candidate_recent_final_delta_trimmed",
@@ -87,6 +89,8 @@ CASE_EXEMPLAR_METRICS = (
     "stage_age_hold",
     "stage_age_quality_blocked",
     "stage_candidate_quality_blocked",
+    "finalize_ko_short_closed_aged_no_queue",
+    "finalize_ko_short_closed_next_completed_no_queue",
     "pending_overrun",
     "candidate_delta_trimmed",
     "candidate_recent_final_delta_trimmed",
@@ -99,6 +103,8 @@ BOUNDARY_ZERO_HIGH_FINAL_F1 = 0.95
 BOUNDARY_GRANULARITY_FINAL_RECALL = 0.95
 BOUNDARY_GRANULARITY_FINAL_F1 = 0.85
 BOUNDARY_GRANULARITY_MAX_BOUNDARY_F1 = 0.50
+BOUNDARY_GRANULARITY_ZERO_FINAL_MAX_F1 = 0.0
+BOUNDARY_GRANULARITY_ZERO_FINAL_MIN_ADJUSTED_F1 = 0.95
 LOW_SCORE_THRESHOLDS = (0.35, 0.50, 0.65)
 MID_SCORE_MIN_FINAL_F1 = 0.65
 LOW_SCORE_METRIC_PREFIXES = (
@@ -1121,11 +1127,13 @@ def summarize_boundary_granularity_cases(results: list[dict[str, Any]]) -> dict[
     for result in expected_results:
         final_score = dict(result.get("final_score", {}))
         boundary_score = dict(result.get("final_boundary_score", {}))
+        adjusted_boundary_score = dict(result.get("boundary_granularity_adjusted_score", final_score))
         expected_count = len(list(result.get("expected_final", []) or []))
         actual_count = len(list(result.get("actual_final", []) or []))
         final_recall = float(final_score.get("recall", 0.0))
         final_f1 = float(final_score.get("f1", 0.0))
         boundary_f1 = float(boundary_score.get("f1", 0.0))
+        adjusted_f1 = float(adjusted_boundary_score.get("f1", 0.0))
         if actual_count <= expected_count:
             continue
         if final_recall < BOUNDARY_GRANULARITY_FINAL_RECALL:
@@ -1135,6 +1143,14 @@ def summarize_boundary_granularity_cases(results: list[dict[str, Any]]) -> dict[
         if boundary_f1 > BOUNDARY_GRANULARITY_MAX_BOUNDARY_F1:
             continue
         granularity_cases.append(result)
+    zero_final_high_adjusted_cases = [
+        result
+        for result in expected_results
+        if len(list(result.get("actual_final", []) or [])) > len(list(result.get("expected_final", []) or []))
+        and float(dict(result.get("final_score", {})).get("f1", 0.0)) <= BOUNDARY_GRANULARITY_ZERO_FINAL_MAX_F1
+        and float(dict(result.get("boundary_granularity_adjusted_score", {})).get("f1", 0.0))
+        >= BOUNDARY_GRANULARITY_ZERO_FINAL_MIN_ADJUSTED_F1
+    ]
     return {
         "interpretation": (
             "These cases recovered expected content with high recall but emitted more final "
@@ -1147,6 +1163,10 @@ def summarize_boundary_granularity_cases(results: list[dict[str, Any]]) -> dict[
             "min_final_f1": BOUNDARY_GRANULARITY_FINAL_F1,
             "max_boundary_f1": BOUNDARY_GRANULARITY_MAX_BOUNDARY_F1,
         },
+        "split_only_thresholds": {
+            "max_final_f1": BOUNDARY_GRANULARITY_ZERO_FINAL_MAX_F1,
+            "min_adjusted_f1": BOUNDARY_GRANULARITY_ZERO_FINAL_MIN_ADJUSTED_F1,
+        },
         "expected_case_count": len(expected_results),
         "boundary_granularity_case_count": len(granularity_cases),
         "boundary_granularity_examples": [
@@ -1156,6 +1176,18 @@ def summarize_boundary_granularity_cases(results: list[dict[str, Any]]) -> dict[
                 key=lambda item: (
                     float(dict(item.get("final_boundary_score", {})).get("f1", 0.0)),
                     -float(dict(item.get("final_score", {})).get("recall", 0.0)),
+                    str(item.get("id", "")),
+                ),
+            )[:CASE_EXEMPLAR_LIMIT]
+        ],
+        "boundary_granularity_split_only_case_count": len(zero_final_high_adjusted_cases),
+        "boundary_granularity_split_only_examples": [
+            _boundary_granularity_payload(result)
+            for result in sorted(
+                zero_final_high_adjusted_cases,
+                key=lambda item: (
+                    -float(dict(item.get("boundary_granularity_adjusted_score", {})).get("f1", 0.0)),
+                    float(dict(item.get("final_boundary_score", {})).get("f1", 0.0)),
                     str(item.get("id", "")),
                 ),
             )[:CASE_EXEMPLAR_LIMIT]
@@ -1514,6 +1546,8 @@ def _case_primary_review_action(result: dict[str, Any]) -> str:
     expected_quality = set(result.get("expected_quality_flags", []) or [])
     context_flags = set(result.get("case_context_flags", []) or [])
     definition_flags = set(result.get("case_definition_flags", []) or [])
+    if _is_boundary_granularity_split_only_review(result):
+        return "manual_boundary_review"
     if (
         not input_evidence.get("stable_repeat_fully_supported", True)
         and int(input_evidence.get("stable_candidate_count", 0)) > 0
@@ -1577,6 +1611,22 @@ def _is_boundary_granularity_review(result: dict[str, Any]) -> bool:
         and float(final_score.get("recall", 0.0)) >= BOUNDARY_GRANULARITY_FINAL_RECALL
         and float(final_score.get("f1", 0.0)) >= BOUNDARY_GRANULARITY_FINAL_F1
         and float(boundary_score.get("f1", 0.0)) <= BOUNDARY_GRANULARITY_MAX_BOUNDARY_F1
+    )
+
+
+def _is_boundary_granularity_split_only_review(result: dict[str, Any]) -> bool:
+    if not result.get("expected_final"):
+        return False
+    if not isinstance(result.get("boundary_granularity_adjusted_score"), dict):
+        return False
+    final_score = dict(result.get("final_score", {}))
+    adjusted_boundary_score = dict(result.get("boundary_granularity_adjusted_score", {}))
+    expected_count = len(list(result.get("expected_final", []) or []))
+    actual_count = len(list(result.get("actual_final", []) or []))
+    return (
+        actual_count > expected_count
+        and float(final_score.get("f1", 0.0)) <= BOUNDARY_GRANULARITY_ZERO_FINAL_MAX_F1
+        and float(adjusted_boundary_score.get("f1", 0.0)) >= BOUNDARY_GRANULARITY_ZERO_FINAL_MIN_ADJUSTED_F1
     )
 
 
@@ -2798,6 +2848,9 @@ def summarize_tuning_next_action(
     missing_no_residue_count = int(missing_expected_without_terminal_residue_summary.get("case_count", 0))
     split_coverage_count = int(missing_expected_split_coverage_summary.get("case_count", 0))
     boundary_granularity_count = int(boundary_granularity_summary.get("boundary_granularity_case_count", 0))
+    boundary_granularity_split_only_count = int(
+        boundary_granularity_summary.get("boundary_granularity_split_only_case_count", 0)
+    )
     strict_actionable_low_count = int(
         dict(strict_logic_candidate_summary.get("actionable_low_final", {}) or {}).get("case_count", 0)
     )
@@ -2832,6 +2885,9 @@ def summarize_tuning_next_action(
     if cleanup_count > 0:
         priority = "case_definition_cleanup"
         rationale = "expected_final cleanup queue is non-empty; fix labels/windows before app logic changes."
+    elif boundary_granularity_split_only_count > 0:
+        priority = "review_split_only_boundary_granularity"
+        rationale = "some zero-final-f1 cases are split-only granularity mismatches with high adjusted boundary support."
     elif health_recommendation != "app-logic-tuning-subset-usable":
         priority = "case_definition_review"
         rationale = "case definition review ratio or strict candidate count is not healthy enough for app tuning."
@@ -2907,6 +2963,7 @@ def summarize_tuning_next_action(
         "missing_expected_without_terminal_residue_case_count": missing_no_residue_count,
         "missing_expected_split_coverage_case_count": split_coverage_count,
         "boundary_granularity_case_count": boundary_granularity_count,
+        "boundary_granularity_split_only_case_count": boundary_granularity_split_only_count,
         "case_definition_cleanup_queue_count": cleanup_count,
     }
 

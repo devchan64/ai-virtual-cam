@@ -36,6 +36,7 @@ from src.app.dictation_core.dictation_revision_text import (
 from src.app.dictation_core.dictation_transcript_logic import (
     _coalesce_completed_short_no_end_fragments,
     _has_later_completed_extension,
+    _is_ko_short_closed_sentence,
     _is_pending_prefix_mixed_candidate,
     _is_prior_pending_recent_final_mixed_candidate,
     _stale_leading_short_closed_candidate_reason,
@@ -231,6 +232,11 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
     if reason in {"confirmed", "confirmed_forced"} and queue_before:
         state.count("finalize_confirmed_with_queue_tail")
         state.count(f"finalize_confirmed_with_queue_tail_q{min(len(queue_before), 5)}")
+    if not queue_before and _is_ko_short_closed_sentence(staged_before, language):
+        if reason in {"aged", "aged_forced"}:
+            state.count("finalize_ko_short_closed_aged_no_queue")
+        elif reason == "next_completed":
+            state.count("finalize_ko_short_closed_next_completed_no_queue")
     if _prefer_queued_revision_for_active(state, chunk_index, reason):
         state.finalize_events.append(
             {
@@ -353,7 +359,7 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
         state.staged_delta_suppressed_chunks = 0
         state.staged_delta_suppressed_chunk_index = -1
         state.staged_queue_promoted_chunk = -1
-        state.count("finalize_aged_short_closed_stronger_queue_suppressed")
+        state.count("finalize_ko_short_closed_stronger_queue_suppressed")
         state.count("segment_state_suppressed")
         _promote_next_staged_sentence(state, chunk_index)
         state.finalize_events.append(
@@ -363,7 +369,7 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
                 "staged_before": staged_before,
                 "queue_before": queue_before,
                 "queue_after": [str(entry["sentence"]) for entry in (state.staged_queue or ())],
-                "suppressed": "aged_short_closed_stronger_queue",
+                "suppressed": "ko_short_closed_stronger_queue",
                 "output_sentence": output_sentence,
             }
         )

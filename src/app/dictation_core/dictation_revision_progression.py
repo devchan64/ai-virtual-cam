@@ -331,6 +331,23 @@ def _prefer_sentence_revision(left: str, right: str) -> str:
             and not ("mixed_latin_zh" in left_flags and "mixed_latin_zh" in right_flags)
         ):
             return _normalized_text(right)
+        if (
+            _has_hangul_words(left_words)
+            and _has_hangul_words(right_words)
+            and "no_end_marker" in left_flags
+            and "no_end_marker" in right_flags
+            and len(left_words) > len(right_words)
+        ):
+            left_compact = _normalized_text(left).replace(" ", "")
+            right_compact = _normalized_text(right).replace(" ", "")
+            if left_compact and right_compact:
+                compact_ratio = SequenceMatcher(None, left_compact, right_compact, autojunk=False).ratio()
+                if (
+                    compact_ratio >= 0.75
+                    and len(left_compact) - len(right_compact) <= 4
+                    and len(left_words) - len(right_words) <= 4
+                ):
+                    return _normalized_text(right)
     if _share_stable_numeric_sequence(left_words, right_words):
         if _sentence_end_count(right) > _sentence_end_count(left):
             return _normalized_text(right)
