@@ -254,6 +254,11 @@ def _should_defer_short_closed_queue_quality_block(
     if "short_cjk" not in flags or flags.intersection({"no_end_marker", "short_no_end_fragment", "low_value_cjk_fragment"}):
         return False
     sentence_units = _word_units(_normalized_text(sentence))
+    # Single-long-queue defer is useful for very short acknowledgements and
+    # closed four-unit clauses, but three-unit zh tails often behave like
+    # suffix fragments and create duplicate finals.
+    if len(sentence_units) == 3:
+        return False
     if len(queued_sentences) == 1:
         queued = _normalized_text(queued_sentences[0])
         if not queued:
