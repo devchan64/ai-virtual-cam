@@ -197,8 +197,14 @@ def _should_restore_trimmed_closed_candidate(
     original_sentence: str,
     trimmed_candidate: str,
     language: str,
+    recent_reason: str | None = None,
 ) -> bool:
-    return _should_restore_trimmed_closed_candidate_impl(original_sentence, trimmed_candidate, language)
+    return _should_restore_trimmed_closed_candidate_impl(
+        original_sentence,
+        trimmed_candidate,
+        language,
+        recent_reason,
+    )
 
 
 def _is_ko_short_closed_sentence(

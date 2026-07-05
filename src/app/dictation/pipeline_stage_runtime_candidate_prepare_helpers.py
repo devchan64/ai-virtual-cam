@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from src.app.dictation_core.dictation_recent_final import _recent_final_output_delta
+from src.app.dictation_core.dictation_recent_final import _recent_final_output_delta_with_reason
 from src.app.dictation_core.dictation_revision_progression import _diagnostic_tail
 from src.app.dictation.pipeline_stage_state_helpers import tick_stage_age_once
 from src.app.dictation_core.dictation_revision_text import _sentence_output_delta
@@ -66,17 +66,7 @@ def prepare_stage_candidate(
         count_metric("candidate_delta_trimmed")
         if _is_cjk_text(normalized_sentence):
             count_metric("candidate_delta_trimmed_cjk")
-    if _should_restore_trimmed_closed_candidate(normalized_sentence, candidate, detected):
-        count_metric("candidate_delta_trimmed_restored_closed_sentence")
-        worker._emit(
-            "status",
-            "받아쓰기 AI delta trim 복구: "
-            f"chunk={chunk_index} before={_diagnostic_tail(candidate)} "
-            f"after={_diagnostic_tail(normalized_sentence)}",
-            display=False,
-        )
-        candidate = normalized_sentence
-    recent_candidate, recent_source = _recent_final_output_delta(
+    recent_candidate, recent_source, recent_reason = _recent_final_output_delta_with_reason(
         normalized_sentence,
         recent_transcripts,
         detected,
@@ -85,6 +75,18 @@ def prepare_stage_candidate(
         candidate = recent_candidate
         recent_final_trimmed = True
         count_metric("candidate_recent_final_delta_trimmed")
+    if _should_restore_trimmed_closed_candidate(normalized_sentence, candidate, detected, recent_reason):
+        count_metric("candidate_delta_trimmed_restored_closed_sentence")
+        if recent_source is not None:
+            count_metric("candidate_recent_final_delta_trimmed_restored_closed_sentence")
+        worker._emit(
+            "status",
+            "받아쓰기 AI delta trim 복구: "
+            f"chunk={chunk_index} before={_diagnostic_tail(candidate)} "
+            f"after={_diagnostic_tail(normalized_sentence)}",
+            display=False,
+        )
+        candidate = normalized_sentence
     set_prepared_candidate_recent_final_trimmed(recent_final_trimmed)
     if not candidate:
         count_metric("candidate_duplicate_suppressed")

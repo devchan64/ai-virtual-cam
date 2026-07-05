@@ -223,6 +223,7 @@ def _should_restore_trimmed_closed_candidate(
     original_sentence: str,
     trimmed_candidate: str,
     language: str,
+    recent_reason: str | None = None,
 ) -> bool:
     normalized_original = _normalized_text(original_sentence)
     normalized_trimmed = _normalized_text(trimmed_candidate)
@@ -230,17 +231,45 @@ def _should_restore_trimmed_closed_candidate(
         return False
     original_words = _word_units(normalized_original)
     trimmed_words = _word_units(normalized_trimmed)
-    if len(original_words) < 4 or len(original_words) > 5:
+    original_flags = set(_final_sentence_diagnostic_flags(normalized_original, language))
+    trimmed_flags = set(_final_sentence_diagnostic_flags(normalized_trimmed, language))
+    if (
+        len(original_words) >= 4
+        and len(original_words) <= 5
+        and len(trimmed_words) <= 2
+        and len(trimmed_words) < len(original_words)
+        and original_words[-len(trimmed_words) :] == trimmed_words
+        and not original_flags
+        and trimmed_flags.issuperset({"no_end_marker", "short_no_end_fragment"})
+    ):
+        return True
+    if recent_reason != "prefix_extension":
         return False
-    if len(trimmed_words) > 2 or len(trimmed_words) >= len(original_words):
+    if language != "zh" and not (_is_cjk_text(normalized_original) and _is_cjk_text(normalized_trimmed)):
+        return False
+    if not normalized_original.endswith(normalized_trimmed):
+        return False
+    if _boundary_sentence_end_count(normalized_original) != 1 or _boundary_sentence_end_count(normalized_trimmed) != 1:
+        return False
+    if original_flags.intersection(
+        {"empty", "spaced_cjk", "cjk_internal_gap", "cjk_repeated_ngram", "repeated_word_ngram", "trailing_ellipsis"}
+    ):
+        return False
+    if trimmed_flags.intersection(
+        {"empty", "no_end_marker", "short_no_end_fragment", "spaced_cjk", "cjk_internal_gap", "trailing_ellipsis"}
+    ):
+        return False
+    prefix_text = normalized_original[: -len(normalized_trimmed)].rstrip()
+    if len(trimmed_words) < 4 or len(trimmed_words) > 6 or len(original_words) < len(trimmed_words) + 6:
+        return False
+    recent_words = _word_units(prefix_text)
+    if len(recent_words) < 20 and len(trimmed_words) < 5:
         return False
     if original_words[-len(trimmed_words) :] != trimmed_words:
         return False
-    original_flags = set(_final_sentence_diagnostic_flags(normalized_original, language))
-    trimmed_flags = set(_final_sentence_diagnostic_flags(normalized_trimmed, language))
-    if original_flags:
+    if len(prefix_text) < 8 or not any(char in prefix_text for char in "，,、；："):
         return False
-    return trimmed_flags.issuperset({"no_end_marker", "short_no_end_fragment"})
+    return len(trimmed_words) / max(len(original_words), 1) <= 0.60
 
 
 def _should_defer_short_closed_queue_quality_block(
@@ -321,9 +350,40 @@ def _coalesce_completed_short_no_end_fragments(
     index = 0
     while index < len(sentences):
         current = _normalized_text(sentences[index])
-        if current and index + 1 < len(sentences) and _sentence_end_count(current) == 0 and "short_no_end_fragment" in set(_final_sentence_diagnostic_flags(current, language)):
+        if current and index + 1 < len(sentences) and _sentence_end_count(current) == 0:
             following = _normalized_text(sentences[index + 1])
-            if following and _sentence_end_count(following) > 0:
+            current_flags = set(_final_sentence_diagnostic_flags(current, language))
+            following_flags = set(_final_sentence_diagnostic_flags(following, language)) if following else set()
+            should_merge = "short_no_end_fragment" in current_flags
+            if (
+                not should_merge
+                and language == "zh"
+                and following
+                and "no_end_marker" not in following_flags
+                and "short_cjk" in following_flags
+                and len(_word_units(current)) >= 8
+                and len(_word_units(following)) >= 4
+            ):
+                should_merge = True
+            if should_merge and following and _sentence_end_count(following) > 0:
+                current_words = _word_units(current)
+                following_words = _word_units(following)
+                if language == "zh":
+                    repeated_tail = False
+                    max_tail = min(4, len(current_words), len(following_words))
+                    for size in range(max_tail, 1, -1):
+                        tail = current_words[-size:]
+                        for start in range(0, len(following_words) - size + 1):
+                            if following_words[start : start + size] == tail:
+                                repeated_tail = True
+                                break
+                        if repeated_tail:
+                            break
+                    if repeated_tail:
+                        if current:
+                            coalesced.append(current)
+                        index += 1
+                        continue
                 separator = "" if _is_cjk_text(current + following) else " "
                 combined = _normalized_text(f"{current}{separator}{following}")
                 if _should_stage_boundary_candidate(combined, language):
@@ -547,6 +607,8 @@ def _should_preserve_staged_output_when_delta_fragment(staged_sentence: str, out
     output = _normalized_text(output_sentence)
     if not staged or not output or staged == output:
         return False
+    if _should_restore_trimmed_closed_candidate(staged, output, language):
+        return True
     if _sentence_end_count(staged) <= _sentence_end_count(output):
         return False
     staged_flags = set(_final_sentence_diagnostic_flags(staged, language))

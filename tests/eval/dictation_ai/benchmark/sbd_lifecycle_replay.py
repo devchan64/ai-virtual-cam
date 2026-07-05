@@ -617,9 +617,6 @@ def _stage_completed_sentence(
         state.count("candidate_delta_trimmed")
         if _is_cjk_text(normalized_sentence):
             state.count("candidate_delta_trimmed_cjk")
-    if _should_restore_trimmed_closed_candidate(normalized_sentence, candidate, language):
-        candidate = normalized_sentence
-        state.count("candidate_delta_trimmed_restored_closed_sentence")
     if state.staged_sentence and prior_pending_text and candidate:
         stripped_candidate = _strip_prior_pending_prefix_revision(
             state.staged_sentence,
@@ -640,6 +637,11 @@ def _stage_completed_sentence(
         recent_final_trimmed = True
         state.count("candidate_recent_final_delta_trimmed")
         state.count(f"candidate_recent_final_delta_trimmed_{recent_reason}")
+    if _should_restore_trimmed_closed_candidate(normalized_sentence, candidate, language, recent_reason):
+        candidate = normalized_sentence
+        state.count("candidate_delta_trimmed_restored_closed_sentence")
+        if recent_source is not None:
+            state.count("candidate_recent_final_delta_trimmed_restored_closed_sentence")
     if not candidate:
         state.count("candidate_duplicate_suppressed")
         if recent_source is not None:

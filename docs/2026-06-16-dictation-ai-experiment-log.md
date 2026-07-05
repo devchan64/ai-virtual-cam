@@ -34097,3 +34097,236 @@ counterfactual:
   2. `completed` 순서와 staged queue progression,
   3. expected group 자체의 merge/split 허용 범위
   중 어느 축이 공통 병목인지 더 좁혀서 진행한다.
+
+## 2026-07-05 recent-final prefix-extension short CJK restore 채택
+
+배경:
+
+- `predicted-zh-002.jsonl:18`은 recent final
+  `...然后整个。`
+  뒤에 같은 chunk 흐름에서
+  `...然后整个味道很香。`
+  이 반복 관측되는데, candidate 준비 단계에서 recent-final `prefix_extension` trim이 먼저 적용되어
+  `味道很香。`만 새 final로 stage되는 병목이 있었다.
+- 같은 형태는 `predicted-zh-000.jsonl:3`, `predicted-zh-000.jsonl:62`, `predicted-zh-002.jsonl:75`,
+  `predicted-zh-001.jsonl:35`에서도 반복되었다.
+- 반대로 trim 복구를 넓게 적용하면 `predicted-zh-002.jsonl:37`, `predicted-zh-000.jsonl:82`처럼
+  짧은 recent final 뒤의 3-4 unit suffix를 과복구해 downstream finalization이 흔들렸다.
+
+실험 순서:
+
+1. `v32`: 모든 closed CJK suffix trim을 recent-final 이후 복구
+2. `v33`: `prefix_extension` reason으로 잘린 짧은 CJK suffix만 복구
+3. `v34`: `prefix_extension` 중에서도
+   - recent prefix가 충분히 길거나
+   - suffix가 5 unit 이상일 때만 복구
+
+핵심 구현:
+
+- candidate 준비 단계에서 `_recent_final_output_delta_with_reason()` 결과를 직접 받아
+  recent-final trim reason을 확인한다.
+- `_should_restore_trimmed_closed_candidate()`를 확장해
+  - `recent_reason == "prefix_extension"`
+  - 닫힌 CJK suffix
+  - suffix `4..6` unit
+  - recent prefix가 길거나 suffix가 `5+` unit
+  인 경우에만 원문 candidate를 복구한다.
+- benchmark replay 구현(`sbd_lifecycle_replay.py`)도 같은 순서와 규칙으로 맞췄다.
+
+결과:
+
+`v28` baseline:
+
+```text
+.tmp/eval/dictation-ai-sbd/20260705-v28-equal-length-zh-midspan-revision.json
+final_f1_avg=0.682353
+final_similarity_coverage_avg=0.577783
+boundary_granularity_adjusted_f1_avg=0.764852
+case_exact_match=33
+```
+
+`v32` 광범위 복구:
+
+```text
+.tmp/eval/dictation-ai-sbd/20260705-v32-recent-final-trimmed-closed-cjk-restore.json
+final_f1_avg=0.683076
+final_similarity_coverage_avg=0.578015
+boundary_granularity_adjusted_f1_avg=0.764984
+changed_cases=20
+```
+
+- `predicted-zh-002.jsonl:18`은 `0.191304 -> 0.489130`으로 크게 좋아졌지만
+- `predicted-zh-002.jsonl:37`, `predicted-zh-000.jsonl:82` 등 회귀가 같이 발생해 채택하지 않았다.
+
+`v33` `prefix_extension` 한정 복구:
+
+```text
+.tmp/eval/dictation-ai-sbd/20260705-v33-short-prefix-extension-cjk-restore.json
+final_f1_avg=0.683479
+final_similarity_coverage_avg=0.578556
+changed_cases=7
+```
+
+- 회귀 폭은 줄었지만 여전히 `predicted-zh-002.jsonl:37`, `predicted-zh-000.jsonl:82`가 남았다.
+
+`v34` 최근 prefix 길이 / suffix 길이 guard 추가:
+
+```text
+.tmp/eval/dictation-ai-sbd/20260705-v34-long-recent-or-5unit-prefix-extension-restore.json
+final_precision_avg=0.625306
+final_recall_avg=0.817463
+final_f1_avg=0.683540
+final_similarity_coverage_avg=0.578751
+boundary_granularity_adjusted_f1_avg=0.764852
+case_exact_match=33
+changed_cases=5
+```
+
+대표 개선:
+
+- `predicted-zh-002.jsonl:18`: `0.191304 -> 0.489130`
+- `predicted-zh-000.jsonl:3`: `0.410526 -> 0.547368`
+- `predicted-zh-000.jsonl:62`: `0.275862 -> 0.413793`
+- `predicted-zh-002.jsonl:75`: `0.275862 -> 0.413793`
+- `predicted-zh-001.jsonl:35`: `0.407224 -> 0.586304`
+
+회귀:
+
+- `v34`에서는 `v28` 대비 음수 delta 케이스가 남지 않았다.
+
+판단:
+
+- recent-final trim을 완전히 끄는 것이 아니라, `prefix_extension`으로 설명되는 짧은 닫힌 CJK suffix만
+  제한적으로 복구하는 방향이 현재 challenge replay에서는 가장 안정적이다.
+- `v34`는 `v28` 대비 `final_similarity_coverage_avg`, `final_f1_avg`를 같이 올리면서
+  boundary adjusted score를 유지했고, `v33`의 회귀 2건도 제거했다.
+- 따라서 현재 채택 후보는 `v34` 규칙이다.
+
+## 2026-07-05 no-end + short CJK completed coalesce 실험
+
+배경:
+
+- `predicted-zh-002.jsonl:47`은 `completed` 단계에서 이미
+  - `哇，我默默走到一个监狱一条街，全部都在监狱`
+  - `哎，好酷哦！`
+  - `现在决定要吃这件了，外面完全看不出来`
+  - `他到底吃什么，走吧，Go。`
+  처럼 인접한 두 조각으로 잘려 나왔다.
+- 이 경우 stage/revision 정책보다 앞에서 `completed` pair 자체를 coalesce해야 final split을 줄일 수 있다.
+
+실험:
+
+- 기존 `_coalesce_completed_short_no_end_fragments()`는 `short_no_end_fragment + closed`만 합쳤다.
+- 여기에 `zh` 한정으로
+  - 앞 문장이 `no_end_marker`
+  - 뒤 문장이 닫힌 `short_cjk`
+  - 앞 문장 길이 `>= 8`
+  인 pair도 coalesce 후보로 포함했다.
+
+`v35`:
+
+```text
+.tmp/eval/dictation-ai-sbd/20260705-v35-no-end-plus-short-cjk-coalesce.json
+final_f1_avg=0.683836
+final_similarity_coverage_avg=0.579361
+boundary_granularity_adjusted_f1_avg=0.765514
+changed_cases=6
+```
+
+대표 개선:
+
+- `predicted-zh-002.jsonl:47`: `0.430233 -> 0.980769`
+  - actual final:
+    - `哇，我默默走到一个监狱一条街，全部都在监狱哎，好酷哦！`
+    - `现在决定要吃这间了，外面完全看不出来他到底吃什么，走吧，Go。`
+
+회귀:
+
+- `predicted-zh-001.jsonl:51`: `-0.184615`
+- `predicted-zh-001.jsonl:35`: `-0.137941`
+- `predicted-zh-001.jsonl:23`: `-0.004748`
+
+판단:
+
+- 2-unit 조각 `煎饼。` 같은 너무 짧은 short CJK suffix까지 합치면 over-merge 회귀가 커진다.
+
+`v36`:
+
+```text
+.tmp/eval/dictation-ai-sbd/20260705-v36-no-end-plus-short-cjk4-coalesce.json
+final_f1_avg=0.683812
+final_similarity_coverage_avg=0.579479
+boundary_granularity_adjusted_f1_avg=0.765264
+changed_cases=4
+```
+
+차이:
+
+- `no-end + short_cjk` coalesce에서 뒤 조각의 길이를 `>= 4` unit으로 제한했다.
+
+`v34` 대비 변화:
+
+- 양수:
+  - `predicted-zh-002.jsonl:47`: `+0.550537`
+  - `predicted-zh-000.jsonl:17`: `+0.260749`
+- 음수:
+  - `predicted-zh-001.jsonl:35`: `-0.137941`
+  - `predicted-zh-001.jsonl:23`: `-0.004748`
+
+판단:
+
+- `v36`은 `v35`의 핵심 이득(`predicted-zh-002.jsonl:47`)을 유지하면서
+  `predicted-zh-001.jsonl:51` 회귀를 제거했다.
+- 전체 지표도 `v34`보다 높다.
+  - `final_similarity_coverage_avg`: `0.578751 -> 0.579479`
+  - `final_f1_avg`: `0.683540 -> 0.683812`
+- 다만 `predicted-zh-001.jsonl:35`의 over-merge 회귀가 남아 있으므로, 이 규칙은 현재 "유력 후보"이지만
+  추가 guard 없이 최종 채택했다고 보지는 않는다.
+
+`v37` tail-repeat guard:
+
+```text
+.tmp/eval/dictation-ai-sbd/20260705-v37-no-end-short-cjk-tail-repeat-guard.json
+final_precision_avg=0.625753
+final_recall_avg=0.817735
+final_f1_avg=0.684057
+final_similarity_coverage_avg=0.579689
+boundary_granularity_adjusted_f1_avg=0.765324
+```
+
+차이:
+
+- `no-end + short_cjk` coalesce 전에
+  현재 문장 tail token run(최대 4 unit)이 뒤 short sentence 안에서 다시 반복되면
+  병합하지 않는 guard를 추가했다.
+
+`v36` 대비:
+
+- `predicted-zh-001.jsonl:35`: `+0.137941`
+  - `然后那个店员还讲了有一个是那个鹅肝的那个，鹅肝呢`
+  - `在这里，鹅肝呢是这个。`
+  조합의 over-merge를 차단했다.
+- `predicted-zh-002.jsonl:47`: 유지
+- `predicted-zh-000.jsonl:17`: 유지
+- `predicted-zh-001.jsonl:23`: 변화 없음
+
+`v34` 대비 최종 변화:
+
+- 양수:
+  - `predicted-zh-002.jsonl:47`: `+0.550537`
+  - `predicted-zh-000.jsonl:17`: `+0.260749`
+  - `predicted-zh-001.jsonl:90`: `+0.055556`
+- 음수:
+  - `predicted-zh-001.jsonl:23`: `-0.004748`
+
+판단:
+
+- `v37`은 `v34`/`v36`보다 summary가 모두 높고,
+  남는 음수도 `predicted-zh-001.jsonl:23` 한 건의 소폭 변화만 남는다.
+- 따라서 현재 `completed` coalesce 축의 최우선 채택 후보는 `v37`이다.
+- 남은 `predicted-zh-001.jsonl:23`은 report에서
+  - `case_context_flags=['unmodeled_prefix_context']`
+  - `case_definition_flags=['expected_revision_variant_group']`
+  - `logic_tuning_candidate=None`
+  로 분류된다.
+- 즉 이 residual 음수는 현재 evidence 기준에서 pipeline 규칙 추가보다 case interpretation/label 정리에 가까운 신호다.

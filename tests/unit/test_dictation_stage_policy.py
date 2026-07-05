@@ -14,14 +14,70 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _should_defer_cjk_recent_final_trimmed_queue_finalize,
     _should_finalize_before_replacement,
     _should_finalize_with_right_context,
+    _coalesce_completed_short_no_end_fragments,
     _should_suppress_ko_short_closed_final_with_stronger_queue_candidate,
     _should_restore_trimmed_closed_candidate,
     _should_suppress_aged_low_value_final,
     _should_suppress_aged_no_end_marker_queue_final,
+    _should_preserve_staged_output_when_delta_fragment,
 )
 
 
 class DictationStagePolicyTest(unittest.TestCase):
+    def test_coalesces_zh_no_end_with_short_closed_suffix(self) -> None:
+        self.assertEqual(
+            _coalesce_completed_short_no_end_fragments(
+                ["哇，我默默走到一个监狱一条街，全部都在监狱", "哎，好酷哦！"],
+                "zh",
+            ),
+            ("哇，我默默走到一个监狱一条街，全部都在监狱哎，好酷哦！",),
+        )
+
+    def test_coalesces_zh_no_end_with_short_closed_tail_sentence(self) -> None:
+        self.assertEqual(
+            _coalesce_completed_short_no_end_fragments(
+                ["现在决定要吃这件了，外面完全看不出来", "他到底吃什么，走吧，Go。"],
+                "zh",
+            ),
+            ("现在决定要吃这件了，外面完全看不出来他到底吃什么，走吧，Go。",),
+        )
+
+    def test_does_not_coalesce_short_closed_zh_after_closed_sentence(self) -> None:
+        self.assertEqual(
+            _coalesce_completed_short_no_end_fragments(
+                ["我的父母呢，他们讲他们想要吃饭，所以我就找了一家餐厅。", "这一家。"],
+                "zh",
+            ),
+            ("我的父母呢，他们讲他们想要吃饭，所以我就找了一家餐厅。", "这一家。"),
+        )
+
+    def test_does_not_coalesce_zh_no_end_with_too_short_closed_suffix(self) -> None:
+        self.assertEqual(
+            _coalesce_completed_short_no_end_fragments(
+                ["一来了，其实每一餐都蛮多人", "煎饼。"],
+                "zh",
+            ),
+            ("一来了，其实每一餐都蛮多人", "煎饼。"),
+        )
+
+    def test_does_not_coalesce_zh_when_following_repeats_current_tail(self) -> None:
+        self.assertEqual(
+            _coalesce_completed_short_no_end_fragments(
+                ["然后那个店员还讲了有一个是那个鹅肝的那个，鹅肝呢", "在这里，鹅肝呢是这个。"],
+                "zh",
+            ),
+            ("然后那个店员还讲了有一个是那个鹅肝的那个，鹅肝呢", "在这里，鹅肝呢是这个。"),
+        )
+
+    def test_does_not_preserve_short_zh_suffix_without_clause_pause(self) -> None:
+        self.assertFalse(
+            _should_preserve_staged_output_when_delta_fragment(
+                "今天真的很好玩。",
+                "很好玩。",
+                "zh",
+            )
+        )
+
     def test_prefers_equal_length_closed_zh_midspan_revision_candidate(self) -> None:
         self.assertEqual(
             _prefer_sentence_revision(
@@ -396,6 +452,36 @@ class DictationStagePolicyTest(unittest.TestCase):
                 "지역에 따라 상품에 따라 완전히 다른 시장이에요.",
                 "완전히 다른 시장이에요",
                 "ko",
+            )
+        )
+
+    def test_restores_trimmed_closed_zh_suffix_sentence(self) -> None:
+        self.assertTrue(
+            _should_restore_trimmed_closed_candidate(
+                "它的那个炸鸡呢，它的皮已经不脆了，可是它的那个肉很嫩，而且它那个炸鸡呢，还有撒上一些孜然，然后整个味道很香。",
+                "味道很香。",
+                "zh",
+                recent_reason="prefix_extension",
+            )
+        )
+
+    def test_does_not_restore_longer_trimmed_closed_zh_clause_suffix_sentence(self) -> None:
+        self.assertFalse(
+            _should_restore_trimmed_closed_candidate(
+                "然后我们来到了这一家，是比较靠近那个待会我们要去的市集。",
+                "靠近那个待会我们要去的市集。",
+                "zh",
+                recent_reason="prefix_extension",
+            )
+        )
+
+    def test_does_not_restore_short_suffix_when_recent_prefix_is_too_short(self) -> None:
+        self.assertFalse(
+            _should_restore_trimmed_closed_candidate(
+                "我家也可以有这种电视哦，是这种的。",
+                "是这种的。",
+                "zh",
+                recent_reason="prefix_extension",
             )
         )
 
