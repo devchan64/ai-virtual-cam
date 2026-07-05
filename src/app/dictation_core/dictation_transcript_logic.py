@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from src.app.dictation_core.dictation_revision_text import (
+    _best_common_word_run,
     _final_sentence_diagnostic_flags,
     _is_cjk_text,
     _new_text_delta,
@@ -349,7 +350,7 @@ def _should_defer_cjk_recent_final_trimmed_queue_finalize(
     confirmed_queue_deferrals: int,
     queued_sentences: tuple[str, ...] = (),
 ) -> bool:
-    if not recent_final_trimmed or confirmed_queue_deferrals > 0:
+    if not recent_final_trimmed:
         return False
     if reason not in {"confirmed", "confirmed_forced", "aged", "aged_forced"}:
         return False
@@ -370,7 +371,95 @@ def _should_defer_cjk_recent_final_trimmed_queue_finalize(
         return False
     if _sentence_end_count(first_queue) <= 0:
         return False
-    return len(_word_units(first_queue)) >= 6
+    queue_words = _word_units(first_queue)
+    if len(queue_words) < 6:
+        return False
+    if confirmed_queue_deferrals <= 0:
+        return True
+    if confirmed_queue_deferrals > 1 or reason not in {"aged", "aged_forced"}:
+        return False
+    if len(queued_sentences) != 1 or len(queue_words) <= len(sentence_words):
+        return False
+    best_i, best_j, best_len = _best_common_word_run(queue_words, sentence_words)
+    if best_len < 4 or best_len / max(len(sentence_words), 1) < 0.50:
+        return False
+    sentence_edge_overlap = best_j <= 1 or best_j + best_len >= len(sentence_words) - 1
+    queue_edge_overlap = best_i <= 1 or best_i + best_len >= len(queue_words) - 1
+    return sentence_edge_overlap and queue_edge_overlap
+
+
+def _merge_recent_trimmed_cjk_queue_prefix_with_staged_suffix(
+    sentence: str,
+    language: str,
+    reason: str,
+    recent_final_trimmed: bool,
+    confirmed_queue_deferrals: int,
+    queued_sentences: tuple[str, ...] = (),
+) -> str | None:
+    if not recent_final_trimmed or confirmed_queue_deferrals <= 0:
+        return None
+    if reason not in {"aged", "aged_forced"}:
+        return None
+    if len(queued_sentences) != 1:
+        return None
+    normalized_sentence = _normalized_text(sentence)
+    normalized_queue = _normalized_text(queued_sentences[0])
+    if not normalized_sentence or not normalized_queue:
+        return None
+    if not (_is_cjk_text(normalized_sentence) and _is_cjk_text(normalized_queue)):
+        return None
+    if _sentence_end_count(normalized_sentence) <= 0 or _sentence_end_count(normalized_queue) <= 0:
+        return None
+    sentence_words = _word_units(normalized_sentence)
+    queue_words = _word_units(normalized_queue)
+    if len(sentence_words) < 6 or len(queue_words) < 6 or len(queue_words) <= len(sentence_words):
+        return None
+    best_i, best_j, best_len = _best_common_word_run(queue_words, sentence_words)
+    if best_len < 4 or best_len / max(len(sentence_words), 1) < 0.45:
+        return None
+    if best_j > 1 or best_i + best_len < len(queue_words) - 1:
+        return None
+    overlap_text = "".join(sentence_words[best_j : best_j + best_len])
+    if not overlap_text:
+        return None
+    queue_overlap_index = normalized_queue.rfind(overlap_text)
+    sentence_overlap_index = normalized_sentence.find(overlap_text)
+    if queue_overlap_index < 0 or sentence_overlap_index < 0:
+        return None
+    combined = _normalized_text(
+        normalized_queue[: queue_overlap_index + len(overlap_text)]
+        + normalized_sentence[sentence_overlap_index + len(overlap_text) :]
+    )
+    if combined in {normalized_sentence, normalized_queue}:
+        return None
+    if not _should_stage_boundary_candidate_impl(combined, language):
+        return None
+    return combined
+
+
+def _should_defer_recent_trimmed_zh_next_completed_no_queue(
+    sentence: str,
+    language: str,
+    recent_final_trimmed: bool,
+    staged_confirmations: int,
+    queued_sentences: tuple[str, ...] = (),
+) -> bool:
+    if not recent_final_trimmed or language != "zh" or queued_sentences:
+        return False
+    if staged_confirmations > 1:
+        return False
+    normalized_sentence = _normalized_text(sentence)
+    if not normalized_sentence or not _is_cjk_text(normalized_sentence):
+        return False
+    if _sentence_end_count(normalized_sentence) <= 0:
+        return False
+    sentence_words = _word_units(normalized_sentence)
+    if len(sentence_words) < 6:
+        return False
+    flags = set(_final_sentence_diagnostic_flags(normalized_sentence, language))
+    if flags.intersection({"empty", "short_cjk", "no_end_marker", "short_no_end_fragment", "trailing_ellipsis"}):
+        return False
+    return True
 
 
 def _should_suppress_ko_short_closed_final_with_stronger_queue_candidate(

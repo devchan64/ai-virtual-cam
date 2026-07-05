@@ -9,6 +9,7 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _replacement_decision_reason,
     _stage_finalize_age_limit,
     _staged_sentence_required_confirmations,
+    _should_defer_recent_trimmed_zh_next_completed_no_queue,
     _should_defer_unconfirmed_replacement,
     _should_defer_short_closed_queue_quality_block,
     _should_finalize_before_replacement,
@@ -67,6 +68,22 @@ def _handle_deferred_replacement(
             commit_buffer_node.queued_sentences(),
         )
     ):
+        if _should_defer_recent_trimmed_zh_next_completed_no_queue(
+            active_stage.sentence,
+            detected,
+            active_stage.recentFinalTrimmed,
+            active_stage.confirmations,
+            commit_buffer_node.queued_sentences(),
+        ):
+            count_metric("stage_age_finalize_recent_trimmed_deferred")
+            worker._emit(
+                "status",
+                "받아쓰기 AI recent-final trim aged 보류: "
+                f"chunk={chunk_index} decision={replacement_reason} staged_confirmations={active_stage.confirmations} "
+                f"staged_age={active_stage.age} staged_tail={_diagnostic_tail(active_stage.sentence)}",
+                display=False,
+            )
+            return []
         count_metric("stage_age_finalize")
         worker._emit(
             "status",
@@ -162,6 +179,23 @@ def _finish_replacement_transition(
         active_stage.forced,
         tuple([*later_completed_sentences, *commit_buffer_node.queued_sentences()]),
     ):
+        if _should_defer_recent_trimmed_zh_next_completed_no_queue(
+            active_stage.sentence,
+            detected,
+            active_stage.recentFinalTrimmed,
+            active_stage.confirmations,
+            tuple([*later_completed_sentences, *commit_buffer_node.queued_sentences()]),
+        ):
+            count_metric("stage_finalize_before_replace_recent_trimmed_deferred")
+            worker._emit(
+                "status",
+                "받아쓰기 AI recent-final trim next-completed 보류: "
+                f"chunk={chunk_index} decision={replacement_reason} staged_confirmations={active_stage.confirmations} "
+                f"staged_age={active_stage.age} staged_tail={_diagnostic_tail(active_stage.sentence)}",
+                display=False,
+            )
+            queue_staged_sentence(candidate, forced)
+            return []
         count_metric("stage_finalize_before_replace")
         finalized = finalize_staged_sentence(detected, "next_completed")
     else:

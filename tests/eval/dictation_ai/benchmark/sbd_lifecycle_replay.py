@@ -37,6 +37,7 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _coalesce_completed_short_no_end_fragments,
     _has_later_completed_extension,
     _is_ko_short_closed_sentence,
+    _merge_recent_trimmed_cjk_queue_prefix_with_staged_suffix,
     _is_pending_prefix_mixed_candidate,
     _is_prior_pending_recent_final_mixed_candidate,
     _stale_leading_short_closed_candidate_reason,
@@ -47,6 +48,7 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _staged_sentence_required_confirmations,
     _should_allow_no_text_stage_aging,
     _should_confirm_staged_sentence,
+    _should_defer_recent_trimmed_zh_next_completed_no_queue,
     _should_defer_token_sentence_revision,
     _should_enable_aged_queue_backlog_promotion_boost,
     _should_defer_unconfirmed_replacement,
@@ -285,44 +287,58 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
             }
         )
         return []
-    output_sentence = _sentence_output_delta(state.committed_text, staged_before)
-    if _should_preserve_staged_output_when_delta_fragment(staged_before, output_sentence, language):
-        state.count("finalize_delta_fragment_preserved")
-        output_sentence = staged_before
-    assert state.final_sentences is not None
-    output_sentence, recent_source, recent_reason = _recent_final_output_delta_with_reason(
-        output_sentence,
-        tuple(state.final_sentences),
+    merged_queue_sentence = _merge_recent_trimmed_cjk_queue_prefix_with_staged_suffix(
+        staged_before,
         language,
+        reason,
+        state.staged_recent_final_trimmed,
+        state.staged_confirmed_queue_deferrals,
+        tuple(queue_before),
     )
-    if recent_source is not None:
-        if output_sentence:
-            state.count("finalize_recent_delta_trimmed")
-            state.count(f"finalize_recent_delta_trimmed_{recent_reason}")
-        else:
-            state.staged_sentence = ""
-            state.staged_confirmations = 0
-            state.staged_age = 0
-            state.staged_forced = False
-            state.staged_deferred_age_chunk = -1
-            state.staged_delta_suppressed_chunks = 0
-            state.staged_delta_suppressed_chunk_index = -1
-            state.count("finalize_recent_echo_suppressed")
-            state.count(f"finalize_recent_echo_suppressed_{recent_reason}")
-            state.count("segment_state_suppressed")
-            _promote_next_staged_sentence(state, chunk_index)
-            state.finalize_events.append(
-                {
-                    "chunk_index": chunk_index,
-                    "reason": reason,
-                    "staged_before": staged_before,
-                    "queue_before": queue_before,
-                    "queue_after": [str(entry["sentence"]) for entry in (state.staged_queue or ())],
-                    "suppressed": f"recent_echo_{recent_reason}",
-                    "output_sentence": "",
-                }
-            )
-            return []
+    if merged_queue_sentence is not None:
+        assert state.staged_queue is not None
+        state.staged_queue.pop(0)
+        state.count("finalize_recent_trimmed_queue_overlap_merged")
+    output_source_sentence = merged_queue_sentence or staged_before
+    output_sentence = _sentence_output_delta(state.committed_text, output_source_sentence)
+    if _should_preserve_staged_output_when_delta_fragment(output_source_sentence, output_sentence, language):
+        state.count("finalize_delta_fragment_preserved")
+        output_sentence = output_source_sentence
+    assert state.final_sentences is not None
+    if merged_queue_sentence is None:
+        output_sentence, recent_source, recent_reason = _recent_final_output_delta_with_reason(
+            output_sentence,
+            tuple(state.final_sentences),
+            language,
+        )
+        if recent_source is not None:
+            if output_sentence:
+                state.count("finalize_recent_delta_trimmed")
+                state.count(f"finalize_recent_delta_trimmed_{recent_reason}")
+            else:
+                state.staged_sentence = ""
+                state.staged_confirmations = 0
+                state.staged_age = 0
+                state.staged_forced = False
+                state.staged_deferred_age_chunk = -1
+                state.staged_delta_suppressed_chunks = 0
+                state.staged_delta_suppressed_chunk_index = -1
+                state.count("finalize_recent_echo_suppressed")
+                state.count(f"finalize_recent_echo_suppressed_{recent_reason}")
+                state.count("segment_state_suppressed")
+                _promote_next_staged_sentence(state, chunk_index)
+                state.finalize_events.append(
+                    {
+                        "chunk_index": chunk_index,
+                        "reason": reason,
+                        "staged_before": output_source_sentence,
+                        "queue_before": queue_before,
+                        "queue_after": [str(entry["sentence"]) for entry in (state.staged_queue or ())],
+                        "suppressed": f"recent_echo_{recent_reason}",
+                        "output_sentence": "",
+                    }
+                )
+                return []
     if not output_sentence:
         state.staged_sentence = ""
         state.staged_confirmations = 0
@@ -339,7 +355,7 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
             {
                 "chunk_index": chunk_index,
                 "reason": reason,
-                "staged_before": staged_before,
+                "staged_before": output_source_sentence,
                 "queue_before": queue_before,
                 "queue_after": [str(entry["sentence"]) for entry in (state.staged_queue or ())],
                 "suppressed": "duplicate",
@@ -348,7 +364,7 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
         )
         return []
     if _should_suppress_aged_low_value_final(
-        staged_before,
+        output_source_sentence,
         language,
         reason,
         state.staged_confirmations,
@@ -370,7 +386,7 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
             {
                 "chunk_index": chunk_index,
                 "reason": reason,
-                "staged_before": staged_before,
+                "staged_before": output_source_sentence,
                 "queue_before": queue_before,
                 "queue_after": [str(entry["sentence"]) for entry in (state.staged_queue or ())],
                 "suppressed": "aged_low_value",
@@ -379,7 +395,7 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
         )
         return []
     if _should_suppress_ko_short_closed_final_with_stronger_queue_candidate(
-        staged_before,
+        output_source_sentence,
         language,
         reason,
         state.staged_confirmations,
@@ -401,7 +417,7 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
             {
                 "chunk_index": chunk_index,
                 "reason": reason,
-                "staged_before": staged_before,
+                "staged_before": output_source_sentence,
                 "queue_before": queue_before,
                 "queue_after": [str(entry["sentence"]) for entry in (state.staged_queue or ())],
                 "suppressed": "ko_short_closed_stronger_queue",
@@ -410,7 +426,7 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
         )
         return []
     if _should_suppress_right_context_short_prefix_extension_with_single_queue(
-        staged_before,
+        output_source_sentence,
         reason,
         tuple(str(entry["sentence"]) for entry in (state.staged_queue or ())),
     ):
@@ -429,7 +445,7 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
             {
                 "chunk_index": chunk_index,
                 "reason": reason,
-                "staged_before": staged_before,
+                "staged_before": output_source_sentence,
                 "queue_before": queue_before,
                 "queue_after": [str(entry["sentence"]) for entry in (state.staged_queue or ())],
                 "suppressed": "right_context_short_prefix_queue_extension",
@@ -438,7 +454,7 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
         )
         return []
     if _should_suppress_ko_pure_latin_final_with_hangul_queue(
-        staged_before,
+        output_source_sentence,
         language,
         reason,
         tuple(str(entry["sentence"]) for entry in (state.staged_queue or ())),
@@ -458,7 +474,7 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
             {
                 "chunk_index": chunk_index,
                 "reason": reason,
-                "staged_before": staged_before,
+                "staged_before": output_source_sentence,
                 "queue_before": queue_before,
                 "queue_after": [str(entry["sentence"]) for entry in (state.staged_queue or ())],
                 "suppressed": "ko_pure_latin_hangul_queue",
@@ -467,7 +483,7 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
         )
         return []
     if _should_suppress_ko_numeric_aged_final_with_queue(
-        staged_before,
+        output_source_sentence,
         language,
         reason,
         tuple(str(entry["sentence"]) for entry in (state.staged_queue or ())),
@@ -487,7 +503,7 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
             {
                 "chunk_index": chunk_index,
                 "reason": reason,
-                "staged_before": staged_before,
+                "staged_before": output_source_sentence,
                 "queue_before": queue_before,
                 "queue_after": [str(entry["sentence"]) for entry in (state.staged_queue or ())],
                 "suppressed": "ko_numeric_aged_queue",
@@ -496,7 +512,7 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
         )
         return []
     if _should_suppress_aged_no_end_marker_queue_final(
-        staged_before,
+        output_source_sentence,
         language,
         reason,
         state.staged_confirmations,
@@ -516,7 +532,7 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
             {
                 "chunk_index": chunk_index,
                 "reason": reason,
-                "staged_before": staged_before,
+                "staged_before": output_source_sentence,
                 "queue_before": queue_before,
                 "queue_after": [str(entry["sentence"]) for entry in (state.staged_queue or ())],
                 "suppressed": "aged_no_end_marker_queue",
@@ -524,7 +540,7 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
             }
         )
         return []
-    if _should_suppress_delta_final(staged_before, output_sentence, language, reason):
+    if _should_suppress_delta_final(output_source_sentence, output_sentence, language, reason):
         state.count("finalize_delta_suppressed")
         if state.staged_delta_suppressed_chunk_index != chunk_index:
             state.staged_delta_suppressed_chunks += 1
@@ -544,7 +560,7 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
                 {
                     "chunk_index": chunk_index,
                     "reason": reason,
-                    "staged_before": staged_before,
+                    "staged_before": output_source_sentence,
                     "queue_before": queue_before,
                     "queue_after": [str(entry["sentence"]) for entry in (state.staged_queue or ())],
                     "suppressed": "delta_stage_dropped",
@@ -557,7 +573,7 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
             {
                 "chunk_index": chunk_index,
                 "reason": reason,
-                "staged_before": staged_before,
+                "staged_before": output_source_sentence,
                 "queue_before": queue_before,
                 "queue_after": [str(entry["sentence"]) for entry in (state.staged_queue or ())],
                 "suppressed": "delta_stage_retained",
@@ -589,7 +605,7 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
         {
             "chunk_index": chunk_index,
             "reason": reason,
-            "staged_before": staged_before,
+            "staged_before": output_source_sentence,
             "queue_before": queue_before,
             "queue_after": [str(entry["sentence"]) for entry in (state.staged_queue or ())],
             "suppressed": "",
@@ -828,9 +844,9 @@ def _stage_completed_sentence(
                         sentence_finalize_age,
                         tuple(str(entry["sentence"]) for entry in (state.staged_queue or ())),
                     )
-                    and _should_finalize_before_replacement(
-                        state.staged_sentence,
-                        language,
+        and _should_finalize_before_replacement(
+            state.staged_sentence,
+            language,
                         state.staged_confirmations,
                     state.staged_age,
                     sentence_finalize_age,
@@ -919,6 +935,15 @@ def _stage_completed_sentence(
                 state.count("stage_age_finalize")
                 reason = "aged_forced" if state.staged_forced else "aged"
             else:
+                if _should_defer_recent_trimmed_zh_next_completed_no_queue(
+                    state.staged_sentence,
+                    language,
+                    state.staged_recent_final_trimmed,
+                    state.staged_confirmations,
+                    tuple(str(entry["sentence"]) for entry in (state.staged_queue or ())),
+                ):
+                    state.count("stage_finalize_before_replace_recent_trimmed_deferred")
+                    return []
                 state.count("stage_finalize_before_replace")
                 reason = "next_completed"
             return _finalize_staged_sentence(state, language, reason, chunk_index)
@@ -972,6 +997,15 @@ def _stage_completed_sentence(
                 tuple(str(entry["sentence"]) for entry in (state.staged_queue or ())),
             )
         ):
+            if _should_defer_recent_trimmed_zh_next_completed_no_queue(
+                state.staged_sentence,
+                language,
+                state.staged_recent_final_trimmed,
+                state.staged_confirmations,
+                tuple(str(entry["sentence"]) for entry in (state.staged_queue or ())),
+            ):
+                state.count("stage_age_finalize_recent_trimmed_deferred")
+                return []
             state.count("stage_age_finalize")
             finalized = _finalize_staged_sentence(
                 state,
@@ -1032,6 +1066,21 @@ def _stage_completed_sentence(
             ]
         ),
     ):
+        if _should_defer_recent_trimmed_zh_next_completed_no_queue(
+            state.staged_sentence,
+            language,
+            state.staged_recent_final_trimmed,
+            state.staged_confirmations,
+            tuple(
+                [
+                    *later_completed_sentences,
+                    *(str(entry["sentence"]) for entry in (state.staged_queue or ())),
+                ]
+            ),
+        ):
+            state.count("stage_finalize_before_replace_recent_trimmed_deferred")
+            _queue_staged_sentence(state, candidate, forced, recent_final_trimmed, chunk_index)
+            return []
         state.count("stage_finalize_before_replace")
         finalized = _finalize_staged_sentence(state, language, "next_completed", chunk_index)
     else:

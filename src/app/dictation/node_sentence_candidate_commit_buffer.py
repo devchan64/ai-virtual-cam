@@ -34,6 +34,11 @@ class SentenceCandidateCommitBufferNode:
     def queue_entries(self) -> tuple[dict[str, object], ...]:
         return tuple(dict(entry) for entry in self._queue)
 
+    def pop_first_queue_entry(self) -> dict[str, object] | None:
+        if not self._queue:
+            return None
+        return dict(self._queue.popleft())
+
     def load_snapshot(
         self,
         *,

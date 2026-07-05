@@ -18,6 +18,7 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _stage_finalize_age_limit,
     _staged_sentence_required_confirmations,
     _should_confirm_staged_sentence,
+    _should_defer_recent_trimmed_zh_next_completed_no_queue,
     _should_defer_token_sentence_revision,
     _should_finalize_before_replacement,
 )
@@ -156,6 +157,22 @@ def _resolve_revised_stage_progression(
             count_metric("stage_age_finalize")
             reason = "aged_forced" if active_stage.forced else "aged"
         else:
+            if _should_defer_recent_trimmed_zh_next_completed_no_queue(
+                active_stage.sentence,
+                detected,
+                active_stage.recentFinalTrimmed,
+                active_stage.confirmations,
+                commit_buffer_node.queued_sentences(),
+            ):
+                count_metric("stage_finalize_before_replace_recent_trimmed_deferred")
+                worker._emit(
+                    "status",
+                    "받아쓰기 AI recent-final trim next-completed 보류: "
+                    f"chunk={chunk_index} staged_confirmations={active_stage.confirmations} "
+                    f"staged_age={active_stage.age} staged_tail={_diagnostic_tail(active_stage.sentence)}",
+                    display=False,
+                )
+                return []
             count_metric("stage_finalize_before_replace")
             reason = "next_completed"
         return finalize_staged_sentence(detected, reason)

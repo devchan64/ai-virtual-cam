@@ -2,6 +2,7 @@ import unittest
 
 from src.app.dictation_core.dictation_transcript_logic import (
     _is_ko_short_closed_sentence,
+    _merge_recent_trimmed_cjk_queue_prefix_with_staged_suffix,
     _prefer_sentence_revision,
     _stage_finalize_age_limit,
     _stale_leading_short_closed_candidate_reason,
@@ -12,6 +13,7 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _should_enable_aged_queue_backlog_promotion_boost,
     _should_defer_short_closed_queue_quality_block,
     _should_defer_cjk_recent_final_trimmed_queue_finalize,
+    _should_defer_recent_trimmed_zh_next_completed_no_queue,
     _should_finalize_before_replacement,
     _should_finalize_with_right_context,
     _coalesce_completed_short_no_end_fragments,
@@ -240,6 +242,66 @@ class DictationStagePolicyTest(unittest.TestCase):
                 True,
                 1,
                 ("然后呢，早上我们哎，因为那边都是十一点后才开，我们现在就是才十点而已。",),
+            )
+        )
+
+    def test_defers_trimmed_closed_zh_aged_finalize_one_more_time_for_overlap_queue_suffix(self) -> None:
+        self.assertTrue(
+            _should_defer_cjk_recent_final_trimmed_queue_finalize(
+                "靠近那个待会我们要去的市。",
+                "zh",
+                "aged",
+                True,
+                1,
+                ("然后我们来到了这一家，是比较靠近那个待会。",),
+            )
+        )
+
+    def test_does_not_defer_trimmed_closed_zh_aged_finalize_again_without_strong_overlap(self) -> None:
+        self.assertFalse(
+            _should_defer_cjk_recent_final_trimmed_queue_finalize(
+                "今天真的很开心，我们准备要回家了。",
+                "zh",
+                "aged",
+                True,
+                1,
+                ("然后我们明天早上还要再去另外一个市场。",),
+            )
+        )
+
+    def test_merges_recent_trimmed_zh_queue_prefix_with_staged_suffix(self) -> None:
+        self.assertEqual(
+            _merge_recent_trimmed_cjk_queue_prefix_with_staged_suffix(
+                "靠近那个待会我们要去的市集。",
+                "zh",
+                "aged",
+                True,
+                1,
+                ("然后我们来到了这一家，是比较靠近那个待会。",),
+            ),
+            "然后我们来到了这一家，是比较靠近那个待会我们要去的市集。",
+        )
+
+    def test_does_not_merge_recent_trimmed_zh_queue_without_suffix_prefix_shape(self) -> None:
+        self.assertIsNone(
+            _merge_recent_trimmed_cjk_queue_prefix_with_staged_suffix(
+                "今天真的很开心，我们准备要回家了。",
+                "zh",
+                "aged",
+                True,
+                1,
+                ("然后我们明天早上还要再去另外一个市场。",),
+            )
+        )
+
+    def test_defers_recent_trimmed_zh_next_completed_without_queue(self) -> None:
+        self.assertTrue(
+            _should_defer_recent_trimmed_zh_next_completed_no_queue(
+                "然后我们来到了这一家，是比较。",
+                "zh",
+                True,
+                1,
+                (),
             )
         )
 

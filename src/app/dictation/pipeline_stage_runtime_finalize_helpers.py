@@ -9,6 +9,7 @@ from src.app.dictation_core.dictation_revision_text import _sentence_output_delt
 from src.app.dictation_core.dictation_transcript_logic import (
     _final_sentence_diagnostic_flags,
     _is_ko_short_closed_sentence,
+    _merge_recent_trimmed_cjk_queue_prefix_with_staged_suffix,
     _normalized_text,
     _should_defer_cjk_recent_final_trimmed_queue_finalize,
     _should_suppress_ko_numeric_aged_final_with_queue,
@@ -260,11 +261,30 @@ def finalize_staged_sentence(
             display=False,
         )
         return committed_text, next_final_segment_id, []
-    output_sentence = _sentence_output_delta(committed_text, active_stage.sentence)
     staged_before = active_stage.sentence
+    merged_queue_sentence = _merge_recent_trimmed_cjk_queue_prefix_with_staged_suffix(
+        staged_before,
+        detected,
+        reason,
+        active_stage.recentFinalTrimmed,
+        active_stage.confirmedQueueDeferrals,
+        queue_before_sentences,
+    )
+    if merged_queue_sentence is not None:
+        commit_buffer_node.pop_first_queue_entry()
+        count_metric("finalize_recent_trimmed_queue_overlap_merged")
+        worker._emit(
+            "status",
+            "받아쓰기 AI recent-final trim queue 병합 확정: "
+            f"chunk={chunk_index} reason={reason} staged_tail={_diagnostic_tail(staged_before)} "
+            f"queue_head={_diagnostic_tail(queue_before_sentences[0])}",
+            display=False,
+        )
+    output_source_sentence = merged_queue_sentence or staged_before
+    output_sentence = _sentence_output_delta(committed_text, output_source_sentence)
     committed_before_chars = len(_normalized_text(committed_text))
     output_sentence = preserve_staged_output_when_delta_fragment(
-        staged_before=staged_before,
+        staged_before=output_source_sentence,
         output_sentence=output_sentence,
         detected=detected,
         chunk_index=chunk_index,
@@ -281,19 +301,20 @@ def finalize_staged_sentence(
                 metric_name="finalize_duplicate_suppressed",
                 reason=reason,
                 status_prefix="받아쓰기 AI 확정 후보 중복 무시",
-                text=staged_before,
+                text=output_source_sentence,
             ),
         )
-    output_sentence = apply_recent_final_finalize_adjustment(
-        detected,
-        reason=reason,
-        staged_before=staged_before,
-        output_sentence=output_sentence,
-    )
-    if output_sentence is None:
-        return committed_text, next_final_segment_id, []
+    if merged_queue_sentence is None:
+        output_sentence = apply_recent_final_finalize_adjustment(
+            detected,
+            reason=reason,
+            staged_before=output_source_sentence,
+            output_sentence=output_sentence,
+        )
+        if output_sentence is None:
+            return committed_text, next_final_segment_id, []
     if _should_suppress_aged_low_value_final(
-        staged_before,
+        output_source_sentence,
         detected,
         reason,
         active_stage.confirmations,
@@ -310,7 +331,7 @@ def finalize_staged_sentence(
                 metric_name="finalize_aged_low_value_suppressed",
                 reason=reason,
                 status_prefix="받아쓰기 AI 낮은 가치 aged 확정 후보 무시",
-                text=staged_before,
+                text=output_source_sentence,
                 extra_status="",
                 count_metric=count_metric,
                 count_segment_state=count_segment_state,
@@ -319,7 +340,7 @@ def finalize_staged_sentence(
             ),
         )
     if _should_suppress_ko_short_closed_final_with_stronger_queue_candidate(
-        staged_before,
+        output_source_sentence,
         detected,
         reason,
         active_stage.confirmations,
@@ -336,7 +357,7 @@ def finalize_staged_sentence(
                 metric_name="finalize_ko_short_closed_stronger_queue_suppressed",
                 reason=reason,
                 status_prefix="받아쓰기 AI 강한 queue로 짧은 확정 후보 무시",
-                text=staged_before,
+                text=output_source_sentence,
                 extra_status="",
                 count_metric=count_metric,
                 count_segment_state=count_segment_state,
@@ -345,7 +366,7 @@ def finalize_staged_sentence(
             ),
         )
     if _should_suppress_right_context_short_prefix_extension_with_single_queue(
-        staged_before,
+        output_source_sentence,
         reason,
         commit_buffer_node.queued_sentences(),
     ):
@@ -359,7 +380,7 @@ def finalize_staged_sentence(
                 metric_name="finalize_right_context_short_prefix_queue_extension_suppressed",
                 reason=reason,
                 status_prefix="받아쓰기 AI 짧은 right-context prefix 확정 후보 무시",
-                text=staged_before,
+                text=output_source_sentence,
                 extra_status="",
                 count_metric=count_metric,
                 count_segment_state=count_segment_state,
@@ -368,7 +389,7 @@ def finalize_staged_sentence(
             ),
         )
     if _should_suppress_ko_pure_latin_final_with_hangul_queue(
-        staged_before,
+        output_source_sentence,
         detected,
         reason,
         commit_buffer_node.queued_sentences(),
@@ -383,7 +404,7 @@ def finalize_staged_sentence(
                 metric_name="finalize_ko_pure_latin_hangul_queue_suppressed",
                 reason=reason,
                 status_prefix="받아쓰기 AI 한글 queue 뒤 순수 영문 확정 후보 무시",
-                text=staged_before,
+                text=output_source_sentence,
                 extra_status="",
                 count_metric=count_metric,
                 count_segment_state=count_segment_state,
@@ -392,7 +413,7 @@ def finalize_staged_sentence(
             ),
         )
     if _should_suppress_ko_numeric_aged_final_with_queue(
-        staged_before,
+        output_source_sentence,
         detected,
         reason,
         commit_buffer_node.queued_sentences(),
@@ -407,7 +428,7 @@ def finalize_staged_sentence(
                 metric_name="finalize_ko_numeric_aged_queue_suppressed",
                 reason=reason,
                 status_prefix="받아쓰기 AI 숫자 위주 aged 확정 후보 무시",
-                text=staged_before,
+                text=output_source_sentence,
                 extra_status="",
                 count_metric=count_metric,
                 count_segment_state=count_segment_state,
@@ -416,7 +437,7 @@ def finalize_staged_sentence(
             ),
         )
     if _should_suppress_aged_no_end_marker_queue_final(
-        staged_before,
+        output_source_sentence,
         detected,
         reason,
         active_stage.confirmations,
@@ -432,7 +453,7 @@ def finalize_staged_sentence(
                 metric_name="finalize_aged_no_end_marker_queue_suppressed",
                 reason=reason,
                 status_prefix="받아쓰기 AI no-end queue aged 확정 후보 무시",
-                text=staged_before,
+                text=output_source_sentence,
                 extra_status="",
                 count_metric=count_metric,
                 count_segment_state=count_segment_state,
@@ -443,7 +464,7 @@ def finalize_staged_sentence(
     if apply_delta_finalize_guard(
         detected,
         reason=reason,
-        staged_before=staged_before,
+        staged_before=output_source_sentence,
         output_sentence=output_sentence,
     ):
         return committed_text, next_final_segment_id, []
@@ -454,7 +475,7 @@ def finalize_staged_sentence(
     committed_text, next_final_segment_id, produced = emit_finalized_sentence(
         detected,
         reason=reason,
-        staged_before=staged_before,
+        staged_before=output_source_sentence,
         output_sentence=output_sentence,
         committed_before_chars=committed_before_chars,
     )
