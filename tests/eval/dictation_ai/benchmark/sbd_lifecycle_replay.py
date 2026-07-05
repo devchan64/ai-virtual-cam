@@ -58,7 +58,7 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _should_suppress_ko_pure_latin_final_with_hangul_queue,
     _should_suppress_right_context_short_prefix_extension_with_single_queue,
     _should_suppress_aged_low_value_final,
-    _should_suppress_aged_short_closed_when_queue_has_stronger_candidate,
+    _should_suppress_ko_short_closed_final_with_stronger_queue_candidate,
     _should_suppress_aged_no_end_marker_queue_final,
     _should_split_terminal_tail_revision,
     _should_stage_boundary_candidate,
@@ -337,7 +337,7 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
             }
         )
         return []
-    if _should_suppress_aged_short_closed_when_queue_has_stronger_candidate(
+    if _should_suppress_ko_short_closed_final_with_stronger_queue_candidate(
         staged_before,
         language,
         reason,

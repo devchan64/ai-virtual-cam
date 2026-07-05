@@ -10,7 +10,7 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _should_defer_short_closed_queue_quality_block,
     _should_finalize_before_replacement,
     _should_finalize_with_right_context,
-    _should_suppress_aged_short_closed_when_queue_has_stronger_candidate,
+    _should_suppress_ko_short_closed_final_with_stronger_queue_candidate,
     _should_restore_trimmed_closed_candidate,
     _should_suppress_aged_low_value_final,
     _should_suppress_aged_no_end_marker_queue_final,
@@ -323,7 +323,7 @@ class DictationStagePolicyTest(unittest.TestCase):
 
     def test_suppresses_short_closed_ko_aged_final_with_stronger_queue_confirmation(self) -> None:
         self.assertTrue(
-            _should_suppress_aged_short_closed_when_queue_has_stronger_candidate(
+            _should_suppress_ko_short_closed_final_with_stronger_queue_candidate(
                 "정말 맞습니다.",
                 "ko",
                 "aged",
@@ -338,7 +338,7 @@ class DictationStagePolicyTest(unittest.TestCase):
 
     def test_keeps_single_unit_ko_aged_final_with_only_one_stronger_queue_candidate(self) -> None:
         self.assertFalse(
-            _should_suppress_aged_short_closed_when_queue_has_stronger_candidate(
+            _should_suppress_ko_short_closed_final_with_stronger_queue_candidate(
                 "원몰!",
                 "ko",
                 "aged",
@@ -354,7 +354,7 @@ class DictationStagePolicyTest(unittest.TestCase):
 
     def test_suppresses_single_unit_ko_aged_final_with_stronger_two_item_queue(self) -> None:
         self.assertTrue(
-            _should_suppress_aged_short_closed_when_queue_has_stronger_candidate(
+            _should_suppress_ko_short_closed_final_with_stronger_queue_candidate(
                 "맞습니다.",
                 "ko",
                 "aged",
@@ -369,7 +369,7 @@ class DictationStagePolicyTest(unittest.TestCase):
 
     def test_keeps_short_closed_ko_aged_final_without_stronger_queue_confirmation(self) -> None:
         self.assertFalse(
-            _should_suppress_aged_short_closed_when_queue_has_stronger_candidate(
+            _should_suppress_ko_short_closed_final_with_stronger_queue_candidate(
                 "아 그럼 아니에요?",
                 "ko",
                 "aged",
@@ -384,7 +384,7 @@ class DictationStagePolicyTest(unittest.TestCase):
 
     def test_suppresses_single_unit_ko_aged_final_when_clean_closed_queue_bursts(self) -> None:
         self.assertTrue(
-            _should_suppress_aged_short_closed_when_queue_has_stronger_candidate(
+            _should_suppress_ko_short_closed_final_with_stronger_queue_candidate(
                 "뭐래요!",
                 "ko",
                 "aged",
@@ -396,6 +396,76 @@ class DictationStagePolicyTest(unittest.TestCase):
                     {"sentence": "아이큐가 500인데요?", "confirmations": 1},
                     {"sentence": "500은 무슨?", "confirmations": 1},
                     {"sentence": "고백이나 하지 마요.", "confirmations": 1},
+                ),
+            )
+        )
+
+    def test_suppresses_single_unit_ko_statement_with_single_long_queue_candidate(self) -> None:
+        self.assertTrue(
+            _should_suppress_ko_short_closed_final_with_stronger_queue_candidate(
+                "그래요.",
+                "ko",
+                "aged",
+                staged_confirmations=1,
+                staged_forced=False,
+                queued_entries=(
+                    {"sentence": "약간 글로벌 탑티어 약간 이런 느낌이네요.", "confirmations": 1},
+                ),
+            )
+        )
+
+    def test_suppresses_single_unit_ko_next_completed_statement_with_single_long_queue_candidate(self) -> None:
+        self.assertTrue(
+            _should_suppress_ko_short_closed_final_with_stronger_queue_candidate(
+                "네.",
+                "ko",
+                "next_completed",
+                staged_confirmations=1,
+                staged_forced=False,
+                queued_entries=(
+                    {"sentence": "그렇지만 상황도 크게 보면.", "confirmations": 1},
+                ),
+            )
+        )
+
+    def test_suppresses_single_unit_ko_next_completed_statement_with_confirmation_two(self) -> None:
+        self.assertTrue(
+            _should_suppress_ko_short_closed_final_with_stronger_queue_candidate(
+                "네.",
+                "ko",
+                "next_completed",
+                staged_confirmations=2,
+                staged_forced=False,
+                queued_entries=(
+                    {"sentence": "그렇지만 상황도 크게 보면.", "confirmations": 1},
+                ),
+            )
+        )
+
+    def test_keeps_longer_single_unit_ko_next_completed_statement_with_confirmation_two(self) -> None:
+        self.assertFalse(
+            _should_suppress_ko_short_closed_final_with_stronger_queue_candidate(
+                "안녕하세요.",
+                "ko",
+                "next_completed",
+                staged_confirmations=2,
+                staged_forced=False,
+                queued_entries=(
+                    {"sentence": "저는 성인권 대학교에서 근무하고 있는 권석준이라고 합니다.", "confirmations": 1},
+                ),
+            )
+        )
+
+    def test_keeps_single_unit_ko_question_with_single_long_queue_candidate(self) -> None:
+        self.assertFalse(
+            _should_suppress_ko_short_closed_final_with_stronger_queue_candidate(
+                "뭐가?",
+                "ko",
+                "next_completed",
+                staged_confirmations=1,
+                staged_forced=False,
+                queued_entries=(
+                    {"sentence": "딴 거 지른 거 아니죠?", "confirmations": 1},
                 ),
             )
         )

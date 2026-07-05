@@ -514,7 +514,7 @@ def _should_suppress_aged_no_end_marker_queue_final(
     return False
 
 
-def _should_suppress_aged_short_closed_when_queue_has_stronger_candidate(
+def _should_suppress_ko_short_closed_final_with_stronger_queue_candidate(
     sentence: str,
     language: str,
     reason: str,
@@ -523,7 +523,7 @@ def _should_suppress_aged_short_closed_when_queue_has_stronger_candidate(
     *,
     sentence_required_confirmations: int,
 ) -> bool:
-    if reason not in {"aged", "aged_forced"}:
+    if reason not in {"aged", "aged_forced", "next_completed"}:
         return False
     if language != "ko" or not queued_entries:
         return False
@@ -539,6 +539,7 @@ def _should_suppress_aged_short_closed_when_queue_has_stronger_candidate(
     if len(sentence_units) == 0 or len(sentence_units) > 2:
         return False
     clean_closed_queue_count = 0
+    clean_closed_queue_word_lengths: list[int] = []
     saw_stronger_queue_candidate = False
     for entry in queued_entries:
         queued_sentence = _normalized_text(str(entry.get("sentence") or ""))
@@ -549,6 +550,7 @@ def _should_suppress_aged_short_closed_when_queue_has_stronger_candidate(
             continue
         queued_units = _word_units(queued_sentence)
         clean_closed_queue_count += 1
+        clean_closed_queue_word_lengths.append(len(queued_units))
         if len(queued_units) < len(sentence_units) + 2:
             continue
         queued_confirmations = int(entry.get("confirmations", 0))
@@ -556,12 +558,33 @@ def _should_suppress_aged_short_closed_when_queue_has_stronger_candidate(
             return True
         if queued_confirmations >= max(2, staged_confirmations + 1):
             saw_stronger_queue_candidate = True
-    if len(sentence_units) != 1 or staged_confirmations > 1:
+    if len(sentence_units) != 1:
+        return False
+    allow_next_completed_single_queue_statement = (
+        reason == "next_completed"
+        and staged_confirmations <= 2
+        and clean_closed_queue_count == 1
+        and bool(clean_closed_queue_word_lengths)
+        and clean_closed_queue_word_lengths[0] >= 4
+        and normalized_sentence.endswith(".")
+        and len(normalized_sentence) <= 3
+    )
+    if staged_confirmations > 1 and not allow_next_completed_single_queue_statement:
         return False
     if clean_closed_queue_count >= 4:
         return True
     if clean_closed_queue_count == 3:
         return False
+    if allow_next_completed_single_queue_statement:
+        return True
+    if (
+        clean_closed_queue_count == 1
+        and clean_closed_queue_word_lengths
+        and clean_closed_queue_word_lengths[0] >= 4
+        and normalized_sentence.endswith(".")
+        and staged_confirmations <= 1
+    ):
+        return True
     return saw_stronger_queue_candidate
 
 

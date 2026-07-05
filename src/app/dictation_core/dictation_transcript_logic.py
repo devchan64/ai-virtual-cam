@@ -45,7 +45,7 @@ from src.app.dictation_core.dictation_stage_policy import (
     _should_restore_trimmed_closed_candidate as _should_restore_trimmed_closed_candidate_impl,
     _should_suppress_ko_numeric_aged_final_with_queue as _should_suppress_ko_numeric_aged_final_with_queue_impl,
     _should_suppress_ko_pure_latin_final_with_hangul_queue as _should_suppress_ko_pure_latin_final_with_hangul_queue_impl,
-    _should_suppress_aged_short_closed_when_queue_has_stronger_candidate as _should_suppress_aged_short_closed_when_queue_has_stronger_candidate_impl,
+    _should_suppress_ko_short_closed_final_with_stronger_queue_candidate as _should_suppress_ko_short_closed_final_with_stronger_queue_candidate_impl,
     _should_suppress_right_context_short_prefix_extension_with_single_queue as _should_suppress_right_context_short_prefix_extension_with_single_queue_impl,
     _should_suppress_aged_low_value_final as _should_suppress_aged_low_value_final_impl,
     _should_suppress_aged_no_end_marker_queue_final as _should_suppress_aged_no_end_marker_queue_final_impl,
@@ -311,7 +311,7 @@ def _should_suppress_aged_low_value_final(
     )
 
 
-def _should_suppress_aged_short_closed_when_queue_has_stronger_candidate(
+def _should_suppress_ko_short_closed_final_with_stronger_queue_candidate(
     sentence: str,
     language: str,
     reason: str,
@@ -319,7 +319,7 @@ def _should_suppress_aged_short_closed_when_queue_has_stronger_candidate(
     staged_forced: bool,
     queued_entries: tuple[dict[str, object], ...] = (),
 ) -> bool:
-    return _should_suppress_aged_short_closed_when_queue_has_stronger_candidate_impl(
+    return _should_suppress_ko_short_closed_final_with_stronger_queue_candidate_impl(
         sentence,
         language,
         reason,

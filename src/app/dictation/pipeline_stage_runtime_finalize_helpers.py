@@ -14,7 +14,7 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _should_suppress_right_context_short_prefix_extension_with_single_queue,
     _should_enable_aged_queue_backlog_promotion_boost,
     _should_preserve_staged_output_when_delta_fragment,
-    _should_suppress_aged_short_closed_when_queue_has_stronger_candidate,
+    _should_suppress_ko_short_closed_final_with_stronger_queue_candidate,
     _should_suppress_aged_low_value_final,
     _should_suppress_aged_no_end_marker_queue_final,
     _should_suppress_delta_final,
@@ -293,7 +293,7 @@ def finalize_staged_sentence(
                 worker=worker,
             ),
         )
-    if _should_suppress_aged_short_closed_when_queue_has_stronger_candidate(
+    if _should_suppress_ko_short_closed_final_with_stronger_queue_candidate(
         staged_before,
         detected,
         reason,
@@ -308,9 +308,9 @@ def finalize_staged_sentence(
                 active_stage=active_stage,
                 detected=detected,
                 chunk_index=chunk_index,
-                metric_name="finalize_aged_short_closed_stronger_queue_suppressed",
+                metric_name="finalize_ko_short_closed_stronger_queue_suppressed",
                 reason=reason,
-                status_prefix="받아쓰기 AI 강한 queue로 짧은 aged 확정 후보 무시",
+                status_prefix="받아쓰기 AI 강한 queue로 짧은 확정 후보 무시",
                 text=staged_before,
                 extra_status="",
                 count_metric=count_metric,
