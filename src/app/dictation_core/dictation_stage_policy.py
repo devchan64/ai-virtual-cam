@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from difflib import SequenceMatcher
 
 from src.app.dictation_core.dictation_revision_text import (
     _best_common_word_run,
@@ -371,6 +372,46 @@ def _has_preferred_deferred_revision(sentence: str, deferred_revision_sentences:
     return False
 
 
+def _has_preferred_prefix_aligned_cjk_queue_correction(
+    sentence: str,
+    deferred_revision_sentences: tuple[str, ...],
+) -> bool:
+    normalized_sentence = _normalized_text(sentence)
+    if not normalized_sentence or not _is_cjk_text(normalized_sentence):
+        return False
+    if _sentence_end_count(normalized_sentence) <= 0:
+        return False
+    sentence_words = _word_units(normalized_sentence)
+    if len(sentence_words) < 10:
+        return False
+    for deferred in deferred_revision_sentences:
+        normalized_deferred = _normalized_text(deferred)
+        if not normalized_deferred or normalized_deferred == normalized_sentence or not _is_cjk_text(normalized_deferred):
+            continue
+        if _sentence_end_count(normalized_deferred) <= 0:
+            continue
+        if _prefer_sentence_revision(normalized_sentence, normalized_deferred) != normalized_deferred:
+            continue
+        deferred_words = _word_units(normalized_deferred)
+        if len(deferred_words) < 10:
+            continue
+        aligned_blocks = [
+            block
+            for block in SequenceMatcher(None, sentence_words, deferred_words, autojunk=False).get_matching_blocks()
+            if block.size > 0 and block.a == block.b
+        ]
+        if not aligned_blocks:
+            continue
+        first = aligned_blocks[0]
+        if first.a != 0 or first.size < 4:
+            continue
+        total_aligned = sum(block.size for block in aligned_blocks)
+        shorter = min(len(sentence_words), len(deferred_words))
+        if len(aligned_blocks) >= 2 and total_aligned >= max(8, shorter // 2):
+            return True
+    return False
+
+
 def _should_finalize_before_replacement(
     sentence: str,
     language: str,
@@ -388,6 +429,12 @@ def _should_finalize_before_replacement(
     if _has_deferred_revision_extension(sentence, deferred_revision_sentences):
         return False
     if _has_preferred_deferred_revision(sentence, deferred_revision_sentences):
+        return False
+    if (
+        language == "zh"
+        and staged_confirmations <= 1
+        and _has_preferred_prefix_aligned_cjk_queue_correction(sentence, deferred_revision_sentences)
+    ):
         return False
     if language == "ko" and _has_restart_like_repeat_for_next_completed(sentence):
         return False

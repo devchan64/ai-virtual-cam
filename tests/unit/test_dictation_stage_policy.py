@@ -320,6 +320,19 @@ class DictationStagePolicyTest(unittest.TestCase):
             )
         )
 
+    def test_blocks_age_finalize_when_queue_has_preferred_prefix_aligned_zh_correction(self) -> None:
+        self.assertFalse(
+            _should_finalize_before_replacement(
+                "我点的是干辣的，它里面加的是油味的。",
+                "zh",
+                staged_confirmations=1,
+                staged_age=2,
+                sentence_finalize_age=1,
+                staged_forced=False,
+                deferred_revision_sentences=("我点的是橄榄的，它里面主要是有味的，开始选一个酱。",),
+            )
+        )
+
     def test_blocks_finalize_before_replacement_for_restart_like_repeat_sentence(self) -> None:
         self.assertFalse(
             _should_finalize_before_replacement(
