@@ -7,6 +7,7 @@ from src.app.dictation_core.dictation_revision_progression import _diagnostic_ta
 from src.app.dictation.pipeline_stage_state_helpers import tick_stage_age_once
 from src.app.dictation_core.dictation_transcript_logic import (
     _replacement_decision_reason,
+    _stage_finalize_age_limit,
     _staged_sentence_required_confirmations,
     _should_defer_unconfirmed_replacement,
     _should_defer_short_closed_queue_quality_block,
@@ -48,7 +49,14 @@ def _handle_deferred_replacement(
         display=False,
     )
     if (
-        active_stage.age >= sentence_max_age_chunks(active_stage.forced, sentence_finalize_age)
+        active_stage.age
+        >= _stage_finalize_age_limit(
+            active_stage.sentence,
+            detected,
+            active_stage.forced,
+            sentence_finalize_age,
+            commit_buffer_node.queued_sentences(),
+        )
         and _should_finalize_before_replacement(
             active_stage.sentence,
             detected,

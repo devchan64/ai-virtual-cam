@@ -15,6 +15,7 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _final_sentence_diagnostic_flags,
     _has_later_completed_extension,
     _is_cjk_text,
+    _stage_finalize_age_limit,
     _staged_sentence_required_confirmations,
     _should_confirm_staged_sentence,
     _should_defer_token_sentence_revision,
@@ -72,7 +73,13 @@ def _handle_deferred_token_sentence_revision(
         active_stage.forced,
         commit_buffer_node.queued_sentences(),
     ):
-        max_age = sentence_max_age_chunks(active_stage.forced, sentence_finalize_age)
+        max_age = _stage_finalize_age_limit(
+            active_stage.sentence,
+            detected,
+            active_stage.forced,
+            sentence_finalize_age,
+            commit_buffer_node.queued_sentences(),
+        )
         if active_stage.age >= max_age:
             count_metric("stage_age_finalize")
             return finalize_staged_sentence(
@@ -138,7 +145,13 @@ def _resolve_revised_stage_progression(
         active_stage.forced,
         commit_buffer_node.queued_sentences(),
     ):
-        max_age = sentence_max_age_chunks(active_stage.forced, sentence_finalize_age)
+        max_age = _stage_finalize_age_limit(
+            active_stage.sentence,
+            detected,
+            active_stage.forced,
+            sentence_finalize_age,
+            commit_buffer_node.queued_sentences(),
+        )
         if active_stage.age >= max_age:
             count_metric("stage_age_finalize")
             reason = "aged_forced" if active_stage.forced else "aged"

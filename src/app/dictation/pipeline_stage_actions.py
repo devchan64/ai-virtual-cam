@@ -12,6 +12,7 @@ from typing import Callable
 from src.app.dictation_core.dictation_revision_progression import _diagnostic_tail, _should_age_staged_sentence
 from src.app.dictation.pipeline_stage_state_helpers import tick_stage_age
 from src.app.dictation_core.dictation_transcript_logic import (
+    _stage_finalize_age_limit,
     _stage_quality_block_age_limit,
     _staged_sentence_required_confirmations,
     _should_confirm_staged_sentence,
@@ -48,7 +49,13 @@ def age_staged_sentence(
         )
         return []
     tick_stage_age(active_stage, chunk_index=chunk_index, count_metric=count_metric)
-    max_age = sentence_max_age_chunks(active_stage.forced, sentence_finalize_age)
+    max_age = _stage_finalize_age_limit(
+        active_stage.sentence,
+        detected,
+        active_stage.forced,
+        sentence_finalize_age,
+        commit_buffer_node.queued_sentences(),
+    )
     if active_stage.age < max_age:
         return []
     if _should_confirm_staged_sentence(

@@ -281,6 +281,37 @@ def _should_defer_short_closed_queue_quality_block(
     return True
 
 
+def _should_extend_zh_long_closed_stage_age(
+    sentence: str,
+    language: str,
+    queued_sentences: tuple[str, ...] = (),
+) -> bool:
+    if language != "zh" or queued_sentences:
+        return False
+    normalized = _normalized_text(sentence)
+    if not normalized or _sentence_end_count(normalized) <= 0:
+        return False
+    flags = set(_final_sentence_diagnostic_flags(normalized, language))
+    if flags.intersection(
+        {
+            "empty",
+            "short_cjk",
+            "no_end_marker",
+            "short_no_end_fragment",
+            "low_value_cjk_fragment",
+            "cjk_internal_gap",
+            "cjk_repeated_ngram",
+            "repeated_word_ngram",
+            "trailing_ellipsis",
+        }
+    ):
+        return False
+    sentence_words = _word_units(normalized)
+    if len(sentence_words) < 12:
+        return False
+    return _boundary_sentence_end_count(normalized) > 1 or "，" in normalized or "," in normalized
+
+
 def _coalesce_completed_short_no_end_fragments(
     sentences: list[str] | tuple[str, ...],
     language: str,

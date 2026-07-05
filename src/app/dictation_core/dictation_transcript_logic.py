@@ -50,6 +50,7 @@ from src.app.dictation_core.dictation_stage_policy import (
     _should_suppress_right_context_short_prefix_extension_with_single_queue as _should_suppress_right_context_short_prefix_extension_with_single_queue_impl,
     _should_suppress_aged_low_value_final as _should_suppress_aged_low_value_final_impl,
     _should_suppress_aged_no_end_marker_queue_final as _should_suppress_aged_no_end_marker_queue_final_impl,
+    _should_extend_zh_long_closed_stage_age as _should_extend_zh_long_closed_stage_age_impl,
     _should_finalize_with_right_context as _should_finalize_with_right_context_impl,
     _should_preserve_staged_output_when_delta_fragment as _should_preserve_staged_output_when_delta_fragment_impl,
     _should_split_terminal_tail_revision,
@@ -94,6 +95,19 @@ def _stage_quality_block_age_limit(sentence: str, language: str, forced: bool, b
         and not flags.intersection({"no_end_marker", "short_no_end_fragment", "low_value_cjk_fragment"})
     ):
         return limit + _short_cjk_replacement_hold_chunks()
+    return limit
+
+
+def _stage_finalize_age_limit(
+    sentence: str,
+    language: str,
+    forced: bool,
+    base_age: int | None = None,
+    queued_sentences: tuple[str, ...] = (),
+) -> int:
+    limit = _sentence_max_age_chunks(forced, base_age)
+    if _should_extend_zh_long_closed_stage_age_impl(sentence, language, queued_sentences):
+        return limit + 1
     return limit
 
 

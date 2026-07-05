@@ -3,6 +3,7 @@ import unittest
 from src.app.dictation_core.dictation_transcript_logic import (
     _is_ko_short_closed_sentence,
     _prefer_sentence_revision,
+    _stage_finalize_age_limit,
     _stale_leading_short_closed_candidate_reason,
     _should_allow_no_text_stage_aging,
     _should_suppress_ko_numeric_aged_final_with_queue,
@@ -101,6 +102,18 @@ class DictationStagePolicyTest(unittest.TestCase):
                 ("但是因为我们要退税，所以我们要排队。",),
                 staged_confirmations=2,
             )
+        )
+
+    def test_extends_finalize_age_for_long_closed_zh_without_queue(self) -> None:
+        self.assertEqual(
+            _stage_finalize_age_limit(
+                "它的那个炸鸡呢，它的皮已经不脆了，可是它的那个肉很嫩，而且它那个炸鸡呢。",
+                "zh",
+                False,
+                3,
+                (),
+            ),
+            4,
         )
 
     def test_keeps_no_flag_zh_aged_final_when_queue_has_no_closed_sentence(self) -> None:

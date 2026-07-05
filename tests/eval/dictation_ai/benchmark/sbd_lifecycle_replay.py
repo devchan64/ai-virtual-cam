@@ -42,6 +42,7 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _stale_leading_short_closed_candidate_reason,
     _replacement_decision_reason,
     _sentence_max_age_chunks,
+    _stage_finalize_age_limit,
     _stage_quality_block_age_limit,
     _staged_sentence_required_confirmations,
     _should_allow_no_text_stage_aging,
@@ -777,7 +778,14 @@ def _stage_completed_sentence(
                         chunk_index,
                     )
                 if (
-                    state.staged_age >= _sentence_max_age_chunks(state.staged_forced, sentence_finalize_age)
+                    state.staged_age
+                    >= _stage_finalize_age_limit(
+                        state.staged_sentence,
+                        language,
+                        state.staged_forced,
+                        sentence_finalize_age,
+                        tuple(str(entry["sentence"]) for entry in (state.staged_queue or ())),
+                    )
                     and _should_finalize_before_replacement(
                         state.staged_sentence,
                         language,
@@ -856,7 +864,13 @@ def _stage_completed_sentence(
             state.staged_forced,
             tuple(str(entry["sentence"]) for entry in (state.staged_queue or ())),
         ):
-            max_age = _sentence_max_age_chunks(state.staged_forced, sentence_finalize_age)
+            max_age = _stage_finalize_age_limit(
+                state.staged_sentence,
+                language,
+                state.staged_forced,
+                sentence_finalize_age,
+                tuple(str(entry["sentence"]) for entry in (state.staged_queue or ())),
+            )
             if state.staged_age >= max_age:
                 state.count("stage_age_finalize")
                 reason = "aged_forced" if state.staged_forced else "aged"
@@ -896,7 +910,14 @@ def _stage_completed_sentence(
             state.staged_deferred_age_chunk = chunk_index
             state.count("stage_age_tick")
         if (
-            state.staged_age >= _sentence_max_age_chunks(state.staged_forced, sentence_finalize_age)
+            state.staged_age
+            >= _stage_finalize_age_limit(
+                state.staged_sentence,
+                language,
+                state.staged_forced,
+                sentence_finalize_age,
+                tuple(str(entry["sentence"]) for entry in (state.staged_queue or ())),
+            )
             and _should_finalize_before_replacement(
                 state.staged_sentence,
                 language,
@@ -1002,7 +1023,13 @@ def _age_staged_sentence(state: LifecycleState, language: str, sentence_finalize
     state.staged_age += 1
     state.staged_deferred_age_chunk = chunk_index
     state.count("stage_age_tick")
-    if state.staged_age < _sentence_max_age_chunks(state.staged_forced, sentence_finalize_age):
+    if state.staged_age < _stage_finalize_age_limit(
+        state.staged_sentence,
+        language,
+        state.staged_forced,
+        sentence_finalize_age,
+        tuple(str(entry["sentence"]) for entry in (state.staged_queue or ())),
+    ):
         return []
     if _should_confirm_staged_sentence(
         state.staged_sentence,
