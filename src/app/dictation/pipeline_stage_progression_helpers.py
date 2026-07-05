@@ -114,6 +114,7 @@ def handle_replacement_candidate(
     *,
     forced: bool,
     recent_final_trimmed: bool,
+    later_completed_sentences: list[str] | tuple[str, ...],
     prior_pending_text: str,
 ) -> list[tuple[int, str]]:
     return _handle_replacement_candidate(
@@ -122,6 +123,7 @@ def handle_replacement_candidate(
         detected=detected,
         forced=forced,
         recent_final_trimmed=recent_final_trimmed,
+        later_completed_sentences=later_completed_sentences,
         prior_pending_text=prior_pending_text,
         chunk_index=ctx.chunk_index,
         sentence_finalize_age=ctx.sentence_finalize_age,
@@ -209,6 +211,7 @@ def stage_completed_sentence(
         detected,
         forced=forced,
         recent_final_trimmed=ctx.prepared_candidate_recent_final_trimmed,
+        later_completed_sentences=later_completed_sentences,
         prior_pending_text=prior_pending_text,
     )
 

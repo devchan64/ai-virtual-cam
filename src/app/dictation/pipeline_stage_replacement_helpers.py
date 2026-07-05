@@ -121,6 +121,7 @@ def _finish_replacement_transition(
     candidate: str,
     forced: bool,
     recent_final_trimmed: bool,
+    later_completed_sentences: list[str] | tuple[str, ...],
     detected: str,
     replacement_reason: str,
     chunk_index: int,
@@ -159,7 +160,7 @@ def _finish_replacement_transition(
         active_stage.age,
         sentence_finalize_age,
         active_stage.forced,
-        commit_buffer_node.queued_sentences(),
+        tuple([*later_completed_sentences, *commit_buffer_node.queued_sentences()]),
     ):
         count_metric("stage_finalize_before_replace")
         finalized = finalize_staged_sentence(detected, "next_completed")
@@ -199,6 +200,7 @@ def handle_replacement_candidate(
     detected: str,
     forced: bool,
     recent_final_trimmed: bool,
+    later_completed_sentences: list[str] | tuple[str, ...],
     prior_pending_text: str,
     chunk_index: int,
     sentence_finalize_age: int,
@@ -276,6 +278,7 @@ def handle_replacement_candidate(
         candidate=candidate,
         forced=forced,
         recent_final_trimmed=recent_final_trimmed,
+        later_completed_sentences=later_completed_sentences,
         detected=detected,
         replacement_reason=replacement_reason,
         chunk_index=chunk_index,
