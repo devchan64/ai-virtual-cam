@@ -34,6 +34,13 @@ def _cjk_delta_from_words(words: list[str]) -> str:
     return "".join(words).strip()
 
 
+_CJK_BOUNDARY_CHARS = "，,。！？?!、；;：:"
+
+
+def _is_cjk_boundary_char(char: str) -> bool:
+    return char in _CJK_BOUNDARY_CHARS
+
+
 def _contains_word_sequence(words: list[str], candidate: list[str]) -> bool:
     if not candidate or len(candidate) > len(words):
         return False
@@ -100,6 +107,13 @@ def _recent_final_sentence_delta_with_reason(candidate: str, recent_sentence: st
     recent_words = _word_units(normalized_recent)
     if candidate_words and candidate_words == recent_words:
         return "", "exact"
+    if _should_keep_closed_cjk_candidate_against_recent(
+        normalized_candidate,
+        candidate_words,
+        normalized_recent,
+        recent_words,
+    ):
+        return None, "keep_closed_cjk_candidate"
     extension_delta = _recent_final_prefix_extension_delta(candidate_words, recent_words, normalized_candidate)
     if extension_delta is not None:
         return extension_delta, "prefix_extension"
@@ -213,6 +227,45 @@ def _recent_final_sentence_delta_with_reason(candidate: str, recent_sentence: st
         return "", "echo_short_cjk_suffix"
     delta = _cjk_delta_from_words(suffix_words) if _has_cjk_words(candidate_words) else _sentence_delta_from_words(suffix_words)
     return _with_candidate_terminal(delta, normalized_candidate), "echo"
+
+
+def _should_keep_closed_cjk_candidate_against_recent(
+    normalized_candidate: str,
+    candidate_words: list[str],
+    normalized_recent: str,
+    recent_words: list[str],
+) -> bool:
+    if not (_has_cjk_words(candidate_words) and _has_cjk_words(recent_words)):
+        return False
+    if _boundary_sentence_end_count(normalized_candidate) <= 0 or _boundary_sentence_end_count(normalized_recent) <= 0:
+        return False
+    if len(candidate_words) < 8 or len(recent_words) < 8:
+        return False
+
+    recent_contains_candidate = normalized_recent.find(normalized_candidate)
+    if recent_contains_candidate >= 0 and len(recent_words) >= len(candidate_words) + 6:
+        before = normalized_recent[recent_contains_candidate - 1] if recent_contains_candidate > 0 else ""
+        after_index = recent_contains_candidate + len(normalized_candidate)
+        after = normalized_recent[after_index] if after_index < len(normalized_recent) else ""
+        if recent_contains_candidate == 0 and after and _is_cjk_boundary_char(after):
+            return True
+        if recent_contains_candidate > 0 and _is_cjk_boundary_char(before):
+            return True
+
+    candidate_contains_recent = normalized_candidate.find(normalized_recent)
+    if candidate_contains_recent > 0 and len(candidate_words) - len(recent_words) <= 4:
+        if candidate_contains_recent <= 2:
+            return True
+        before = normalized_candidate[candidate_contains_recent - 1]
+        if _is_cjk_boundary_char(before):
+            return True
+
+    if len(recent_words) >= len(candidate_words) + 6:
+        best_i, best_j, best_len = _best_common_word_run(recent_words, candidate_words)
+        if best_j == 0 and best_i >= 4 and best_len >= max(8, len(candidate_words) - 1):
+            return True
+
+    return False
 
 
 def _recent_final_prefix_extension_delta(

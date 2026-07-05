@@ -469,11 +469,14 @@ def _sentence_output_delta(committed_text: str, sentence: str) -> str:
     coverage = best_len / max(len(sentence_words), 1)
     if coverage >= 0.85:
         return ""
+    is_cjk_overlap = _has_cjk_words(committed_words) and _has_cjk_words(sentence_words)
     if best_j == 0 and best_len >= 4:
         suffix_words = sentence_words[best_len:]
-        if len(suffix_words) >= 3:
-            return _sentence_delta_from_words(suffix_words)
-        return ""
+        overlap_coverage = best_len / max(len(sentence_words), 1)
+        if (not is_cjk_overlap) or best_i <= 1 or overlap_coverage >= 0.6:
+            if len(suffix_words) >= 3:
+                return _sentence_delta_from_words(suffix_words)
+            return ""
     if best_i + best_len == len(committed_words) and 0 < best_j <= 3 and best_len >= 8:
         suffix_words = sentence_words[best_j + best_len :]
         if len(suffix_words) >= 3:
@@ -486,7 +489,10 @@ def _sentence_output_delta(committed_text: str, sentence: str) -> str:
         return ""
     if best_i + best_len == len(committed_words) and best_j == 0 and best_len >= 2:
         suffix_words = sentence_words[best_len:]
-        if best_len >= 3 or len(suffix_words) >= 5:
+        overlap_coverage = best_len / max(len(sentence_words), 1)
+        if ((not is_cjk_overlap) or best_i <= 1 or overlap_coverage >= 0.6 or len(suffix_words) <= best_len) and (
+            best_len >= 3 or len(suffix_words) >= 5
+        ):
             return _sentence_delta_from_words(suffix_words)
     return normalized
 
