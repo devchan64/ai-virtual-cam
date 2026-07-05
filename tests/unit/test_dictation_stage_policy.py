@@ -11,6 +11,7 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _should_suppress_right_context_short_prefix_extension_with_single_queue,
     _should_enable_aged_queue_backlog_promotion_boost,
     _should_defer_short_closed_queue_quality_block,
+    _should_defer_cjk_recent_final_trimmed_queue_finalize,
     _should_finalize_before_replacement,
     _should_finalize_with_right_context,
     _should_suppress_ko_short_closed_final_with_stronger_queue_candidate,
@@ -130,6 +131,20 @@ class DictationStagePolicyTest(unittest.TestCase):
             )
         )
 
+    def test_keeps_no_flag_zh_aged_final_when_no_end_queue_is_weaker_revision(self) -> None:
+        self.assertFalse(
+            _should_suppress_aged_no_end_marker_queue_final(
+                "我点的是橄榄，然后里面主要是油美的，还是选的酱。",
+                "zh",
+                "aged",
+                staged_confirmations=1,
+                deferred_revision_sentences=(
+                    "橄榄的它里面主要是有味的开始选一个酱",
+                    "刚刚那件。",
+                ),
+            )
+        )
+
     def test_enables_aged_queue_backlog_promotion_boost_for_large_backlog(self) -> None:
         self.assertTrue(_should_enable_aged_queue_backlog_promotion_boost("aged", 3, "zh"))
 
@@ -138,6 +153,54 @@ class DictationStagePolicyTest(unittest.TestCase):
 
     def test_does_not_enable_aged_queue_backlog_promotion_boost_for_non_zh(self) -> None:
         self.assertFalse(_should_enable_aged_queue_backlog_promotion_boost("aged", 3, "en"))
+
+    def test_defers_trimmed_closed_zh_finalize_once_when_queue_has_closed_sentence(self) -> None:
+        self.assertTrue(
+            _should_defer_cjk_recent_final_trimmed_queue_finalize(
+                "是呃四十八小时内的最后一天，我们今天下午就要去搭飞机了。",
+                "zh",
+                "confirmed",
+                True,
+                0,
+                ("然后呢，早上我们哎，因为那边都是十一点后才开，我们现在就是才十点而已。",),
+            )
+        )
+
+    def test_does_not_defer_trimmed_closed_zh_finalize_after_one_queue_hold(self) -> None:
+        self.assertFalse(
+            _should_defer_cjk_recent_final_trimmed_queue_finalize(
+                "是呃四十八小时内的最后一天，我们今天下午就要去搭飞机了。",
+                "zh",
+                "confirmed",
+                True,
+                1,
+                ("然后呢，早上我们哎，因为那边都是十一点后才开，我们现在就是才十点而已。",),
+            )
+        )
+
+    def test_does_not_defer_short_trimmed_closed_zh_finalize_with_single_queue(self) -> None:
+        self.assertFalse(
+            _should_defer_cjk_recent_final_trimmed_queue_finalize(
+                "还选了一个酱。",
+                "zh",
+                "confirmed",
+                True,
+                0,
+                ("刚刚那一间贝果店，我觉得蛮不错的。",),
+            )
+        )
+
+    def test_keeps_defer_for_short_trimmed_closed_zh_finalize_with_two_queue_sentences(self) -> None:
+        self.assertTrue(
+            _should_defer_cjk_recent_final_trimmed_queue_finalize(
+                "装在这个上面。",
+                "zh",
+                "confirmed",
+                True,
+                0,
+                ("其实很简单，就是用转的。", "然后它的这个插头打开，然后它的电源。"),
+            )
+        )
 
     def test_allows_no_text_stage_aging_for_zh_closed_stage(self) -> None:
         self.assertTrue(_should_allow_no_text_stage_aging("是我的错觉吗？", "zh", ()))

@@ -24,6 +24,7 @@ class StageFacadeContext:
     next_final_segment_id: int = 1
     stable_analysis: StableAnalysis | None = None
     queue_promotion_backlog_boost_remaining: int = 0
+    prepared_candidate_recent_final_trimmed: bool = False
 
     def sync_chunk(
         self,
@@ -60,3 +61,6 @@ class StageFacadeContext:
             stable_analysis.stable_internal_chars,
         )
         self.count_metric(f"{prefix}_stable_internal_{bucket}", 1)
+
+    def set_prepared_candidate_recent_final_trimmed(self, value: bool) -> None:
+        self.prepared_candidate_recent_final_trimmed = value

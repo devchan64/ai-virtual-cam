@@ -10,6 +10,7 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _final_sentence_diagnostic_flags,
     _is_ko_short_closed_sentence,
     _normalized_text,
+    _should_defer_cjk_recent_final_trimmed_queue_finalize,
     _should_suppress_ko_numeric_aged_final_with_queue,
     _should_suppress_ko_pure_latin_final_with_hangul_queue,
     _should_suppress_right_context_short_prefix_extension_with_single_queue,
@@ -227,6 +228,24 @@ def finalize_staged_sentence(
             count_metric("finalize_ko_short_closed_aged_no_queue")
         elif reason == "next_completed":
             count_metric("finalize_ko_short_closed_next_completed_no_queue")
+    if _should_defer_cjk_recent_final_trimmed_queue_finalize(
+        active_stage.sentence,
+        detected,
+        reason,
+        active_stage.recentFinalTrimmed,
+        active_stage.confirmedQueueDeferrals,
+        queue_before_sentences,
+    ):
+        active_stage.confirmedQueueDeferrals += 1
+        count_metric("finalize_recent_final_trimmed_queue_deferred")
+        worker._emit(
+            "status",
+            "받아쓰기 AI recent-final trim queue 확정 보류: "
+            f"chunk={chunk_index} reason={reason} staged_tail={_diagnostic_tail(active_stage.sentence)} "
+            f"queue_head={_diagnostic_tail(queue_before_sentences[0])}",
+            display=False,
+        )
+        return committed_text, next_final_segment_id, []
     if commit_buffer_node.prefer_queued_revision_for_active(
         chunk_index=chunk_index,
         max_promotion_age_chunks=staged_queue_max_promotion_age_chunks_for_language(detected),

@@ -69,6 +69,8 @@ def promote_next_staged_sentence(
             break
         if promoted_sentence and _should_stage_boundary_candidate(promoted_sentence, detected):
             active_stage.sentence = promoted_sentence
+            active_stage.recentFinalTrimmed = True
+            active_stage.confirmedQueueDeferrals = 0
             active_stage.deltaSuppressedChunks = 0
             active_stage.deltaSuppressedChunkIndex = -1
             count_metric("stage_queue_recent_final_delta_trimmed", 1)
@@ -105,6 +107,7 @@ def start_staged_sentence(
     active_stage: ActiveStage,
     candidate: str,
     forced: bool,
+    recent_final_trimmed: bool,
     detected: str,
     chunk_index: int,
     committed_text: str,
@@ -114,7 +117,12 @@ def start_staged_sentence(
 ) -> None:
     count_metric("stage_start")
     count_segment_state("staged")
-    active_stage.start(candidate, forced=forced, chunk_index=chunk_index)
+    active_stage.start(
+        candidate,
+        forced=forced,
+        chunk_index=chunk_index,
+        recent_final_trimmed=recent_final_trimmed,
+    )
     worker._emit(
         "status",
         "받아쓰기 AI stage 시작: "

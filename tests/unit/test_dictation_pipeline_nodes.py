@@ -89,6 +89,8 @@ class DictationPipelineNodeTest(unittest.TestCase):
         self.assertEqual(active.age, 0)
         self.assertTrue(active.forced)
         self.assertEqual(active.deferredAgeChunk, 4)
+        self.assertFalse(active.recentFinalTrimmed)
+        self.assertEqual(active.confirmedQueueDeferrals, 0)
         self.assertEqual(active.deltaSuppressedChunks, 0)
         self.assertEqual(active.deltaSuppressedChunkIndex, -1)
 
@@ -98,6 +100,8 @@ class DictationPipelineNodeTest(unittest.TestCase):
                 "confirmations": 2,
                 "age": 3,
                 "forced": False,
+                "recent_final_trimmed": True,
+                "confirmed_queue_deferrals": 1,
                 "deferred_age_chunk": 9,
             }
         )
@@ -106,6 +110,8 @@ class DictationPipelineNodeTest(unittest.TestCase):
         self.assertEqual(active.confirmations, 2)
         self.assertEqual(active.age, 3)
         self.assertFalse(active.forced)
+        self.assertTrue(active.recentFinalTrimmed)
+        self.assertEqual(active.confirmedQueueDeferrals, 1)
         self.assertEqual(active.deferredAgeChunk, 9)
         self.assertEqual(active.deltaSuppressedChunks, 0)
         self.assertEqual(active.deltaSuppressedChunkIndex, -1)
@@ -116,6 +122,8 @@ class DictationPipelineNodeTest(unittest.TestCase):
         self.assertEqual(active.confirmations, 0)
         self.assertEqual(active.age, 0)
         self.assertFalse(active.forced)
+        self.assertFalse(active.recentFinalTrimmed)
+        self.assertEqual(active.confirmedQueueDeferrals, 0)
         self.assertEqual(active.deferredAgeChunk, -1)
         self.assertEqual(active.deltaSuppressedChunks, 0)
         self.assertEqual(active.deltaSuppressedChunkIndex, -1)
@@ -787,6 +795,56 @@ class DictationPipelineNodeTest(unittest.TestCase):
         self.assertNotIn("stage_finalize_deferred_for_queue_revision", metrics)
         self.assertNotIn("stage_revision", metrics)
         self.assertNotIn("revised", states)
+
+    def test_queue_revision_uses_preferred_source_for_recent_final_trimmed_flag(self) -> None:
+        metrics: dict[str, int] = {}
+        states: dict[str, int] = {}
+
+        def count_metric(name: str, amount: int = 1) -> None:
+            metrics[name] = metrics.get(name, 0) + amount
+
+        def count_state(name: str, amount: int = 1) -> None:
+            states[name] = states.get(name, 0) + amount
+
+        node = SentenceCandidateCommitBufferNode(max_size=4)
+        stable = SimpleNamespace(
+            stable_internal_ratio=0.0,
+            stable_internal_chars=0,
+            stable_overlap_source="none",
+        )
+        node.enqueue_or_revision(
+            candidate="我点的是橄榄的，它里面主要是油底的，还选了一个酱。",
+            forced=False,
+            recent_final_trimmed=True,
+            chunk_index=1,
+            stable_analysis=stable,
+            count_metric=count_metric,
+            count_segment_state=count_state,
+        )
+
+        with (
+            patch("src.app.dictation.node_sentence_candidate_commit_buffer._sentences_are_revisions", return_value=True),
+            patch(
+                "src.app.dictation.node_sentence_candidate_commit_buffer._prefer_sentence_revision",
+                return_value="刚刚那一间贝果店，我觉得蛮不错的。",
+            ),
+            patch("src.app.dictation.node_sentence_candidate_commit_buffer._should_reset_revision_age", return_value=False),
+            patch("src.app.dictation.node_sentence_candidate_commit_buffer._next_revision_confirmation_count", return_value=2),
+        ):
+            node.enqueue_or_revision(
+                candidate="刚刚那一间贝果店，我觉得蛮不错的。",
+                forced=False,
+                recent_final_trimmed=False,
+                chunk_index=2,
+                stable_analysis=stable,
+                count_metric=count_metric,
+                count_segment_state=count_state,
+            )
+
+        entry = node.queue_entries()[0]
+        self.assertEqual(entry["sentence"], "刚刚那一间贝果店，我觉得蛮不错的。")
+        self.assertFalse(entry["recent_final_trimmed"])
+        self.assertEqual(entry["confirmed_queue_deferrals"], 0)
 
     def test_commit_buffer_drops_stale_queued_revision_before_active_final(self) -> None:
         metrics: dict[str, int] = {}

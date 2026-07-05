@@ -120,6 +120,7 @@ def _finish_replacement_transition(
     active_stage: ActiveStage,
     candidate: str,
     forced: bool,
+    recent_final_trimmed: bool,
     detected: str,
     replacement_reason: str,
     chunk_index: int,
@@ -186,6 +187,8 @@ def _finish_replacement_transition(
         queue_staged_sentence(candidate, forced)
         return finalized
     start_staged_sentence(candidate, detected, forced)
+    active_stage.recentFinalTrimmed = recent_final_trimmed
+    active_stage.confirmedQueueDeferrals = 0
     return finalized
 
 
@@ -195,6 +198,7 @@ def handle_replacement_candidate(
     candidate: str,
     detected: str,
     forced: bool,
+    recent_final_trimmed: bool,
     prior_pending_text: str,
     chunk_index: int,
     sentence_finalize_age: int,
@@ -271,6 +275,7 @@ def handle_replacement_candidate(
         active_stage=active_stage,
         candidate=candidate,
         forced=forced,
+        recent_final_trimmed=recent_final_trimmed,
         detected=detected,
         replacement_reason=replacement_reason,
         chunk_index=chunk_index,

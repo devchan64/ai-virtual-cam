@@ -44,6 +44,8 @@ class SentenceCandidateCommitBufferNode:
         self.active.confirmations = active.confirmations
         self.active.age = active.age
         self.active.forced = active.forced
+        self.active.recentFinalTrimmed = active.recentFinalTrimmed
+        self.active.confirmedQueueDeferrals = active.confirmedQueueDeferrals
         self.active.deferredAgeChunk = active.deferredAgeChunk
         self.active.deltaSuppressedChunks = active.deltaSuppressedChunks
         self.active.deltaSuppressedChunkIndex = active.deltaSuppressedChunkIndex
@@ -111,6 +113,7 @@ class SentenceCandidateCommitBufferNode:
         *,
         candidate: str,
         forced: bool,
+        recent_final_trimmed: bool = False,
         chunk_index: int,
         stable_analysis: Any,
         count_metric: MetricCounter,
@@ -143,6 +146,14 @@ class SentenceCandidateCommitBufferNode:
             )
             entry["age"] = int(entry["age"]) + 1
             entry["forced"] = bool(entry["forced"]) or forced
+            previous_recent_final_trimmed = bool(entry.get("recent_final_trimmed", False))
+            if preferred == queued_sentence:
+                entry["recent_final_trimmed"] = previous_recent_final_trimmed
+            elif preferred == candidate:
+                entry["recent_final_trimmed"] = recent_final_trimmed
+            else:
+                entry["recent_final_trimmed"] = previous_recent_final_trimmed or recent_final_trimmed
+            entry["confirmed_queue_deferrals"] = 0
             entry["deferred_age_chunk"] = chunk_index
             count_metric("stage_queue_revision", 1)
             count_metric("stage_age_tick", 1)
@@ -157,6 +168,8 @@ class SentenceCandidateCommitBufferNode:
                 "confirmations": 1,
                 "age": 0,
                 "forced": forced,
+                "recent_final_trimmed": recent_final_trimmed,
+                "confirmed_queue_deferrals": 0,
                 "deferred_age_chunk": chunk_index,
             }
         )

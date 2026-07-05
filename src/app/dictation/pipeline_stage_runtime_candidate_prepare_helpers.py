@@ -36,11 +36,14 @@ def prepare_stage_candidate(
     count_metric: Callable[[str, int], None],
     count_segment_state: Callable[[str, int], None],
     count_recent_final_stable_internal_suppression: Callable[[str], None],
+    set_prepared_candidate_recent_final_trimmed: Callable[[bool], None],
     suppress_active_stage_for_quality: Callable[..., None],
     worker: TranscriptWorkerLike,
     strip_prior_pending_prefix_revision: Callable[[str, str, str], str],
     stage_quality_block_age_limit: Callable[[str, str, bool, int], int],
 ) -> str | None:
+    recent_final_trimmed = False
+    set_prepared_candidate_recent_final_trimmed(False)
     normalized_sentence = _normalized_text(sentence)
     candidate = _sentence_output_delta(committed_text, sentence)
     if active_stage.sentence and prior_pending_text and candidate:
@@ -80,7 +83,9 @@ def prepare_stage_candidate(
     )
     if recent_source is not None and recent_candidate != candidate:
         candidate = recent_candidate
+        recent_final_trimmed = True
         count_metric("candidate_recent_final_delta_trimmed")
+    set_prepared_candidate_recent_final_trimmed(recent_final_trimmed)
     if not candidate:
         count_metric("candidate_duplicate_suppressed")
         if recent_source is not None:

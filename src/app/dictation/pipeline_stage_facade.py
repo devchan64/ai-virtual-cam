@@ -92,11 +92,17 @@ class StageLoopFacade:
     def promote_next_staged_sentence(self, detected: str) -> None:
         _promote_next_staged_sentence(self._ctx, detected)
 
-    def queue_staged_sentence(self, candidate: str, forced: bool) -> None:
-        _queue_staged_sentence(self._ctx, candidate, forced)
+    def queue_staged_sentence(self, candidate: str, forced: bool, recent_final_trimmed: bool = False) -> None:
+        _queue_staged_sentence(self._ctx, candidate, forced, recent_final_trimmed)
 
-    def start_staged_sentence(self, candidate: str, detected: str, forced: bool) -> None:
-        _start_staged_sentence(self._ctx, candidate, detected, forced)
+    def start_staged_sentence(
+        self,
+        candidate: str,
+        detected: str,
+        forced: bool,
+        recent_final_trimmed: bool = False,
+    ) -> None:
+        _start_staged_sentence(self._ctx, candidate, detected, forced, recent_final_trimmed)
 
     def suppress_active_stage_for_quality(
         self,

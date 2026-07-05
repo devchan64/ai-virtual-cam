@@ -186,6 +186,7 @@ def handle_revision_candidate(
     candidate: str,
     detected: str,
     forced: bool,
+    recent_final_trimmed: bool,
     later_completed_sentences: list[str] | tuple[str, ...],
     stable_analysis: StableAnalysis,
     chunk_index: int,
@@ -266,6 +267,8 @@ def handle_revision_candidate(
             count_metric("stage_revision_candidate_quality_blocked")
     preferred_changed = preferred != staged_before
     active_stage.sentence = preferred
+    active_stage.recentFinalTrimmed = recent_final_trimmed
+    active_stage.confirmedQueueDeferrals = 0
     if preferred_changed:
         active_stage.deltaSuppressedChunks = 0
         active_stage.deltaSuppressedChunkIndex = -1

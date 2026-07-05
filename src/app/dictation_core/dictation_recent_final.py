@@ -191,7 +191,8 @@ def _recent_final_sentence_delta_with_reason(candidate: str, recent_sentence: st
     if _has_cjk_words(candidate_words) and _has_cjk_words(recent_words):
         cjk_blocks = [block for block in matcher.get_matching_blocks() if block.size >= 2]
         matched_recent = sum(block.size for block in cjk_blocks)
-        if matched_recent >= 10 and matched_recent / max(len(recent_words), 1) >= 0.55:
+        starts_inside_recent = any(block.b <= 1 and block.a >= 4 for block in cjk_blocks)
+        if starts_inside_recent and matched_recent >= 10 and matched_recent / max(len(recent_words), 1) >= 0.55:
             last_candidate_end = max((block.b + block.size for block in cjk_blocks), default=0)
             suffix_words = candidate_words[last_candidate_end:]
             if not suffix_words:

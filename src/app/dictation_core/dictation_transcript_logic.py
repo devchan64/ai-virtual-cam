@@ -335,6 +335,38 @@ def _should_suppress_aged_low_value_final(
     )
 
 
+def _should_defer_cjk_recent_final_trimmed_queue_finalize(
+    sentence: str,
+    language: str,
+    reason: str,
+    recent_final_trimmed: bool,
+    confirmed_queue_deferrals: int,
+    queued_sentences: tuple[str, ...] = (),
+) -> bool:
+    if not recent_final_trimmed or confirmed_queue_deferrals > 0:
+        return False
+    if reason not in {"confirmed", "confirmed_forced", "aged", "aged_forced"}:
+        return False
+    if len(queued_sentences) == 0 or len(queued_sentences) > 2:
+        return False
+    normalized_sentence = _normalized_text(sentence)
+    if not normalized_sentence or not _is_cjk_text(normalized_sentence):
+        return False
+    if _sentence_end_count(normalized_sentence) <= 0:
+        return False
+    sentence_words = _word_units(normalized_sentence)
+    if len(sentence_words) < 6:
+        return False
+    if len(queued_sentences) == 1 and len(sentence_words) < 8:
+        return False
+    first_queue = _normalized_text(queued_sentences[0])
+    if not first_queue or first_queue == normalized_sentence:
+        return False
+    if _sentence_end_count(first_queue) <= 0:
+        return False
+    return len(_word_units(first_queue)) >= 6
+
+
 def _should_suppress_ko_short_closed_final_with_stronger_queue_candidate(
     sentence: str,
     language: str,

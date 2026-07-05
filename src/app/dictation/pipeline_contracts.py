@@ -58,6 +58,8 @@ class ActiveSentenceCandidate:
     confirmations: int = 0
     age: int = 0
     forced: bool = False
+    recentFinalTrimmed: bool = False
+    confirmedQueueDeferrals: int = 0
     deferredAgeChunk: int = -1
     deltaSuppressedChunks: int = 0
     deltaSuppressedChunkIndex: int = -1
@@ -68,16 +70,20 @@ class ActiveSentenceCandidate:
         self.confirmations = 0
         self.age = 0
         self.forced = False
+        self.recentFinalTrimmed = False
+        self.confirmedQueueDeferrals = 0
         self.deferredAgeChunk = -1
         self.deltaSuppressedChunks = 0
         self.deltaSuppressedChunkIndex = -1
         self.queuePromotedChunk = -1
 
-    def start(self, sentence: str, *, forced: bool, chunk_index: int) -> None:
+    def start(self, sentence: str, *, forced: bool, chunk_index: int, recent_final_trimmed: bool = False) -> None:
         self.sentence = sentence
         self.confirmations = 1
         self.age = 0
         self.forced = forced
+        self.recentFinalTrimmed = recent_final_trimmed
+        self.confirmedQueueDeferrals = 0
         self.deferredAgeChunk = chunk_index
         self.deltaSuppressedChunks = 0
         self.deltaSuppressedChunkIndex = -1
@@ -88,6 +94,8 @@ class ActiveSentenceCandidate:
         self.confirmations = int(entry["confirmations"])
         self.age = int(entry["age"])
         self.forced = bool(entry["forced"])
+        self.recentFinalTrimmed = bool(entry.get("recent_final_trimmed", False))
+        self.confirmedQueueDeferrals = int(entry.get("confirmed_queue_deferrals", 0))
         self.deferredAgeChunk = int(entry["deferred_age_chunk"])
         self.deltaSuppressedChunks = 0
         self.deltaSuppressedChunkIndex = -1

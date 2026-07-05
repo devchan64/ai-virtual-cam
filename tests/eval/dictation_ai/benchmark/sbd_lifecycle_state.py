@@ -15,6 +15,8 @@ class LifecycleState:
     staged_confirmations: int = 0
     staged_age: int = 0
     staged_forced: bool = False
+    staged_recent_final_trimmed: bool = False
+    staged_confirmed_queue_deferrals: int = 0
     staged_deferred_age_chunk: int = -1
     staged_delta_suppressed_chunks: int = 0
     staged_delta_suppressed_chunk_index: int = -1

@@ -56,6 +56,7 @@ from src.app.dictation_core.dictation_transcript_logic import (
     _should_finalize_with_right_context,
     _should_finalize_replaced_sentence,
     _should_preserve_staged_output_when_delta_fragment,
+    _should_defer_cjk_recent_final_trimmed_queue_finalize,
     _should_suppress_ko_numeric_aged_final_with_queue,
     _should_suppress_ko_pure_latin_final_with_hangul_queue,
     _should_suppress_right_context_short_prefix_extension_with_single_queue,
@@ -92,6 +93,8 @@ def _commit_buffer_from_state(state: LifecycleState) -> SentenceCandidateCommitB
         confirmations=state.staged_confirmations,
         age=state.staged_age,
         forced=state.staged_forced,
+        recentFinalTrimmed=state.staged_recent_final_trimmed,
+        confirmedQueueDeferrals=state.staged_confirmed_queue_deferrals,
         deferredAgeChunk=state.staged_deferred_age_chunk,
         deltaSuppressedChunks=state.staged_delta_suppressed_chunks,
         deltaSuppressedChunkIndex=state.staged_delta_suppressed_chunk_index,
@@ -106,6 +109,8 @@ def _sync_state_from_commit_buffer(state: LifecycleState, node: SentenceCandidat
     state.staged_confirmations = node.active.confirmations
     state.staged_age = node.active.age
     state.staged_forced = node.active.forced
+    state.staged_recent_final_trimmed = node.active.recentFinalTrimmed
+    state.staged_confirmed_queue_deferrals = node.active.confirmedQueueDeferrals
     state.staged_deferred_age_chunk = node.active.deferredAgeChunk
     state.staged_delta_suppressed_chunks = node.active.deltaSuppressedChunks
     state.staged_delta_suppressed_chunk_index = node.active.deltaSuppressedChunkIndex
@@ -209,11 +214,18 @@ def _prefer_queued_revision_for_active(state: LifecycleState, chunk_index: int, 
     return deferred
 
 
-def _queue_staged_sentence(state: LifecycleState, candidate: str, forced: bool, chunk_index: int) -> None:
+def _queue_staged_sentence(
+    state: LifecycleState,
+    candidate: str,
+    forced: bool,
+    recent_final_trimmed: bool,
+    chunk_index: int,
+) -> None:
     node = _commit_buffer_from_state(state)
     node.enqueue_or_revision(
         candidate=candidate,
         forced=forced,
+        recent_final_trimmed=recent_final_trimmed,
         chunk_index=chunk_index,
         stable_analysis=state.stable_analysis,
         count_metric=state.count,
@@ -238,6 +250,28 @@ def _finalize_staged_sentence(state: LifecycleState, language: str, reason: str,
             state.count("finalize_ko_short_closed_aged_no_queue")
         elif reason == "next_completed":
             state.count("finalize_ko_short_closed_next_completed_no_queue")
+    if _should_defer_cjk_recent_final_trimmed_queue_finalize(
+        staged_before,
+        language,
+        reason,
+        state.staged_recent_final_trimmed,
+        state.staged_confirmed_queue_deferrals,
+        tuple(queue_before),
+    ):
+        state.staged_confirmed_queue_deferrals += 1
+        state.count("finalize_recent_final_trimmed_queue_deferred")
+        state.finalize_events.append(
+            {
+                "chunk_index": chunk_index,
+                "reason": reason,
+                "staged_before": staged_before,
+                "queue_before": queue_before,
+                "queue_after": [str(entry["sentence"]) for entry in (state.staged_queue or ())],
+                "suppressed": "recent_final_trimmed_queue_deferred",
+                "output_sentence": "",
+            }
+        )
+        return []
     if _prefer_queued_revision_for_active(state, chunk_index, reason):
         state.finalize_events.append(
             {
@@ -577,6 +611,7 @@ def _stage_completed_sentence(
     later_completed_sentences: list[str] | tuple[str, ...] = (),
 ) -> list[str]:
     normalized_sentence = normalized_text(sentence)
+    recent_final_trimmed = False
     candidate = _sentence_output_delta(state.committed_text, normalized_sentence)
     if candidate and candidate != normalized_sentence:
         state.count("candidate_delta_trimmed")
@@ -602,6 +637,7 @@ def _stage_completed_sentence(
     )
     if recent_source is not None and recent_candidate != candidate:
         candidate = recent_candidate
+        recent_final_trimmed = True
         state.count("candidate_recent_final_delta_trimmed")
         state.count(f"candidate_recent_final_delta_trimmed_{recent_reason}")
     if not candidate:
@@ -693,6 +729,8 @@ def _stage_completed_sentence(
         state.staged_confirmations = 1
         state.staged_age = 0
         state.staged_forced = forced
+        state.staged_recent_final_trimmed = recent_final_trimmed
+        state.staged_confirmed_queue_deferrals = 0
         state.staged_deferred_age_chunk = chunk_index
         state.staged_delta_suppressed_chunks = 0
         state.staged_delta_suppressed_chunk_index = -1
@@ -708,7 +746,7 @@ def _stage_completed_sentence(
         if not state.staged_sentence:
             _promote_next_staged_sentence(state, chunk_index)
         if state.staged_sentence:
-            _queue_staged_sentence(state, candidate, forced, chunk_index)
+            _queue_staged_sentence(state, candidate, forced, recent_final_trimmed, chunk_index)
             return finalized
         state.count("stage_start")
         state.count("segment_state_staged")
@@ -716,6 +754,8 @@ def _stage_completed_sentence(
         state.staged_confirmations = 1
         state.staged_age = 0
         state.staged_forced = forced
+        state.staged_recent_final_trimmed = recent_final_trimmed
+        state.staged_confirmed_queue_deferrals = 0
         state.staged_deferred_age_chunk = chunk_index
         state.staged_delta_suppressed_chunks = 0
         state.staged_delta_suppressed_chunk_index = -1
@@ -760,7 +800,7 @@ def _stage_completed_sentence(
                         state.count("stage_revision_confirmation_reset")
             if defer_token_sentence_revision:
                 state.count("stage_revision_token_sentence_deferred")
-                _queue_staged_sentence(state, preferred, forced, chunk_index)
+                _queue_staged_sentence(state, preferred, forced, recent_final_trimmed, chunk_index)
                 if state.staged_deferred_age_chunk != chunk_index:
                     state.staged_age += 1
                     state.staged_deferred_age_chunk = chunk_index
@@ -818,6 +858,8 @@ def _stage_completed_sentence(
                     _promote_next_staged_sentence(state, chunk_index)
                 return []
         state.staged_sentence = preferred
+        state.staged_recent_final_trimmed = recent_final_trimmed
+        state.staged_confirmed_queue_deferrals = 0
         if preferred_changed:
             state.staged_delta_suppressed_chunks = 0
             state.staged_delta_suppressed_chunk_index = -1
@@ -903,7 +945,7 @@ def _stage_completed_sentence(
     )
     state.count(f"stage_replace_decision_{replacement_reason}")
     if _should_defer_unconfirmed_replacement(replacement_reason):
-        _queue_staged_sentence(state, candidate, forced, chunk_index)
+        _queue_staged_sentence(state, candidate, forced, recent_final_trimmed, chunk_index)
         state.count("stage_replace_deferred")
         if state.staged_deferred_age_chunk != chunk_index:
             state.staged_age += 1
@@ -955,7 +997,7 @@ def _stage_completed_sentence(
         and _should_stage_boundary_candidate(candidate, language)
     )
     if state.staged_deferred_age_chunk == chunk_index and not allow_same_chunk_suffix_replacement:
-        _queue_staged_sentence(state, candidate, forced, chunk_index)
+        _queue_staged_sentence(state, candidate, forced, recent_final_trimmed, chunk_index)
         state.count("stage_replace_deferred_same_chunk")
         return []
     if allow_same_chunk_suffix_replacement:
@@ -1000,7 +1042,7 @@ def _stage_completed_sentence(
     if not state.staged_sentence:
         _promote_next_staged_sentence(state, chunk_index)
     if state.staged_sentence:
-        _queue_staged_sentence(state, candidate, forced, chunk_index)
+        _queue_staged_sentence(state, candidate, forced, recent_final_trimmed, chunk_index)
         return finalized
     state.count("stage_start")
     state.count("segment_state_staged")
@@ -1008,6 +1050,8 @@ def _stage_completed_sentence(
     state.staged_confirmations = 1
     state.staged_age = 0
     state.staged_forced = forced
+    state.staged_recent_final_trimmed = recent_final_trimmed
+    state.staged_confirmed_queue_deferrals = 0
     state.staged_deferred_age_chunk = chunk_index
     state.staged_delta_suppressed_chunks = 0
     state.staged_delta_suppressed_chunk_index = -1

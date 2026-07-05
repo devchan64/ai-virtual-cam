@@ -55,6 +55,7 @@ def prepare_stage_candidate(
         count_metric=ctx.count_metric,
         count_segment_state=ctx.count_segment_state,
         count_recent_final_stable_internal_suppression=ctx.count_recent_final_stable_internal_suppression,
+        set_prepared_candidate_recent_final_trimmed=ctx.set_prepared_candidate_recent_final_trimmed,
         suppress_active_stage_for_quality=lambda language, **kwargs: suppress_active_stage_for_quality(
             ctx,
             language,
@@ -72,6 +73,7 @@ def handle_revision_candidate(
     detected: str,
     *,
     forced: bool,
+    recent_final_trimmed: bool,
     later_completed_sentences: list[str] | tuple[str, ...],
 ) -> list[tuple[int, str]]:
     return _handle_revision_candidate(
@@ -79,6 +81,7 @@ def handle_revision_candidate(
         candidate=candidate,
         detected=detected,
         forced=forced,
+        recent_final_trimmed=recent_final_trimmed,
         later_completed_sentences=later_completed_sentences,
         stable_analysis=ctx.require_stable_analysis(),
         chunk_index=ctx.chunk_index,
@@ -89,6 +92,7 @@ def handle_revision_candidate(
             ctx,
             candidate_text,
             candidate_forced,
+            recent_final_trimmed,
         ),
         finalize_staged_sentence=lambda language, reason: finalize_staged_sentence(ctx, language, reason),
         suppress_active_stage_for_quality=lambda language, **kwargs: suppress_active_stage_for_quality(
@@ -109,6 +113,7 @@ def handle_replacement_candidate(
     detected: str,
     *,
     forced: bool,
+    recent_final_trimmed: bool,
     prior_pending_text: str,
 ) -> list[tuple[int, str]]:
     return _handle_replacement_candidate(
@@ -116,6 +121,7 @@ def handle_replacement_candidate(
         candidate=candidate,
         detected=detected,
         forced=forced,
+        recent_final_trimmed=recent_final_trimmed,
         prior_pending_text=prior_pending_text,
         chunk_index=ctx.chunk_index,
         sentence_finalize_age=ctx.sentence_finalize_age,
@@ -125,6 +131,7 @@ def handle_replacement_candidate(
             ctx,
             candidate_text,
             candidate_forced,
+            recent_final_trimmed,
         ),
         finalize_staged_sentence=lambda language, reason: finalize_staged_sentence(ctx, language, reason),
         suppress_active_stage_for_quality=lambda language, **kwargs: suppress_active_stage_for_quality(
@@ -137,6 +144,7 @@ def handle_replacement_candidate(
             candidate_text,
             language,
             candidate_forced,
+            recent_final_trimmed,
         ),
         promote_next_staged_sentence=lambda language: promote_next_staged_sentence(ctx, language),
         worker=ctx.worker,
@@ -170,7 +178,7 @@ def stage_completed_sentence(
     if not ctx.active_stage.sentence:
         promote_next_staged_sentence(ctx, detected)
     if not ctx.active_stage.sentence:
-        start_staged_sentence(ctx, candidate, detected, forced)
+        start_staged_sentence(ctx, candidate, detected, forced, ctx.prepared_candidate_recent_final_trimmed)
         return []
     if _should_confirm_staged_sentence(
         ctx.active_stage.sentence,
@@ -182,9 +190,9 @@ def stage_completed_sentence(
         if not ctx.active_stage.sentence:
             promote_next_staged_sentence(ctx, detected)
         if ctx.active_stage.sentence:
-            queue_staged_sentence(ctx, candidate, forced)
+            queue_staged_sentence(ctx, candidate, forced, ctx.prepared_candidate_recent_final_trimmed)
             return finalized
-        start_staged_sentence(ctx, candidate, detected, forced)
+        start_staged_sentence(ctx, candidate, detected, forced, ctx.prepared_candidate_recent_final_trimmed)
         return finalized
     if _sentences_are_revisions(ctx.active_stage.sentence, candidate):
         return handle_revision_candidate(
@@ -192,6 +200,7 @@ def stage_completed_sentence(
             candidate,
             detected,
             forced=forced,
+            recent_final_trimmed=ctx.prepared_candidate_recent_final_trimmed,
             later_completed_sentences=later_completed_sentences,
         )
     return handle_replacement_candidate(
@@ -199,6 +208,7 @@ def stage_completed_sentence(
         candidate,
         detected,
         forced=forced,
+        recent_final_trimmed=ctx.prepared_candidate_recent_final_trimmed,
         prior_pending_text=prior_pending_text,
     )
 

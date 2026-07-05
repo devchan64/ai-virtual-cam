@@ -40,10 +40,16 @@ def promote_next_staged_sentence(ctx: StageFacadeContext, detected: str) -> None
     )
 
 
-def queue_staged_sentence(ctx: StageFacadeContext, candidate: str, forced: bool) -> None:
+def queue_staged_sentence(
+    ctx: StageFacadeContext,
+    candidate: str,
+    forced: bool,
+    recent_final_trimmed: bool,
+) -> None:
     ctx.commit_buffer_node.enqueue_or_revision(
         candidate=candidate,
         forced=forced,
+        recent_final_trimmed=recent_final_trimmed,
         chunk_index=ctx.chunk_index,
         stable_analysis=ctx.require_stable_analysis(),
         count_metric=ctx.count_metric,
@@ -51,11 +57,18 @@ def queue_staged_sentence(ctx: StageFacadeContext, candidate: str, forced: bool)
     )
 
 
-def start_staged_sentence(ctx: StageFacadeContext, candidate: str, detected: str, forced: bool) -> None:
+def start_staged_sentence(
+    ctx: StageFacadeContext,
+    candidate: str,
+    detected: str,
+    forced: bool,
+    recent_final_trimmed: bool,
+) -> None:
     _start_staged_sentence(
         active_stage=ctx.active_stage,
         candidate=candidate,
         forced=forced,
+        recent_final_trimmed=recent_final_trimmed,
         detected=detected,
         chunk_index=ctx.chunk_index,
         committed_text=ctx.committed_text,

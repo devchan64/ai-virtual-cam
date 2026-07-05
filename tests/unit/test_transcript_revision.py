@@ -22,11 +22,27 @@ class TranscriptRevisionLifecycleTest(unittest.TestCase):
             (candidate, None, "no_match"),
         )
 
+    def test_recent_final_does_not_use_cjk_block_for_prefix_aligned_closed_zh_correction(self) -> None:
+        candidate = "我点的是橄榄的，它里面主要是油底的，还选了一个酱。"
+        recent = "我点的是橄榄，然后里面主要是油美的，还是选的酱。"
+        self.assertEqual(
+            _recent_final_output_delta_with_reason(candidate, [recent], "zh"),
+            ("我点的是橄榄的，它里面主要是油底的，还选了一个酱。", None, "no_match"),
+        )
+
     def test_recent_final_still_suppresses_exact_zh_duplicate(self) -> None:
         candidate = "你们三个知道他是谁吗？"
         self.assertEqual(
             _recent_final_output_delta_with_reason(candidate, [candidate], "zh"),
             ("", candidate, "exact"),
+        )
+
+    def test_recent_final_keeps_cjk_block_for_inside_recent_tail_continuation(self) -> None:
+        candidate = "收纳的，住的时候要先把这个转开，然后把它装在这个上面。"
+        recent = "然后它的把手也是可以收纳的，煮的时候要先把这个转开，然后把它。"
+        self.assertEqual(
+            _recent_final_output_delta_with_reason(candidate, [recent], "zh"),
+            ("装在这个上面。", recent, "cjk_block"),
         )
 
     def test_sentence_output_delta_keeps_new_zh_sentence_with_repeated_prefix(self) -> None:

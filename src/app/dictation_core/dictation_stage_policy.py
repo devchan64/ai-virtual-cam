@@ -555,8 +555,20 @@ def _should_suppress_aged_no_end_marker_queue_final(
         return False
     if _final_sentence_diagnostic_flags(sentence, language):
         return False
+    normalized_sentence = _normalized_text(sentence)
     for deferred in deferred_revision_sentences:
-        if "no_end_marker" in set(_final_sentence_diagnostic_flags(deferred, language)):
+        deferred_flags = set(_final_sentence_diagnostic_flags(deferred, language))
+        if "no_end_marker" not in deferred_flags:
+            continue
+        normalized_deferred = _normalized_text(deferred)
+        if not normalized_deferred:
+            return True
+        sentence_words = _word_units(normalized_sentence)
+        deferred_words = _word_units(normalized_deferred)
+        _best_i, _best_j, best_len = _best_common_word_run(sentence_words, deferred_words)
+        if best_len < 4:
+            return True
+        if _prefer_sentence_revision(normalized_sentence, normalized_deferred) != normalized_sentence:
             return True
     return False
 
