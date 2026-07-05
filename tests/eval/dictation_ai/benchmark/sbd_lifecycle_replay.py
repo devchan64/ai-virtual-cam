@@ -1025,7 +1025,12 @@ def _stage_completed_sentence(
         state.staged_age,
         sentence_finalize_age,
         state.staged_forced,
-        tuple(str(entry["sentence"]) for entry in (state.staged_queue or ())),
+        tuple(
+            [
+                *later_completed_sentences,
+                *(str(entry["sentence"]) for entry in (state.staged_queue or ())),
+            ]
+        ),
     ):
         state.count("stage_finalize_before_replace")
         finalized = _finalize_staged_sentence(state, language, "next_completed", chunk_index)
